@@ -184,7 +184,7 @@ component("chromium_sqlite3") {
   defines = []
 
   if (is_component_build) {
-    if (is_win) {
+    if (is_win || is_os2) {
       defines += [ "SQLITE_API=__declspec(dllexport)" ]
     } else {
       defines += [ "SQLITE_API=__attribute__((visibility(\"default\")))" ]
@@ -321,7 +321,7 @@ component("dev_sqlite3") {
 }
 
 config("sqlite_export") {
-  if (is_component_build && is_win) {
+  if (is_component_build && is_win || is_os2) {
     defines = [ "SQLITE_API=__declspec(dllimport)" ]
   }
 }

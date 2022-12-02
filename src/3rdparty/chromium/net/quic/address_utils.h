@@ -39,11 +39,13 @@ inline IPAddress ToIPAddress(quic::QuicIpAddress address) {
       return IPAddress(reinterpret_cast<const uint8_t*>(&raw_address),
                        sizeof(raw_address));
     }
+#if !defined(OS_OS2)
     case quic::IpAddressFamily::IP_V6: {
       in6_addr raw_address = address.GetIPv6();
       return IPAddress(reinterpret_cast<const uint8_t*>(&raw_address),
                        sizeof(raw_address));
     }
+#endif
     default:
       DCHECK_EQ(address.address_family(), quic::IpAddressFamily::IP_UNSPEC);
       return IPAddress();
@@ -71,6 +73,7 @@ inline quic::QuicIpAddress ToQuicIpAddress(net::IPAddress address) {
     memcpy(&result, address.bytes().data(), IPAddress::kIPv4AddressSize);
     return quic::QuicIpAddress(result);
   }
+#if !defined(OS_OS2)
   if (address.IsIPv6()) {
     in6_addr result;
     static_assert(sizeof(result) == IPAddress::kIPv6AddressSize,
@@ -78,6 +81,7 @@ inline quic::QuicIpAddress ToQuicIpAddress(net::IPAddress address) {
     memcpy(&result, address.bytes().data(), IPAddress::kIPv6AddressSize);
     return quic::QuicIpAddress(result);
   }
+#endif
 
   DCHECK(address.empty());
   return quic::QuicIpAddress();

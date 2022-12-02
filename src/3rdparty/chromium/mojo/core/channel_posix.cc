@@ -56,8 +56,13 @@ class MessageView {
   // Owns |message|. |offset| indexes the first unsent byte in the message.
   MessageView(Channel::MessagePtr message, size_t offset)
       : message_(std::move(message)),
-        offset_(offset),
-        handles_(message_->TakeHandles()) {
+        offset_(offset)
+#if defined(OS_OS2)
+      , handles_(message_->TakeHandles())
+#else
+      , handles_(message_->TakeHandles()) {
+#endif
+  {
     DCHECK(!message_->data_num_bytes() || message_->data_num_bytes() > offset_);
   }
 
@@ -416,6 +421,7 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
       result = SocketWrite(socket_.get(), message_view.data(),
                            message_view.data_num_bytes());
     }
+#endif
 
     if (result < 0) {
       if (errno != EAGAIN &&

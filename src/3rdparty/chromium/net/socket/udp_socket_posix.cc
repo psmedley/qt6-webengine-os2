@@ -60,6 +60,10 @@
 #include <pthread.h>
 #endif  // defined(OS_MAC)
 
+#if defined(OS_OS2)
+#include <libcx/net.h>
+#endif
+
 namespace net {
 
 namespace {
@@ -897,9 +901,14 @@ int UDPSocketPosix::SetMulticastOptions() {
       rv = setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_LOOP,
                       &loop, sizeof(loop));
     } else {
+#if !defined(OS_OS2)
       u_int loop = 0;
       rv = setsockopt(socket_, IPPROTO_IPV6, IPV6_MULTICAST_LOOP,
                       &loop, sizeof(loop));
+#else
+      rv = -1;
+      errno = EAFNOSUPPORT;
+#endif
     }
     if (rv < 0)
       return MapSystemError(errno);
@@ -911,10 +920,15 @@ int UDPSocketPosix::SetMulticastOptions() {
       rv = setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_TTL,
                       &ttl, sizeof(ttl));
     } else {
+#if !defined(OS_OS2)
       // Signed integer. -1 to use route default.
       int ttl = multicast_time_to_live_;
       rv = setsockopt(socket_, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
                       &ttl, sizeof(ttl));
+#else
+      rv = -1;
+      errno = EAFNOSUPPORT;
+#endif
     }
     if (rv < 0)
       return MapSystemError(errno);
@@ -931,6 +945,7 @@ int UDPSocketPosix::SetMulticastOptions() {
           return MapSystemError(errno);
         break;
       }
+#if !defined(OS_OS2)
       case AF_INET6: {
         uint32_t interface_index = multicast_interface_;
         int rv = setsockopt(socket_, IPPROTO_IPV6, IPV6_MULTICAST_IF,
@@ -940,6 +955,7 @@ int UDPSocketPosix::SetMulticastOptions() {
           return MapSystemError(errno);
         break;
       }
+#endif
       default:
         NOTREACHED() << "Invalid address family";
         return ERR_ADDRESS_INVALID;
@@ -998,6 +1014,7 @@ int UDPSocketPosix::JoinGroup(const IPAddress& group_address) const {
         return MapSystemError(errno);
       return OK;
     }
+#if !defined(OS_OS2)
     case IPAddress::kIPv6AddressSize: {
       if (addr_family_ != AF_INET6)
         return ERR_ADDRESS_INVALID;
@@ -1011,6 +1028,7 @@ int UDPSocketPosix::JoinGroup(const IPAddress& group_address) const {
         return MapSystemError(errno);
       return OK;
     }
+#endif
     default:
       NOTREACHED() << "Invalid address family";
       return ERR_ADDRESS_INVALID;
@@ -1027,9 +1045,17 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
     case IPAddress::kIPv4AddressSize: {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
+#if defined(OS_OS2)
+      ip_mreq mreq = {};
+      int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
+                                          &mreq.imr_interface.s_addr);
+      if (error != OK)
+        return error;
+#else
       ip_mreqn mreq = {};
       mreq.imr_ifindex = multicast_interface_;
       mreq.imr_address.s_addr = INADDR_ANY;
+#endif
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
@@ -1038,6 +1064,7 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
         return MapSystemError(errno);
       return OK;
     }
+#if !defined(OS_OS2)
     case IPAddress::kIPv6AddressSize: {
       if (addr_family_ != AF_INET6)
         return ERR_ADDRESS_INVALID;
@@ -1055,6 +1082,7 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
         return MapSystemError(errno);
       return OK;
     }
+#endif
     default:
       NOTREACHED() << "Invalid address family";
       return ERR_ADDRESS_INVALID;
@@ -1101,12 +1129,14 @@ int UDPSocketPosix::SetDiffServCodePoint(DiffServCodePoint dscp) {
   // Set the IPv4 option in all cases to support dual-stack sockets.
   int rv = setsockopt(socket_, IPPROTO_IP, IP_TOS, &dscp_and_ecn,
                       sizeof(dscp_and_ecn));
+#if !defined(OS_OS2)
   if (addr_family_ == AF_INET6) {
     // In the IPv6 case, the previous socksetopt may fail because of a lack of
     // dual-stack support. Therefore ignore the previous return value.
     rv = setsockopt(socket_, IPPROTO_IPV6, IPV6_TCLASS,
                     &dscp_and_ecn, sizeof(dscp_and_ecn));
   }
+#endif
   if (rv < 0)
     return MapSystemError(errno);
 

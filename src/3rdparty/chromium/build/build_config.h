@@ -88,6 +88,8 @@
 #define OS_QNX 1
 #elif defined(_AIX)
 #define OS_AIX 1
+#elif defined(__OS2__)
+#define OS_OS2 1
 #elif defined(__asmjs__) || defined(__wasm__)
 #define OS_ASMJS 1
 #else

@@ -210,6 +210,7 @@ NativeImageBufferEGL::~NativeImageBufferEGL() {
   DCHECK(client_infos_.empty());
   if (egl_image_ != EGL_NO_IMAGE_KHR)
     eglDestroyImageKHR(egl_display_, egl_image_);
+  LOG(ERROR) << "stub";
 }
 
 void NativeImageBufferEGL::AddClient(gl::GLImage* client) {

@@ -198,7 +198,7 @@ class NSSInitSingleton {
     //
     // TODO(mattm): DCHECK this succeeded when crbug.com/310972 is fixed.
     // Failing to load root certs will it hard to talk to anybody via https.
-    LoadNSSModule("Root Certs", "libnssckbi.so", nullptr);
+    LoadNSSModule(kRootCertsModuleName, kRootCertsPath, nullptr);
 
     // Disable MD5 certificate signatures. (They are disabled by default in
     // NSS 3.14.)

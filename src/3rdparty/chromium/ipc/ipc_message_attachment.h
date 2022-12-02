@@ -25,6 +25,7 @@ class IPC_MESSAGE_SUPPORT_EXPORT MessageAttachment
     WIN_HANDLE,
     MACH_PORT,
     FUCHSIA_HANDLE,
+    OS2_SHMEM_HANDLE,
   };
 
   static scoped_refptr<MessageAttachment> CreateFromMojoHandle(

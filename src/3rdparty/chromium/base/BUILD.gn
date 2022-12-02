@@ -916,10 +916,6 @@ jumbo_component("base") {
       "files/file_posix.cc",
       "files/file_util_posix.cc",
       "files/memory_mapped_file_posix.cc",
-      "memory/madv_free_discardable_memory_allocator_posix.cc",
-      "memory/madv_free_discardable_memory_allocator_posix.h",
-      "memory/madv_free_discardable_memory_posix.cc",
-      "memory/madv_free_discardable_memory_posix.h",
       "message_loop/watchable_io_message_pump_posix.cc",
       "message_loop/watchable_io_message_pump_posix.h",
       "native_library_posix.cc",
@@ -1133,6 +1129,20 @@ jumbo_component("base") {
     jumbo_excluded_sources += [
       "logging_win.cc",
       "profiler/module_cache_win.cc",
+    ]
+  }
+
+  if (is_os2) {
+    sources += [
+      "message_loop/message_pump_os2.cc",
+      "message_loop/message_pump_os2.h",
+      "os2/os2_toolkit.h",
+      "os2/scoped_shmem_handle.h",
+      "process/process_handle_os2.cc",
+      "process/process_iterator_os2.cc",
+      "process/process_metrics_os2.cc",
+      "profiler/stack_sampler_posix.cc",
+      "threading/platform_thread_os2.cc",
     ]
   }
 
@@ -1985,6 +1995,33 @@ jumbo_component("base") {
     ]
   }
 
+  # OS/2.
+  if (is_os2) {
+    sources += [
+      "base_paths_posix.cc",
+      "files/file_path_watcher_os2.cc",
+      "memory/platform_shared_memory_region_os2.cc",
+      "nix/xdg_util.cc",
+      "nix/xdg_util.h",
+      "process/memory_os2.cc",
+      "profiler/module_cache_stub.cc",
+      "rand_util_os2.cc",
+      "system/sys_info_os2.cc",
+    ]
+    sources -= [
+      "profiler/module_cache_posix.cc",
+      "rand_util_posix.cc",
+      "strings/string16.cc",
+      "threading/platform_thread_internal_posix.cc",
+    ]
+
+    defines += [ "_EMX_SOURCE" ] # Use EMX extensions.
+
+    deps += [
+      "//base/third_party/xdg_user_dirs",
+    ]
+  }
+
   # Desktop Mac.
   if (is_mac) {
     sources -= [ "process/launch_posix.cc" ]
@@ -2176,7 +2213,7 @@ jumbo_component("base") {
 
   # Android and MacOS have their own custom shared memory handle
   # implementations. e.g. due to supporting both POSIX and native handles.
-  if (is_posix && !is_android && !is_mac) {
+  if (is_posix && !is_android && !is_mac && !is_os2) {
     sources += [ "memory/platform_shared_memory_region_posix.cc" ]
   }
 

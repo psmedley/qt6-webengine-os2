@@ -71,6 +71,9 @@ void SharedMemoryMapping::Unmap() {
 #if defined(OS_WIN)
   if (!UnmapViewOfFile(memory_))
     DPLOG(ERROR) << "UnmapViewOfFile";
+#elif defined(OS_OS2)
+  if (shmem_unmap(memory_) == -1)
+    DPLOG(ERROR) << "shmem_unmap";
 #elif defined(OS_FUCHSIA)
   uintptr_t addr = reinterpret_cast<uintptr_t>(memory_);
   zx_status_t status = zx::vmar::root_self()->unmap(addr, mapped_size_);

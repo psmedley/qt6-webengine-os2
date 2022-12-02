@@ -106,6 +106,9 @@ bool UnixDomainSocket::SendMsg(int fd,
                      &no_sigpipe_len) == 0)
       << "Failed ot get socket option.";
   DCHECK(no_sigpipe) << "SO_NOSIGPIPE not set on the socket.";
+#elif defined(OS_OS2)
+  // No SO_NOSIGPIPE or MSG_NOSIGNAL on OS/2
+  const int flags = 0;
 #else
   const int flags = MSG_NOSIGNAL;
 #endif  // OS_APPLE

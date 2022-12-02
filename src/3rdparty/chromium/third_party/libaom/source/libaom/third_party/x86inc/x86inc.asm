@@ -126,6 +126,8 @@
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,aout
 %define ABI_IS_32BIT 1
+%elifidn __OUTPUT_FORMAT__,obj
+%define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0
 %endif

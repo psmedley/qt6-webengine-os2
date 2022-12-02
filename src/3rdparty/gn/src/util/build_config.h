@@ -52,6 +52,8 @@
 #define OS_QNX 1
 #elif defined(_AIX)
 #define OS_AIX 1
+#elif defined(__OS2__)
+#define OS_OS2 1
 #elif defined(__asmjs__)
 #define OS_ASMJS 1
 #elif defined(__HAIKU__)
@@ -74,8 +76,12 @@
     defined(OS_FREEBSD) || defined(OS_LINUX) || defined(OS_MACOSX) || \
     defined(OS_NACL) || defined(OS_NETBSD) || defined(OS_OPENBSD) ||  \
     defined(OS_QNX) || defined(OS_SOLARIS) || defined(OS_HAIKU) || \
-    defined(OS_MSYS)
+    defined(OS_MSYS) || defined(OS_OS2)
 #define OS_POSIX 1
+#endif
+
+#if defined(OS_WIN) || defined(OS_OS2)
+#define OS_DOSLIKE 1
 #endif
 
 // Use tcmalloc

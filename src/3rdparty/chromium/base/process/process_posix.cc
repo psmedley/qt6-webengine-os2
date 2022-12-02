@@ -33,6 +33,11 @@
 
 namespace {
 
+#if defined(OS_OS2)
+const int kForegroundPriority = 0;
+const int kBackgroundPriority = 5;
+#endif
+
 #if !defined(OS_NACL_NONSFI)
 
 bool WaitpidWithTimeout(base::ProcessHandle handle,
@@ -302,6 +307,15 @@ ProcessId Process::Pid() const {
 bool Process::is_current() const {
   return process_ == GetCurrentProcessHandle();
 }
+
+#if defined(OS_OS2)
+Time Process::CreationTime() const {
+  // There doesn't seem to be a way to get this information from the system.
+  // TODO: Implement it in LIBC/LIBCx by recording process creation time.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return Time();
+}
+#endif
 
 void Process::Close() {
   process_ = kNullProcessHandle;

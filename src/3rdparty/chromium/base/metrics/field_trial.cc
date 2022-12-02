@@ -825,7 +825,7 @@ void FieldTrialList::InsertFieldTrialHandleIfNeeded(
             MACH_MSG_TYPE_COPY_SEND));
   }
 }
-#elif defined(OS_POSIX) && !defined(OS_NACL)
+#elif defined(OS_POSIX) && !defined(OS_NACL) && !defined(OS_OS2)
 // static
 int FieldTrialList::GetFieldTrialDescriptor() {
   InstantiateFieldTrialAllocatorIfNeeded();
@@ -1153,6 +1153,10 @@ std::string FieldTrialList::SerializeSharedMemoryRegionMetadata(
   uintptr_t uintptr_handle =
       reinterpret_cast<uintptr_t>(shm.GetPlatformHandle());
   ss << uintptr_handle << ",";
+#elif defined(OS_OS2)
+  // Tell the child process the address of the shared memory object.
+  uintptr_t uintptr_handle = static_cast<uintptr_t>(shm.GetPlatformHandle());
+  ss << uintptr_handle << ",";
 #elif defined(OS_FUCHSIA)
   ss << shm.GetPlatformHandle()->get() << ",";
 #elif defined(OS_MAC)
@@ -1187,6 +1191,9 @@ FieldTrialList::DeserializeSharedMemoryRegionMetadata(
 #if defined(OS_FUCHSIA)
   zx_handle_t handle = static_cast<zx_handle_t>(field_trial_handle);
   zx::vmo scoped_handle = zx::vmo(handle);
+#elif defined(OS_OS2)
+  SHMEM handle = static_cast<SHMEM>(field_trial_handle);
+  os2::ScopedShmemHandle scoped_handle(handle);
 #elif defined(OS_WIN)
   HANDLE handle = reinterpret_cast<HANDLE>(field_trial_handle);
   if (IsCurrentProcessElevated()) {

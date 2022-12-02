@@ -14,6 +14,10 @@
 #include <windows.h>
 #endif
 
+#if defined(OS_OS2)
+#include <libcx/handles.h>
+#endif
+
 namespace mojo {
 namespace core {
 
@@ -83,6 +87,14 @@ class PlatformHandleInTransit {
   static PlatformHandle TakeIncomingRemoteHandle(
       HANDLE handle,
       base::ProcessHandle owning_process);
+#endif
+
+#if defined(OS_OS2)
+  // A convenience method to get a proper PlatformHandle depending on LIBCx
+  // |handle| type.
+  static PlatformHandle CreateFromLIBCxHandle(const LIBCX_HANDLE &handle);
+
+  void to_libcx_handle(LIBCX_HANDLE &handle);
 #endif
 
  private:

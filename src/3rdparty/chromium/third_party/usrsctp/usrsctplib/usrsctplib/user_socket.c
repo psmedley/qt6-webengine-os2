@@ -587,6 +587,10 @@ copy_from_user(void *dst, void *src, size_t len) {
 # define copyout(k, u, len)	copy_to_user(u, k, len)
 
 
+#if defined(__Userspace_os_OS2)
+#define UIO_MAXIOV	1024		/* max 1K of iov's */
+#endif
+
 /* copyiniov definition copied/modified from src/sys/kern/kern_subr.c */
 int
 copyiniov(struct iovec *iovp, u_int iovcnt, struct iovec **iov, int error)

@@ -492,6 +492,8 @@ class Node(object):
         value = target_platform == 'darwin'
       elif name == 'is_win':
         value = target_platform in ('cygwin', 'win32')
+      elif name == 'is_os2':
+        value = target_platform.startswith('os2')
       elif name == 'is_android':
         value = target_platform == 'android'
       elif name == 'is_ios':
@@ -501,8 +503,8 @@ class Node(object):
       elif name == 'is_posix':
         value = (target_platform in ('darwin', 'linux2', 'linux3', 'sunos5',
                                      'android', 'ios')
-                 or 'bsd' in target_platform)
-
+                 or 'bsd' in target_platform
+                 or target_platform.startswith('os2'))
       elif name == 'pp_ifdef':
         def pp_ifdef(symbol):
           return symbol in defs

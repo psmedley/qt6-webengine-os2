@@ -93,6 +93,8 @@ GPUTestConfig::OS GetCurrentOS() {
   return GPUTestConfig::kOsAndroid;
 #elif defined(OS_FUCHSIA)
   return GPUTestConfig::kOsFuchsia;
+#elif defined(OS_OS2)
+  return GPUTestConfig::kOsUnknown;
 #else
 #error "unknown os"
 #endif

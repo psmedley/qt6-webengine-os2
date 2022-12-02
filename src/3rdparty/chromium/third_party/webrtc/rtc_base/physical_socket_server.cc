@@ -70,7 +70,7 @@ typedef void* SockOptArg;
 
 #endif  // WEBRTC_POSIX
 
-#if defined(WEBRTC_POSIX) && !defined(WEBRTC_MAC) && !defined(__native_client__)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_MAC) && !defined(WEBRTC_OS2) && !defined(__native_client__)
 
 int64_t GetSocketRecvTimestamp(int socket) {
   struct timeval tv_ioctl;
@@ -302,7 +302,7 @@ int PhysicalSocket::GetOption(Option opt, int* value) {
     *value = (*value != IP_PMTUDISC_DONT) ? 1 : 0;
 #endif
   } else if (opt == OPT_DSCP) {
-#if defined(WEBRTC_POSIX)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_OS2)
     // unshift DSCP value to get six most significant bits of IP DiffServ field
     *value >>= 2;
 #endif
@@ -320,12 +320,12 @@ int PhysicalSocket::SetOption(Option opt, int value) {
     value = (value) ? IP_PMTUDISC_DO : IP_PMTUDISC_DONT;
 #endif
   } else if (opt == OPT_DSCP) {
-#if defined(WEBRTC_POSIX)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_OS2)
     // shift DSCP value to fit six most significant bits of IP DiffServ field
     value <<= 2;
 #endif
   }
-#if defined(WEBRTC_POSIX)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_OS2)
   if (sopt == IPV6_TCLASS) {
     // Set the IPv4 option in all cases to support dual-stack sockets.
     // Don't bother checking the return code, as this is expected to fail if
@@ -564,7 +564,7 @@ int PhysicalSocket::TranslateOption(Option opt, int* slevel, int* sopt) {
       *slevel = IPPROTO_IP;
       *sopt = IP_DONTFRAGMENT;
       break;
-#elif defined(WEBRTC_MAC) || defined(BSD) || defined(__native_client__)
+#elif defined(WEBRTC_MAC) || defined(WEBRTC_OS2) || defined(BSD) || defined(__native_client__)
       RTC_LOG(LS_WARNING) << "Socket::OPT_DONTFRAGMENT not supported.";
       return -1;
 #elif defined(WEBRTC_POSIX)
@@ -585,7 +585,7 @@ int PhysicalSocket::TranslateOption(Option opt, int* slevel, int* sopt) {
       *sopt = TCP_NODELAY;
       break;
     case OPT_DSCP:
-#if defined(WEBRTC_POSIX)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_OS2)
       if (family_ == AF_INET6) {
         *slevel = IPPROTO_IPV6;
         *sopt = IPV6_TCLASS;

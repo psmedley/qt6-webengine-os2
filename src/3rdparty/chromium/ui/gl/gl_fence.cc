@@ -43,7 +43,7 @@ bool GLFence::IsSupported() {
          g_current_gl_version->is_desktop_core_profile ||
 #if defined(OS_APPLE)
          g_current_gl_driver->ext.b_GL_APPLE_fence ||
-#else
+#elif defined(USE_EGL)
          g_driver_egl.ext.b_EGL_KHR_fence_sync ||
 #endif
          g_current_gl_driver->ext.b_GL_NV_fence;
@@ -70,7 +70,7 @@ std::unique_ptr<GLFence> GLFence::Create() {
 #if defined(OS_APPLE)
   } else if (g_current_gl_driver->ext.b_GL_APPLE_fence) {
     fence = std::make_unique<GLFenceAPPLE>();
-#else
+#elif defined(USE_EGL)
   } else if (g_driver_egl.ext.b_EGL_KHR_fence_sync) {
     fence = GLFenceEGL::Create();
     DCHECK(fence);

@@ -408,7 +408,7 @@ int main(int argc, char** argv) {
   std::string impls_str = command_line.GetSwitchValueASCII("impls");
   if (impls_str.empty()) {
     // Default value.
-#if !defined(OS_FUCHSIA)
+#if !defined(OS_FUCHSIA) && !defined(OS_OS2)
     impls_str = "platform,";
 #endif
     impls_str += "builtin,pathbuilder";

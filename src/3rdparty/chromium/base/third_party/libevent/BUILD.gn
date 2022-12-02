@@ -102,7 +102,7 @@ source_set("system_libevent") {
 }
 
 group("libevent") {
-  if (host_toolchain != current_toolchain) {
+  if (is_os2 || host_toolchain != current_toolchain) {
     if (use_system_libevent) {
        public_deps = [ ":system_libevent" ]
     } else {

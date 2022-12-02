@@ -7,18 +7,29 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#if !defined(OS_OS2)
 #include <sched.h>
+#endif
 #include <setjmp.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/resource.h>
+#if !defined(OS_OS2)
 #include <sys/syscall.h>
+#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#if defined(OS_OS2)
+#include <libcx/spawn2.h>
+#include <sys/socket.h>
+#include <sys/fmutex.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
 
 #include <iterator>
 #include <limits>
@@ -65,6 +76,10 @@
 #error "macOS should use launch_mac.cc"
 #endif
 
+#if defined(OS_OS2)
+static _fmutex spawn2_mutex = _FMUTEX_INITIALIZER;
+#endif
+
 extern char** environ;
 
 namespace base {
@@ -79,6 +94,7 @@ char** GetEnvironment() {
   return environ;
 }
 
+#if !defined(OS_OS2)
 // Set the process's "environment" (i.e. the thing that setenv/getenv
 // work with).
 void SetEnvironment(char** env) {
@@ -186,8 +202,10 @@ void ResetChildSignalHandlersToDefaults(void) {
 }
 #endif  // !defined(OS_LINUX) ||
         // (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
+#endif  // !defined(OS_OS2)
 }  // anonymous namespace
 
+#if !defined(OS_OS2)
 // Functor for |ScopedDIR| (below).
 struct ScopedDIRClose {
   inline void operator()(DIR* x) const {
@@ -270,6 +288,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     DPCHECK(ret == 0);
   }
 }
+#endif  // !defined(OS_OS2)
 
 Process LaunchProcess(const CommandLine& cmdline,
                       const LaunchOptions& options) {
@@ -280,10 +299,12 @@ Process LaunchProcess(const std::vector<std::string>& argv,
                       const LaunchOptions& options) {
   TRACE_EVENT0("base", "LaunchProcess");
 
+#if !defined(OS_OS2)
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
   fd_shuffle1.reserve(options.fds_to_remap.size());
   fd_shuffle2.reserve(options.fds_to_remap.size());
+#endif
 
   std::vector<char*> argv_cstr;
   argv_cstr.reserve(argv.size() + 1);
@@ -299,9 +320,11 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   if (!options.environment.empty())
     new_environ = internal::AlterEnvironment(old_environ, options.environment);
 
+#if !defined(OS_OS2)
   sigset_t full_sigset;
   sigfillset(&full_sigset);
   const sigset_t orig_sigmask = SetSignalMask(full_sigset);
+#endif
 
   const char* current_directory = nullptr;
   if (!options.current_directory.empty()) {
@@ -490,6 +513,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       DPCHECK(ret > 0);
     }
   }
+#endif
 
   return Process(pid);
 }
@@ -524,10 +548,12 @@ static bool GetAppOutputInternal(
   // process cannot allocate memory.
   std::vector<char*> argv_cstr;
   argv_cstr.reserve(argv.size() + 1);
+#if !defined(OS_OS2)
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
   fd_shuffle1.reserve(3);
   fd_shuffle2.reserve(3);
+#endif
 
   // Either |do_search_path| should be false or |envp| should be null, but not
   // both.
@@ -537,6 +563,43 @@ static bool GetAppOutputInternal(
   if (pipe(pipe_fd) < 0)
     return false;
 
+#if defined(OS_OS2)
+  // Use spawn2 on OS/2 instead of fork since spawning is much more natural and
+  // resource friendly there.
+  for (const auto& arg : argv)
+    argv_cstr.push_back(const_cast<char*>(arg.c_str()));
+  argv_cstr.push_back(nullptr);
+
+  int dev_null = open("/dev/null", O_WRONLY);
+  if (dev_null < 0)
+    return false;
+
+  int stdfds[3] = {0};
+  stdfds[0] = dev_null;
+  stdfds[1] = pipe_fd[1];
+  stdfds[2] = include_stderr ? pipe_fd[1] : dev_null;
+
+  // Use a mutex instead of P_2_THREADSAFE, this implies that no other Chromium
+  // code calls spawn2 or fiddles with the current directory or standard file
+  // descriptors (0,1,2) redirection.
+  _fmutex_request(&spawn2_mutex, _FMR_IGNINT);
+
+  if (VLOG_IS_ON(1)) {
+    for (size_t i = 0; i < argv_cstr.size(); ++i)
+      VLOG(1) << "spawn2: arg[" << i << "] [" << argv_cstr[i] << "]";
+    for (int *p = stdfds; *p != -1; p += 2)
+      VLOG(1) << "spawn2: map fd " << p[0] << " -> " << p[1];
+  }
+
+  pid_t pid = spawn2(P_NOWAIT, argv_cstr[0], argv_cstr.data(),
+                     nullptr, envp, stdfds);
+
+  VLOG(1) << "spawn2: pid " << pid << ", errno " << errno;
+
+  _fmutex_release(&spawn2_mutex);
+
+  close(dev_null);
+#else
   pid_t pid = fork();
   switch (pid) {
     case -1: {
@@ -590,6 +653,7 @@ static bool GetAppOutputInternal(
       _exit(127);
     }
     default: {
+#endif
       // parent
       //
       // Close our writing end of pipe now. Otherwise later read would not
@@ -619,8 +683,10 @@ static bool GetAppOutputInternal(
       // process that launched it.
       internal::GetAppOutputScopedAllowBaseSyncPrimitives allow_wait;
       return process.WaitForExit(exit_code);
+#if !defined(OS_OS2)
     }
   }
+#endif
 }
 
 bool GetAppOutput(const CommandLine& cl, std::string* output) {

@@ -424,6 +424,15 @@ if (is_linux || is_chromeos) {
     sources = [ "set_process_title_linux.cc" ]
     deps = [ "//base" ]
   }
+
+  if (is_os2) {
+    # OS/2 uses some Linux sources, put those back.
+    set_sources_assignment_filter([])
+    sources += [
+      "common_sandbox_support_linux.cc",
+    ]
+    set_sources_assignment_filter(sources_assignment_filter)
+  }
 }
 
 # See comment at the top of //content/BUILD.gn for how this works.

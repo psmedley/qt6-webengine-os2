@@ -38,6 +38,12 @@ bool GetPeerEuid(base::PlatformFile fd, uid_t* peer_euid) {
   }
   *peer_euid = socket_euid;
   return true;
+#elif defined(OS_OS2)
+  // OS/2 lacks getpeereid and friends. Assume the local connection always
+  // comes from the local user (which is always true as OS/2 is a single user
+  // system per se).
+  *peer_euid = geteuid();
+  return true;
 #else
   struct ucred cred;
   socklen_t cred_len = sizeof(cred);
@@ -99,6 +105,7 @@ ssize_t SocketWritev(base::PlatformFile socket,
 #endif
 }
 
+#if !defined(OS_OS2)
 ssize_t SendmsgWithHandles(base::PlatformFile socket,
                            struct iovec* iov,
                            size_t num_iov,
@@ -124,29 +131,41 @@ ssize_t SendmsgWithHandles(base::PlatformFile socket,
   }
   return HANDLE_EINTR(sendmsg(socket, &msg, kSendmsgFlags));
 }
+#endif  // !defined(OS_OS2)
 
 ssize_t SocketRecvmsg(base::PlatformFile socket,
                       void* buf,
                       size_t num_bytes,
+#if !defined(OS_OS2)
                       std::vector<base::ScopedFD>* descriptors,
+#endif
                       bool block) {
   struct iovec iov = {buf, num_bytes};
+#if !defined(OS_OS2)
   char cmsg_buf[CMSG_SPACE(kMaxSendmsgHandles * sizeof(int))];
+#endif
   struct msghdr msg = {};
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
+#if !defined(OS_OS2)
   msg.msg_control = cmsg_buf;
   msg.msg_controllen = sizeof(cmsg_buf);
+#endif
+
   ssize_t result =
       HANDLE_EINTR(recvmsg(socket, &msg, block ? 0 : MSG_DONTWAIT));
   if (result < 0)
     return result;
 
+#if !defined(OS_OS2)
   if (msg.msg_controllen == 0)
     return result;
+#endif
 
   DCHECK(!(msg.msg_flags & MSG_CTRUNC));
 
+  // On OS/2 sendmsg(SCM_RIGHTS) is not supported.
+#if !defined(OS_OS2)
   descriptors->clear();
   for (cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg;
        cmsg = CMSG_NXTHDR(&msg, cmsg)) {
@@ -162,6 +181,7 @@ ssize_t SocketRecvmsg(base::PlatformFile socket,
       }
     }
   }
+#endif  // !defined(OS_OS2)
 
   return result;
 }

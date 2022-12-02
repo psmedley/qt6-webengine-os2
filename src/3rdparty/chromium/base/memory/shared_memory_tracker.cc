@@ -51,7 +51,15 @@ SharedMemoryTracker::GetOrCreateSharedMemoryDump(
 void SharedMemoryTracker::IncrementMemoryUsage(
     const SharedMemoryMapping& mapping) {
   AutoLock hold(usages_lock_);
+#if defined(OS_OS2)
+  auto found = usages_.find(mapping.raw_memory_ptr());
+  if (found != usages_.end()) {
+    ++found->second.count;
+    DCHECK(found->second.count);
+  }
+#else
   DCHECK(usages_.find(mapping.raw_memory_ptr()) == usages_.end());
+#endif
   usages_.emplace(mapping.raw_memory_ptr(),
                   UsageInfo(mapping.mapped_size(), mapping.guid()));
 }
@@ -59,8 +67,19 @@ void SharedMemoryTracker::IncrementMemoryUsage(
 void SharedMemoryTracker::DecrementMemoryUsage(
     const SharedMemoryMapping& mapping) {
   AutoLock hold(usages_lock_);
+#if defined(OS_OS2)
+  auto found = usages_.find(mapping.raw_memory_ptr());
+  DCHECK(found != usages_.end());
+  if (found != usages_.end()) {
+    DCHECK(found->second.count);
+    --found->second.count;
+    if (!found->second.count)
+      usages_.erase(found);
+  }
+#else
   DCHECK(usages_.find(mapping.raw_memory_ptr()) != usages_.end());
   usages_.erase(mapping.raw_memory_ptr());
+#endif
 }
 
 SharedMemoryTracker::SharedMemoryTracker() {

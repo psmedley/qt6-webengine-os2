@@ -30,7 +30,9 @@ def Main():
         print("'%s' does not exist" % f, file=sys.stderr)
         return 1
 
-  with open(args.stamp, 'w'):
+  with open(args.stamp, 'w') as f:
+    # Close the file before changing its timestamp (vital on DOS-like OSes).
+    f.close()
     os.utime(args.stamp, None)
 
   return 0

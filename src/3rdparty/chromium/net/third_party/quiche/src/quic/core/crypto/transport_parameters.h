@@ -99,7 +99,9 @@ struct QUIC_EXPORT_PRIVATE TransportParameters {
     bool operator!=(const PreferredAddress& rhs) const;
 
     QuicSocketAddress ipv4_socket_address;
+#if !defined(__OS2__)
     QuicSocketAddress ipv6_socket_address;
+#endif
     QuicConnectionId connection_id;
     std::vector<uint8_t> stateless_reset_token;
 

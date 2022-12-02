@@ -26,8 +26,9 @@
 #include "getopt.h"
 #include <unistd.h>
 #else
-#include <getopt.h>
+// must come before getopt.h on OS/2, see https://github.com/bitwiseworks/libc/issues/44
 #include <unistd.h>
+#include <getopt.h>
 #endif
 
 #include "browse.h"
@@ -225,10 +226,20 @@ int GuessParallelism() {
   case 0:
   case 1:
     return 2;
+#ifdef __OS2__
+  // Running more than 3 G++ instances with heavy C++ may easily eat up
+  // all available memory on a 32 bit system and cause a kernel panic.
+  // See https://github.com/bitwiseworks/qtwebengine-chromium-os2/issues/10
+  // for details.
+  default:
+    (void) processors;
+    return 3;
+#else
   case 2:
     return 3;
   default:
     return processors + 2;
+#endif
   }
 }
 

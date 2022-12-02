@@ -8,6 +8,8 @@
 #include "build/chromeos_buildflags.h"
 #include "printing/printing_export.h"
 
+#include "build/build_config.h"
+
 namespace printing {
 
 // property names

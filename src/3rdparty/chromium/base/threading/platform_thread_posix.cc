@@ -6,7 +6,9 @@
 
 #include <errno.h>
 #include <pthread.h>
+#if !defined(OS_OS2)
 #include <sched.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/time.h>
@@ -194,6 +196,8 @@ PlatformThreadId PlatformThread::CurrentId() {
   return g_thread_id;
 #elif defined(OS_ANDROID)
   return gettid();
+#elif defined(OS_OS2)
+  return _gettid();
 #elif defined(OS_FUCHSIA)
   return zx_thread_self();
 #elif defined(OS_SOLARIS) || defined(OS_QNX)
@@ -222,7 +226,12 @@ PlatformThreadHandle PlatformThread::CurrentHandle() {
 
 // static
 void PlatformThread::YieldCurrentThread() {
+#if defined(OS_OS2)
+  // Under OS/2 this will end up in DosSleep(0) which does yielding.
+  pthread_yield();
+#else
   sched_yield();
+#endif
 }
 
 // static
@@ -296,6 +305,8 @@ void PlatformThread::Detach(PlatformThreadHandle thread_handle) {
 bool PlatformThread::CanIncreaseThreadPriority(ThreadPriority priority) {
 #if defined(OS_NACL)
   return false;
+#elif defined(OS_OS2)
+  return true;
 #else
   auto platform_specific_ability =
       internal::CanIncreaseCurrentThreadPriorityForPlatform(priority);
@@ -315,6 +326,11 @@ void PlatformThread::SetCurrentThreadPriorityImpl(ThreadPriority priority) {
   if (internal::SetCurrentThreadPriorityForPlatform(priority))
     return;
 
+#if defined(OS_OS2)
+  // setpriority on OS/2 is useless as it only changes the default priority, not
+  // what Chromium expects. Just bail out if the above fails (it should not).
+  NOTREACHED();
+#else
   // setpriority(2) should change the whole thread group's (i.e. process)
   // priority. However, as stated in the bugs section of
   // http://man7.org/linux/man-pages/man2/getpriority.2.html: "under the current
@@ -326,6 +342,7 @@ void PlatformThread::SetCurrentThreadPriorityImpl(ThreadPriority priority) {
     DVPLOG(1) << "Failed to set nice value of thread ("
               << PlatformThread::CurrentId() << ") to " << nice_setting;
   }
+#endif  // defined(OS_OS2)
 #endif  // defined(OS_NACL)
 }
 
@@ -341,6 +358,12 @@ ThreadPriority PlatformThread::GetCurrentThreadPriority() {
   if (platform_specific_priority)
     return platform_specific_priority.value();
 
+#if defined(OS_OS2)
+  // getpriority on OS/2 is useless as it only returns the default priority, not
+  // what Chromium expects. Just bail out if the above fails (it should not).
+  NOTREACHED();
+  return ThreadPriority::NORMAL;
+#else
   // Need to clear errno before calling getpriority():
   // http://man7.org/linux/man-pages/man2/getpriority.2.html
   errno = 0;
@@ -352,6 +375,7 @@ ThreadPriority PlatformThread::GetCurrentThreadPriority() {
   }
 
   return internal::NiceValueToThreadPriority(nice_value);
+#endif  // defined(OS_OS2)
 #endif  // !defined(OS_NACL)
 }
 
@@ -359,9 +383,13 @@ ThreadPriority PlatformThread::GetCurrentThreadPriority() {
 
 // static
 size_t PlatformThread::GetDefaultThreadStackSize() {
+#if !defined(OS_OS2)
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
   return base::GetDefaultThreadStackSize(attributes);
+#else
+  return 0;
+#endif
 }
 
 }  // namespace base

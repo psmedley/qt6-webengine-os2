@@ -22,6 +22,10 @@
 #include "base/os_compat_android.h"
 #endif
 
+#if !defined(O_BINARY)
+#define O_BINARY 0
+#endif
+
 namespace base {
 
 // Make sure our Whence mappings match the system headers.
@@ -504,6 +508,8 @@ void File::DoInitialize(const FilePath& path, uint32_t flags) {
     open_flags |= O_APPEND | O_WRONLY;
 
   static_assert(O_RDONLY == 0, "O_RDONLY must equal zero");
+
+  open_flags |= O_BINARY;
 
   int mode = S_IRUSR | S_IWUSR;
 #if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)

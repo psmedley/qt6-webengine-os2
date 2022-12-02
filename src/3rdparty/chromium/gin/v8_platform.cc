@@ -239,11 +239,11 @@ class PageAllocator : public v8::PageAllocator {
     DCHECK_LT(new_length, length);
     uint8_t* release_base = reinterpret_cast<uint8_t*>(address) + new_length;
     size_t release_size = length - new_length;
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if (defined(OS_POSIX) && !defined(OS_OS2)) || defined(OS_FUCHSIA)
     // On POSIX, we can unmap the trailing pages.
     base::FreePages(release_base, release_size);
-#elif defined(OS_WIN)
-    // On Windows, we can only de-commit the trailing pages. FreePages() will
+#elif defined(OS_WIN) || defined(OS_OS2)
+    // On Windows and OS/2, we can only de-commit the trailing pages. FreePages() will
     // still free all pages in the region including the released tail, so it's
     // safe to just decommit the tail.
     base::DecommitSystemPages(release_base, release_size,

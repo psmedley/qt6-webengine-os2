@@ -53,11 +53,17 @@
 extern "C" char* mkdtemp(char* path);
 #endif
 
+#if defined(OS_OS2)
+#define creat(N,M) open((N), O_WRONLY|O_TRUNC|O_CREAT|O_BINARY, (M))
+#elif !defined(O_BINARY)
+#define O_BINARY 0
+#endif
+
 namespace base {
 
 namespace {
 
-#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || \
+#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || defined(OS_OS2) \
     defined(OS_HAIKU) || defined(OS_MSYS) || defined(OS_ANDROID) && __ANDROID_API__ < 21
 int CallStat(const char* path, stat_wrapper_t* sb) {
   return stat(path, sb);
@@ -140,6 +146,7 @@ bool CopyFileContents(File* infile, File* outfile) {
   return false;
 }
 
+#if !defined(OS_OS2)
 // Appends |mode_char| to |mode| before the optional character set encoding; see
 // https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
 // details.
@@ -150,6 +157,7 @@ std::string AppendModeCharacter(std::string_view mode, char mode_char) {
                 mode_char);
   return result;
 }
+#endif
 #endif
 
 }  // namespace
@@ -482,9 +490,10 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
       strchr(mode, 'e') == nullptr ||
       (strchr(mode, ',') != nullptr && strchr(mode, 'e') > strchr(mode, ',')));
   FILE* result = nullptr;
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_OS2)
   // macOS does not provide a mode character to set O_CLOEXEC; see
   // https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man3/fopen.3.html.
+  // OS/2 doesn't provide it either.
   const char* the_mode = mode;
 #else
   std::string mode_with_e(AppendModeCharacter(mode, 'e'));
@@ -493,7 +502,7 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   do {
     result = fopen(filename.value().c_str(), the_mode);
   } while (!result && errno == EINTR);
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_OS2)
   // Mark the descriptor as close-on-exec.
   if (result)
     SetCloseOnExec(fileno(result));
@@ -509,7 +518,7 @@ FILE* FileToFILE(File file, const char* mode) {
 }
 
 int ReadFile(const FilePath& filename, char* data, int max_size) {
-  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY));
+  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY | O_BINARY));
   if (fd < 0)
     return -1;
 

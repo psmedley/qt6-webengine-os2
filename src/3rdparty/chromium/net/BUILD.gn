@@ -1460,6 +1460,12 @@ component("net") {
       ]
     }
 
+    if (is_os2) {
+      sources += [
+        "base/platform_mime_util_os2.cc",
+      ]
+    }
+
     if (trial_comparison_cert_verifier_supported) {
       sources += [
         "cert/trial_comparison_cert_verifier.cc",

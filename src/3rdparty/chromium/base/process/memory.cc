@@ -22,6 +22,11 @@
 #endif
 #include "build/build_config.h"
 
+#if defined(OS_OS2)
+#include "base/os2/os2_toolkit.h"
+#include <umalloc.h>
+#endif
+
 namespace base {
 
 size_t g_oom_size = 0U;

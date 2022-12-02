@@ -70,6 +70,8 @@ source_set("power_save_blocker") {
     ]
   } else if (is_win) {
     sources += [ "power_save_blocker_win.cc" ]
+  } else if (is_os2) {
+    sources += [ "power_save_blocker_os2.cc" ]
   } else {
     # Fuchsia and non-DBus Linux.
     sources += [ "power_save_blocker_stub.cc" ]

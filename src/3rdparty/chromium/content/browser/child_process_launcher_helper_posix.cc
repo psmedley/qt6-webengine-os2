@@ -98,6 +98,7 @@ std::unique_ptr<PosixFileDescriptorInfo> CreateDefaultPosixFilesToMap(
   command_line->AppendSwitchASCII(switches::kSharedFiles,
                                   file_switch_value_builder.switch_value());
 
+
   return files_to_register;
 }
 

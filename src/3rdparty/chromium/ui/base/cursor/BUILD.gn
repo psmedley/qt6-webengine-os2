@@ -27,6 +27,10 @@ component("cursor_base") {
   if (use_aura) {
     sources += [ "cursor_aura.cc" ]
   }
+
+  if (is_os2) {
+    sources += [ "cursor_os2.cc" ]
+  }
 }
 
 component("theme_manager") {

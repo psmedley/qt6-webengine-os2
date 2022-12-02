@@ -56,6 +56,11 @@ TLSIndex CreateTLSIndex()
     index = TlsAlloc();
 #    endif
 
+#elif defined(ANGLE_PLATFORM_OS2)
+    if (DosAllocThreadLocalMemory(1, &index) != 0)
+    {
+        index = TLS_INVALID_INDEX;
+    }
 #elif defined(ANGLE_PLATFORM_POSIX)
     // Create global pool key
     if ((pthread_key_create(&index, nullptr)) != 0)
@@ -94,6 +99,8 @@ bool DestroyTLSIndex(TLSIndex index)
 #    else
     return (TlsFree(index) == TRUE);
 #    endif
+#elif defined(ANGLE_PLATFORM_OS2)
+    return (DosFreeThreadLocalMemory(index) == 0);
 #elif defined(ANGLE_PLATFORM_POSIX)
     return (pthread_key_delete(index) == 0);
 #endif
@@ -126,6 +133,9 @@ bool SetTLSValue(TLSIndex index, void *value)
 #    else
     return (TlsSetValue(index, value) == TRUE);
 #    endif
+#elif defined(ANGLE_PLATFORM_OS2)
+    *index = (ULONG)value;
+    return true;
 #elif defined(ANGLE_PLATFORM_POSIX)
     return (pthread_setspecific(index, value) == 0);
 #endif
@@ -153,6 +163,8 @@ void *GetTLSValue(TLSIndex index)
 #    else
     return TlsGetValue(index);
 #    endif
+#elif defined(ANGLE_PLATFORM_OS2)
+    return (void*)*index;
 #elif defined(ANGLE_PLATFORM_POSIX)
     return pthread_getspecific(index);
 #endif

@@ -15,6 +15,8 @@
 #include <windows.h>
 
 #include "base/win/scoped_handle.h"
+#elif defined(OS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #endif
 
 #if defined(OS_MAC)
@@ -39,6 +41,10 @@ void ExtractPlatformHandlesFromSharedMemoryRegionHandle(
 #elif defined(OS_ANDROID)
   // This is a file descriptor. Same code as above, but separated for clarity.
   *extracted_handle = PlatformHandle(std::move(handle));
+#elif defined(OS_OS2)
+  // This is a shared memory handle. Same code as above, but separated for
+  // clarity.
+  *extracted_handle = PlatformHandle(std::move(handle));
 #else
   *extracted_handle = PlatformHandle(std::move(handle.fd));
   *extracted_readonly_handle = PlatformHandle(std::move(handle.readonly_fd));
@@ -61,6 +67,9 @@ CreateSharedMemoryRegionHandleFromPlatformHandles(
 #elif defined(OS_ANDROID)
   DCHECK(!readonly_handle.is_valid());
   return handle.TakeFD();
+#elif defined(OS_OS2)
+  DCHECK(!readonly_handle.is_valid());
+  return handle.TakeShmemHandle();
 #else
   return base::subtle::ScopedFDPair(handle.TakeFD(), readonly_handle.TakeFD());
 #endif

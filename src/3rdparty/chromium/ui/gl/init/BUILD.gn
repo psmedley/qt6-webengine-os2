@@ -64,6 +64,11 @@ jumbo_component("init") {
       "ozone_util.h",
     ]
     deps += [ "//ui/ozone" ]
+  } else if (is_os2) {
+    sources += [
+      "gl_factory_os2.cc",
+      "gl_initializer_os2.cc",
+    ]
   }
 
   # Allow X11 to use Ozone implementation of gl_factory and gl_initializer.

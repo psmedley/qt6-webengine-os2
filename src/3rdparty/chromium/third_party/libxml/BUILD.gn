@@ -10,6 +10,8 @@ if (is_linux || is_chromeos || is_android || is_nacl || is_fuchsia) {
   os_include = "mac"
 } else if (is_win) {
   os_include = "win32"
+} else if (is_os2) {
+  os_include = "os2"
 }
 
 import("//third_party/libxml/libxml_visibility.gni")

@@ -362,13 +362,13 @@ assertTargets(
 )
 add_check_for_support(
    MODULES QtWebEngine
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING)
-   MESSAGE "Build can be done only on Linux, Windows or macOS."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING) OR OS2
+   MESSAGE "Build can be done only on Linux, Windows, OS/2 or macOS."
 )
 add_check_for_support(
    MODULES QtPdf
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING) OR IOS
-   MESSAGE "Build can be done only on Linux, Windows, macOS or iOS."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING) OR IOS OR OS2
+   MESSAGE "Build can be done only on Linux, Windows, macOS, OS/2 or iOS."
 )
 if(LINUX AND CMAKE_CROSSCOMPILING)
    get_gn_arch(testArch ${TEST_architecture_arch})

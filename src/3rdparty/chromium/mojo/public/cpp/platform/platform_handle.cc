@@ -70,6 +70,19 @@ base::mac::ScopedMachSendRight CloneMachPort(
   }
   return base::mac::ScopedMachSendRight(mach_port.get());
 }
+#elif defined(OS_OS2)
+base::os2::ScopedShmemHandle CloneShmemHandle(const
+  base::os2::ScopedShmemHandle& handle) {
+  DCHECK(handle.is_valid());
+
+  SHMEM dupe = shmem_duplicate(handle.get(), 0);
+  if (dupe == SHMEM_INVALID) {
+    DPLOG(ERROR) << "shmem_duplicate";
+    return base::os2::ScopedShmemHandle();
+  }
+
+  return base::os2::ScopedShmemHandle(dupe);
+}
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -98,6 +111,9 @@ PlatformHandle::PlatformHandle(base::mac::ScopedMachSendRight mach_port)
     : type_(Type::kMachSend), mach_send_(std::move(mach_port)) {}
 PlatformHandle::PlatformHandle(base::mac::ScopedMachReceiveRight mach_port)
     : type_(Type::kMachReceive), mach_receive_(std::move(mach_port)) {}
+#elif defined(OS_OS2)
+PlatformHandle::PlatformHandle(base::os2::ScopedShmemHandle handle)
+    : type_(Type::kShmemHandle), handle_(std::move(handle)) {}
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -122,6 +138,8 @@ PlatformHandle& PlatformHandle::operator=(PlatformHandle&& other) {
 #elif defined(OS_MAC)
   mach_send_ = std::move(other.mach_send_);
   mach_receive_ = std::move(other.mach_receive_);
+#elif defined(OS_OS2)
+  handle_ = std::move(other.handle_);
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -165,6 +183,13 @@ void PlatformHandle::ToMojoPlatformHandle(PlatformHandle handle,
           static_cast<uint64_t>(handle.ReleaseMachReceiveRight());
       break;
     }
+#elif defined(OS_OS2)
+    if (handle.is_shmem_handle()) {
+      out_handle->type = MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE;
+      out_handle->value =
+          static_cast<uint64_t>(handle.TakeShmemHandle().release());
+      break;
+    }
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -202,6 +227,11 @@ PlatformHandle PlatformHandle::FromMojoPlatformHandle(
     return PlatformHandle(base::mac::ScopedMachReceiveRight(
         static_cast<mach_port_t>(handle->value)));
   }
+#elif defined(OS_OS2)
+  if (handle->type == MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE) {
+    return PlatformHandle(base::os2::ScopedShmemHandle(
+        static_cast<SHMEM>(handle->value)));
+  }
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -221,6 +251,8 @@ void PlatformHandle::reset() {
 #elif defined(OS_MAC)
   mach_send_.reset();
   mach_receive_.reset();
+#elif defined(OS_OS2)
+  handle_.reset();
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -238,6 +270,8 @@ void PlatformHandle::release() {
 #elif defined(OS_MAC)
   ignore_result(mach_send_.release());
   ignore_result(mach_receive_.release());
+#elif defined(OS_OS2)
+  ignore_result(handle_.release());
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -256,6 +290,10 @@ PlatformHandle PlatformHandle::Clone() const {
   if (is_valid_mach_send())
     return PlatformHandle(CloneMachPort(mach_send_));
   CHECK(!is_valid_mach_receive()) << "Cannot clone Mach receive rights";
+  return PlatformHandle(CloneFD(fd_));
+#elif defined(OS_OS2)
+  if (is_valid_shmem_handle())
+    return PlatformHandle(CloneShmemHandle(handle_));
   return PlatformHandle(CloneFD(fd_));
 #elif defined(OS_POSIX)
   return PlatformHandle(CloneFD(fd_));

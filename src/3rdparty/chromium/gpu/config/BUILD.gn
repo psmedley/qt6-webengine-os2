@@ -165,6 +165,10 @@ source_set("config_sources") {
     sources += [ "gpu_info_collector_fuchsia.cc" ]
   }
 
+  if (is_os2) {
+    sources += [ "gpu_info_collector_os2.cc" ]
+  }
+
   sources += process_json_outputs
 
   configs += [ "//gpu:gpu_implementation" ]

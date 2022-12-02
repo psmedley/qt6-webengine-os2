@@ -8,6 +8,13 @@
 
 #include "system_utils.h"
 
+#include "common/platform.h"
+
+#if defined(ANGLE_PLATFORM_OS2)
+#    define INCL_BASE
+#    include <os2.h>
+#endif
+
 #include <array>
 #include <iostream>
 

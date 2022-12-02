@@ -11,6 +11,9 @@
 # be able to get it to work by giving it some hints.  See the comment
 # at the beginning of configure.in for additional information.
 #
+VENDOR ?=community
+BUILD_INFO=\#\#1\#\# $(shell date +'%d %b %Y %H:%M:%S')     $(shell uname -n)
+BUILDLEVEL_INFO=@\#$(VENDOR):$(RELEASE)\#@$(BUILD_INFO)::::$(PATCH_LEVEL)::
 
 # The toplevel directory of the source tree.  This is the directory
 # that contains this "Makefile.in" and the "configure.in" script.
@@ -98,6 +101,7 @@ TCC += @HAVE_ZLIB@
 VERSION = @VERSION@
 VERSION_NUMBER = @VERSION_NUMBER@
 RELEASE = @RELEASE@
+PATCH_LEVEL = @PATCH_LEVEL@
 
 # Filename extensions
 #
@@ -644,6 +648,7 @@ sqlite3.pc: $(TOP)/sqlite3.pc.in
 
 libsqlite3.la:	$(LIBOBJ)
 	$(LTLINK) -no-undefined -o $@ $(LIBOBJ) $(TLIBS) \
+		-buildlevel '$(BUILDLEVEL_INFO)' \
 		${ALLOWRELEASE} -rpath "$(libdir)" -version-info "8:6:8"
 
 libtclsqlite3.la:	tclsqlite.lo libsqlite3.la
@@ -651,11 +656,12 @@ libtclsqlite3.la:	tclsqlite.lo libsqlite3.la
 		libsqlite3.la @TCL_STUB_LIB_SPEC@ $(TLIBS) \
 		-rpath "$(TCLLIBDIR)" \
 		-version-info "8:6:8" \
+		-buildlevel '$(BUILDLEVEL_INFO)' \
 		-avoid-version
 
-sqlite3$(TEXE):	shell.c sqlite3.c
+sqlite3$(TEXE):	shell.c sqlite3.c getrusage.lo
 	$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \
-		shell.c sqlite3.c \
+		shell.c sqlite3.c getrusage.lo \
 		$(LIBREADLINE) $(TLIBS) -rpath "$(libdir)"
 
 sqldiff$(TEXE):	$(TOP)/tool/sqldiff.c sqlite3.lo sqlite3.h
@@ -935,6 +941,9 @@ os.lo:	$(TOP)/src/os.c $(HDR)
 
 os_unix.lo:	$(TOP)/src/os_unix.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/os_unix.c
+
+getrusage.lo:	$(TOP)/src/getrusage.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/getrusage.c
 
 os_win.lo:	$(TOP)/src/os_win.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/os_win.c
@@ -1240,7 +1249,7 @@ TESTFIXTURE_FLAGS += -DSQLITE_CKSUMVFS_STATIC
 TESTFIXTURE_SRC0 = $(TESTSRC2) libsqlite3.la
 TESTFIXTURE_SRC1 = sqlite3.c
 TESTFIXTURE_SRC = $(TESTSRC) $(TOP)/src/tclsqlite.c
-TESTFIXTURE_SRC += $(TESTFIXTURE_SRC$(USE_AMALGAMATION))
+TESTFIXTURE_SRC += $(TESTFIXTURE_SRC1)
 
 testfixture$(TEXE):	$(TESTFIXTURE_SRC)
 	$(LTLINK) -DSQLITE_NO_SYNC=1 $(TEMP_STORE) $(TESTFIXTURE_FLAGS) \

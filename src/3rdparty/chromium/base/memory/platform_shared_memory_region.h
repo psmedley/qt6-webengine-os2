@@ -21,6 +21,8 @@
 #elif defined(OS_WIN)
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_types.h"
+#elif defined(OS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #elif defined(OS_POSIX)
 #include <sys/types.h>
 #include "base/file_descriptor_posix.h"
@@ -153,6 +155,9 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
 #elif defined(OS_ANDROID)
   using PlatformHandle = int;
   using ScopedPlatformHandle = ScopedFD;
+#elif defined(OS_OS2)
+  using PlatformHandle = SHMEM;
+  using ScopedPlatformHandle = os2::ScopedShmemHandle;
 #else
   using PlatformHandle = FDPair;
   using ScopedPlatformHandle = ScopedFDPair;

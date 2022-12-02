@@ -93,6 +93,13 @@ if (is_apple) {
   }
 }
 
+if (is_os2) {
+  angle_system_utils_sources += [
+    "src/common/system_utils_os2.cpp",
+    "src/common/system_utils_posix.cpp",
+  ]
+}
+
 if (is_win) {
   libangle_common_sources += [ "src/common/system_utils_win.cpp" ]
   if (current_os == "winuwp") {

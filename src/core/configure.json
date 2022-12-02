@@ -195,7 +195,7 @@
         },
         "webengine-poppler-cpp": {
             "label": "poppler-cpp",
-            "autoDetect": "config.unix",
+            "autoDetect": "(config.unix || config.os2)",
             "condition": "libs.webengine-poppler-cpp",
             "output": [ "privateFeature" ]
         },

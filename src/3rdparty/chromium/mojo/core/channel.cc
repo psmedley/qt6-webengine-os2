@@ -107,6 +107,10 @@ Channel::Message::Message(size_t capacity,
 #if defined(OS_WIN)
   // On Windows we serialize HANDLEs into the extra header space.
   extra_header_size = max_handles_ * sizeof(HandleEntry);
+#elif defined(OS_OS2)
+  // On OS/2 we serialize handles into the extra header space.
+  extra_header_size = max_handles_ ?
+      sizeof(OS2ExtraHeader) + max_handles_ * sizeof(HandleEntry) : 0;
 #elif defined(OS_FUCHSIA)
   // On Fuchsia we serialize handle types into the extra header space.
   extra_header_size = max_handles_ * sizeof(HandleInfoEntry);
@@ -235,6 +239,9 @@ Channel::MessagePtr Channel::Message::Deserialize(
 
 #if defined(OS_WIN)
   uint32_t max_handles = extra_header_size / sizeof(HandleEntry);
+#elif defined(OS_OS2)
+  uint32_t max_handles = extra_header_size > sizeof(OS2ExtraHeader) ?
+      (extra_header_size - sizeof(OS2ExtraHeader)) / sizeof(HandleEntry) : 0;
 #elif defined(OS_FUCHSIA)
   uint32_t max_handles = extra_header_size / sizeof(HandleInfoEntry);
 #elif defined(OS_MAC)
@@ -303,6 +310,19 @@ Channel::MessagePtr Channel::Message::Deserialize(
           PlatformHandleInTransit::TakeIncomingRemoteHandle(handle,
                                                             from_process));
     }
+  }
+  message->SetHandles(std::move(handles));
+#elif defined(OS_OS2)
+  std::vector<PlatformHandleInTransit> handles(num_handles);
+  Message::HandleEntry *message_handles = message->mutable_os2_header()->handles;
+  pid_t pid = from_process != base::kNullProcessHandle ? from_process : message->mutable_os2_header()->pid;
+  if (pid) {
+    int rc = libcx_take_handles(message_handles, num_handles, pid, LIBCX_HANDLE_CLOSE);
+    DPCHECK(rc == 0);
+  }
+  for (size_t i = 0; i < num_handles; i++) {
+    handles[i] = PlatformHandleInTransit(
+        PlatformHandleInTransit::CreateFromLIBCxHandle(message_handles[i]));
   }
   message->SetHandles(std::move(handles));
 #endif

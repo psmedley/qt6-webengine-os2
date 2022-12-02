@@ -27,7 +27,7 @@
 #if !defined(USE_SYMBOLIZE)
 #include <cxxabi.h>
 #endif
-#if !defined(__UCLIBC__) && !defined(_AIX)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 #include <execinfo.h>
 #endif
 
@@ -78,7 +78,8 @@ const char kSymbolCharacters[] =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 #endif  // !defined(USE_SYMBOLIZE)
 
-#if !defined(USE_SYMBOLIZE)
+#if !defined(USE_SYMBOLIZE) && \
+  !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 // Demangles C++ symbols in the given text. Example:
 //
 // "out/Debug/base_unittests(_ZN10StackTraceC1Ev+0x20) [0x817778c]"
@@ -88,7 +89,6 @@ void DemangleSymbols(std::string* text) {
   // Note: code in this function is NOT async-signal safe (std::string uses
   // malloc internally).
 
-#if !defined(__UCLIBC__) && !defined(_AIX)
   std::string::size_type search_from = 0;
   while (search_from < text->size()) {
     // Look for the start of a mangled symbol, from search_from.
@@ -123,9 +123,9 @@ void DemangleSymbols(std::string* text) {
       search_from = mangled_start + 2;
     }
   }
-#endif  // !defined(__UCLIBC__) && !defined(_AIX)
 }
-#endif  // !defined(USE_SYMBOLIZE)
+#endif  // !defined(USE_SYMBOLIZE) && \
+        // !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 
 class BacktraceOutputHandler {
  public:
@@ -135,7 +135,7 @@ class BacktraceOutputHandler {
   virtual ~BacktraceOutputHandler() = default;
 };
 
-#if !defined(__UCLIBC__) && !defined(_AIX)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 void OutputPointer(void* pointer, BacktraceOutputHandler* handler) {
   // This should be more than enough to store a 64-bit number in hex:
   // 16 hex digits + 1 for null-terminator.
@@ -218,7 +218,7 @@ void ProcessBacktrace(void* const* trace,
   }
 #endif  // defined(USE_SYMBOLIZE)
 }
-#endif  // !defined(__UCLIBC__) && !defined(_AIX)
+#endif  // !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 
 void PrintToStderr(const char* output) {
   // NOTE: This code MUST be async-signal safe (it's used by in-process
@@ -765,6 +765,13 @@ class SandboxSymbolizeHelper {
 }  // namespace
 
 bool EnableInProcessStackDumping() {
+#if defined(OS_OS2)
+  // On OS/2, there is no ready-to-use API to print a stack dump. Let LIBC
+  // handle crashes (and generate a very useful .TRP file via EXCEPTQ with
+  // a stack dump and a lot of useful info).
+  return false;
+#endif
+
 #if defined(USE_SYMBOLIZE)
   SandboxSymbolizeHelper::GetInstance();
 #endif  // USE_SYMBOLIZE
@@ -827,7 +834,7 @@ size_t CollectStackTrace(void** trace, size_t count) {
   // NOTE: This code MUST be async-signal safe (it's used by in-process
   // stack dumping signal handler). NO malloc or stdio is allowed here.
 
-#if !defined(__UCLIBC__) && !defined(_AIX)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
   // Though the backtrace API man page does not list any possible negative
   // return values, we take no chance.
   return base::saturated_cast<size_t>(backtrace(trace, count));
@@ -840,13 +847,13 @@ void StackTrace::PrintWithPrefix(const char* prefix_string) const {
 // NOTE: This code MUST be async-signal safe (it's used by in-process
 // stack dumping signal handler). NO malloc or stdio is allowed here.
 
-#if !defined(__UCLIBC__) && !defined(_AIX)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
   PrintBacktraceOutputHandler handler;
   ProcessBacktrace(trace_, count_, prefix_string, &handler);
 #endif
 }
 
-#if !defined(__UCLIBC__) && !defined(_AIX)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
 void StackTrace::OutputToStreamWithPrefix(std::ostream* os,
                                           const char* prefix_string) const {
   StreamBacktraceOutputHandler handler(os);

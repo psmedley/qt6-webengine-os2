@@ -62,10 +62,19 @@
 #include <grp.h>
 #endif
 
+#if defined(OS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 // We need to do this on AIX due to some inconsistencies in how AIX
 // handles XOPEN_SOURCE and ALL_SOURCE.
 #if defined(OS_AIX)
 extern "C" char* mkdtemp(char* path);
+#endif
+
+#if !defined(O_BINARY)
+#define O_BINARY 0
 #endif
 
 namespace base {
@@ -228,7 +237,7 @@ bool DoCopyDirectory(const FilePath& from_path,
       continue;
     }
 
-    int open_flags = O_WRONLY | O_CREAT;
+    int open_flags = O_WRONLY | O_CREAT | O_BINARY;
     // If |open_exclusive| is set then we should always create the destination
     // file, so O_NONBLOCK is not necessary to ensure we don't block on the
     // open call for the target file below, and since the destination will

@@ -66,7 +66,12 @@
   %define global_private(x) global mangle(x)
 %endif
 
-section .text
+%ifidn __OUTPUT_FORMAT__,obj
+  ; Force 32-bit code segment on OS/2 to override the default 16-bit one.
+  segment TEXT32 CLASS=CODE USE32 ALIGN=16
+%else  
+  section .text
+%endif
 
 ;; typedef void (*PushAllRegistersCallback)(ThreadState*, intptr_t*);
 ;; extern "C" void PushAllRegisters(ThreadState*, PushAllRegistersCallback)

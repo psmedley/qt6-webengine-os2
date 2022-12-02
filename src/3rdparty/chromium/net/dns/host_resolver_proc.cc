@@ -19,7 +19,7 @@
 #include "net/dns/dns_util.h"
 #include "net/dns/host_resolver.h"
 
-#if defined(OS_OPENBSD)
+#if defined(OS_OPENBSD) || defined(OS_OS2)
 #define AI_ADDRCONFIG 0
 #endif
 

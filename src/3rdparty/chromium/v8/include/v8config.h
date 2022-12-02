@@ -131,6 +131,11 @@ path. Add it with -I<path> to the command line
 # define V8_OS_QNX 1
 #elif defined(_WIN32)
 # define V8_OS_WIN 1
+# define V8_OS_DOSLIKE 1
+#elif defined(__OS2__)
+# define V8_OS_OS2 1
+# define V8_OS_POSIX 1
+# define V8_OS_DOSLIKE 1
 #endif
 
 // -----------------------------------------------------------------------------
@@ -484,7 +489,7 @@ set BUILDING_V8_SHARED, to include its headers for linking against the \
 V8 shared library set USING_V8_SHARED.
 #endif
 
-#ifdef V8_OS_WIN
+#ifdef V8_OS_DOSLIKE
 
 // Setup for Windows DLL export/import. When building the V8 DLL the
 // BUILDING_V8_SHARED needs to be defined. When building a program which uses
@@ -499,7 +504,7 @@ V8 shared library set USING_V8_SHARED.
 # define V8_EXPORT
 #endif  // BUILDING_V8_SHARED
 
-#else  // V8_OS_WIN
+#else  // V8_OS_DOSLIKE
 
 // Setup for Linux shared library export.
 #if V8_HAS_ATTRIBUTE_VISIBILITY
@@ -512,7 +517,7 @@ V8 shared library set USING_V8_SHARED.
 # define V8_EXPORT
 #endif
 
-#endif  // V8_OS_WIN
+#endif  // V8_OS_DOSLIKE
 
 // clang-format on
 

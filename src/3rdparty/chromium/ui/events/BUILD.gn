@@ -224,6 +224,7 @@ jumbo_component("events") {
     "keyboard_hook_base.cc",
     "keyboard_hook_base.h",
     "null_event_targeter.cc",
+    "os2/keyboard_hook_os2.cc",
     "scoped_target_handler.cc",
   ]
 

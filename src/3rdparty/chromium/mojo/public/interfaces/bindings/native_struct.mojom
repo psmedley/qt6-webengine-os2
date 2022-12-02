@@ -11,6 +11,7 @@ enum SerializedHandleType {
   WIN_HANDLE,
   MACH_PORT,
   FUCHSIA_HANDLE,
+  OS2_SHMEM_HANDLE,
 };
 
 struct SerializedHandle {

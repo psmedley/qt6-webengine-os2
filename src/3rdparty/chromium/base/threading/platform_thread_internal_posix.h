@@ -14,6 +14,7 @@ namespace base {
 
 namespace internal {
 
+#if !defined(OS_OS2)
 struct ThreadPriorityToNiceValuePair {
   ThreadPriority priority;
   int nice_value;
@@ -36,6 +37,7 @@ BASE_EXPORT ThreadPriority NiceValueToThreadPriority(int nice_value);
 // result of CanIncreaseThreadPriority().
 Optional<bool> CanIncreaseCurrentThreadPriorityForPlatform(
     ThreadPriority priority);
+#endif
 
 // Allows platform specific tweaks to the generic POSIX solution for
 // SetCurrentThreadPriority(). Returns true if the platform-specific

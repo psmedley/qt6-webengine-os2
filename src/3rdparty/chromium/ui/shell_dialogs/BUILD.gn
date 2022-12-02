@@ -116,6 +116,10 @@ jumbo_component("shell_dialogs") {
       "//ui/platform_window",
     ]
   }
+
+  if (is_os2) {
+    sources += [ "select_file_dialog_os2.cc" ]
+  }
 }
 
 test("shell_dialogs_unittests") {

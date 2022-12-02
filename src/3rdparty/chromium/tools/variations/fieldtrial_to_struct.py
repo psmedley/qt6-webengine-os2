@@ -40,6 +40,7 @@ _platforms = [
     'ios',
     'linux',
     'mac',
+    'os2',
     'windows',
 ]
 

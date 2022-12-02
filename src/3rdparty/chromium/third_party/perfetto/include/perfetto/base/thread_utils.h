@@ -71,6 +71,11 @@ using PlatformThreadId = pid_t;
 inline PlatformThreadId GetThreadId() {
   return reinterpret_cast<int32_t>(pthread_self());
 }
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+using PlatformThreadId = int;
+inline PlatformThreadId GetThreadId() {
+  return _gettid();
+}
 #else  // Default to pthreads in case no OS is set.
 using PlatformThreadId = pthread_t;
 inline PlatformThreadId GetThreadId() {

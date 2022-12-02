@@ -105,8 +105,8 @@ void ConditionVariable::TimedWait(const TimeDelta& max_time) {
 #else
   // The timeout argument to pthread_cond_timedwait is in absolute time.
   struct timespec absolute_time;
-#if defined(OS_NACL)
-  // See comment in constructor for why this is different in NaCl.
+#if defined(OS_NACL) || defined(OS_OS2)
+  // See comment in constructor for why this is different in NaCl and OS/2.
   struct timeval now;
   gettimeofday(&now, NULL);
   absolute_time.tv_sec = now.tv_sec;

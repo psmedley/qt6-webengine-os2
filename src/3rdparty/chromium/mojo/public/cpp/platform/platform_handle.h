@@ -18,6 +18,8 @@
 #include <lib/zx/handle.h>
 #elif defined(OS_MAC)
 #include "base/mac/scoped_mach_port.h"
+#elif defined(OS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -49,6 +51,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif defined(OS_MAC)
     kMachSend,
     kMachReceive,
+#elif defined(OS_OS2)
+    kShmemHandle,
 #endif
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
     kFd,
@@ -65,6 +69,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif defined(OS_MAC)
   explicit PlatformHandle(base::mac::ScopedMachSendRight mach_port);
   explicit PlatformHandle(base::mac::ScopedMachReceiveRight mach_port);
+#elif defined(OS_OS2)
+  explicit PlatformHandle(base::os2::ScopedShmemHandle handle);
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -163,6 +169,23 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
   mach_port_t ReleaseMachReceiveRight() WARN_UNUSED_RESULT {
     return TakeMachReceiveRight().release();
   }
+#elif defined(OS_OS2)
+  bool is_valid() const { return is_valid_fd() || is_valid_shmem_handle(); }
+  bool is_valid_shmem_handle() const { return handle_.is_valid(); }
+  bool is_shmem_handle() const { return type_ == Type::kShmemHandle; }
+  const base::os2::ScopedShmemHandle& GetShmemHandle() const {
+    return handle_;
+  }
+  base::os2::ScopedShmemHandle TakeShmemHandle() {
+    if (type_ == Type::kShmemHandle)
+      type_ = Type::kNone;
+    return std::move(handle_);
+  }
+  SHMEM ReleaseShmemHandle() WARN_UNUSED_RESULT {
+    if (type_ == Type::kShmemHandle)
+      type_ = Type::kNone;
+    return handle_.release();
+  }
 #elif defined(OS_POSIX)
   bool is_valid() const { return is_valid_fd(); }
 #else
@@ -223,6 +246,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif defined(OS_MAC)
   base::mac::ScopedMachSendRight mach_send_;
   base::mac::ScopedMachReceiveRight mach_receive_;
+#elif defined(OS_OS2)
+  base::os2::ScopedShmemHandle handle_;
 #endif
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
