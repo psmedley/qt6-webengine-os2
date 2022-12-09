@@ -13,7 +13,7 @@ else()
     find_package(FLEX)
     find_package(PkgConfig)
     find_package(Snappy)
-    find_package(Nodejs 10.19)
+#    find_package(Nodejs 10.19)
 endif()
 
 if(PkgConfig_FOUND)
@@ -385,8 +385,8 @@ add_check_for_support(
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
-   CONDITION TARGET Nodejs::Nodejs
-   MESSAGE "node.js version 10.19 or later is required."
+#   CONDITION TARGET Nodejs::Nodejs
+#   MESSAGE "node.js version 10.19 or later is required."
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
@@ -463,6 +463,7 @@ add_check_for_support(
    CONDITION
        (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL GNU) OR
        (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL Clang) OR
+       (OS2 AND CMAKE_CXX_COMPILER_ID STREQUAL GNU) OR
        (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL MSVC) OR
        (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL Clang AND
           CMAKE_CXX_SIMULATE_ID STREQUAL MSVC) OR
