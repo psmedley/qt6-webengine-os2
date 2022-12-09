@@ -12,7 +12,7 @@ set(NINJA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Python2 REQUIRED)
 
-if(WIN32)
+if(WIN32 OR OS2)
     set(NINJA_EXECUTABLE ninja.exe)
 else()
     set(NINJA_EXECUTABLE ninja)
