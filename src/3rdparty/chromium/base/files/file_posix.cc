@@ -590,7 +590,7 @@ File::Error File::GetLastFileError() {
   return base::File::OSErrorToFileError(errno);
 }
 
-#if defined(OS_BSD) || defined(OS_APPLE) || defined(OS_NACL) || \
+#if defined(OS_BSD) || defined(OS_APPLE) || defined(OS_NACL) || defined(OS_OS2) || \
     defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21)
 int File::Stat(const char* path, stat_wrapper_t* sb) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
