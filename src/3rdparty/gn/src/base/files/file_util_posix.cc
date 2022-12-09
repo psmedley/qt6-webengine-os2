@@ -47,6 +47,11 @@
 #include <grp.h>
 #endif
 
+#if defined(OS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 // We need to do this on AIX due to some inconsistencies in how AIX
 // handles XOPEN_SOURCE and ALL_SOURCE.
 #if defined(OS_AIX)
@@ -63,7 +68,7 @@ namespace base {
 
 namespace {
 
-#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || defined(OS_OS2) \
+#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || defined(OS_OS2) || \
     defined(OS_HAIKU) || defined(OS_MSYS) || defined(OS_ANDROID) && __ANDROID_API__ < 21
 int CallStat(const char* path, stat_wrapper_t* sb) {
   return stat(path, sb);

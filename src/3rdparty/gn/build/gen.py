@@ -51,6 +51,8 @@ class Platform(object):
       self._platform = 'netbsd'
     elif self._platform.startswith('openbsd'):
       self._platform = 'openbsd'
+    elif self._platform.startswith('os2'):
+      self._platform = 'os2'
     elif self._platform.startswith('haiku'):
       self._platform = 'haiku'
     elif self._platform.startswith('sunos'):
@@ -58,7 +60,7 @@ class Platform(object):
 
   @staticmethod
   def known_platforms():
-    return ['linux', 'darwin', 'mingw', 'msys', 'msvc', 'aix', 'fuchsia', 'freebsd', 'netbsd', 'openbsd', 'haiku', 'solaris']
+    return ['linux', 'darwin', 'mingw', 'msys', 'msvc', 'aix', 'fuchsia', 'freebsd', 'netbsd', 'openbsd', 'os2', 'haiku', 'solaris']
 
   def platform(self):
     return self._platform
@@ -90,8 +92,14 @@ class Platform(object):
   def is_solaris(self):
     return self._platform == 'solaris'
 
+  def is_os2(self):
+    return self._platform == 'os2'
+
+  def is_doslike(self):
+    return self.is_windows() or self.is_os2()
+
   def is_posix(self):
-    return self._platform in ['linux', 'freebsd', 'darwin', 'aix', 'openbsd', 'haiku', 'solaris', 'msys', 'netbsd']
+    return self._platform in ['linux', 'freebsd', 'darwin', 'aix', 'openbsd', 'os2', 'haiku', 'solaris', 'msys', 'netbsd']
 
 
 def main(argv):
@@ -230,6 +238,7 @@ def WriteGenericNinja(path, static_libraries, executables,
       'freebsd': 'build_linux.ninja.template',
       'aix': 'build_aix.ninja.template',
       'openbsd': 'build_openbsd.ninja.template',
+      'os2': 'build_os2.ninja.template',
       'haiku': 'build_haiku.ninja.template',
       'solaris': 'build_linux.ninja.template',
       'netbsd': 'build_linux.ninja.template',
@@ -238,7 +247,7 @@ def WriteGenericNinja(path, static_libraries, executables,
   with open(template_filename) as f:
     ninja_template = f.read()
 
-  if platform.is_windows():
+  if platform.is_doslike():
     executable_ext = '.exe'
     library_ext = '.lib'
     object_ext = '.obj'
@@ -373,11 +382,12 @@ def WriteGNNinja(path, platform, host, options):
       # Use -fdata-sections and -ffunction-sections to place each function
       # or data item into its own section so --gc-sections can eliminate any
       # unused functions and data items.
-      cflags.extend(['-fdata-sections', '-ffunction-sections'])
-      ldflags.extend(['-fdata-sections', '-ffunction-sections'])
+      if not platform.is_os2():
+        cflags.extend(['-fdata-sections', '-ffunction-sections'])
+        ldflags.extend(['-fdata-sections', '-ffunction-sections'])
       if platform.is_darwin():
         ldflags.append('-Wl,-dead_strip')
-      elif not platform.is_aix() and not platform.is_solaris():
+      elif not platform.is_aix() and not platform.is_solaris() and not platform.is_os2():
         # Garbage collection is done by default on aix.
         ldflags.append('-Wl,--gc-sections')
 
@@ -387,13 +397,15 @@ def WriteGNNinja(path, platform, host, options):
           ldflags.append('-Wl,-S')
         elif platform.is_aix():
           ldflags.append('-Wl,-s')
+        elif platform.is_os2():
+          ldflags.append('-s')
         elif platform.is_solaris():
           ldflags.append('-Wl,--strip-all')
         else:
           ldflags.append('-Wl,-strip-all')
 
       # Enable identical code-folding.
-      if options.use_icf and not platform.is_darwin():
+      if options.use_icf and not platform.is_darwin() and not platform.is_os2():
         ldflags.append('-Wl,--icf=all')
 
       if options.use_lto:
@@ -438,6 +450,10 @@ def WriteGNNinja(path, platform, host, options):
     elif platform.is_aix():
       cflags.append('-maix64')
       ldflags.append('-maix64')
+    elif platform.is_os2():
+      cflags.append('-Zomf')
+      # LIBCx is needed for spawn2 used in ExecProcess.
+      ldflags.append('-Zomf -Zhigh-mem -lcx')
     elif platform.is_haiku():
       cflags.append('-fPIC')
       cflags.extend(['-D_BSD_SOURCE'])
