@@ -88,6 +88,9 @@ static_library("bundled_libxslt") {
   if (is_mac) {
     sources += [ "mac/config.h" ]
   }
+  if (is_os2) {
+    sources += [ "os2/config.h" ]
+  }
 
   cflags = []
   if (is_linux || is_chromeos || is_android || is_fuchsia) {
@@ -103,6 +106,8 @@ static_library("bundled_libxslt") {
     ]
   } else if (is_mac) {
     include_dirs = [ "mac" ]
+  } else if (is_os2) {
+    include_dirs = [ "os2" ]
   }
 
   deps = [ "//third_party/libxml" ]
