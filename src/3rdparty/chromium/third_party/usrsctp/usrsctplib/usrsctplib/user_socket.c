@@ -587,7 +587,7 @@ copy_from_user(void *dst, void *src, size_t len) {
 # define copyout(k, u, len)	copy_to_user(u, k, len)
 
 
-#if defined(__Userspace_os_OS2)
+#if defined(__OS2__)
 #define UIO_MAXIOV	1024		/* max 1K of iov's */
 #endif
 
@@ -1039,7 +1039,7 @@ userspace_sctp_recvmsg(struct socket *so,
 	if (error) {
 		if ((auio.uio_resid != ulen) &&
 		    (error == EINTR ||
-#if !defined(__NetBSD__)
+#if !defined(__NetBSD__) && !defined(__OS2__)
 		     error == ERESTART ||
 #endif
 		     error == EWOULDBLOCK)) {
@@ -1132,7 +1132,7 @@ usrsctp_recvv(struct socket *so,
 	if (errno) {
 		if ((auio.uio_resid != ulen) &&
 		    (errno == EINTR ||
-#if !defined(__NetBSD__)
+#if !defined(__NetBSD__) && !defined(__OS2__)
 		     errno == ERESTART ||
 #endif
 		     errno == EWOULDBLOCK)) {
@@ -1948,7 +1948,7 @@ int user_connect(struct socket *so, struct sockaddr *sa)
 		error = pthread_cond_wait(SOCK_COND(so), SOCK_MTX(so));
 #endif
 		if (error) {
-#if defined(__NetBSD__)
+#if defined(__NetBSD__) || defined(__OS2__)
 			if (error == EINTR) {
 #else
 			if (error == EINTR || error == ERESTART) {
@@ -1968,7 +1968,7 @@ bad:
 	if (!interrupted) {
 		so->so_state &= ~SS_ISCONNECTING;
 	}
-#if !defined(__NetBSD__)
+#if !defined(__NetBSD__) && !defined(__OS2__)
 	if (error == ERESTART) {
 		error = EINTR;
 	}

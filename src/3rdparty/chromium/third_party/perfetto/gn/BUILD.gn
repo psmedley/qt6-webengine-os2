@@ -56,6 +56,7 @@ action("gen_buildflags") {
     perfetto_local_symbolizer =
         "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_LINUX() || " +
         "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_MAC() ||" +
+        "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_OS2() ||" +
         "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_WIN()"
   } else {
     perfetto_local_symbolizer = "0"

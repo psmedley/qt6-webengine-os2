@@ -60,13 +60,30 @@ std::string GetEnvironmentVar(const char *variableName)
 
 const char *GetPathSeparatorForEnvironmentVar()
 {
+#if defined(ANGLE_PLATFORM_OS2)
+    return ";";
+#else
     return ":";
+#endif
 }
 
 std::string GetHelperExecutableDir()
 {
     std::string directory;
     static int placeholderSymbol = 0;
+#if defined(ANGLE_PLATFORM_OS2)
+    // TODO implement dladdr in LIBCn, see https://github.com/bitwiseworks/libc/issues/104
+    HMODULE hmod;
+    if (!DosQueryModFromEIP(&hmod, NULL, 0, NULL, NULL, (ULONG)&placeholderSymbol))
+    {
+        char path[CCHMAXPATH];
+        if (!DosQueryModuleName(hmod, CCHMAXPATH, path))
+        {
+            std::string moduleName = path;
+            directory              = moduleName.substr(0, moduleName.find_last_of('\\') + 1);
+        }
+    }
+#else
     Dl_info dlInfo;
     if (dladdr(&placeholderSymbol, &dlInfo) != 0)
     {
@@ -74,6 +91,7 @@ std::string GetHelperExecutableDir()
         directory              = moduleName.substr(0, moduleName.find_last_of('/') + 1);
     }
     return directory;
+#endif
 }
 
 class PosixLibrary : public Library
