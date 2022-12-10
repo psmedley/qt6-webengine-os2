@@ -57,7 +57,7 @@ TEST_F(CompileCommandsTest, SourceSet) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char expected[] =
         "[\r\n"
         "  {\r\n"
@@ -106,7 +106,7 @@ TEST_F(CompileCommandsTest, SourceSet) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char expected[] =
         "[\r\n"
         "  {\r\n"
@@ -167,7 +167,7 @@ TEST_F(CompileCommandsTest, SourceSet) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char expected[] =
         "[\r\n"
         "  {\r\n"
@@ -303,7 +303,7 @@ TEST_F(CompileCommandsTest, WinPrecompiledHeaders) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char no_pch_expected[] =
         "[\r\n"
         "  {\r\n"
@@ -357,7 +357,7 @@ TEST_F(CompileCommandsTest, WinPrecompiledHeaders) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char pch_win_expected[] =
         "[\r\n"
         "  {\r\n"
@@ -452,7 +452,7 @@ TEST_F(CompileCommandsTest, GCCPrecompiledHeaders) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char no_pch_expected[] =
         "[\r\n"
         "  {\r\n"
@@ -506,7 +506,7 @@ TEST_F(CompileCommandsTest, GCCPrecompiledHeaders) {
     CompileCommandsWriter writer;
     std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
     const char pch_gcc_expected[] =
         "[\r\n"
         "  {\r\n"
@@ -562,7 +562,7 @@ TEST_F(CompileCommandsTest, EscapedFlags) {
   CompileCommandsWriter writer;
   std::string out = writer.RenderJSON(build_settings(), targets);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   const char expected[] =
       "[\r\n"
       "  {\r\n"

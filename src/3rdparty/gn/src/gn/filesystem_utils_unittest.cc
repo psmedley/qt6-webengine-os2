@@ -131,7 +131,7 @@ TEST(FilesystemUtils, IsPathAbsolute) {
   EXPECT_FALSE(IsPathAbsolute("//"));
   EXPECT_FALSE(IsPathAbsolute("//foo/bar"));
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   EXPECT_TRUE(IsPathAbsolute("C:/foo"));
   EXPECT_TRUE(IsPathAbsolute("C:/"));
   EXPECT_TRUE(IsPathAbsolute("C:\\foo"));
@@ -144,7 +144,7 @@ TEST(FilesystemUtils, IsPathAbsolute) {
 TEST(FilesystemUtils, MakeAbsolutePathRelativeIfPossible) {
   std::string dest;
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   EXPECT_TRUE(
       MakeAbsolutePathRelativeIfPossible("C:\\base", "C:\\base\\foo", &dest));
   EXPECT_EQ("//foo", dest);
@@ -175,33 +175,37 @@ TEST(FilesystemUtils, MakeAbsolutePathRelativeIfPossible) {
 }
 
 TEST(FilesystemUtils, MakeAbsoluteFilePathRelativeIfPossible) {
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   EXPECT_EQ(
-      base::FilePath(u"out\\Debug"),
+      base::FilePath(FILE_PATH_LITERAL("out\\Debug")),
       MakeAbsoluteFilePathRelativeIfPossible(
-          base::FilePath(u"C:\\src"), base::FilePath(u"C:\\src\\out\\Debug")));
-  EXPECT_EQ(base::FilePath(u".\\gn"),
+          base::FilePath(FILE_PATH_LITERAL("C:\\src")),
+          base::FilePath(FILE_PATH_LITERAL("C:\\src\\out\\Debug"))));
+  EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL(".\\gn")),
             MakeAbsoluteFilePathRelativeIfPossible(
-                base::FilePath(u"C:\\src\\out\\Debug"),
-                base::FilePath(u"C:\\src\\out\\Debug\\gn")));
+                base::FilePath(FILE_PATH_LITERAL("C:\\src\\out\\Debug")),
+                base::FilePath(FILE_PATH_LITERAL("C:\\src\\out\\Debug\\gn"))));
   EXPECT_EQ(
-      base::FilePath(u"..\\.."),
+      base::FilePath(FILE_PATH_LITERAL("..\\..")),
       MakeAbsoluteFilePathRelativeIfPossible(
-          base::FilePath(u"C:\\src\\out\\Debug"), base::FilePath(u"C:\\src")));
+          base::FilePath(FILE_PATH_LITERAL("C:\\src\\out\\Debug")),
+          base::FilePath(FILE_PATH_LITERAL("C:\\src"))));
   EXPECT_EQ(
-      base::FilePath(u"..\\.."),
+      base::FilePath(FILE_PATH_LITERAL("..\\..")),
       MakeAbsoluteFilePathRelativeIfPossible(
-          base::FilePath(u"C:\\src\\out\\Debug"), base::FilePath(u"C:/src")));
-  EXPECT_EQ(base::FilePath(u"."),
-            MakeAbsoluteFilePathRelativeIfPossible(base::FilePath(u"C:\\src"),
-                                                   base::FilePath(u"C:\\src")));
-  EXPECT_EQ(base::FilePath(u"..\\..\\..\\u\\v\\w"),
+          base::FilePath(FILE_PATH_LITERAL("C:\\src\\out\\Debug")),
+          base::FilePath(FILE_PATH_LITERAL("C:/src"))));
+  EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL(".")),
+            MakeAbsoluteFilePathRelativeIfPossible(base::FilePath(FILE_PATH_LITERAL("C:\\src")),
+                                                   base::FilePath(FILE_PATH_LITERAL("C:\\src"))));
+  EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL("..\\..\\..\\u\\v\\w")),
             MakeAbsoluteFilePathRelativeIfPossible(
-                base::FilePath(u"C:\\a\\b\\c\\x\\y\\z"),
-                base::FilePath(u"C:\\a\\b\\c\\u\\v\\w")));
-  EXPECT_EQ(base::FilePath(u"D:\\bar"),
-            MakeAbsoluteFilePathRelativeIfPossible(base::FilePath(u"C:\\foo"),
-                                                   base::FilePath(u"D:\\bar")));
+                base::FilePath(FILE_PATH_LITERAL("C:\\a\\b\\c\\x\\y\\z")),
+                base::FilePath(FILE_PATH_LITERAL("C:\\a\\b\\c\\u\\v\\w"))));
+  EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL("D:\\bar")),
+            MakeAbsoluteFilePathRelativeIfPossible(base::FilePath(FILE_PATH_LITERAL("C:\\foo")),
+                                                   base::FilePath(FILE_PATH_LITERAL("D:\\bar"))));
+
 #else
   EXPECT_EQ(base::FilePath("out/Debug"),
             MakeAbsoluteFilePathRelativeIfPossible(
@@ -294,7 +298,7 @@ TEST(FilesystemUtils, NormalizePath) {
   NormalizePath(&input);
   EXPECT_EQ("//foo/bar/", input);
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   // Go above and outside of the source root.
   input = "//../foo";
   NormalizePath(&input, "/C:/source/root");
@@ -529,7 +533,7 @@ TEST(FilesystemUtils, RebasePath) {
             RebasePath("/path/to/foo", SourceDir("/source/root/a/b"),
                        std::string_view("/x/y/z")));
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   // Test corrections while rebasing Windows-style absolute paths.
   EXPECT_EQ("../../../../path/to/foo",
             RebasePath("C:/path/to/foo", SourceDir("//a/b"),
@@ -558,43 +562,43 @@ TEST(FilesystemUtils, DirectoryWithNoLastSlash) {
 }
 
 TEST(FilesystemUtils, SourceDirForPath) {
-#if defined(OS_WIN)
-  base::FilePath root(u"C:\\source\\foo\\");
+#if defined(OS_DOSLIKE)
+  base::FilePath root(FILE_PATH_LITERAL("C:\\source\\foo\\"));
   EXPECT_EQ("/C:/foo/bar/",
-            SourceDirForPath(root, base::FilePath(u"C:\\foo\\bar")).value());
-  EXPECT_EQ("/", SourceDirForPath(root, base::FilePath(u"/")).value());
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("C:\\foo\\bar"))).value());
+  EXPECT_EQ("/", SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("/"))).value());
   EXPECT_EQ("//",
-            SourceDirForPath(root, base::FilePath(u"C:\\source\\foo")).value());
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("C:\\source\\foo"))).value());
   EXPECT_EQ("//bar/",
-            SourceDirForPath(root, base::FilePath(u"C:\\source\\foo\\bar\\"))
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("C:\\source\\foo\\bar\\")))
                 .value());
   EXPECT_EQ("//bar/baz/",
-            SourceDirForPath(root, base::FilePath(u"C:\\source\\foo\\bar\\baz"))
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("C:\\source\\foo\\bar\\baz")))
                 .value());
 
   // Should be case-and-slash-insensitive.
   EXPECT_EQ(
       "//baR/",
-      SourceDirForPath(root, base::FilePath(u"c:/SOURCE\\Foo/baR/")).value());
+      SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("c:/SOURCE\\Foo/baR/"))).value());
 
   // Some "weird" Windows paths.
   EXPECT_EQ("/foo/bar/",
-            SourceDirForPath(root, base::FilePath(u"/foo/bar/")).value());
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("/foo/bar/"))).value());
   EXPECT_EQ("/C:/foo/bar/",
-            SourceDirForPath(root, base::FilePath(u"C:foo/bar/")).value());
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("C:foo/bar/"))).value());
 
   // Also allow absolute GN-style Windows paths.
   EXPECT_EQ("/C:/foo/bar/",
-            SourceDirForPath(root, base::FilePath(u"/C:/foo/bar")).value());
+            SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("/C:/foo/bar"))).value());
   EXPECT_EQ(
       "//bar/",
-      SourceDirForPath(root, base::FilePath(u"/C:/source/foo/bar")).value());
+      SourceDirForPath(root, base::FilePath(FILE_PATH_LITERAL("/C:/source/foo/bar"))).value());
 
   // Empty source dir.
   base::FilePath empty;
   EXPECT_EQ(
       "/C:/source/foo/",
-      SourceDirForPath(empty, base::FilePath(u"C:\\source\\foo")).value());
+      SourceDirForPath(empty, base::FilePath(FILE_PATH_LITERAL("C:\\source\\foo"))).value());
 #else
   base::FilePath root("/source/foo/");
   EXPECT_EQ("/foo/bar/",
@@ -796,7 +800,7 @@ TEST(FilesystemUtils, GetSubBuildDir) {
             GetSubBuildDirAsOutputFile(default_context, SourceDir("/abs"),
                                        BuildDirType::GEN)
                 .value());
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   EXPECT_EQ("//out/Debug/obj/ABS_PATH/C/abs/",
             GetSubBuildDirAsSourceDir(default_context, SourceDir("/C:/abs"),
                                       BuildDirType::OBJ)

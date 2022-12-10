@@ -101,7 +101,7 @@ bool Resolve(const SourceDir& current_dir,
   // ref.
   const char* input_str = input.data();
   size_t offset = 0;
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
   if (IsPathAbsolute(input)) {
     size_t drive_letter_pos = input[0] == '/' ? 1 : 0;
     if (input.size() > drive_letter_pos + 2 &&
