@@ -170,7 +170,7 @@ void PathOutput::WritePathStr(std::ostream& out,
     // paths will look like "/C:/foo/bar.txt". On OS/2, however, there
     // may be absolute paths with rewrite rules like "/@unixroot" which
     // should be left intact.
-    base::StringPiece substr = str.substr(1);
+    std::string_view substr = str.substr(1);
 #if defined(OS_OS2)
     if (!base::FilePath(substr).IsAbsolute())
       EscapeStringToStream(out, str, options_);
