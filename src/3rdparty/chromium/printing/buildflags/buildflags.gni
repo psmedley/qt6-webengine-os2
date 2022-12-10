@@ -26,6 +26,6 @@ declare_args() {
     use_cups = true
   } else {
     use_cups = (is_chromeos_device || (is_linux || is_chromeos_lacros) ||
-                is_mac) && !is_chromecast && !is_fuchsia
+                is_mac || is_os2) && !is_chromecast && !is_fuchsia
   }
 }

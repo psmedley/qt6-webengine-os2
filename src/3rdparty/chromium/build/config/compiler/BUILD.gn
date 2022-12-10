@@ -321,6 +321,12 @@ config("compiler") {
         # Not available on aix.
         cflags += [ "-fstack-protector" ]
       }
+
+      if (is_os2) {
+        # On OS/2, stack protection helpers are in a separate library.
+        # See https://github.com/bitwiseworks/gcc-os2/issues/13
+        ldflags += [ "-fstack-protector" ]
+      }
     }
 
     if (use_lld) {
@@ -332,7 +338,7 @@ config("compiler") {
     }
 
     # Linker warnings.
-    if (fatal_linker_warnings && !is_apple && current_os != "aix") {
+    if (fatal_linker_warnings && !is_apple && !is_os2 && current_os != "aix") {
       ldflags += [ "-Wl,--fatal-warnings" ]
     }
     if (fatal_linker_warnings && is_apple) {
@@ -404,7 +410,7 @@ config("compiler") {
     # Explicitly pass --build-id to ld. Compilers used to always pass this
     # implicitly but don't any more (in particular clang when built without
     # ENABLE_LINKER_BUILD_ID=ON).
-    if (is_official_build) {
+    if (is_official_build && !is_os2)) {
       # The sha1 build id has lower risk of collision but is more expensive to
       # compute, so only use it in the official build to avoid slowing down
       # links.
@@ -572,7 +578,7 @@ config("compiler") {
   # C11/C++11 compiler flags setup.
   # ---------------------------
   if (is_linux || is_chromeos || is_android || (is_nacl && is_clang) ||
-      current_os == "aix") {
+      current_os == "aix" || is_os2) {
     if (target_os == "android") {
       cxx11_override = use_cxx11_on_android
     } else {
@@ -1899,7 +1905,7 @@ config("export_dynamic") {
 config("thin_archive") {
   # The macOS and iOS default linker ld64 does not support reading thin
   # archives.
-  if ((is_posix && !is_nacl && (!is_apple || use_lld)) || is_fuchsia) {
+  if ((is_posix && !is_nacl && && !is_os2 (!is_apple || use_lld)) || is_fuchsia) {
     arflags = [ "-T" ]
   } else if (is_win && use_lld) {
     arflags = [ "/llvmlibthin" ]

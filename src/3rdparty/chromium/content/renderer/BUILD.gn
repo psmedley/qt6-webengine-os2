@@ -380,6 +380,13 @@ target(link_target_type, "renderer") {
     ]
   }
 
+  if (is_os2) {
+    sources += [
+      "render_view_os2.cc",
+      "renderer_main_platform_delegate_os2.cc",
+    ]
+  }
+
   if (enable_media_remoting || is_chromecast) {
     deps += [ "//media/mojo/mojom:remoting" ]
 

@@ -317,6 +317,8 @@ config("executable_config") {
       "//build/config/ios:ios_dynamic_flags",
       "//build/config/ios:ios_executable_flags",
     ]
+  } else if (is_os2) {
+    configs += [ "//build/config/os2:os2_executable_flags" ]
   } else if (is_linux || is_chromeos || is_android || current_os == "aix") {
     configs += [ "//build/config/gcc:executable_config" ]
     if (is_chromecast) {
@@ -352,6 +354,8 @@ config("shared_library_config") {
       "//build/config/ios:ios_dynamic_flags",
       "//build/config/ios:ios_shared_library_flags",
     ]
+  } else if (is_os2) {
+    configs += [ "//build/config/os2:os2_dynamic_flags" ]
   } else if (is_chromecast) {
     configs += [ "//build/config/chromecast:shared_library_config" ]
   } else if (is_linux || is_chromeos || current_os == "aix") {

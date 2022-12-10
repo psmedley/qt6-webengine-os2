@@ -9,5 +9,5 @@ declare_args() {
   use_pangocairo =
       # TODO(crbug.com/1052397): Remove !chromeos_is_browser_only once
       # lacros-chrome switches to target_os="chromeos"
-      use_gtk && !chromeos_is_browser_only
+      (use_gtk || is_os2) && !chromeos_is_browser_only
 }

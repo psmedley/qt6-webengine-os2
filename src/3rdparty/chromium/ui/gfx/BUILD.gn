@@ -817,7 +817,7 @@ test("gfx_unittests") {
     sources += [ "system_fonts_win_unittest.cc" ]
   }
 
-  if (is_linux || is_chromeos || is_android || is_fuchsia || is_win) {
+  if (is_linux || is_chromeos || is_android || is_fuchsia || is_win || is_os2) {
     sources += [ "platform_font_skia_unittest.cc" ]
   }
 

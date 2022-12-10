@@ -15,7 +15,7 @@ if (is_mac) {
 if (is_android) {
   import("//build/config/android/rules.gni")
 }
-if (use_cups && is_chromeos_ash) {
+if (use_cups && (is_chromeos_ash || is_os2)) {
   import("//printing/backend/tools/code_generator.gni")
 }
 
@@ -38,7 +38,7 @@ source_set("printing_export") {
   sources = [ "printing_export.h" ]
 }
 
-if (use_cups_ipp && is_chromeos_ash) {
+if (use_cups_ipp && (is_chromeos_ash || is_os2)) {
   ipp_handler_map_path = "$target_gen_dir/backend/ipp_handler_map.cc"
 
   ipp_code_generate("ipp_handlers_generate") {
@@ -126,7 +126,7 @@ component("printing") {
     ]
   }
 
-  if (is_chromeos_ash) {
+  if (is_chromeos_ash || is_os2) {
     defines += [ "PRINT_BACKEND_AVAILABLE" ]
 
     sources += [
@@ -202,7 +202,7 @@ component("printing") {
   if (use_cups) {
     configs += [ ":cups" ]
 
-    if (is_linux || is_chromeos) {
+    if (is_linux || is_chromeos || is_os2) {
       # CUPS 1.6 deprecated the PPD APIs, but we will stay with this API
       # for now as the suitability of the replacement is unclear.
       # More info: crbug.com/226176
@@ -219,7 +219,7 @@ component("printing") {
     # of the print backend and enables a custom implementation instead.
     defines += [ "PRINT_BACKEND_AVAILABLE" ]
 
-    if (use_cups_ipp) {
+    if (use_cups_ipp || is_os2) {
       sources += [
         "backend/cups_connection.cc",
         "backend/cups_connection.h",
@@ -240,7 +240,7 @@ component("printing") {
       ]
     }
 
-    if (is_chromeos_ash) {
+    if (is_chromeos_ash || is_os2) {
       deps += [ ":ipp_handlers_generate" ]
 
       sources += [
@@ -274,7 +274,7 @@ component("printing") {
     }
   }
 
-  if (use_cups_ipp || is_chromeos_ash) {
+  if (use_cups_ipp || is_chromeos_ash || is_os2) {
     sources += [
       "printer_query_result.h",
       "printer_status.cc",
@@ -379,7 +379,7 @@ test("printing_unittests") {
   if (use_cups) {
     configs += [ ":cups" ]
 
-    if (use_cups_ipp) {
+    if (use_cups_ipp || is_os2) {
       sources += [ "backend/cups_ipp_helper_unittest.cc" ]
     }
 

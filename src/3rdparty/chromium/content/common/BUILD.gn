@@ -430,6 +430,7 @@ if (is_linux || is_chromeos) {
     set_sources_assignment_filter([])
     sources += [
       "common_sandbox_support_linux.cc",
+      "cursors/webcursor_os2.cc",
     ]
     set_sources_assignment_filter(sources_assignment_filter)
   }

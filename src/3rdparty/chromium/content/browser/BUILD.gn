@@ -2486,7 +2486,7 @@ jumbo_static_library("browser") {
       ]
     }
 
-    if (is_linux || is_chromeos) {
+    if (is_linux || is_chromeos || is_os2) {
       deps += [ "//components/services/font:ppapi_fontconfig_matching" ]
     }
   }
@@ -2538,6 +2538,17 @@ jumbo_static_library("browser") {
   if (use_pangocairo) {
     configs += [ "//build/config/linux/pangocairo" ]
   }
+
+    if (is_os2) {
+      # OS/2 uses some Linux sources, put those back.
+      set_sources_assignment_filter([])
+      sources += [
+        "renderer_host/pepper/pepper_truetype_font_linux.cc",
+        "child_process_launcher_helper_os2.cc",
+        "memory/swap_metrics_driver_impl_os2.cc",
+      ]
+      set_sources_assignment_filter(sources_assignment_filter)
+    }
 
   if (is_android) {
     sources += [

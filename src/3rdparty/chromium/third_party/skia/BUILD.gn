@@ -633,7 +633,7 @@ if (skia_compile_processors || skia_compile_sksl_tests) {
     skslc_path += "$host_toolchain/"
   }
   skslc_path += "skslc"
-  if (host_os == "win") {
+  if (host_os == "win" || host_os == "os2") {
     skslc_path += ".exe"
   }
 

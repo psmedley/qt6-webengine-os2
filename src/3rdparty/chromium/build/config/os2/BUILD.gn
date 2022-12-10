@@ -1,0 +1,42 @@
+# Copyright 2017 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/sanitizers/sanitizers.gni")
+import("//build/toolchain/toolchain.gni")
+
+assert(is_os2)
+
+# This is included by reference in the //build/config/compiler config that
+# is applied to all targets. It is here to separate out the logic that is
+# OS/2-only.
+config("compiler") {
+  cflags = [
+    "-Zomf",
+  ]
+
+  ldflags = [
+    "-Zomf",
+    "-Zmap",
+    "-Zhigh-mem",
+    "-lcx",
+    # Newer gettext is not part of LIBC (yet).
+    "-lintl",
+    # pthread is also not part of LIBC ATM.
+    "-lpthread",
+  ]
+}
+
+# Settings for EXEs.
+config("os2_executable_flags") {
+  ldflags = [ "-Zstack", "0x2000" ]
+
+  # TODO: Use ldflags += [ "-Zlinker", "/PM:PM", "-Zno-fork" ] for executables
+  # that need to be PM apps. For now build all executables in VIO mode (default)
+  # so that they will have a console attached (see also ../win/console_app.gni).
+}
+
+# Settings for DLLs.
+config("os2_dynamic_flags") {
+  ldflags = [ "-Zdll" ]
+}

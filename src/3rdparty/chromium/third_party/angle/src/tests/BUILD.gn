@@ -155,7 +155,7 @@ angle_test("angle_unittests") {
   }
 }
 
-if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
+if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple || is_os2) {
   import("angle_end2end_tests.gni")
 
   angle_test("angle_end2end_tests") {
@@ -302,7 +302,7 @@ angle_perftests_common("angle_perftests_static") {
   test_utils = ":angle_common_test_utils_static"
 }
 
-if (is_win || is_linux || is_chromeos || is_android || is_apple) {
+if (is_win || is_linux || is_chromeos || is_android || is_apple || is_os2) {
   import("angle_perftests.gni")
 
   # This test suite is for perf tests that use ANGLE's internals in some direct way.

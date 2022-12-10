@@ -160,7 +160,7 @@ source_set("fxge") {
     ]
   }
 
-  if (is_linux || is_chromeos) {
+  if (is_linux || is_chromeos || is_os2) {
     sources += [ "fx_ge_linux.cpp" ]
   }
 

@@ -154,6 +154,15 @@ component("message_support") {
     ]
   }
 
+  if (is_os2) {
+    sources += [
+    "shmem_handle_attachment_os2.cc",
+    "shmem_handle_attachment_os2.h",
+    "shmem_handle_os2.cc",
+    "shmem_handle_os2.h",
+    ]
+  }
+
   if (is_fuchsia) {
     sources += [
       "handle_attachment_fuchsia.cc",
