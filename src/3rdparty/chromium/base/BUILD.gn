@@ -2020,7 +2020,6 @@ jumbo_component("base") {
     sources -= [
       "profiler/module_cache_posix.cc",
       "rand_util_posix.cc",
-      "strings/string16.cc",
       "threading/platform_thread_internal_posix.cc",
     ]
 

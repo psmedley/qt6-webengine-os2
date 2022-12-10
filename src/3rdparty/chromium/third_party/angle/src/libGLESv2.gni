@@ -94,7 +94,7 @@ if (is_apple) {
 }
 
 if (is_os2) {
-  angle_system_utils_sources += [
+  libangle_common_sources += [
     "src/common/system_utils_os2.cpp",
     "src/common/system_utils_posix.cpp",
   ]
