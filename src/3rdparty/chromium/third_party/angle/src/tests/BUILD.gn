@@ -13,7 +13,7 @@ declare_args() {
   build_angle_gles1_conform_tests = false
   build_angle_trace_perf_tests = false
   build_angle_perftests =
-      is_win || is_linux || is_chromeos || is_android || is_apple || is_fuchsia
+      is_win || is_linux || is_chromeos || is_android || is_apple || is_fuchsia || is_os2
 }
 
 angle_test("test_utils_unittest_helper") {
@@ -224,7 +224,7 @@ if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple ||
   }
 }
 
-if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
+if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple || is_os2) {
   import("angle_white_box_tests.gni")
 
   angle_test("angle_white_box_tests") {
