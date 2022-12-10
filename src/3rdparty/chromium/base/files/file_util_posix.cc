@@ -321,7 +321,7 @@ bool DoDeleteFile(const FilePath& path, bool recursive) {
 }
 #endif  // !defined(OS_NACL_NONSFI)
 
-#if !defined(OS_APPLE)
+#if !defined(OS_APPLE) && !defined(OS_OS2)
 // Appends |mode_char| to |mode| before the optional character set encoding; see
 // https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
 // details.
@@ -829,9 +829,10 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
       (strchr(mode, ',') != nullptr && strchr(mode, 'e') > strchr(mode, ',')));
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   FILE* result = nullptr;
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(OS_OS2)
   // macOS does not provide a mode character to set O_CLOEXEC; see
   // https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man3/fopen.3.html.
+  // OS/2 doesn't provide it either.
   const char* the_mode = mode;
 #else
   std::string mode_with_e(AppendModeCharacter(mode, 'e'));
@@ -840,7 +841,7 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   do {
     result = fopen(filename.value().c_str(), the_mode);
   } while (!result && errno == EINTR);
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(OS_OS2)
   // Mark the descriptor as close-on-exec.
   if (result)
     SetCloseOnExec(fileno(result));

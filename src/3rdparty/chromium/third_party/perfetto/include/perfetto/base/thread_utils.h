@@ -27,6 +27,8 @@
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
 #include <zircon/process.h>
 #include <zircon/types.h>
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+#include <stdlib.h>
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/syscall.h>

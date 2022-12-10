@@ -38,7 +38,7 @@ class SandboxIPCHandler;
 namespace base {
 namespace subtle {
 
-#if defined(OS_POSIX) && !defined(OS_MAC) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MAC) && !defined(OS_ANDROID) && !defined(OS_OS2)
 // Helper structs to keep two descriptors on POSIX. It's needed to support
 // ConvertToReadOnly().
 struct BASE_EXPORT FDPair {
@@ -183,7 +183,7 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
                                          Mode mode,
                                          size_t size,
                                          const UnguessableToken& guid);
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MAC)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MAC) && !defined(OS_OS2)
   // Specialized version of Take() for POSIX that takes only one file descriptor
   // instead of pair. Cannot be used with kWritable |mode|.
   static PlatformSharedMemoryRegion Take(ScopedFD handle,

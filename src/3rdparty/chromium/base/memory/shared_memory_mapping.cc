@@ -20,6 +20,10 @@
 #include <aclapi.h>
 #endif
 
+#if defined(OS_OS2)
+#include <libcx/shmem.h>
+#endif
+
 #if defined(OS_MAC)
 #include <mach/mach_vm.h>
 #include "base/mac/mach_logging.h"

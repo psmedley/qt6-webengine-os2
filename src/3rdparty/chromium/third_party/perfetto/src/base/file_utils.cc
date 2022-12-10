@@ -35,7 +35,10 @@
 #include <dirent.h>
 #include <unistd.h>
 #endif
-
+# 
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+#include <sys/fcntl.h>
+#endif
 namespace perfetto {
 namespace base {
 namespace {
@@ -180,7 +183,7 @@ int CloseFile(int fd) {
 
 ScopedFile OpenFile(const std::string& path, int flags, FileOpenMode mode) {
   PERFETTO_DCHECK((flags & O_CREAT) == 0 || mode != kFileModeInvalid);
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) || PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
   // Always use O_BINARY on Windows, to avoid silly EOL translations.
   ScopedFile fd(_open(path.c_str(), flags | O_BINARY, mode));
 #else
