@@ -17,6 +17,8 @@
 #include "base/third_party/libevent/freebsd/event-config.h"
 #elif defined(__sun)
 #include "base/third_party/libevent/solaris/event-config.h"
+#elif defined(__OS2__)
+#include "base/third_party/libevent/os2/event-config.h"
 #elif defined(_AIX)
 #include "base/third_party/libevent/aix/event-config.h"
 #else

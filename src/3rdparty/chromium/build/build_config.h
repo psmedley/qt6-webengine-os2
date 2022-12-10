@@ -204,7 +204,7 @@
 #endif
 
 // Type detection for wchar_t.
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
 #define WCHAR_T_IS_UTF16
 #elif defined(OS_FUCHSIA)
 #define WCHAR_T_IS_UTF32

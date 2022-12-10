@@ -298,7 +298,7 @@
 #error ABSL_HAVE_ATTRIBUTE_SECTION cannot be directly set
 #elif (ABSL_HAVE_ATTRIBUTE(section) ||                \
        (defined(__GNUC__) && !defined(__clang__))) && \
-    !defined(__APPLE__) && ABSL_HAVE_ATTRIBUTE_WEAK
+    !defined(__APPLE__) && !defined(__OS2__) && ABSL_HAVE_ATTRIBUTE_WEAK
 #define ABSL_HAVE_ATTRIBUTE_SECTION 1
 
 // ABSL_ATTRIBUTE_SECTION
