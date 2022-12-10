@@ -17,7 +17,7 @@
 #include "third_party/base/check.h"
 #include "third_party/base/stl_util.h"
 
-#if !defined(OS_LINUX) && !defined(OS_CHROMEOS) && !defined(OS_ASMJS)
+#if !defined(OS_LINUX) && !defined(OS_CHROMEOS) && !defined(OS_ASMJS) && !defined(__OS2__)
 #error "Included on the wrong platform"
 #endif
 
@@ -166,10 +166,16 @@ class CLinuxPlatform : public CFX_GEModule::PlatformIface {
   std::unique_ptr<SystemFontInfoIface> CreateDefaultSystemFontInfo() override {
     auto pInfo = std::make_unique<CFX_LinuxFontInfo>();
     if (!pInfo->ParseFontCfg(CFX_GEModule::Get()->GetUserFontPaths())) {
+#ifdef __OS2__
+    pInfo->AddPath("/@system_drive/PSFONTS");
+    pInfo->AddPath("/@unixroot/usr/share/fonts");
+    pInfo->AddPath("/@unixroot/usr/local/share/fonts");
+#else
       pInfo->AddPath("/usr/share/fonts");
       pInfo->AddPath("/usr/share/X11/fonts/Type1");
       pInfo->AddPath("/usr/share/X11/fonts/TTF");
       pInfo->AddPath("/usr/local/share/fonts");
+#endif
     }
     return pInfo;
   }
