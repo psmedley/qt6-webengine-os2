@@ -14,7 +14,7 @@ class TaskQueue(object):
     tasks will be executed in parallel.
     """
 
-    def __init__(self, single_process=False):
+    def __init__(self, single_process=True):
         """
         Args:
             single_process: True makes the instance will not create nor use a
