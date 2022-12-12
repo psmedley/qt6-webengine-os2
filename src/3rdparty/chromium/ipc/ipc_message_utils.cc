@@ -1083,6 +1083,9 @@ void ParamTraits<base::subtle::PlatformSharedMemoryRegion>::Log(
 #elif defined(OS_WIN)
   l->append("Handle: ");
   LogParam(p.GetPlatformHandle(), l);
+#elif defined(OS_OS2)
+  l->append("SHMEM handle: ");
+  LogParam(p.GetPlatformHandle(), l);
 #elif defined(OS_MAC)
   l->append("Mach port: ");
   LogParam(p.GetPlatformHandle(), l);

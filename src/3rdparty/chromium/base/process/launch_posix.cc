@@ -333,6 +333,90 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
   pid_t pid;
   base::TimeTicks before_fork = TimeTicks::Now();
+#if defined(OS_OS2)
+  // Use spawn2 on OS/2 instead of fork since spawning is much more natural and
+  // resource friendly there.
+  const char* executable_path = !options.real_path.empty() ?
+      options.real_path.value().c_str() : argv_cstr[0];
+
+  // Reserve space for possible stdin/err/out inheritance and EOL
+  int stdfds[(options.fds_to_remap.size() + 3) * 2 + 1];
+  int *pfd = stdfds;
+  int null_fd = -1;
+
+  // Process file descriptors for the child. By default, LaunchProcess will
+  // open stdin to /dev/null and inherit stdout and stderr (this part is based
+  // on code from launch_mac.cc).
+  bool inherit_stdout = true, inherit_stderr = true;
+  bool null_stdin = true;
+  for (const auto& dup2_pair : options.fds_to_remap) {
+    if (dup2_pair.second == STDIN_FILENO) {
+      null_stdin = false;
+    } else if (dup2_pair.second == STDOUT_FILENO) {
+      inherit_stdout = false;
+    } else if (dup2_pair.second == STDERR_FILENO) {
+      inherit_stderr = false;
+    }
+
+    *pfd++ = dup2_pair.first;
+    *pfd++ = dup2_pair.second;
+  }
+
+  if (null_stdin) {
+    *pfd++ = null_fd = open("/dev/null", O_RDONLY);
+    DPCHECK(null_fd != -1);
+    *pfd++ = STDIN_FILENO;
+  }
+  if (inherit_stdout) {
+    *pfd++ = STDOUT_FILENO;
+    *pfd++ = STDOUT_FILENO;
+  }
+  if (inherit_stderr) {
+    *pfd++ = STDERR_FILENO;
+    *pfd++ = STDERR_FILENO;
+  }
+
+  *pfd++ = -1;
+
+  // Use a mutex instead of P_2_THREADSAFE, this implies that no other Chromium
+  // code calls spawn2 or fiddles with the current directory or standard file
+  // descriptors (0,1,2) redirection.
+  _fmutex_request(&spawn2_mutex, _FMR_IGNINT);
+
+  VLOG(1) << "spawn2: executable [" << executable_path << "]";
+ VLOG_IF(1, current_directory) << "spawn2: curdir [" << current_directory << "]";
+  if (VLOG_IS_ON(1)) {
+    for (size_t i = 0; i < argv_cstr.size(); ++i)
+      VLOG(1) << "spawn2: arg[" << i << "] [" << argv_cstr[i] << "]";
+    for (int *p = stdfds; *p != -1; p += 2)
+      VLOG(1) << "spawn2: map fd " << p[0] << " -> " << p[1];
+  }
+
+  pid = spawn2(P_NOWAIT | P_2_XREDIR, executable_path, argv_cstr.data(),
+               current_directory, new_environ.get(), stdfds);
+
+  VLOG(1) << "spawn2: pid " << pid << ", errno " << errno;
+
+  _fmutex_release(&spawn2_mutex);
+
+  if (null_fd != -1)
+    close(null_fd);
+
+  base::TimeTicks after_fork = TimeTicks::Now();
+  base::TimeDelta fork_time = after_fork - before_fork;
+  UMA_HISTOGRAM_TIMES("MPArch.SpawnTime", fork_time);
+
+  if (pid < 0) {
+    DPLOG(ERROR) << "LaunchProcess: failed to spawn2: " << executable_path
+                 << ": " << strerror(errno);
+    return Process();
+  }
+
+  if (options.wait) {
+    pid_t ret = HANDLE_EINTR(waitpid(pid, nullptr, 0));
+    DPCHECK(ret > 0);
+  }
+#else
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
   if (options.clone_flags) {
     // Signal handling in this function assumes the creation of a new
@@ -507,8 +591,10 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     if (options.wait) {
       // While this isn't strictly disk IO, waiting for another process to
       // finish is the sort of thing ThreadRestrictions is trying to prevent.
+#if !defined(OS_OS2)
       ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                               BlockingType::MAY_BLOCK);
+#endif
       pid_t ret = HANDLE_EINTR(waitpid(pid, nullptr, 0));
       DPCHECK(ret > 0);
     }

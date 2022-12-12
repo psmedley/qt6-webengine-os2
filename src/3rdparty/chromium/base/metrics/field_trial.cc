@@ -750,7 +750,7 @@ void FieldTrialList::CreateTrialsFromCommandLine(
     int fd_key) {
   global_->create_trials_from_command_line_called_ = true;
 
-#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC)
+#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC) || defined(__OS2__)
   if (cmd_line.HasSwitch(field_trial_handle_switch)) {
     std::string switch_value =
         cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
@@ -1173,7 +1173,7 @@ std::string FieldTrialList::SerializeSharedMemoryRegionMetadata(
   return ss.str();
 }
 
-#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC)
+#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC) || defined(OS_OS2)
 
 // static
 ReadOnlySharedMemoryRegion
@@ -1263,7 +1263,7 @@ FieldTrialList::DeserializeSharedMemoryRegionMetadata(
 
 #endif
 
-#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC)
+#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC) || defined(OS_OS2)
 // static
 bool FieldTrialList::CreateTrialsFromSwitchValue(
     const std::string& switch_value) {

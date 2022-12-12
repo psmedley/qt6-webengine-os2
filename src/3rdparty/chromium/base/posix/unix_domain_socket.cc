@@ -57,13 +57,13 @@ bool CreateSocketPair(ScopedFD* one, ScopedFD* two) {
 
 // static
 bool UnixDomainSocket::EnableReceiveProcessId(int fd) {
-#if !defined(OS_APPLE)
+#if !defined(OS_APPLE) && !defined(OS_OS2)
   const int enable = 1;
   return setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0;
 #else
-  // SO_PASSCRED is not supported on macOS.
+  // SO_PASSCRED is not supported on macOS or OS/2.
   return true;
-#endif  // OS_APPLE
+#endif  // OS_APPLE && OS_OS2
 }
 #endif  // !defined(OS_NACL_NONSFI)
 
@@ -151,8 +151,8 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
 
   const size_t kControlBufferSize =
       CMSG_SPACE(sizeof(int) * kMaxFileDescriptors)
-#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE)
-      // The PNaCl toolchain for Non-SFI binary build and macOS do not support
+#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE) && !defined(OS_OS2)
+      // The PNaCl toolchain for Non-SFI binary build, OS/2 and macOS do not support
       // ucred. macOS supports xucred, but this structure is insufficient.
       + CMSG_SPACE(sizeof(struct ucred))
 #endif  // !defined(OS_NACL_NONSFI) && !defined(OS_APPLE)

@@ -61,7 +61,7 @@ typedef std::vector<std::pair<int, int>> FileHandleMappingVector;
 // Options for launching a subprocess that are passed to LaunchProcess().
 // The default constructor constructs the object with default options.
 struct BASE_EXPORT LaunchOptions {
-#if (defined(OS_POSIX) || defined(OS_FUCHSIA)) && !defined(OS_APPLE)
+#if (defined(OS_POSIX) || defined(OS_FUCHSIA)) && !defined(OS_APPLE) && !defined(OS_OS2)
   // Delegate to be run in between fork and exec in the subprocess (see
   // pre_exec_delegate below)
   class BASE_EXPORT PreExecDelegate {
@@ -282,6 +282,7 @@ struct BASE_EXPORT LaunchOptions {
   // argv[0].
   base::FilePath real_path;
 
+#if !defined(OS_OS2)
 #if !defined(OS_APPLE)
   // If non-null, a delegate to be run immediately prior to executing the new
   // program in the child process.
@@ -308,6 +309,7 @@ struct BASE_EXPORT LaunchOptions {
   // process' controlling terminal.
   int ctrl_terminal_fd = -1;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // !defined(OS_OS2)
 };
 
 // Launch a process via the command line |cmdline|.
@@ -356,7 +358,7 @@ BASE_EXPORT Process LaunchElevatedProcess(const CommandLine& cmdline,
 BASE_EXPORT Process LaunchProcess(const std::vector<std::string>& argv,
                                   const LaunchOptions& options);
 
-#if !defined(OS_APPLE)
+#if !defined(OS_APPLE) && !defined(OS_OS2)
 // Close all file descriptors, except those which are a destination in the
 // given multimap. Only call this function in a child process where you know
 // that there aren't any other threads.

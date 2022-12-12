@@ -51,6 +51,25 @@ NOINLINE void OnNoMemoryInternal(size_t size) {
   size_t tmp_size = size;
   base::debug::Alias(&tmp_size);
 
+#if defined(OS_OS2)
+  LOG(ERROR) << "Out of memory. size=" << tmp_size;
+  // Log some numbers from LIBC and system before crashing.
+  _HEAPSTATS hst;
+  if (!_ustats(_udefault(nullptr), &hst))
+    LOG(ERROR) << "LIBC heap: provided "
+               << hst._provided << ", used " << hst._used
+               << ", maxfree " << hst._max_free;
+  else
+    PLOG(ERROR) << "_ustats failed";
+  ULONG buf[2];
+  if (!DosQuerySysInfo(QSV_MAXPRMEM, QSV_MAXSHMEM, buf, sizeof(buf)))
+    LOG(ERROR) << "System low mem: max private " << buf[0]
+               << ", max shared " << buf[1];
+  if (!DosQuerySysInfo(QSV_MAXHPRMEM, QSV_MAXHSHMEM, buf, sizeof(buf)))
+    LOG(ERROR) << "System high mem: max private " << buf[0]
+               << ", max shared " << buf[1];
+  IMMEDIATE_CRASH();
+#else
   // Note: Don't add anything that may allocate here. Depending on the
   // allocator, this may be called from within the allocator (e.g. with
   // PartitionAlloc), and would deadlock as our locks are not recursive.
@@ -63,6 +82,7 @@ NOINLINE void OnNoMemoryInternal(size_t size) {
   // to be able to successfully unwind through libc to get to the correct
   // address, which is particularly an issue on Android.
   IMMEDIATE_CRASH();
+#endif
 #endif  // defined(OS_WIN)
 }
 
