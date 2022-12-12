@@ -59,11 +59,11 @@
 #define ERESTART (-1)
 #endif
 
-#if !defined(__APPLE__) && !defined(__NetBSD__) && !defined(__OpenBSD__)
+#if !defined(__APPLE__) && !defined(__NetBSD__) && !defined(__OpenBSD__) && !defined(__OS2__)
 enum	uio_rw { UIO_READ, UIO_WRITE };
 #endif
 
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
+#if !defined(__NetBSD__) && !defined(__OpenBSD__) && !defined(__OS2__)
 /* Segment flag values. */
 enum uio_seg {
 	UIO_USERSPACE,		/* from user data space */

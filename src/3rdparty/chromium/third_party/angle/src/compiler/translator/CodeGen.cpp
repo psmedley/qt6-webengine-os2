@@ -24,6 +24,9 @@
 #    include "compiler/translator/TranslatorMetal.h"
 #endif  // ANGLE_ENABLE_METAL
 
+#ifdef __OS2__ //No idea why it is necessary to add this include on OS2, otherwise we get an error about TCompiler
+#include "compiler/translator/Compiler.h"
+#endif
 #include "compiler/translator/util.h"
 
 namespace sh

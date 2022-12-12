@@ -13,7 +13,9 @@
 #if defined(WEBRTC_WIN)
 #include <windows.h>
 #else
+#ifndef WEBRTC_OS2
 #include <sched.h>
+#endif
 #include <time.h>
 #endif
 

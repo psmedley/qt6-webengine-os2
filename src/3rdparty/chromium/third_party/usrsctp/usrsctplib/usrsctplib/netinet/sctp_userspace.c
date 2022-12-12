@@ -44,6 +44,10 @@
 #include <sys/prctl.h>
 #endif
 
+#if defined(__OS2__)
+#include <libcx/net.h>
+#endif
+
 #if defined(_WIN32)
 /* Adapter to translate Unix thread start routines to Windows thread start
  * routines.
@@ -95,6 +99,10 @@ sctp_userspace_set_threadname(const char *name)
 }
 
 #if !defined(_WIN32) && !defined(__native_client__)
+#if defined(__OS2__)
+/* Reuse another int field, if.h misses ifr_mtu it so far */
+#define ifr_mtu ifr_metric
+#endif
 int
 sctp_userspace_get_mtu_from_ifn(uint32_t if_index, int af)
 {
@@ -126,7 +134,7 @@ sctp_userspace_get_mtu_from_ifn(uint32_t if_index, int af)
 }
 #endif
 
-#if defined(__APPLE__) || defined(__DragonFly__) || defined(__linux__) || defined(__native_client__) || defined(__NetBSD__) || defined(_WIN32) || defined(__Fuchsia__) || defined(__EMSCRIPTEN__)
+#if defined(__APPLE__) || defined(__DragonFly__) || defined(__linux__) || defined(__native_client__) || defined(__NetBSD__) || defined(_WIN32) || defined(__Fuchsia__) || defined(__EMSCRIPTEN__) || defined(__OS2__)
 int
 timingsafe_bcmp(const void *b1, const void *b2, size_t n)
 {

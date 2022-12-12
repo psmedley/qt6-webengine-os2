@@ -30,7 +30,7 @@
 #define YIELD_PROCESSOR YieldProcessor()
 #define YIELD_THREAD SwitchToThread()
 
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA) || defined(OS_OS2)
 
 #if defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_X86)
 #define YIELD_PROCESSOR __asm__ __volatile__("pause")

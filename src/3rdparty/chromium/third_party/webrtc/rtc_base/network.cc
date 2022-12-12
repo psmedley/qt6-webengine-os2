@@ -131,6 +131,7 @@ uint16_t ComputeNetworkCostByType(int type,
 }
 
 #if !defined(__native_client__)
+#ifndef WEBRTC_NO_INET6
 bool IsIgnoredIPv6(bool allow_mac_based_ipv6, const InterfaceAddress& ip) {
   if (ip.family() != AF_INET6) {
     return false;

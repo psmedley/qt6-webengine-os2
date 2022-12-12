@@ -276,6 +276,7 @@ def abs(filename):
 
 def get_file_contents(filename):
     filename = abs(filename)
+    filename.strip('\n') #fixme - tries to open filenames with a \n on the end, so remove it
     with open(filename) as f:
         return f.read()
 

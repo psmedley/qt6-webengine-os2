@@ -282,6 +282,10 @@ typedef char* caddr_t;
 #endif
 
 #else /* !defined(Userspace_os_Windows) */
+#if defined(__OS2__)
+/* OS/2 defines mbstat in sys/socket.h, disable it. */
+#define mbstat mbstat_os2
+#endif
 #include <sys/socket.h>
 
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
@@ -404,7 +408,7 @@ int win_if_nametoindex(const char *);
 #define MA_OWNED 7 /* sys/mutex.h typically on FreeBSD */
 #if !defined(__FreeBSD__)
 struct mtx {int dummy;};
-#if !defined(__NetBSD__)
+#if !defined(__NetBSD__) && !defined(__OS2__)
 struct selinfo {int dummy;};
 #endif
 struct sx {int dummy;};
@@ -413,6 +417,10 @@ struct sx {int dummy;};
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#ifdef __OS2__
+#include <libcx/net.h>
+#endif
+
 /* #include <sys/param.h>  in FreeBSD defines MSIZE */
 /* #include <sys/ktr.h> */
 /* #include <sys/systm.h> */
@@ -1068,7 +1076,7 @@ sctp_get_mbuf_for_msg(unsigned int space_needed, int want_header, int how, int a
 /* with the current included files, this is defined in Linux but
  *  in FreeBSD, it is behind a _KERNEL in sys/socket.h ...
  */
-#if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__native_client__)
+#if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__native_client__) || defined(__OS2__)
 /* stolen from /usr/include/sys/socket.h */
 #define CMSG_ALIGN(n)   _ALIGN(n)
 #elif defined(__NetBSD__)
@@ -1136,7 +1144,7 @@ sctp_get_mbuf_for_msg(unsigned int space_needed, int want_header, int how, int a
 
 #define SCTP_IS_LISTENING(inp) ((inp->sctp_flags & SCTP_PCB_FLAGS_ACCEPTING) != 0)
 
-#if defined(__APPLE__) || defined(__DragonFly__) || defined(__linux__) || defined(__native_client__) || defined(__NetBSD__) || defined(_WIN32) || defined(__Fuchsia__) || defined(__EMSCRIPTEN__)
+#if defined(__APPLE__) || defined(__DragonFly__) || defined(__linux__) || defined(__native_client__) || defined(__NetBSD__) || defined(_WIN32) || defined(__Fuchsia__) || defined(__EMSCRIPTEN__) || defined(__OS2__)
 int
 timingsafe_bcmp(const void *, const void *, size_t);
 #endif
