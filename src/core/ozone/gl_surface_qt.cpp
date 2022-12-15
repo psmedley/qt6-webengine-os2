@@ -41,7 +41,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE.Chromium file.
 
-#if !defined(OS_MAC)
+#if !defined(OS_MAC) && !defined(OS_OS2)
 
 #include "gl_surface_qt.h"
 #include "qtwebenginecoreglobal_p.h"
@@ -244,4 +244,4 @@ void DirectCompositionSurfaceWin::DisableSoftwareOverlays()
 }
 } // namespace gl
 #endif
-#endif // !defined(OS_MAC)
+#endif // !defined(OS_MAC) && !defined(OS_OS2)

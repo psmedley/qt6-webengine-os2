@@ -1098,10 +1098,15 @@ bool ParseTransportParameters(ParsedQuicVersion version,
         }
         preferred_address.ipv4_socket_address =
             QuicSocketAddress(QuicIpAddress(ipv4_address), ipv4_port);
+#if !defined(__OS2__)
         preferred_address.ipv6_socket_address =
             QuicSocketAddress(QuicIpAddress(ipv6_address), ipv6_port);
-        if (!preferred_address.ipv4_socket_address.host().IsIPv4() ||
-            !preferred_address.ipv6_socket_address.host().IsIPv6()) {
+#endif
+        if (!preferred_address.ipv4_socket_address.host().IsIPv4()
+#if !defined(__OS2__)
+            || !preferred_address.ipv6_socket_address.host().IsIPv6()
+#endif
+           ) {
           *error_details = "Received preferred_address of bad families " +
                            preferred_address.ToString();
           return false;

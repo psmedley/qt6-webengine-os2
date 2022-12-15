@@ -223,7 +223,7 @@ base::string16 Accelerator::GetShortcutText() const {
     if (key != 0)
       shortcut += key;
 #elif defined(USE_AURA) || defined(OS_APPLE) || defined(OS_ANDROID)
-    const uint16_t c = DomCodeToUsLayoutCharacter(
+    base::char16 c = DomCodeToUsLayoutCharacter(
         UsLayoutKeyboardCodeToDomCode(key_code_), false);
     if (c != 0)
       shortcut +=

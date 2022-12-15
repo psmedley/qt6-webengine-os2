@@ -6271,6 +6271,9 @@ static int unixOpen(
 #endif
   
   assert( zPath==0 || zPath[0]=='/' 
+#if defined(SQLITE_OS_OS2)
+      || (isalpha(zPath[0]) && zPath[1]==':')
+#endif
       || eType==SQLITE_OPEN_SUPER_JOURNAL || eType==SQLITE_OPEN_MAIN_JOURNAL 
   );
   rc = fillInUnixFile(pVfs, fd, pFile, zPath, ctrlFlags);
@@ -6390,7 +6393,11 @@ static int mkFullPathname(
   int nPath = sqlite3Strlen30(zPath);
   int iOff = 0;
   int i, j;
+#ifdef SQLITE_OS_OS2
+  if( !IS_ABSOLUTE_PATH(zPath) ){
+#else
   if( zPath[0]!='/' ){
+#endif
     if( osGetcwd(zOut, nOut-2)==0 ){
       return unixLogError(SQLITE_CANTOPEN_BKPT, "getcwd", zPath);
     }

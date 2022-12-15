@@ -163,6 +163,8 @@ Channel::Message::Message(size_t capacity,
     handles_ = reinterpret_cast<HandleEntry*>(mutable_extra_header());
     // Initialize all handles to invalid values.
     for (size_t i = 0; i < max_handles_; ++i)
+#elif defined(OS_OS2)
+    // All handle data is already initialized to zeroes in memset above.
       handles_[i].handle = base::win::HandleToUint32(INVALID_HANDLE_VALUE);
 #elif defined(OS_MAC)
     mach_ports_header_ =
@@ -457,6 +459,13 @@ void Channel::Message::SetHandles(
     handles_[i].handle = base::win::HandleToUint32(handle);
   }
 #endif  // defined(OS_WIN)
+
+#if defined(OS_OS2)
+  memset(mutable_os2_header(), 0, extra_header_size());
+  for (size_t i = 0; i < handle_vector_.size(); i++) {
+    handle_vector_[i].to_libcx_handle(mutable_os2_header()->handles[i]);
+  }
+#endif  // defined(OS_OS2)
 
 #if defined(OS_MAC)
   if (mach_ports_header_) {

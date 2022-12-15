@@ -689,7 +689,9 @@ WebEngineContext::WebEngineContext()
     // Enable sandboxing on OS X and Linux (Desktop / Embedded) by default.
     bool disable_sandbox = qEnvironmentVariableIsSet(kDisableSandboxEnv);
     if (!disable_sandbox) {
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_OS2)
+        parsedCommandLine->AppendSwitch(service_manager::switches::kNoSandbox);
+#elif defined(Q_OS_LINUX)
         parsedCommandLine->AppendSwitch(sandbox::policy::switches::kDisableSetuidSandbox);
 #endif
     } else {

@@ -162,6 +162,28 @@ void ChannelPosix::Write(MessagePtr message) {
   UMA_HISTOGRAM_COUNTS_100("Mojo.Channel.WriteMessageHandles",
                            message->NumHandlesForTransit());
 
+#if defined(OS_OS2)
+    // On OS/2, we can have SHMEM and socket handles which are located in the
+    // extra header section.
+    if (message->has_handles()) {
+      if (remote_process().is_valid()) {
+        Channel::Message::HandleEntry* handles = message->mutable_os2_header()->handles;
+        // Send all handles at once.
+        int rc = libcx_send_handles(handles, message->num_handles(),
+            remote_process().get(), 0);
+        // The process may have gone already, shouldn't assert in this case.
+        DPCHECK(rc == 0 || errno == ESRCH);
+        // Make sure PID in the messgae is reset as we already gave access to
+        // handles (also see below).
+        message->mutable_os2_header()->pid = 0;
+      } else {
+        // Send this process ID so that the remote party could call
+        // libcx_take_handles when it doesn't know our PID.
+        message->mutable_os2_header()->pid = getpid();
+      }
+    }
+#endif
+
   bool write_error = false;
   bool queued = false;
   {
@@ -200,6 +222,33 @@ bool ChannelPosix::GetReadPlatformHandles(const void* payload,
                                           bool* deferred) {
   if (num_handles > std::numeric_limits<uint16_t>::max())
     return false;
+#if defined(OS_OS2)
+    // On OS/2, we can have SHMEM and socket handles which are located in the
+    // extra header section.
+    DCHECK(extra_header);
+    using OS2ExtraHeader = Channel::Message::OS2ExtraHeader;
+    using HandleEntry = Channel::Message::HandleEntry;
+    size_t handles_size = sizeof(OS2ExtraHeader) +
+        sizeof(HandleEntry) * num_handles;
+    if (handles_size > extra_header_size)
+      return false;
+    const OS2ExtraHeader *os2_header =
+        reinterpret_cast<const OS2ExtraHeader*>(extra_header);
+    std::vector<LIBCX_HANDLE> new_handles(
+        os2_header->handles, os2_header->handles + num_handles);
+    pid_t pid = remote_process().is_valid() ? remote_process().get() :
+        os2_header->pid;
+    if (pid) {
+      int rc = libcx_take_handles(new_handles.data(), num_handles, pid,
+          LIBCX_HANDLE_CLOSE);
+      DPCHECK(rc == 0);
+    }
+    handles->resize(num_handles);
+    for (size_t i = 0; i < num_handles; i++) {
+      handles->at(i) = PlatformHandleInTransit::CreateFromLIBCxHandle(
+          new_handles[i]);
+    }
+#else
   if (incoming_fds_.size() < num_handles)
     return true;
 
@@ -208,7 +257,7 @@ bool ChannelPosix::GetReadPlatformHandles(const void* payload,
     handles->at(i) = PlatformHandle(std::move(incoming_fds_.front()));
     incoming_fds_.pop_front();
   }
-
+#endif
   return true;
 }
 
@@ -311,11 +360,16 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
     char* buffer = GetReadBuffer(&buffer_capacity);
     DCHECK_GT(buffer_capacity, 0u);
 
+#if defined(OS_OS2)
+      ssize_t read_result =
+          SocketRecvmsg(socket_.get(), buffer, buffer_capacity);
+#else
     std::vector<base::ScopedFD> incoming_fds;
     ssize_t read_result =
         SocketRecvmsg(socket_.get(), buffer, buffer_capacity, &incoming_fds);
     for (auto& incoming_fd : incoming_fds)
       incoming_fds_.emplace_back(std::move(incoming_fd));
+#endif
 
     if (read_result > 0) {
       bytes_read = static_cast<size_t>(read_result);
@@ -368,12 +422,35 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
   }
   size_t bytes_written = 0;
   std::vector<PlatformHandleInTransit> handles = message_view.TakeHandles();
+#if defined(OS_OS2)
+    // We are about to actually write to the remote process. Platform handles
+    // are either already sent to it in |Write| (if the remote process ID is
+    // known) or will be taken by it in |GetReadPlatformHandles| (otherwise).
+    // In the 1st case, we may safely drop handles to have them closed on our
+    // end. In the 2nd case, we must release them now to make sure they are
+    // NOT closed before the remote process calls |GetReadPlatformHandles|.
+    // The remote process will take care about closing them with LIBCx help.
+    // If the remote process crashes before doing so, we will leak them but
+    // it's irrelevant as this means our total dysfunction is imminent.
+    if (!handles.empty()) {
+      if (!remote_process().is_valid()) {
+        // Release to avoid early closure of not-yet-taken handles.
+        for (auto& handle : handles)
+          handle.CompleteTransit();
+      }
+      // No need to set sent/to-be-taken handles back even on failure to send
+      // the message iteslf.
+      handles.clear();
+    }
+#else
   size_t num_handles = handles.size();
   size_t handles_written = message_view.num_handles_sent();
+#endif
   do {
     message_view.advance_data_offset(bytes_written);
 
     ssize_t result;
+#if !defined(OS_OS2)
     if (handles_written < num_handles) {
       iovec iov = {const_cast<void*>(message_view.data()),
                    message_view.data_num_bytes()};
@@ -417,7 +494,9 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
               PlatformHandleInTransit(PlatformHandle(std::move(fds[i])));
         }
       }
-    } else {
+    } else
+#endif  // !defined(OS_OS2)
+    {
       result = SocketWrite(socket_.get(), message_view.data(),
                            message_view.data_num_bytes());
     }
@@ -452,7 +531,10 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
     }
 
     bytes_written = static_cast<size_t>(result);
-  } while (handles_written < num_handles ||
+    } while (
+#if !defined(OS_OS2)
+             handles_written < num_handles ||
+#endif
            bytes_written < message_view.data_num_bytes());
 
   return FlushOutgoingMessagesNoLock();

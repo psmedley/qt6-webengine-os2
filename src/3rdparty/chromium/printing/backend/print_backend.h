@@ -20,7 +20,7 @@
 #include "printing/printing_export.h"
 #include "ui/gfx/geometry/size.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 #include <stdint.h>
 #endif
 
@@ -61,7 +61,7 @@ struct PRINTING_EXPORT PrinterBasicInfo {
 
 using PrinterList = std::vector<PrinterBasicInfo>;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 
 struct PRINTING_EXPORT AdvancedCapabilityValue {
   AdvancedCapabilityValue();
@@ -111,7 +111,7 @@ struct PRINTING_EXPORT AdvancedCapability {
 
 using AdvancedCapabilities = std::vector<AdvancedCapability>;
 
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 
 struct PRINTING_EXPORT PrinterSemanticCapsAndDefaults {
   PrinterSemanticCapsAndDefaults();
@@ -149,10 +149,10 @@ struct PRINTING_EXPORT PrinterSemanticCapsAndDefaults {
   std::vector<gfx::Size> dpis;
   gfx::Size default_dpi;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
   bool pin_supported = false;
   AdvancedCapabilities advanced_capabilities;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 };
 
 struct PRINTING_EXPORT PrinterCapsAndDefaults {

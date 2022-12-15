@@ -60,7 +60,7 @@ namespace {
 void unicodeToItem(const base::char16* uni, SECItem* item) {
   int len = 0;
   while (uni[len++] != 0);
-  SECITEM_AllocItem(NULL, item, sizeof(PRUnichar) * len);
+  SECITEM_AllocItem(NULL, item, sizeof(base::char16) * len);
 #ifdef IS_LITTLE_ENDIAN
   int i = 0;
   for (i=0; i<len; i++) {

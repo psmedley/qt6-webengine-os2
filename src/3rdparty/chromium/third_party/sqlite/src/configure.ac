@@ -157,6 +157,11 @@ AC_SUBST(VERSION)
 RELEASE=`cat $srcdir/VERSION`
 AC_MSG_NOTICE(Release set to $RELEASE)
 AC_SUBST(RELEASE)
+PATCH_LEVEL=[`cat $srcdir/VERSION \
+                           | sed 's/[^0-9]/ /g' \
+                | awk '{printf "%d",$3}'`]
+AC_MSG_NOTICE(Patch level set to $PATCH_LEVEL)
+AC_SUBST(PATCH_LEVEL)
 
 #########
 # Locate a compiler for the build machine.  This compiler should

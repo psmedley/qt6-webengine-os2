@@ -1842,7 +1842,7 @@ void NetworkContext::OnHttpAuthDynamicParamsChanged(
       http_auth_dynamic_network_service_params->enable_negotiate_port);
   http_auth_merged_preferences_.set_basic_over_http_enabled(
       http_auth_dynamic_network_service_params->basic_over_http_enabled);
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA) || defined(OS_OS2)
   http_auth_merged_preferences_.set_ntlm_v2_enabled(
       http_auth_dynamic_network_service_params->ntlm_v2_enabled);
 #endif

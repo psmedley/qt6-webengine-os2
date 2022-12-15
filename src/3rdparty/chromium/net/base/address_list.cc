@@ -9,6 +9,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(OS_OS2)
+#include <libcx/net.h>
+#endif
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/containers/flat_map.h"

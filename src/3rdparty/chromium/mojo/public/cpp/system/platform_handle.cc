@@ -65,6 +65,9 @@ ScopedSharedBufferHandle WrapPlatformSharedMemoryRegion(
 #elif defined(OS_FUCHSIA)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
+#elif defined(OS_OS2)
+  platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE;
+  platform_handles[0].value = static_cast<uint64_t>(handle.release());
 #elif defined(OS_MAC)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());

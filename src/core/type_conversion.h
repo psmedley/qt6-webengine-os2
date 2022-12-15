@@ -79,7 +79,7 @@ namespace QtWebEngineCore {
 
 inline QString toQt(const base::string16 &string)
 {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
     return QString::fromStdWString(string);
 #else
     return QString::fromUtf16(reinterpret_cast<const char16_t *>(string.data()), string.size());
