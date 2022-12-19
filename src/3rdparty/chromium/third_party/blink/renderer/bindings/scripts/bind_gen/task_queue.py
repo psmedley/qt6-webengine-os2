@@ -22,15 +22,18 @@ class TaskQueue(object):
                 This is useful for debugging.
         """
         assert isinstance(single_process, bool)
-        if single_process:
-            self._single_process = True
-            self._pool_size = 1
-            self._pool = None
-        else:
-            self._single_process = False
-            self._pool_size = multiprocessing.cpu_count()
-            self._pool = multiprocessing.Pool(self._pool_size,
-                                              package_initializer().init)
+        self._single_process = True
+        self._pool_size = 1
+        self._pool = None
+#        if single_process:
+#            self._single_process = True
+#            self._pool_size = 1
+#            self._pool = None
+#        else:
+#            self._single_process = False
+#            self._pool_size = multiprocessing.cpu_count()
+#            self._pool = multiprocessing.Pool(self._pool_size,
+#                                              package_initializer().init)
         self._requested_tasks = []  # List of (func, args, kwargs)
         self._worker_tasks = []  # List of multiprocessing.pool.AsyncResult
         self._did_run = False

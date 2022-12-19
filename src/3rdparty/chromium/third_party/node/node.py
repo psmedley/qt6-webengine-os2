@@ -18,7 +18,7 @@ def which(cmd):
     return None
 
 def GetBinaryPath():
-  if sys.platform == 'win32':
+  if (sys.platform == 'win32' or sys.platform == 'os2knix'):
     nodejs = which('node.exe')
     if nodejs:
       return nodejs
