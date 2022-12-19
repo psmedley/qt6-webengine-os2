@@ -44,7 +44,7 @@
 #include "gl_context_qt.h"
 #include "ozone/gl_surface_egl_qt.h"
 
-#if !defined(OS_MAC)
+#if !defined(OS_MAC) && !defined(OS_OS2)
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface_egl.h"
@@ -373,4 +373,4 @@ std::string DriverEGL::GetPlatformExtensions()
     return "";
 }
 } // namespace gl
-#endif // !defined(OS_MAC)
+#endif // !defined(OS_MAC) && !defined(OS_OS2)

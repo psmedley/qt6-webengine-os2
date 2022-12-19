@@ -138,6 +138,10 @@ extern "C" {
 #define OPENSSL_WINDOWS
 #endif
 
+#if defined(__OS2__)
+#define OPENSSL_OS2
+#endif
+
 // Trusty isn't Linux but currently defines __linux__. As a workaround, we
 // exclude it here.
 // TODO(b/169780122): Remove this workaround once Trusty no longer defines it.

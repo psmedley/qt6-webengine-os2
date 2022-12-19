@@ -127,6 +127,10 @@ base::Optional<size_t> ProcessMemoryDump::CountResidentBytes(
     // TODO(fuchsia): Port, see https://crbug.com/706592.
     ALLOW_UNUSED_LOCAL(chunk_start);
     ALLOW_UNUSED_LOCAL(page_count);
+#elif defined(OS_OS2)
+    // TODO(os2): Port
+    ALLOW_UNUSED_LOCAL(chunk_start);
+    ALLOW_UNUSED_LOCAL(page_count);
 #elif defined(OS_APPLE)
     // mincore in MAC does not fail with EAGAIN.
     failure =

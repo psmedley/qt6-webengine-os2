@@ -54,7 +54,7 @@ std::unique_ptr<GLFence> GLFence::Create() {
       << "Trying to create fence with no context";
 
   std::unique_ptr<GLFence> fence;
-#if !defined(OS_APPLE)
+#if !defined(OS_APPLE) && defined(USE_EGL)
   if (g_driver_egl.ext.b_EGL_KHR_fence_sync &&
       g_driver_egl.ext.b_EGL_KHR_wait_sync) {
     // Prefer GLFenceEGL which doesn't require GL context switching.

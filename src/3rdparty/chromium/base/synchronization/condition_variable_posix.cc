@@ -34,7 +34,7 @@ ConditionVariable::ConditionVariable(Lock* user_lock)
   // non-standard pthread_cond_timedwait_monotonic_np. Newer platform
   // versions have pthread_condattr_setclock.
   // Mac can use relative time deadlines.
-#if !defined(OS_APPLE) && !defined(OS_NACL) && \
+#if !defined(OS_APPLE) && !defined(OS_NACL) &&!defined(OS_OS2) && \
     !defined(HAVE_PTHREAD_COND_TIMEDWAIT_MONOTONIC)
   pthread_condattr_t attrs;
   rv = pthread_condattr_init(&attrs);

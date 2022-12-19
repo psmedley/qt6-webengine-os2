@@ -18,6 +18,10 @@
 #include <sys/resource.h>
 #endif
 
+#if defined(OS_OS2)
+#include <umalloc.h>
+#endif
+
 #if defined(OS_APPLE)
 #include <malloc/malloc.h>
 #else

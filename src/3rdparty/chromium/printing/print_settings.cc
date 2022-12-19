@@ -281,11 +281,11 @@ void PrintSettings::Clear() {
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   advanced_settings_.clear();
 #endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
   send_user_info_ = false;
   username_.clear();
   pin_value_.clear();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 }
 
 void PrintSettings::SetPrinterPrintableArea(

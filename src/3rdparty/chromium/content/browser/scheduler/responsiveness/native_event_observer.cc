@@ -20,7 +20,7 @@
 #include "ui/events/event.h"
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
 #include "base/task/current_thread.h"
 #endif
 
@@ -63,19 +63,28 @@ void NativeEventObserver::OnWindowEventDispatcherFinishedProcessingEvent(
 }
 #endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
 void NativeEventObserver::RegisterObserver() {
   base::CurrentUIThread::Get()->AddMessagePumpObserver(this);
 }
 void NativeEventObserver::DeregisterObserver() {
   base::CurrentUIThread::Get()->RemoveMessagePumpObserver(this);
 }
+#if defined(OS_OS2)
+void NativeEventObserver::WillDispatchMSG(const QMSG& msg) {
+  will_run_event_callback_.Run(&msg);
+}
+void NativeEventObserver::DidDispatchMSG(const QMSG& msg) {
+  did_run_event_callback_.Run(&msg);
+}
+#else
 void NativeEventObserver::WillDispatchMSG(const MSG& msg) {
   will_run_event_callback_.Run(&msg);
 }
 void NativeEventObserver::DidDispatchMSG(const MSG& msg) {
   did_run_event_callback_.Run(&msg);
 }
+#endif  // defined(OS_OS2)
 #endif  // defined(OS_WIN)
 
 #if defined(OS_ANDROID) || defined(OS_FUCHSIA)

@@ -1018,7 +1018,7 @@ void Thread::SetThreadLocal(LocalStorageKey key, void* value) {
 // keep this version in POSIX as most Linux-compatible derivatives will
 // support it. MacOS and FreeBSD are different here.
 #if !defined(V8_OS_FREEBSD) && !defined(V8_OS_MACOSX) && !defined(_AIX) && \
-    !defined(V8_OS_SOLARIS)
+    !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 // static
 Stack::StackSlot Stack::GetStackStart() {
@@ -1044,7 +1044,7 @@ Stack::StackSlot Stack::GetStackStart() {
 }
 
 #endif  // !defined(V8_OS_FREEBSD) && !defined(V8_OS_MACOSX) &&
-        // !defined(_AIX) && !defined(V8_OS_SOLARIS)
+        // !defined(_AIX) && !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 // static
 Stack::StackSlot Stack::GetCurrentStackPosition() {

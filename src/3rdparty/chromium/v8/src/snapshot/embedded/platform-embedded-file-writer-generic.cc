@@ -75,11 +75,11 @@ void PlatformEmbeddedFileWriterGeneric::DeclarePointerToSymbol(
   DeclareSymbolGlobal(name);
   DeclareLabel(name);
   fprintf(fp_, "  %s %s%s\n", DirectiveAsString(PointerSizeDirective()),
-          SYMBOL_PREFIX, target);
+          symbol_prefix, target);
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareSymbolGlobal(const char* name) {
-  fprintf(fp_, ".global %s%s\n", SYMBOL_PREFIX, name);
+  fprintf(fp_, ".global %s%s\n", symbol_prefix, name);
   // These symbols are not visible outside of the final binary, this allows for
   // reduced binary size, and less work for the dynamic linker.
   fprintf(fp_, ".hidden %s\n", name);

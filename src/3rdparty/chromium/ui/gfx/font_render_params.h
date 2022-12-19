@@ -119,7 +119,7 @@ GFX_EXPORT void ClearFontRenderParamsCacheForTest();
 GFX_EXPORT float GetFontRenderParamsDeviceScaleFactor();
 
 #if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
-    defined(OS_ANDROID) || defined(OS_FUCHSIA)
+    defined(OS_ANDROID) || defined(OS_FUCHSIA) || defined(OS_OS2)
 // Sets the device scale factor for FontRenderParams to decide
 // if it should enable subpixel positioning.
 GFX_EXPORT void SetFontRenderParamsDeviceScaleFactor(

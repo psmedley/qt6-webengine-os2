@@ -2522,7 +2522,7 @@ HostResolverManager::HostResolverManager(
   if (system_dns_config_notifier_)
     system_dns_config_notifier_->AddObserver(this);
 #if defined(OS_POSIX) && !defined(OS_APPLE) && !defined(OS_OPENBSD) && \
-    !defined(OS_ANDROID)
+    !defined(OS_ANDROID) && !defined(OS_OS2)
   EnsureDnsReloaderInit();
 #endif
 

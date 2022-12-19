@@ -43,6 +43,14 @@ static const base::FilePath::CharType kReadOnlyCertDB[] =
 
 #else
 
+#if defined(OS_OS2)
+const char kRootCertsModuleName[] = "Root Certs (OS/2)";
+const char kRootCertsPath[] = "nssckbi.dll";
+#else
+const char kRootCertsModuleName[] = "Root Certs";
+const char kRootCertsPath[] = "libnssckbi.so";
+#endif
+
 base::FilePath GetDefaultConfigDirectory() {
   base::FilePath dir;
   base::PathService::Get(base::DIR_HOME, &dir);

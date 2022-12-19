@@ -225,7 +225,7 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
 #endif  // defined(OS_CHROMEOS) || ((defined(OS_LINUX) ||
         // BUILDFLAG(IS_CHROMEOS_LACROS)) && defined(USE_CUPS))
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
   bool send_user_info =
       job_settings.FindBoolKey(kSettingSendUserInfo).value_or(false);
   settings->set_send_user_info(send_user_info);

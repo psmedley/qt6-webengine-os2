@@ -74,7 +74,7 @@ bool IsPeerAuthorized(base::PlatformFile fd) {
 
 // NOTE: On Linux |SIGPIPE| is suppressed by passing |MSG_NOSIGNAL| to
 // |sendmsg()|. On Mac we instead set |SO_NOSIGPIPE| on the socket itself.
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(OS_OS2)
 constexpr int kSendmsgFlags = 0;
 #else
 constexpr int kSendmsgFlags = MSG_NOSIGNAL;

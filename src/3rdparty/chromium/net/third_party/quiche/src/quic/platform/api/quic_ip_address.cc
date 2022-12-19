@@ -265,9 +265,11 @@ in_addr QuicIpAddress::GetIPv4() const {
   return address_.v4;
 }
 
+#if !defined(__OS2__)
 in6_addr QuicIpAddress::GetIPv6() const {
   QUICHE_DCHECK(IsIPv6());
   return address_.v6;
 }
+#endif
 
 }  // namespace quic

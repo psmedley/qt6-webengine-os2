@@ -114,8 +114,12 @@
     defined(OS_FREEBSD) || defined(OS_IOS) || defined(OS_LINUX) ||  \
     defined(OS_CHROMEOS) || defined(OS_MAC) || defined(OS_NACL) ||  \
     defined(OS_NETBSD) || defined(OS_OPENBSD) || defined(OS_QNX) || \
-    defined(OS_SOLARIS)
+    defined(OS_SOLARIS) || defined(OS_OS2)
 #define OS_POSIX 1
+#endif
+
+#if defined(OS_WIN) || defined(OS_OS2)
+#define OS_DOSLIKE 1
 #endif
 
 // Compiler detection. Note: clang masquerades as GCC on POSIX and as MSVC on

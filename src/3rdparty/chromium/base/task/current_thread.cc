@@ -175,7 +175,7 @@ void CurrentUIThread::Abort() {
 }
 #endif  // defined(OS_ANDROID)
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
 void CurrentUIThread::AddMessagePumpObserver(
     MessagePumpForUI::Observer* observer) {
   GetMessagePumpForUI()->AddObserver(observer);
@@ -185,7 +185,7 @@ void CurrentUIThread::RemoveMessagePumpObserver(
     MessagePumpForUI::Observer* observer) {
   GetMessagePumpForUI()->RemoveObserver(observer);
 }
-#endif  // defined(OS_WIN)
+#endif  // defined(OS_WIN) || defined(OS_OS2)
 
 #endif  // !defined(OS_NACL)
 

@@ -243,7 +243,7 @@ class BASE_EXPORT CurrentUIThread : public CurrentThread {
   void Abort();
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
   void AddMessagePumpObserver(MessagePumpForUI::Observer* observer);
   void RemoveMessagePumpObserver(MessagePumpForUI::Observer* observer);
 #endif
