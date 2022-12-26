@@ -26,7 +26,7 @@ def init(root_src_dir):
     elif sys.platform.startswith("darwin"):
         platform = "mac"
         exe_suffix = ""
-    elif sys.platform.startswith(("cygwin", "win", "os2")):
+    elif sys.platform.startswith(("cygwin", "win")):
         platform = "win"
         exe_suffix = ".exe"
     elif sys.platform.startswith(("os2")):
