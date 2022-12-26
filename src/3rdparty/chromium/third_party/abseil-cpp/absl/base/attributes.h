@@ -293,7 +293,7 @@
 // ABSL_HAVE_ATTRIBUTE_SECTION
 //
 // Indicates whether labeled sections are supported. Weak symbol support is
-// a prerequisite. Labeled sections are not supported on Darwin/iOS.
+// a prerequisite. Labeled sections are not supported on Darwin/iOS/OS/2.
 #ifdef ABSL_HAVE_ATTRIBUTE_SECTION
 #error ABSL_HAVE_ATTRIBUTE_SECTION cannot be directly set
 #elif (ABSL_HAVE_ATTRIBUTE(section) ||                \
