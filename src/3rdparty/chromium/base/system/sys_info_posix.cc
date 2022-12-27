@@ -5,7 +5,9 @@
 #include "base/system/sys_info.h"
 
 #include <errno.h>
+#ifndef OS_OS2
 #include <sched.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>

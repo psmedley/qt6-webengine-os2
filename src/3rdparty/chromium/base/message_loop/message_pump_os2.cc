@@ -274,8 +274,6 @@ void MessagePumpForUI::DoRunLoop() {
     // work.
 
     in_native_loop_ = false;
-    state_->delegate->BeforeDoInternalWork();
-    DCHECK(!in_native_loop_);
 
     bool more_work_is_plausible = ProcessNextWindowsMessage();
     in_native_loop_ = false;

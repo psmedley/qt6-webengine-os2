@@ -9,11 +9,15 @@
 
 #if !defined(PA_HAS_SPINNING_MUTEX)
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if (defined(OS_POSIX) || defined(OS_FUCHSIA)) && !defined(OS_OS2)
 #include <sched.h>
 
 #define YIELD_THREAD sched_yield()
 
+#elif defined(OS_OS2)
+#include <pthread.h>
+
+#define YIELD_THREAD pthread_yield()
 #else  // Other OS
 
 #warning "Thread yield not supported on this OS."

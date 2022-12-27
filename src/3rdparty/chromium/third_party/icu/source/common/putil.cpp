@@ -103,6 +103,10 @@
 #   include <windows.h>
 #   include "unicode/uloc.h"
 #   include "wintz.h"
+#elif U_PLATFORM == U_PF_OS2
+#   define INCL_BASE
+#   include <os2.h>
+#   undef DATA_TYPE /* fix name clash */
 #elif U_PLATFORM == U_PF_OS400
 #   include <float.h>
 #   include <qusec.h>       /* error code structure */
@@ -2013,6 +2017,49 @@ remapPlatformDependentCodepage(const char *locale, const char *name) {
          * For non C/POSIX locale, default the code page to UTF-8 instead of US-ASCII.
          */
         name = "UTF-8";
+    }
+#elif U_PLATFORM == U_PF_OS2
+    if ((locale == NULL && (*name == 0 || uprv_strcmp(name, "US-ASCII") == 0)) ||
+        (locale != NULL && uprv_strcmp(locale, "en_US_POSIX") != 0 && uprv_strcmp(name, "US-ASCII") == 0)) {
+        /*
+         If there is no locale information in the environment or if it lacks the code page
+         specification (which is expected on OS/2 since it usually uses LANG=xx_YY), query
+         the current code page from the system.
+         */
+        static char codepage[32];
+        ULONG cp[4] = {0};
+        ULONG len;
+        APIRET arc = DosQueryCp(sizeof(cp) * sizeof(cp[0]), cp, &len);
+        if (!arc && len >= 4) {
+            switch (cp[0])
+            {
+            case 932:
+            case 942:
+            case 943:
+                /*
+                IBM-932, IBM-942 and IBM-943 are ambiguous aliases. Use
+                similar Shift-JIS.
+                */
+                name = "Shift-JIS";
+                break;
+            case 949:
+                /* IBM-949 is ambiguous alias. Use similar EUC-KR. */
+                name = "EUC-KR";
+                break;
+            case 950:
+                /* IBM-950 is ambiguous alias. Use similar Big5. */
+                name = "Big5";
+                break;
+            case 1381:
+                /* IBM-1381 is ambiguous alias. Use similar EUC-CN. */
+                name = "EUC-CN";
+                break;
+            default:
+                sprintf(codepage, "IBM-%lu", cp[0]);
+                name = codepage;
+                break;
+            }
+        }
     }
 #elif U_PLATFORM == U_PF_BSD
     if (uprv_strcmp(name, "CP949") == 0) {

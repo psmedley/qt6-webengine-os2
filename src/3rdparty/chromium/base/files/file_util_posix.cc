@@ -756,7 +756,11 @@ bool ReadFileToStringNonBlocking(const base::FilePath& file, std::string* ret) {
   ret->clear();
 
   base::ScopedFD fd(HANDLE_EINTR(
+#ifndef __OS2__
       open(file.MaybeAsASCII().c_str(), O_CLOEXEC | O_NONBLOCK | O_RDONLY)));
+#else
+      open(file.MaybeAsASCII().c_str(), O_NONBLOCK | O_RDONLY)));
+#endif
   if (!fd.is_valid()) {
     return false;
   }

@@ -72,12 +72,11 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
 void* SystemAllocPagesInternal(void* hint,
                                size_t length,
                                PageAccessibilityConfiguration accessibility,
-                               PageTag page_tag,
-                               bool commit) {
+                               PageTag page_tag) {
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
-  if (commit)
+  if (accessibility != PageInaccessible)
     flags |= PAG_COMMIT;
   if (hint)
     flags |= OBJ_LOCATION;
@@ -102,7 +101,6 @@ void* TrimMappingInternal(void* base,
                           size_t base_length,
                           size_t trim_length,
                           PageAccessibilityConfiguration accessibility,
-                          bool commit,
                           size_t pre_slack,
                           size_t post_slack) {
   void* ret = base;
@@ -111,8 +109,7 @@ void* TrimMappingInternal(void* base,
     // address within the freed range.
     ret = reinterpret_cast<char*>(base) + pre_slack;
     FreePages(base, base_length);
-    ret = SystemAllocPages(ret, trim_length, accessibility, PageTag::kChromium,
-                           commit);
+    ret = SystemAllocPages(ret, trim_length, accessibility, PageTag::kChromium);
   }
   return ret;
 }
@@ -156,13 +153,31 @@ void FreePagesInternal(void* address, size_t length) {
   CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
 }
 
-void DecommitSystemPagesInternal(void* address, size_t length) {
+void DecommitSystemPagesInternal(
+    void* address,
+    size_t length,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
   SetSystemPagesAccess(address, length, PageInaccessible);
 }
 
 bool RecommitSystemPagesInternal(void* address,
                                  size_t length,
-                                 PageAccessibilityConfiguration accessibility) {
+    PageAccessibilityConfiguration accessibility,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
+  return TrySetSystemPagesAccess(address, length, accessibility);
+}
+
+bool TryRecommitSystemPagesInternal(
+    void* address,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
   return TrySetSystemPagesAccess(address, length, accessibility);
 }
 

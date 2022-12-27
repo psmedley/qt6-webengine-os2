@@ -179,7 +179,7 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
         wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
         wire_fds_len = payload_len / sizeof(int);
       }
-#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE)
+#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE) && !defined(OS_OS2)
       // The PNaCl toolchain for Non-SFI binary build and macOS do not support
       // SCM_CREDENTIALS.
       if (cmsg->cmsg_level == SOL_SOCKET &&
