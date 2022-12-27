@@ -23,8 +23,11 @@ import os
 
 
 def touch(fname, times=None):
-  with open(fname, 'a'):
-    os.utime(fname, times)
+   fd = open(fname, 'a');
+   fd.close();
+   os.utime(fname, times);
+#  with open(fname, 'a'):
+#    os.utime(fname, times)
 
 
 def main():
