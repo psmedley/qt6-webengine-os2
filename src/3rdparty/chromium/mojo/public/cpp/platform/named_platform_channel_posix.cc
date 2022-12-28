@@ -8,6 +8,9 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#ifdef __OS2__
+#include <cstring>
+#endif
 
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"

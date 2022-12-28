@@ -33,6 +33,15 @@ inline int vswprintf(wchar_t* buffer, size_t size,
   return ::vswprintf(buffer, size, format, arguments);
 }
 
+#ifdef __OS2__
+inline const char16* as_u16cstr(const wchar_t* str) {
+  return reinterpret_cast<const char16*>(str);
+}
+inline const char16* as_u16cstr(WStringPiece str) {
+  return reinterpret_cast<const char16*>(str.data());
+}
+#endif
+
 }  // namespace base
 
 #endif  // BASE_STRINGS_STRING_UTIL_POSIX_H_

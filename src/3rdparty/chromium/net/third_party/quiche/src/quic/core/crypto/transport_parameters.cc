@@ -284,7 +284,9 @@ TransportParameters::PreferredAddress::~PreferredAddress() {}
 bool TransportParameters::PreferredAddress::operator==(
     const PreferredAddress& rhs) const {
   return ipv4_socket_address == rhs.ipv4_socket_address &&
+#if !defined(__OS2__)
          ipv6_socket_address == rhs.ipv6_socket_address &&
+#endif
          connection_id == rhs.connection_id &&
          stateless_reset_token == rhs.stateless_reset_token;
 }

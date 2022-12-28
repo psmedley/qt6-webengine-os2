@@ -35,6 +35,7 @@ static bool HasCPUMemoryTaggingExtension() {
 #endif
 }
 
+#ifndef OS_OS2
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   static const bool has_bti = HasCPUBranchIdentification();
   static const bool has_mte = HasCPUMemoryTaggingExtension();
@@ -56,5 +57,5 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
       return PROT_NONE;
   }
 }
-
+#endif
 }  // namespace base

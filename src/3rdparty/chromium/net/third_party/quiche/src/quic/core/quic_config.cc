@@ -870,11 +870,13 @@ bool QuicConfig::KeyUpdateSupportedRemotely() const {
 
 void QuicConfig::SetIPv6AlternateServerAddressToSend(
     const QuicSocketAddress& alternate_server_address_ipv6) {
+#if !defined(__OS2__)
   if (!alternate_server_address_ipv6.host().IsIPv6()) {
     QUIC_BUG << "Cannot use SetIPv6AlternateServerAddressToSend with "
              << alternate_server_address_ipv6;
     return;
   }
+#endif
   alternate_server_address_ipv6_.SetSendValue(alternate_server_address_ipv6);
 }
 
@@ -882,11 +884,13 @@ void QuicConfig::SetIPv6AlternateServerAddressToSend(
     const QuicSocketAddress& alternate_server_address_ipv6,
     const QuicConnectionId& connection_id,
     QuicUint128 stateless_reset_token) {
-  if (!alternate_server_address_ipv6.host().IsIPv6()) {
+#if !defined(__OS2__)
+ if (!alternate_server_address_ipv6.host().IsIPv6()) {
     QUIC_BUG << "Cannot use SetIPv6AlternateServerAddressToSend with "
              << alternate_server_address_ipv6;
     return;
   }
+#endif
   alternate_server_address_ipv6_.SetSendValue(alternate_server_address_ipv6);
   preferred_address_connection_id_and_token_ =
       std::make_pair(connection_id, stateless_reset_token);
@@ -1159,11 +1163,15 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
     if (error == QUIC_NO_ERROR && alternate_server_address.HasReceivedValue()) {
       const QuicSocketAddress& received_address =
           alternate_server_address.GetReceivedValue();
+#if !defined(__OS2__)
       if (received_address.host().IsIPv6()) {
         alternate_server_address_ipv6_.SetReceivedValue(received_address);
       } else if (received_address.host().IsIPv4()) {
         alternate_server_address_ipv4_.SetReceivedValue(received_address);
       }
+#else
+      alternate_server_address_ipv4_.SetReceivedValue(received_address);
+#endif
     }
   }
   if (error == QUIC_NO_ERROR) {

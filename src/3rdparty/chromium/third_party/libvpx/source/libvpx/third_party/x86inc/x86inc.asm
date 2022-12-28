@@ -112,6 +112,8 @@
         fakegot:
     %elifidn __OUTPUT_FORMAT__,aout
         SECTION .text
+    %elifidn __OUTPUT_FORMAT__,elf
+        SECTION .rdata align=%1
     %else
         SECTION .rodata align=%1
     %endif
@@ -125,6 +127,8 @@
 %elifidn __OUTPUT_FORMAT__,win32
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,aout
+%define ABI_IS_32BIT 1
+%elifidn __OUTPUT_FORMAT__,obj
 %define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0

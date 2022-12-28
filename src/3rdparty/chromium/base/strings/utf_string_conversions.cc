@@ -302,7 +302,7 @@ std::wstring UTF8ToWide(StringPiece utf8) {
   return ret;
 }
 
-#if defined(WCHAR_T_IS_UTF16) && !defined(__OS2__)
+#if defined(WCHAR_T_IS_UTF16)
 // Easy case since we can use the "utf" versions we already wrote above.
 
 bool WideToUTF8(const wchar_t* src, size_t src_len, std::string* output) {

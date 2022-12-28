@@ -166,11 +166,11 @@ void ChannelPosix::Write(MessagePtr message) {
     // On OS/2, we can have SHMEM and socket handles which are located in the
     // extra header section.
     if (message->has_handles()) {
-      if (remote_process().is_valid()) {
+      if (remote_process().IsValid()) {
         Channel::Message::HandleEntry* handles = message->mutable_os2_header()->handles;
         // Send all handles at once.
         int rc = libcx_send_handles(handles, message->num_handles(),
-            remote_process().get(), 0);
+            remote_process().Handle(), 0);
         // The process may have gone already, shouldn't assert in this case.
         DPCHECK(rc == 0 || errno == ESRCH);
         // Make sure PID in the messgae is reset as we already gave access to
@@ -236,7 +236,7 @@ bool ChannelPosix::GetReadPlatformHandles(const void* payload,
         reinterpret_cast<const OS2ExtraHeader*>(extra_header);
     std::vector<LIBCX_HANDLE> new_handles(
         os2_header->handles, os2_header->handles + num_handles);
-    pid_t pid = remote_process().is_valid() ? remote_process().get() :
+    pid_t pid = remote_process().IsValid() ? remote_process().Handle() :
         os2_header->pid;
     if (pid) {
       int rc = libcx_take_handles(new_handles.data(), num_handles, pid,
@@ -433,7 +433,7 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
     // If the remote process crashes before doing so, we will leak them but
     // it's irrelevant as this means our total dysfunction is imminent.
     if (!handles.empty()) {
-      if (!remote_process().is_valid()) {
+      if (!remote_process().IsValid()) {
         // Release to avoid early closure of not-yet-taken handles.
         for (auto& handle : handles)
           handle.CompleteTransit();
@@ -500,8 +500,6 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
       result = SocketWrite(socket_.get(), message_view.data(),
                            message_view.data_num_bytes());
     }
-#endif
-
     if (result < 0) {
       if (errno != EAGAIN &&
           errno != EWOULDBLOCK

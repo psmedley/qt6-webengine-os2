@@ -49,7 +49,7 @@ static SK_ALWAYS_INLINE float cross(float2 a, float2 b) {
 // support. We call this method "fast_madd" to draw attention to the fact that the operation may
 // give different results on different platforms.
 template<int N> SK_ALWAYS_INLINE vec<N> fast_madd(vec<N> f, vec<N> m, vec<N> a) {
-#if FP_FAST_FMAF
+#ifdef FP_FAST_FMAF
     return skvx::fma(f,m,a);
 #else
     return f*m + a;

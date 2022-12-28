@@ -5,6 +5,7 @@
 #include "ui/color/color_mixers.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 
 namespace ui {
 

@@ -16,6 +16,10 @@
 #include "base/win/scoped_handle.h"
 #endif
 
+#if defined(OS_OS2)
+#include "base/notreached.h"
+#endif
+
 namespace mojo {
 namespace core {
 
