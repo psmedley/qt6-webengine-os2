@@ -18,6 +18,10 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef __OS2__
+#define	_SC_PHYS_PAGES		121
+#endif
+
 #include <limits>
 
 #include "src/base/logging.h"

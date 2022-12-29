@@ -7,6 +7,7 @@
 
 #include <map>
 
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/cursor_loader.h"
@@ -15,21 +16,21 @@ namespace ui {
 
 class CursorFactoryOS2;
 
-class UI_BASE_EXPORT CursorLoaderOS2 : public CursorLoader {
+class COMPONENT_EXPORT(UI_BASE) CursorLoaderOS2 : public CursorLoader {
  public:
   CursorLoaderOS2();
-  ~CursorLoaderOS2() override;
+  ~CursorLoaderOS2();
 
   // CursorLoader overrides:
   void LoadImageCursor(mojom::CursorType id,
                        int resource_id,
-                       const gfx::Point& hot) override;
+                       const gfx::Point& hot);
   void LoadAnimatedCursor(mojom::CursorType id,
                           int resource_id,
                           const gfx::Point& hot,
-                          int frame_delay_ms) override;
+                          int frame_delay_ms);
   void UnloadAll() override;
-  void SetPlatformCursor(gfx::NativeCursor* cursor) override;
+  void SetPlatformCursor(gfx::NativeCursor* cursor);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CursorLoaderOS2);

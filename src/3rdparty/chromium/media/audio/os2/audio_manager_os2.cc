@@ -4,6 +4,7 @@
 
 #include "media/audio/os2/audio_manager_os2.h"
 
+#include "base/logging.h"
 #include "media/audio/os2/audio_output_stream_os2.h"
 
 #include <kai.h>
