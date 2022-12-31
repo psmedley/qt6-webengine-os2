@@ -28,6 +28,7 @@
 #include <zircon/process.h>
 #include <zircon/types.h>
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+extern "C" {int _gettid (void); }
 #include <stdlib.h>
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)

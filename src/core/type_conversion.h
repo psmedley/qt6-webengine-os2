@@ -90,7 +90,7 @@ inline QString toQt(const base::Optional<base::string16> &string)
 {
     if (!string.has_value())
         return QString();
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
     return QString::fromStdWString(string->data());
 #else
     return QString::fromUtf16(string->data());
