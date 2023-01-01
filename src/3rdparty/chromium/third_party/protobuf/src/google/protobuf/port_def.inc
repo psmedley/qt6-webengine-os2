@@ -534,3 +534,7 @@
 // This experiment is purely for the purpose of gathering data. All code guarded
 // by this flag is supposed to be removed after this experiment.
 // #define PROTOBUF_MESSAGE_OWNED_ARENA_EXPERIMENT
+#ifdef __OS2__
+#undef minor
+#undef major
+#endif
