@@ -125,10 +125,10 @@
 #include "base/posix/global_descriptors.h"
 #include "content/public/common/content_descriptors.h"
 
-#if !defined(OS_MAC)
+#if !defined(OS_MAC) && !defined(OS_OS2)
 #include "content/public/common/zygote/zygote_fork_delegate_linux.h"
 #endif
-#if !defined(OS_MAC) && !defined(OS_ANDROID)
+#if !defined(OS_MAC) && !defined(OS_ANDROID) && !defined(OS_OS2)
 #include "content/zygote/zygote_main.h"
 #include "sandbox/linux/services/libc_interceptor.h"
 #endif

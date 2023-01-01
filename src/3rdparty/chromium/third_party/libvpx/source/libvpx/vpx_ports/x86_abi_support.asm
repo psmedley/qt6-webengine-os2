@@ -398,7 +398,9 @@ section .text
 %elifidn __OUTPUT_FORMAT__,aout
 %define SECTION_RODATA section .data
 %elifidn __OUTPUT_FORMAT__,obj
-%define SECTION_RODATA section .data
+%define SECTION_RODATA section .text
+section .text align=16 use32 class=CODE
+group CGROUP text
 %else
 %define SECTION_RODATA section .rodata
 %endif

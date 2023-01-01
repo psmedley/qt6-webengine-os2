@@ -219,7 +219,7 @@ void FakeVideoCaptureDeviceFactory::GetDevicesInfo(
 #elif defined(OS_FUCHSIA)
         VideoCaptureApi::FUCHSIA_CAMERA3;
 #elif defined(OS_OS2)
-        VideoCaptureApi::UNKNOWN
+        VideoCaptureApi::UNKNOWN;
 #else
 #error Unsupported platform
 #endif

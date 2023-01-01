@@ -29,6 +29,7 @@ SkFontHinting RendererPreferencesToSkiaHinting(
 
 }  // namespace
 
+#if 0 //FIXME?
 void RenderViewImpl::UpdateFontRenderingFromRendererPrefs() {
   const blink::mojom::RendererPreferences& prefs = renderer_preferences_;
   blink::WebFontRenderStyle::SetHinting(
@@ -48,5 +49,5 @@ void RenderViewImpl::UpdateFontRenderingFromRendererPrefs() {
   blink::WebFontRenderStyle::SetSubpixelPositioning(
       prefs.use_subpixel_positioning);
 }
-
+#endif
 }  // namespace content
