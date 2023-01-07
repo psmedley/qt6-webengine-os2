@@ -176,7 +176,7 @@ bool WindowTreeHostPlatform::IsKeyLocked(ui::DomCode dom_code) {
 
 base::flat_map<std::string, std::string>
 WindowTreeHostPlatform::GetKeyboardLayoutMap() {
-#if defined(USE_OZONE)
+#if defined(USE_OZONE) && !defined(OS_OS2)
   // USE_X11 supports keyboard layout map through LinuxUI.
   if (features::IsUsingOzonePlatform())
     return ui::GenerateDomKeyboardLayoutMap();

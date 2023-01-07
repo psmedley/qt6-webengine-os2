@@ -399,9 +399,9 @@
 section .text
 %endmacro
 %elifidn __OUTPUT_FORMAT__,obj
-%macro SECTION_RODATA 0
-segment TEXT32 CLASS=CODE USE32 ALIGN=16
-%endmacro
+%define SECTION_RODATA section .text
+section .text align=16 use32 class=CODE
+group CGROUP text
 %elifidn __OUTPUT_FORMAT__,aout
 %define SECTION_RODATA section .data
 %else

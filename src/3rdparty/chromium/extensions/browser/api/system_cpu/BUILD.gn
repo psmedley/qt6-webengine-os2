@@ -26,6 +26,10 @@ source_set("system_cpu") {
     sources += [ "cpu_info_provider_mac.cc" ]
   }
 
+  if (is_os2) {
+    sources += [ "cpu_info_provider_os2.cc" ]
+  }
+
   if (is_linux || is_chromeos) {
     sources += [ "cpu_info_provider_linux.cc" ]
   }

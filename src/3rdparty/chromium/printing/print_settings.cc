@@ -10,7 +10,7 @@
 #include "build/chromeos_buildflags.h"
 #include "printing/units.h"
 
-#if defined(USE_CUPS) && (defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH))
+#if defined(USE_CUPS) && (defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)) 
 #include <cups/cups.h>
 #endif
 
@@ -183,7 +183,7 @@ void GetColorModelForModel(mojom::ColorModel color_model,
   // all ColorModel values are determinantly handled.
 }
 
-#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
 std::string GetIppColorModelForModel(mojom::ColorModel color_model) {
   // Accept |kUnknownColorModel| for consistency with GetColorModelForModel().
   if (color_model == mojom::ColorModel::kUnknownColorModel)

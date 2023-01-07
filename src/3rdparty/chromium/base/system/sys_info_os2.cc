@@ -26,4 +26,9 @@ int64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
   return data;
 }
 
+// static
+std::string SysInfo::CPUModelName() {
+  return "i386";
+}
+
 }  // namespace base

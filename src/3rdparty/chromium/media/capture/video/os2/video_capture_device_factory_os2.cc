@@ -32,4 +32,10 @@ void VideoCaptureDeviceFactoryOS2::GetSupportedFormats(
   capture_formats->clear();
 }
 
+void VideoCaptureDeviceFactoryOS2::GetDevicesInfo(
+    GetDevicesInfoCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  NOTIMPLEMENTED();
+}
+
 }  // namespace media

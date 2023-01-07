@@ -97,6 +97,10 @@ jumbo_static_library("storage_monitor") {
   if (is_fuchsia) {
     sources += [ "storage_monitor_fuchsia.cc" ]
   }
+
+  if (is_os2) {
+    sources += [ "storage_monitor_os2.cc" ]
+  }
 }
 
 static_library("test_support") {

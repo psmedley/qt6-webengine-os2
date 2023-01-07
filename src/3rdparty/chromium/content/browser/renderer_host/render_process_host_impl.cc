@@ -4977,7 +4977,7 @@ void RenderProcessHostImpl::OnProcessLaunched() {
       base::BindRepeating(&RenderProcessHostImpl::BindTracedProcess,
                           instance_weak_factory_->GetWeakPtr()));
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_OS2)
   system_tracing_service_ = std::make_unique<tracing::SystemTracingService>();
   child_process_->EnableSystemTracingService(
       system_tracing_service_->BindAndPassPendingRemote());

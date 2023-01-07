@@ -661,7 +661,7 @@ void BrowserChildProcessHostImpl::OnProcessLaunched() {
       GetData().id,
       static_cast<ChildProcessHostImpl*>(GetHost())->child_process());
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_OS2)
   system_tracing_service_ = std::make_unique<tracing::SystemTracingService>();
   child_process()->EnableSystemTracingService(
       system_tracing_service_->BindAndPassPendingRemote());

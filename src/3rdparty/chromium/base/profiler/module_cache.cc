@@ -40,6 +40,7 @@ const ModuleCache::Module* ModuleCache::GetModuleForAddress(uintptr_t address) {
   if (const ModuleCache::Module* module = GetExistingModuleForAddress(address))
     return module;
 
+#ifndef OS_OS2
   std::unique_ptr<const Module> new_module = CreateModuleForAddress(address);
   if (!new_module && auxiliary_module_provider_)
     new_module = auxiliary_module_provider_->TryCreateModuleForAddress(address);
@@ -50,6 +51,9 @@ const ModuleCache::Module* ModuleCache::GetModuleForAddress(uintptr_t address) {
   // TODO(https://crbug.com/1131769): Reintroduce DCHECK(result.second) after
   // fixing the issue that is causing it to fail.
   return result.first->get();
+#else
+    return nullptr;
+#endif
 }
 
 std::vector<const ModuleCache::Module*> ModuleCache::GetModules() const {

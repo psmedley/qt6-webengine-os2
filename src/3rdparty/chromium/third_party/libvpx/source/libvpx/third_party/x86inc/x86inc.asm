@@ -112,10 +112,23 @@
         fakegot:
     %elifidn __OUTPUT_FORMAT__,aout
         SECTION .text
+    %elifidn __OUTPUT_FORMAT__,obj
+        ; OMF needs special handling to ensure everything is in the same segment
+        ; and that the segment is 32 bit.
+        SECTION .TEXT32 align=%1 use32 class=CODE
     %elifidn __OUTPUT_FORMAT__,elf
         SECTION .rdata align=%1
     %else
         SECTION .rodata align=%1
+    %endif
+%endmacro
+
+; Needed on OS/2 where it is 16-bit by default.
+%macro SECTION_TEXT 0
+    %ifidn __OUTPUT_FORMAT__,obj
+        SEGMENT TEXT32 CLASS=CODE USE32
+    %else
+        SECTION .text
     %endif
 %endmacro
 

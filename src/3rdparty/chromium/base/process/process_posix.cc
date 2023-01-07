@@ -380,4 +380,25 @@ int Process::GetPriority() const {
   return getpriority(PRIO_PROCESS, process_);
 }
 
+#ifdef OS_OS2
+bool Process::CanBackgroundProcesses() {
+  return true;
+}
+
+bool Process::IsProcessBackgrounded() const {
+   // See SetProcessBackgrounded().
+   DCHECK(IsValid());
+  return GetPriority() == kBackgroundPriority;
+ }
+
+bool Process::SetProcessBackgrounded(bool background) {
+  if (!CanBackgroundProcesses())
+    return false;
+
+  int priority = background ? kBackgroundPriority : kForegroundPriority;
+  int result = setpriority(PRIO_PROCESS, process_, priority);
+  DPCHECK(result == 0);
+  return result == 0;
+ }
+#endif //OS_OS2
 }  // namespace base

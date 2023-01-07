@@ -17,12 +17,11 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryOS2
 
   std::unique_ptr<VideoCaptureDevice> CreateDevice(
       const VideoCaptureDeviceDescriptor& device_descriptor) override;
-  void GetDevicesInfo(GetDevicesInfoCallback callback) override;
+  void GetDevicesInfo(GetDevicesInfoCallback callback);
   void GetDeviceDescriptors(
       VideoCaptureDeviceDescriptors* device_descriptors);
   void GetSupportedFormats(const VideoCaptureDeviceDescriptor& device,
                            VideoCaptureFormats* supported_formats);
-
  private:
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceFactoryOS2);
 };
