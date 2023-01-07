@@ -115,7 +115,8 @@
     %elifidn __OUTPUT_FORMAT__,obj
         ; OMF needs special handling to ensure everything is in the same segment
         ; and that the segment is 32 bit.
-        SECTION .TEXT32 align=%1 use32 class=CODE
+        %define .text TEXT32
+        SECTION .text align=4 public use32 FLAT class=CODE
     %elifidn __OUTPUT_FORMAT__,elf
         SECTION .rdata align=%1
     %else
