@@ -125,7 +125,7 @@
         pxor        %1, [GLOBAL(t80)]
 %endmacro
 
-SECTION .text
+SECTION_TEXT
 
 ;void vp8_loop_filter_bh_y_sse2
 ;(

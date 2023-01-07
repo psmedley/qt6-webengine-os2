@@ -165,7 +165,7 @@
         paddw           mm7,       mm3
 %endmacro
 
-SECTION .text
+SECTION_TEXT
 
 ;void int vpx_sad16x16x3_sse3(
 ;    unsigned char *src_ptr,

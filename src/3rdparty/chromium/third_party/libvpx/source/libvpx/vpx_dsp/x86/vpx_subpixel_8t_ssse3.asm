@@ -22,7 +22,7 @@ pw_64:    times 8 dw 64
 ; y = k2k3 + k6k7
 ; z = signed SAT(x + y)
 
-SECTION .text
+SECTION_TEXT
 %define LOCAL_VARS_SIZE 16*6
 
 %macro SETUP_LOCAL_VARS 0

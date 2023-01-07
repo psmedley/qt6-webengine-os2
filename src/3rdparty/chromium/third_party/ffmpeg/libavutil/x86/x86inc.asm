@@ -94,8 +94,22 @@
         SECTION .rdata align=%1
     %elif WIN64
         SECTION .rdata align=%1
+    %elifidn __OUTPUT_FORMAT__,obj
+        ; OMF needs special handling to ensure everything is in the same segment
+        ; and that the segment is 32 bit.
+        %define .text TEXT32
+        SECTION .text align=4 public use32 FLAT class=CODE
     %else
         SECTION .rodata align=%1
+    %endif
+%endmacro
+
+; Needed on OS/2 where it is 16-bit by default.
+%macro SECTION_TEXT 0
+    %ifidn __OUTPUT_FORMAT__,obj
+        SEGMENT TEXT32 CLASS=CODE USE32
+    %else
+        SECTION .text
     %endif
 %endmacro
 

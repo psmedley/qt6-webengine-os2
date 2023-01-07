@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-section .text
+SECTION_TEXT
 
 %if LIBVPX_YASM_WIN64
 globalsym(vpx_winx64_fldcw)

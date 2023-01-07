@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION .text
+SECTION_TEXT
 
 ;void vp8_copy32xn_sse2(
 ;    unsigned char *src_ptr,

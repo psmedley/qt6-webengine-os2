@@ -19,7 +19,7 @@
 ;   int dst_stride      - 3
 ; )
 
-SECTION .text
+SECTION_TEXT
 
 globalsym(vp8_idct_dequant_0_2x_sse2)
 sym(vp8_idct_dequant_0_2x_sse2):

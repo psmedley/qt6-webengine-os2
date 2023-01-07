@@ -68,7 +68,10 @@
     %elifidn __OUTPUT_FORMAT__,aout
         section .text
     %elifidn __OUTPUT_FORMAT__,obj
-        SEGMENT TEXT32 CLASS=CODE USE32 ALIGN=%1
+        ; OMF needs special handling to ensure everything is in the same segment
+        ; and that the segment is 32 bit.
+        %define .text TEXT32
+        SECTION .text align=4 public use32 FLAT class=CODE
     %else
         SECTION .rodata align=%1
     %endif

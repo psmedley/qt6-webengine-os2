@@ -131,7 +131,7 @@
     dec         rcx
 %endm
 
-SECTION .text
+SECTION_TEXT
 
 globalsym(vpx_filter_block1d4_v2_sse2)
 sym(vpx_filter_block1d4_v2_sse2):

@@ -60,7 +60,7 @@
     ret
 %endmacro
 
-SECTION .text
+SECTION_TEXT
 
 ;void vp8_short_fdct4x4_sse2(short *input, short *output, int pitch)
 globalsym(vp8_short_fdct4x4_sse2)

@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION .text
+SECTION_TEXT
 
 ;void vp8_filter_by_weight16x16_sse2
 ;(

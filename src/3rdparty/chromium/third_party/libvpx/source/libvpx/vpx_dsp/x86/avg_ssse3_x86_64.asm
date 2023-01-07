@@ -11,7 +11,7 @@
 %include "third_party/x86inc/x86inc.asm"
 %include "vpx_dsp/x86/bitdepth_conversion_sse2.asm"
 
-SECTION .text
+SECTION_TEXT
 
 %if VPX_ARCH_X86_64
 ; matrix transpose

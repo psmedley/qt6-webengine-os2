@@ -13,7 +13,7 @@
 %include "third_party/x86inc/x86inc.asm"
 %include "vpx_dsp/x86/bitdepth_conversion_sse2.asm"
 
-SECTION .text
+SECTION_TEXT
 
 %macro TRANSFORM_COLS 0
   paddw           m0,        m1

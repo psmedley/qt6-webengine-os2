@@ -146,7 +146,7 @@
 
 %endmacro
 
-SECTION .text
+SECTION_TEXT
 
 ;void int vpx_sad16x16x3_ssse3(
 ;    unsigned char *src_ptr,

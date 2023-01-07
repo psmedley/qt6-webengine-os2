@@ -276,7 +276,7 @@
 
 %endmacro
 
-SECTION .text
+SECTION_TEXT
 
 %if ABI_IS_32BIT
 
