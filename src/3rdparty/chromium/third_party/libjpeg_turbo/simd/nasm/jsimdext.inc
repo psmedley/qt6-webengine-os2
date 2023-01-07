@@ -66,8 +66,10 @@
 ; -- segment definition --
 ;
 %ifdef __OS2__
-%define SEG_TEXT    .TEXT32 align=16 public USE32 class=CODE
-%define SEG_CONST   .DATA32 align=16 public USE32 class=DATA
+%define .text TEXT32
+%define .data DATA32
+%define SEG_TEXT    .text align=4 public use32 FLAT class=CODE
+%define SEG_CONST   .data align=4 public use32 FLAT class=DATA
 %else
 %define SEG_TEXT   _text align=32 public use32 class=CODE
 %define SEG_CONST  _data align=32 public use32 class=DATA
