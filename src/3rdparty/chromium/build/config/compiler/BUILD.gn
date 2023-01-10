@@ -2595,7 +2595,7 @@ config("no_symbols") {
 
     # All configs using /DEBUG should include this:
     configs = [ ":win_pdbaltpath" ]
-  } else if (!is_os2) {
+  } else {
     cflags = [ "-g0" ]
     asmflags = cflags
   }
