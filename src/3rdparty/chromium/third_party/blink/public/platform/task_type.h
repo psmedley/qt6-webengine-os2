@@ -13,8 +13,9 @@ namespace blink {
 // For the task type usage guideline, see https://bit.ly/2vMAsQ4
 //
 // When a new task type is created:
-// * use kCount value as a new value,
-// * update tools/metrics/histograms/enums.xml,
+// * Update kMaxValue to point to a new value
+// * in tools/metrics/histograms/enums.xml update the
+//   "RendererSchedulerTaskType" enum
 // * update TaskTypes.md
 enum class TaskType : unsigned char {
   ///////////////////////////////////////
@@ -254,6 +255,15 @@ enum class TaskType : unsigned char {
   // Tasks that come in on the HighPriorityLocalFrame interface.
   kInternalHighPriorityLocalFrame = 71,
 
+  // Tasks that are should use input priority task queue/runner.
+  kInternalInputBlocking = 77,
+
+  // Tasks related to the WebGPU API
+  kWebGPU = 78,
+
+  // Cross-process PostMessage IPCs that are deferred in the current task.
+  kInternalPostMessageForwarding = 79,
+
   ///////////////////////////////////////
   // The following task types are only for thread-local queues.
   ///////////////////////////////////////
@@ -281,7 +291,7 @@ enum class TaskType : unsigned char {
   kWorkerThreadTaskQueueV8 = 47,
   kWorkerThreadTaskQueueCompositor = 48,
 
-  kCount = 77,
+  kMaxValue = kInternalPostMessageForwarding,
 };
 
 }  // namespace blink

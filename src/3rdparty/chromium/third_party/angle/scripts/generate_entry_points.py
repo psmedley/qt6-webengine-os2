@@ -13,6 +13,7 @@ import registry_xml
 from registry_xml import apis, script_relative, strip_api_prefix
 
 # Paths
+CL_STUBS_HEADER_PATH = "../src/libGLESv2/cl_stubs_autogen.h"
 EGL_GET_LABELED_OBJECT_DATA_PATH = "../src/libGLESv2/egl_get_labeled_object_data.json"
 EGL_STUBS_HEADER_PATH = "../src/libGLESv2/egl_stubs_autogen.h"
 EGL_EXT_STUBS_HEADER_PATH = "../src/libGLESv2/egl_ext_stubs_autogen.h"
@@ -38,6 +39,17 @@ ALIASING_EXCEPTIONS = [
     'renderbufferStorageMultisampleEXT',
 ]
 
+# These are the entry points which potentially are used first by an application
+# and require that the back ends are initialized before the front end is called.
+INIT_DICT = {
+    "clGetPlatformIDs": "false",
+    "clGetPlatformInfo": "false",
+    "clGetDeviceIDs": "false",
+    "clCreateContext": "false",
+    "clCreateContextFromType": "false",
+    "clIcdGetPlatformIDsKHR": "true",
+}
+
 # Strip these suffixes from Context entry point names. NV is excluded (for now).
 STRIP_SUFFIXES = ["ANDROID", "ANGLE", "EXT", "KHR", "OES", "CHROMIUM", "OVR"]
 
@@ -57,9 +69,7 @@ TEMPLATE_ENTRY_POINT_HEADER = """\
 
 {includes}
 
-extern "C" {{
 {entry_points}
-}} // extern "C"
 
 #endif  // {lib}_ENTRY_POINTS_{annotation_upper}_AUTOGEN_H_
 """
@@ -77,9 +87,7 @@ TEMPLATE_ENTRY_POINT_SOURCE = """\
 
 {includes}
 
-extern "C" {{
 {entry_points}
-}} // extern "C"
 """
 
 TEMPLATE_ENTRY_POINTS_ENUM_HEADER = """\
@@ -158,16 +166,16 @@ extern "C" {{
 }} // extern "C"
 """
 
-TEMPLATE_ENTRY_POINT_DECL = """ANGLE_EXPORT {return_type}{export_def} {name}{explicit_context_suffix}({explicit_context_param}{explicit_context_comma}{params});"""
+TEMPLATE_ENTRY_POINT_DECL = """{angle_export}{return_type} {export_def} {name}({params});"""
 
 TEMPLATE_GLES_ENTRY_POINT_NO_RETURN = """\
-void GL_APIENTRY GL_{name}{explicit_context_suffix}({explicit_context_param}{explicit_context_comma}{params})
+void GL_APIENTRY GL_{name}({params})
 {{
     Context *context = {context_getter};
     {event_comment}EVENT(context, GL{name}, "context = %d{comma_if_needed}{format_params}", CID(context){comma_if_needed}{pass_params});
 
     if ({valid_context_check})
-    {{{assert_explicit_context}{packed_gl_enum_conversions}
+    {{{packed_gl_enum_conversions}
         std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
         bool isCallValid = (context->skipValidation() || Validate{name}({validate_params}));
         if (isCallValid)
@@ -184,14 +192,14 @@ void GL_APIENTRY GL_{name}{explicit_context_suffix}({explicit_context_param}{exp
 """
 
 TEMPLATE_GLES_ENTRY_POINT_WITH_RETURN = """\
-{return_type}GL_APIENTRY GL_{name}{explicit_context_suffix}({explicit_context_param}{explicit_context_comma}{params})
+{return_type} GL_APIENTRY GL_{name}({params})
 {{
     Context *context = {context_getter};
     {event_comment}EVENT(context, GL{name}, "context = %d{comma_if_needed}{format_params}", CID(context){comma_if_needed}{pass_params});
 
     {return_type} returnValue;
     if ({valid_context_check})
-    {{{assert_explicit_context}{packed_gl_enum_conversions}
+    {{{packed_gl_enum_conversions}
         std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
         bool isCallValid = (context->skipValidation() || Validate{name}({validate_params}));
         if (isCallValid)
@@ -230,7 +238,7 @@ void EGLAPIENTRY EGL_{name}({params})
 """
 
 TEMPLATE_EGL_ENTRY_POINT_WITH_RETURN = """\
-{return_type}EGLAPIENTRY EGL_{name}({params})
+{return_type} EGLAPIENTRY EGL_{name}({params})
 {{
     ANGLE_SCOPED_GLOBAL_LOCK();
     EGL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
@@ -246,25 +254,85 @@ TEMPLATE_EGL_ENTRY_POINT_WITH_RETURN = """\
 """
 
 TEMPLATE_CL_ENTRY_POINT_NO_RETURN = """\
-void CL_API_ENTRY CL_{name}({params})
+void CL_API_CALL cl{name}({params})
 {{
-    // TODO: CL_EVENT
-    // CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
+    CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
 
-    // TODO: {name}
+    {packed_gl_enum_conversions}
+
+    ANGLE_CL_VALIDATE_VOID({name}{comma_if_needed}{internal_params});
+
+    {name}({internal_params});
 }}
 """
 
-TEMPLATE_CL_ENTRY_POINT_WITH_RETURN = """\
-{return_type}CL_API_ENTRY CL_{name}({params})
-{{
-    // TODO: CL_EVENT
-    // CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
+TEMPLATE_CL_ENTRY_POINT_WITH_RETURN_ERROR = """\
+cl_int CL_API_CALL cl{name}({params})
+{{{initialization}
+    CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
 
-    // TODO: {name}
+    {packed_gl_enum_conversions}
 
-    return ({return_type})0;
+    ANGLE_CL_VALIDATE_ERROR({name}{comma_if_needed}{internal_params});
+
+    return {name}({internal_params});
 }}
+"""
+
+TEMPLATE_CL_ENTRY_POINT_WITH_ERRCODE_RET = """\
+{return_type} CL_API_CALL cl{name}({params})
+{{{initialization}
+    CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
+
+    {packed_gl_enum_conversions}
+
+    ANGLE_CL_VALIDATE_ERRCODE_RET({name}{comma_if_needed}{internal_params});
+
+    cl_int errorCode = CL_SUCCESS;
+    {return_type} object = {name}({internal_params}, errorCode);
+
+    ASSERT((errorCode == CL_SUCCESS) == (object != nullptr));
+    if (errcode_ret != nullptr)
+    {{
+        *errcode_ret = errorCode;
+    }}
+    return object;
+}}
+"""
+
+TEMPLATE_CL_ENTRY_POINT_WITH_RETURN_POINTER = """\
+{return_type} CL_API_CALL cl{name}({params})
+{{{initialization}
+    CL_EVENT({name}, "{format_params}"{comma_if_needed}{pass_params});
+
+    {packed_gl_enum_conversions}
+
+    ANGLE_CL_VALIDATE_POINTER({name}{comma_if_needed}{internal_params});
+
+    return {name}({internal_params});
+}}
+"""
+
+TEMPLATE_CL_STUBS_HEADER = """\
+// GENERATED FILE - DO NOT EDIT.
+// Generated by {script_name} using data from {data_source_name}.
+//
+// Copyright 2021 The ANGLE Project Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// {annotation_lower}_stubs_autogen.h: Stubs for {title} entry points.
+
+#ifndef LIBGLESV2_{annotation_upper}_STUBS_AUTOGEN_H_
+#define LIBGLESV2_{annotation_upper}_STUBS_AUTOGEN_H_
+
+#include "libANGLE/CLtypes.h"
+
+namespace cl
+{{
+{stubs}
+}}  // namespace cl
+#endif  // LIBGLESV2_{annotation_upper}_STUBS_AUTOGEN_H_
 """
 
 TEMPLATE_EGL_STUBS_HEADER = """\
@@ -328,40 +396,30 @@ CONTEXT_HEADER = """\
 
 CONTEXT_DECL_FORMAT = """    {return_type} {name_lower_no_suffix}({internal_params}){maybe_const}; \\"""
 
-TEMPLATE_GL_ENTRY_POINT_EXPORT = """\
-{return_type}GL_APIENTRY gl{name}{explicit_context_suffix}({explicit_context_param}{explicit_context_comma}{params})
+TEMPLATE_CL_ENTRY_POINT_EXPORT = """\
+{return_type} CL_API_CALL cl{name}({params})
 {{
-    return GL_{name}{explicit_context_suffix}({explicit_context_internal_param}{explicit_context_comma}{internal_params});
+    return cl::GetDispatch().cl{name}({internal_params});
+}}
+"""
+
+TEMPLATE_GL_ENTRY_POINT_EXPORT = """\
+{return_type} GL_APIENTRY gl{name}({params})
+{{
+    return GL_{name}({internal_params});
 }}
 """
 
 TEMPLATE_EGL_ENTRY_POINT_EXPORT = """\
-{return_type}EGLAPIENTRY egl{name}({params})
+{return_type} EGLAPIENTRY egl{name}({params})
 {{
     EnsureEGLLoaded();
     return EGL_{name}({internal_params});
 }}
 """
 
-TEMPLATE_GLEXT_EXPLICIT_CONTEXT_INC = """\
-// GENERATED FILE - DO NOT EDIT.
-// Generated by {script_name} using data from {data_source_name}.
-//
-// Copyright 2020 The ANGLE Project Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-//
-// gl{version}ext_explicit_context_autogen.inc:
-//   Function declarations for the EGL_ANGLE_explicit_context extension
-
-{function_pointers}
-#ifdef GL_GLEXT_PROTOTYPES
-{function_prototypes}
-#endif
-"""
-
-TEMPLATE_GLEXT_FUNCTION_POINTER = """typedef {return_type}(GL_APIENTRYP PFN{name_upper}{explicit_context_suffix_upper}PROC)({explicit_context_param}{explicit_context_comma}{params});"""
-TEMPLATE_GLEXT_FUNCTION_PROTOTYPE = """{apicall} {return_type}GL_APIENTRY {name}{explicit_context_suffix}({explicit_context_param}{explicit_context_comma}{params});"""
+TEMPLATE_GLEXT_FUNCTION_POINTER = """typedef {return_type}(GL_APIENTRYP PFN{name_upper}PROC)({params});"""
+TEMPLATE_GLEXT_FUNCTION_PROTOTYPE = """{apicall} {return_type}GL_APIENTRY {name}({params});"""
 
 TEMPLATE_GL_VALIDATION_HEADER = """\
 // GENERATED FILE - DO NOT EDIT.
@@ -385,6 +443,30 @@ class Context;
 
 {prototypes}
 }}  // namespace gl
+
+#endif  // LIBANGLE_VALIDATION_{annotation}_AUTOGEN_H_
+"""
+
+TEMPLATE_CL_VALIDATION_HEADER = """\
+// GENERATED FILE - DO NOT EDIT.
+// Generated by {script_name} using data from {data_source_name}.
+//
+// Copyright 2021 The ANGLE Project Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// validation{annotation}_autogen.h:
+//   Validation functions for the {comment} entry points.
+
+#ifndef LIBANGLE_VALIDATION_{annotation}_AUTOGEN_H_
+#define LIBANGLE_VALIDATION_{annotation}_AUTOGEN_H_
+
+#include "libANGLE/validationCL.h"
+
+namespace cl
+{{
+{prototypes}
+}}  // namespace cl
 
 #endif  // LIBANGLE_VALIDATION_{annotation}_AUTOGEN_H_
 """
@@ -536,7 +618,7 @@ using namespace gl;
 namespace angle
 {{
 
-void FrameCapture::ReplayCall(gl::Context *context,
+void FrameCaptureShared::ReplayCall(gl::Context *context,
                               ReplayContext *replayContext,
                               const CallCapture &call)
 {{
@@ -622,18 +704,18 @@ FORMAT_DICT = {
     "LPGLYPHMETRICSFLOAT": POINTER_FORMAT,
     "UINT": "%u",
     # CL-specific types
-    "size_t": "%u",
-    "cl_char": "%d",
-    "cl_uchar": "%u",
-    "cl_short": "%d",
-    "cl_ushort": "%u",
+    "size_t": "%zu",
+    "cl_char": "%hhd",
+    "cl_uchar": "%hhu",
+    "cl_short": "%hd",
+    "cl_ushort": "%hu",
     "cl_int": "%d",
     "cl_uint": "%u",
-    "cl_long": "%d",
-    "cl_ulong": "%u",
-    "cl_half": "%lf",
-    "cl_float": "%lf",
-    "cl_double": "%lf",
+    "cl_long": "%lld",
+    "cl_ulong": "%llu",
+    "cl_half": "%hu",
+    "cl_float": "%f",
+    "cl_double": "%f",
     "cl_platform_id": POINTER_FORMAT,
     "cl_device_id": POINTER_FORMAT,
     "cl_context": POINTER_FORMAT,
@@ -642,63 +724,61 @@ FORMAT_DICT = {
     "cl_program": POINTER_FORMAT,
     "cl_kernel": POINTER_FORMAT,
     "cl_event": POINTER_FORMAT,
-    "cl_program": POINTER_FORMAT,
     "cl_sampler": POINTER_FORMAT,
     "cl_bool": "%u",
-    "cl_bitfield": "%u",
-    "cl_properties": "%u",
-    "cl_device_type": "%u",
+    "cl_bitfield": "%llu",
+    "cl_properties": "%llu",
+    "cl_device_type": "%llu",
     "cl_platform_info": "%u",
     "cl_device_info": "%u",
-    "cl_platform_info": "%u",
-    "cl_device_fp_config": "%u",
+    "cl_device_fp_config": "%llu",
     "cl_device_mem_cache_type": "%u",
     "cl_device_local_mem_type": "%u",
-    "cl_device_exec_capabilities": "%u",
-    "cl_device_svm_capabilities": "%u",
-    "cl_command_queue_properties": "%u",
-    "cl_device_partition_property": "%u",
-    "cl_device_affinity_domain": "%u",
-    "cl_context_properties": "%u",
+    "cl_device_exec_capabilities": "%llu",
+    "cl_device_svm_capabilities": "%llu",
+    "cl_command_queue_properties": "%llu",
+    "cl_device_partition_property": "%zu",
+    "cl_device_affinity_domain": "%llu",
+    "cl_context_properties": "%zu",
     "cl_context_info": "%u",
-    "cl_queue_properties": "%u",
+    "cl_queue_properties": "%llu",
     "cl_command_queue_info": "%u",
     "cl_channel_order": "%u",
     "cl_channel_type": "%u",
-    "cl_mem_flags": "%u",
-    "cl_svm_mem_flags": "%u",
+    "cl_mem_flags": "%llu",
+    "cl_svm_mem_flags": "%llu",
     "cl_mem_object_type": "%u",
     "cl_mem_info": "%u",
-    "cl_mem_migration_flags": "%u",
+    "cl_mem_migration_flags": "%llu",
+    "cl_mem_properties": "%llu",
     "cl_image_info": "%u",
     "cl_buffer_create_type": "%u",
     "cl_addressing_mode": "%u",
     "cl_filter_mode": "%u",
     "cl_sampler_info": "%u",
-    "cl_map_flags": "%u",
-    "cl_pipe_properties": "%u",
+    "cl_map_flags": "%llu",
+    "cl_pipe_properties": "%zu",
     "cl_pipe_info": "%u",
     "cl_program_info": "%u",
     "cl_program_build_info": "%u",
     "cl_program_binary_type": "%u",
-    "cl_build_status": "%u",
+    "cl_build_status": "%d",
     "cl_kernel_info": "%u",
     "cl_kernel_arg_info": "%u",
     "cl_kernel_arg_address_qualifier": "%u",
     "cl_kernel_arg_access_qualifier": "%u",
-    "cl_kernel_arg_type_qualifier": "%u",
+    "cl_kernel_arg_type_qualifier": "%llu",
     "cl_kernel_work_group_info": "%u",
     "cl_kernel_sub_group_info": "%u",
     "cl_event_info": "%u",
     "cl_command_type": "%u",
     "cl_profiling_info": "%u",
-    "cl_sampler_properties": "%u",
+    "cl_sampler_properties": "%llu",
     "cl_kernel_exec_info": "%u",
-    "cl_device_atomic_capabilities": "%u",
-    "cl_device_device_enqueue_capabilities": "%u",
+    "cl_device_atomic_capabilities": "%llu",
     "cl_khronos_vendor_id": "%u",
-    "cl_mem_properties": "%u",
     "cl_version": "%u",
+    "cl_device_device_enqueue_capabilities": "%llu",
 }
 
 TEMPLATE_HEADER_INCLUDES = """\
@@ -803,6 +883,10 @@ EGL_EXT_SOURCE_INCLUDES = """\
 using namespace egl;
 """
 
+LIBCL_EXPORT_INCLUDES = """
+#include "libOpenCL/dispatch.h"
+"""
+
 LIBGLESV2_EXPORT_INCLUDES = """
 #include "angle_gl.h"
 
@@ -864,7 +948,7 @@ void EnsureEGLLoaded()
     }
 
     EntryPointsLib().reset(
-        angle::OpenSharedLibrary(ANGLE_GLESV2_LIBRARY_NAME, angle::SearchType::ApplicationDir));
+        angle::OpenSharedLibrary(ANGLE_GLESV2_LIBRARY_NAME, angle::SearchType::ModuleDir));
     angle::LoadEGL_EGL(GlobalLoad);
     if (!EGL_GetPlatformDisplay)
     {
@@ -882,13 +966,15 @@ void EnsureEGLLoaded() {}
 """
 
 LIBCL_HEADER_INCLUDES = """\
-#include "export.h"
-
-#include <CL/cl.h>
+#include "angle_cl.h"
 """
 
 LIBCL_SOURCE_INCLUDES = """\
-#include "entry_points_cl_autogen.h"
+#include "libGLESv2/entry_points_cl_autogen.h"
+
+#include "libANGLE/validationCL_autogen.h"
+#include "libGLESv2/cl_stubs_autogen.h"
+#include "libGLESv2/entry_points_cl_utils.h"
 """
 
 TEMPLATE_EVENT_COMMENT = """\
@@ -898,7 +984,7 @@ TEMPLATE_EVENT_COMMENT = """\
 
 TEMPLATE_CAPTURE_PROTO = "angle::CallCapture Capture%s(%s);"
 
-TEMPLATE_VALIDATION_PROTO = "bool Validate%s(%s);"
+TEMPLATE_VALIDATION_PROTO = "%s Validate%s(%s);"
 
 TEMPLATE_WINDOWS_DEF_FILE = """\
 ; GENERATED FILE - DO NOT EDIT.
@@ -1103,6 +1189,44 @@ TEMPLATE_RESOURCE_ID_TYPE_NAME_CASE = """\
         case ResourceIDType::{resource_id_type}:
             return "{resource_id_type}";"""
 
+CL_PACKED_TYPES = {
+    # Enums
+    "cl_platform_info": "PlatformInfo",
+    "cl_device_info": "DeviceInfo",
+    "cl_context_info": "ContextInfo",
+    "cl_command_queue_info": "CommandQueueInfo",
+    "cl_mem_object_type": "MemObjectType",
+    "cl_mem_info": "MemInfo",
+    "cl_image_info": "ImageInfo",
+    "cl_pipe_info": "PipeInfo",
+    "cl_addressing_mode": "AddressingMode",
+    "cl_filter_mode": "FilterMode",
+    "cl_sampler_info": "SamplerInfo",
+    "cl_program_info": "ProgramInfo",
+    "cl_program_build_info": "ProgramBuildInfo",
+    "cl_kernel_info": "KernelInfo",
+    "cl_kernel_arg_info": "KernelArgInfo",
+    "cl_kernel_work_group_info": "KernelWorkGroupInfo",
+    "cl_kernel_sub_group_info": "KernelSubGroupInfo",
+    "cl_kernel_exec_info": "KernelExecInfo",
+    "cl_event_info": "EventInfo",
+    "cl_profiling_info": "ProfilingInfo",
+    # Bit fields
+    "cl_device_type": "DeviceType",
+    "cl_device_fp_config": "DeviceFpConfig",
+    "cl_device_exec_capabilities": "DeviceExecCapabilities",
+    "cl_device_svm_capabilities": "DeviceSvmCapabilities",
+    "cl_command_queue_properties": "CommandQueueProperties",
+    "cl_device_affinity_domain": "DeviceAffinityDomain",
+    "cl_mem_flags": "MemFlags",
+    "cl_svm_mem_flags": "SVM_MemFlags",
+    "cl_mem_migration_flags": "MemMigrationFlags",
+    "cl_map_flags": "MapFlags",
+    "cl_kernel_arg_type_qualifier": "KernelArgTypeQualifier",
+    "cl_device_atomic_capabilities": "DeviceAtomicCapabilities",
+    "cl_device_device_enqueue_capabilities": "DeviceEnqueueCapabilities",
+}
+
 EGL_PACKED_TYPES = {
     "EGLContext": "gl::Context *",
     "EGLConfig": "Config *",
@@ -1122,52 +1246,103 @@ def is_aliasing_excepted(api, cmd_name):
     return api == apis.GLES and cmd_name in ALIASING_EXCEPTIONS
 
 
+def entry_point_export(api):
+    if api == apis.CL:
+        return ""
+    return "ANGLE_EXPORT "
+
+
 def entry_point_prefix(api):
+    if api == apis.CL:
+        return "cl"
     if api == apis.GLES:
-        return "GL"
-    return api
+        return "GL_"
+    return api + "_"
 
 
 def get_api_entry_def(api):
     if api == apis.EGL:
         return "EGLAPIENTRY"
     elif api == apis.CL:
-        return "CL_API_ENTRY"
+        return "CL_API_CALL"
     else:
         return "GL_APIENTRY"
 
 
-def format_entry_point_decl(api, cmd_name, proto, params, is_explicit_context):
+def get_stubs_header_template(api):
+    if api == apis.CL:
+        return TEMPLATE_CL_STUBS_HEADER
+    elif api == apis.EGL:
+        return TEMPLATE_EGL_STUBS_HEADER
+    else:
+        return ""
+
+
+def format_entry_point_decl(api, cmd_name, proto, params):
     comma_if_needed = ", " if len(params) > 0 else ""
     stripped = strip_api_prefix(cmd_name)
     return TEMPLATE_ENTRY_POINT_DECL.format(
+        angle_export=entry_point_export(api),
         export_def=get_api_entry_def(api),
-        name="%s_%s" % (entry_point_prefix(api), stripped),
-        return_type=proto[:-len(cmd_name)],
+        name="%s%s" % (entry_point_prefix(api), stripped),
+        return_type=proto[:-len(cmd_name)].strip(),
         params=", ".join(params),
-        comma_if_needed=comma_if_needed,
-        explicit_context_suffix="ContextANGLE" if is_explicit_context else "",
-        explicit_context_param="GLeglContext ctx" if is_explicit_context else "",
-        explicit_context_comma=", " if is_explicit_context and len(params) > 0 else "")
+        comma_if_needed=comma_if_needed)
 
 
-def type_name_sep_index(param):
-    space = param.rfind(" ")
-    pointer = param.rfind("*")
-    return max(space, pointer)
+# Returns index range of identifier in function parameter
+def find_name_range(param):
+
+    def is_allowed_in_identifier(char):
+        return char.isalpha() or char.isdigit() or char == "_"
+
+    # If type is a function declaration, only search in first parentheses
+    left_paren = param.find("(")
+    if left_paren >= 0:
+        min = left_paren + 1
+        end = param.index(")")
+    else:
+        min = 0
+        end = len(param)
+
+    # Find last identifier in search range
+    while end > min and not is_allowed_in_identifier(param[end - 1]):
+        end -= 1
+    if end == min:
+        raise ValueError
+    start = end - 1
+    while start > min and is_allowed_in_identifier(param[start - 1]):
+        start -= 1
+    return start, end
 
 
 def just_the_type(param):
-    if "*" in param:
-        return param[:type_name_sep_index(param) + 1].strip()
-    return param[:type_name_sep_index(param)].strip()
+    start, end = find_name_range(param)
+    return param[:start].strip() + param[end:].strip()
 
 
 def just_the_name(param):
-    return param[type_name_sep_index(param) + 1:].strip()
+    start, end = find_name_range(param)
+    return param[start:end]
 
 
 def make_param(param_type, param_name):
+
+    def insert_name(param_type, param_name, pos):
+        return param_type[:pos] + " " + param_name + param_type[pos:]
+
+    # If type is a function declaration, insert identifier before first closing parentheses
+    left_paren = param_type.find("(")
+    if left_paren >= 0:
+        right_paren = param_type.index(")")
+        return insert_name(param_type, param_name, right_paren)
+
+    # If type is an array declaration, insert identifier before brackets
+    brackets = param_type.find("[")
+    if brackets >= 0:
+        return insert_name(param_type, param_name, brackets)
+
+    # Otherwise just append identifier
     return param_type + " " + param_name
 
 
@@ -1231,13 +1406,6 @@ def param_format_string(param):
         return just_the_name(param) + " = " + FORMAT_DICT[type_only]
 
 
-def default_return_value(cmd_name, return_type):
-    if return_type == "void":
-        return ""
-    return "GetDefaultReturnValue<EntryPoint::%s, %s>()" % (strip_api_prefix(cmd_name),
-                                                            return_type)
-
-
 def is_context_lost_acceptable_cmd(cmd_name):
     lost_context_acceptable_cmds = [
         "glGetError",
@@ -1254,35 +1422,23 @@ def is_context_lost_acceptable_cmd(cmd_name):
     return False
 
 
-def get_context_getter_function(cmd_name, is_explicit_context):
-    if is_explicit_context:
-        return "static_cast<gl::Context *>(ctx)"
-
+def get_context_getter_function(cmd_name):
     if is_context_lost_acceptable_cmd(cmd_name):
         return "GetGlobalContext()"
 
     return "GetValidGlobalContext()"
 
 
-def get_valid_context_check(cmd_name, is_explicit_context):
-    if is_explicit_context:
-        if is_context_lost_acceptable_cmd(cmd_name):
-            return "context"
-        else:
-            return "context && !context->isContextLost()"
-
+def get_valid_context_check(cmd_name):
     return "context"
 
 
-def get_constext_lost_error_generator(cmd_name, is_explicit_context):
+def get_constext_lost_error_generator(cmd_name):
     # Don't generate context lost errors on commands that accept lost contexts
     if is_context_lost_acceptable_cmd(cmd_name):
         return ""
 
-    if is_explicit_context:
-        return "GenerateContextLostErrorOnContext(context);"
-    else:
-        return "GenerateContextLostErrorOnCurrentGlobalContext();"
+    return "GenerateContextLostErrorOnCurrentGlobalContext();"
 
 
 def strip_suffix(api, name):
@@ -1319,27 +1475,37 @@ def get_packed_enums(api, cmd_packed_gl_enums, cmd_name, packed_param_types, par
     return result
 
 
-def get_def_template(api, return_type):
-    if return_type.strip() == "void":
+def get_def_template(api, return_type, has_errcode_ret):
+    if return_type == "void":
         if api == apis.EGL:
             return TEMPLATE_EGL_ENTRY_POINT_NO_RETURN
         elif api == apis.CL:
             return TEMPLATE_CL_ENTRY_POINT_NO_RETURN
         else:
             return TEMPLATE_GLES_ENTRY_POINT_NO_RETURN
+    elif return_type == "cl_int":
+        return TEMPLATE_CL_ENTRY_POINT_WITH_RETURN_ERROR
     else:
         if api == apis.EGL:
             return TEMPLATE_EGL_ENTRY_POINT_WITH_RETURN
         elif api == apis.CL:
-            return TEMPLATE_CL_ENTRY_POINT_WITH_RETURN
+            if has_errcode_ret:
+                return TEMPLATE_CL_ENTRY_POINT_WITH_ERRCODE_RET
+            else:
+                return TEMPLATE_CL_ENTRY_POINT_WITH_RETURN_POINTER
         else:
             return TEMPLATE_GLES_ENTRY_POINT_WITH_RETURN
 
 
-def format_entry_point_def(api, command_node, cmd_name, proto, params, is_explicit_context,
-                           cmd_packed_enums, packed_param_types, ep_to_object):
+def format_entry_point_def(api, command_node, cmd_name, proto, params, cmd_packed_enums,
+                           packed_param_types, ep_to_object):
     packed_enums = get_packed_enums(api, cmd_packed_enums, cmd_name, packed_param_types, params)
     internal_params = [just_the_name_packed(param, packed_enums) for param in params]
+    if internal_params and internal_params[-1] == "errcode_ret":
+        internal_params.pop()
+        has_errcode_ret = True
+    else:
+        has_errcode_ret = False
     packed_gl_enum_conversions = []
     for param in params:
         name = just_the_name(param)
@@ -1353,8 +1519,8 @@ def format_entry_point_def(api, command_node, cmd_name, proto, params, is_explic
 
     pass_params = [param_print_argument(command_node, param) for param in params]
     format_params = [param_format_string(param) for param in params]
-    return_type = proto[:-len(cmd_name)]
-    default_return = default_return_value(cmd_name, return_type.strip())
+    return_type = proto[:-len(cmd_name)].strip()
+    initialization = "InitBackEnds(%s);\n" % INIT_DICT[cmd_name] if cmd_name in INIT_DICT else ""
     event_comment = TEMPLATE_EVENT_COMMENT if cmd_name in NO_EVENT_MARKER_EXCEPTIONS_LIST else ""
     name_lower_no_suffix = strip_suffix(api, cmd_name[2:3].lower() + cmd_name[3:])
 
@@ -1369,6 +1535,8 @@ def format_entry_point_def(api, command_node, cmd_name, proto, params, is_explic
             ", ".join(params),
         "internal_params":
             ", ".join(internal_params),
+        "initialization":
+            initialization,
         "packed_gl_enum_conversions":
             "".join(packed_gl_enum_conversions),
         "pass_params":
@@ -1380,26 +1548,18 @@ def format_entry_point_def(api, command_node, cmd_name, proto, params, is_explic
         "format_params":
             ", ".join(format_params),
         "context_getter":
-            get_context_getter_function(cmd_name, is_explicit_context),
+            get_context_getter_function(cmd_name),
         "valid_context_check":
-            get_valid_context_check(cmd_name, is_explicit_context),
+            get_valid_context_check(cmd_name),
         "constext_lost_error_generator":
-            get_constext_lost_error_generator(cmd_name, is_explicit_context),
+            get_constext_lost_error_generator(cmd_name),
         "event_comment":
             event_comment,
-        "explicit_context_suffix":
-            "ContextANGLE" if is_explicit_context else "",
-        "explicit_context_param":
-            "GLeglContext ctx" if is_explicit_context else "",
-        "explicit_context_comma":
-            ", " if is_explicit_context and len(params) > 0 else "",
-        "assert_explicit_context":
-            "\nASSERT(context == GetValidGlobalContext());" if is_explicit_context else "",
         "labeled_object":
             get_egl_entry_point_labeled_object(ep_to_object, cmd_name, params, packed_enums)
     }
 
-    template = get_def_template(api, return_type)
+    template = get_def_template(api, return_type, has_errcode_ret)
     return template.format(**format_params)
 
 
@@ -1485,10 +1645,12 @@ def format_capture_method(api, command, cmd_name, proto, params, all_param_types
 
 def const_pointer_type(param, packed_gl_enums):
     type = just_the_type_packed(param, packed_gl_enums)
-    if "**" in type and "const" not in type:
+    if just_the_name(param) == "errcode_ret" or "(" in type:
+        return type
+    elif "**" in type and "const" not in type:
         return type.replace("**", "* const *")
     elif "*" in type and "const" not in type:
-        return "const " + type
+        return type.replace("*", "*const ") if "[]" in type else "const " + type
     else:
         return type
 
@@ -1506,10 +1668,11 @@ def get_internal_params(api, cmd_name, params, cmd_packed_gl_enums, packed_param
 def get_validation_params(api, cmd_name, params, cmd_packed_gl_enums, packed_param_types):
     packed_gl_enums = get_packed_enums(api, cmd_packed_gl_enums, cmd_name, packed_param_types,
                                        params)
+    last = -1 if params and just_the_name(params[-1]) == "errcode_ret" else None
     return ", ".join([
         make_param(
-            const_pointer_type(param, packed_gl_enums), just_the_name_packed(
-                param, packed_gl_enums)) for param in params
+            const_pointer_type(param, packed_gl_enums),
+            just_the_name_packed(param, packed_gl_enums)) for param in params[:last]
     ])
 
 
@@ -1518,7 +1681,7 @@ def format_context_decl(api, cmd_name, proto, params, template, cmd_packed_gl_en
     internal_params = get_internal_params(api, cmd_name, params, cmd_packed_gl_enums,
                                           packed_param_types)
 
-    return_type = proto[:-len(cmd_name)]
+    return_type = proto[:-len(cmd_name)].strip()
     name_lower_no_suffix = cmd_name[2:3].lower() + cmd_name[3:]
     name_lower_no_suffix = strip_suffix(api, name_lower_no_suffix)
     maybe_const = " const" if name_lower_no_suffix.startswith(
@@ -1531,22 +1694,22 @@ def format_context_decl(api, cmd_name, proto, params, template, cmd_packed_gl_en
         maybe_const=maybe_const)
 
 
-def format_entry_point_export(cmd_name, proto, params, is_explicit_context, template):
+def format_entry_point_export(cmd_name, proto, params, template):
     internal_params = [just_the_name(param) for param in params]
-    return_type = proto[:-len(cmd_name)]
+    return_type = proto[:-len(cmd_name)].strip()
 
     return template.format(
         name=strip_api_prefix(cmd_name),
         return_type=return_type,
         params=", ".join(params),
-        internal_params=", ".join(internal_params),
-        explicit_context_suffix="ContextANGLE" if is_explicit_context else "",
-        explicit_context_param="GLeglContext ctx" if is_explicit_context else "",
-        explicit_context_comma=", " if is_explicit_context and len(params) > 0 else "",
-        explicit_context_internal_param="ctx" if is_explicit_context else "")
+        internal_params=", ".join(internal_params))
 
 
-def format_validation_proto(api, cmd_name, params, cmd_packed_gl_enums, packed_param_types):
+def format_validation_proto(api, cmd_name, proto, params, cmd_packed_gl_enums, packed_param_types):
+    if api == apis.CL:
+        return_type = "cl_int"
+    else:
+        return_type = "bool"
     if api in [apis.GL, apis.GLES]:
         with_extra_params = ["Context *context"] + params
     elif api == apis.EGL:
@@ -1555,7 +1718,7 @@ def format_validation_proto(api, cmd_name, params, cmd_packed_gl_enums, packed_p
         with_extra_params = params
     internal_params = get_validation_params(api, cmd_name, with_extra_params, cmd_packed_gl_enums,
                                             packed_param_types)
-    return TEMPLATE_VALIDATION_PROTO % (strip_api_prefix(cmd_name), internal_params)
+    return TEMPLATE_VALIDATION_PROTO % (return_type, strip_api_prefix(cmd_name), internal_params)
 
 
 def format_capture_proto(api, cmd_name, proto, params, cmd_packed_gl_enums, packed_param_types):
@@ -1581,7 +1744,6 @@ class ANGLEEntryPoints(registry_xml.EntryPoints):
                  all_param_types,
                  cmd_packed_enums,
                  export_template=TEMPLATE_GL_ENTRY_POINT_EXPORT,
-                 is_explicit_context=False,
                  packed_param_types=[],
                  ep_to_object={}):
         super().__init__(api, xml, commands)
@@ -1595,21 +1757,17 @@ class ANGLEEntryPoints(registry_xml.EntryPoints):
         self.capture_pointer_funcs = []
 
         for (cmd_name, command_node, param_text, proto_text) in self.get_infos():
-            self.decls.append(
-                format_entry_point_decl(self.api, cmd_name, proto_text, param_text,
-                                        is_explicit_context))
+            self.decls.append(format_entry_point_decl(self.api, cmd_name, proto_text, param_text))
             self.defs.append(
                 format_entry_point_def(self.api, command_node, cmd_name, proto_text, param_text,
-                                       is_explicit_context, cmd_packed_enums, packed_param_types,
-                                       ep_to_object))
+                                       cmd_packed_enums, packed_param_types, ep_to_object))
 
             self.export_defs.append(
-                format_entry_point_export(cmd_name, proto_text, param_text, is_explicit_context,
-                                          export_template))
+                format_entry_point_export(cmd_name, proto_text, param_text, export_template))
 
             self.validation_protos.append(
-                format_validation_proto(self.api, cmd_name, param_text, cmd_packed_enums,
-                                        packed_param_types))
+                format_validation_proto(self.api, cmd_name, proto_text, param_text,
+                                        cmd_packed_enums, packed_param_types))
             self.capture_protos.append(
                 format_capture_proto(self.api, cmd_name, proto_text, param_text, cmd_packed_enums,
                                      packed_param_types))
@@ -1623,14 +1781,9 @@ class GLEntryPoints(ANGLEEntryPoints):
 
     all_param_types = set()
 
-    def __init__(self, api, xml, commands, is_explicit_context=False):
-        super().__init__(
-            api,
-            xml,
-            commands,
-            GLEntryPoints.all_param_types,
-            GLEntryPoints.get_packed_enums(),
-            is_explicit_context=is_explicit_context)
+    def __init__(self, api, xml, commands):
+        super().__init__(api, xml, commands, GLEntryPoints.all_param_types,
+                         GLEntryPoints.get_packed_enums())
 
     _packed_enums = None
 
@@ -1697,8 +1850,14 @@ class CLEntryPoints(ANGLEEntryPoints):
     all_param_types = set()
 
     def __init__(self, xml, commands):
-        super().__init__(apis.CL, xml, commands, CLEntryPoints.all_param_types,
-                         CLEntryPoints.get_packed_enums())
+        super().__init__(
+            apis.CL,
+            xml,
+            commands,
+            CLEntryPoints.all_param_types,
+            CLEntryPoints.get_packed_enums(),
+            export_template=TEMPLATE_CL_ENTRY_POINT_EXPORT,
+            packed_param_types=CL_PACKED_TYPES)
 
     @classmethod
     def get_packed_enums(cls):
@@ -1733,7 +1892,7 @@ def get_decls(api,
     return decls
 
 
-def get_glext_decls(all_commands, gles_commands, version, is_explicit_context):
+def get_glext_decls(all_commands, gles_commands, version):
     glext_ptrs = []
     glext_protos = []
     is_gles1 = False
@@ -1760,10 +1919,6 @@ def get_glext_decls(all_commands, gles_commands, version, is_explicit_context):
             "name_upper": cmd_name.upper(),
             "return_type": return_type,
             "params": params,
-            "explicit_context_comma": ", " if is_explicit_context and len(params) > 0 else "",
-            "explicit_context_suffix": "ContextANGLE" if is_explicit_context else "",
-            "explicit_context_suffix_upper": "CONTEXTANGLE" if is_explicit_context else "",
-            "explicit_context_param": "GLeglContext ctx" if is_explicit_context else ""
         }
 
         glext_ptrs.append(TEMPLATE_GLEXT_FUNCTION_POINTER.format(**format_params))
@@ -1851,26 +2006,6 @@ def write_context_api_decls(decls, api):
         with open(path, "w") as out:
             out.write(content)
             out.close()
-
-
-def write_glext_explicit_context_inc(version, ptrs, protos):
-    possible_versions = ["31", "32"]
-    folder_version = version if version not in possible_versions else "3"
-
-    content = TEMPLATE_GLEXT_EXPLICIT_CONTEXT_INC.format(
-        script_name=os.path.basename(sys.argv[0]),
-        data_source_name="gl.xml and gl_angle_ext.xml",
-        version=version,
-        function_pointers=ptrs,
-        function_prototypes=protos)
-
-    path = os.path.join(
-        script_relative(".."), "include", "GLES{}".format(folder_version),
-        "gl{}ext_explicit_context_autogen.inc".format(version))
-
-    with open(path, "w") as out:
-        out.write(content)
-        out.close()
 
 
 def write_validation_header(annotation, comment, protos, source, template):
@@ -2291,8 +2426,8 @@ def get_egl_entry_point_labeled_object(ep_to_object, cmd_stripped, params, packe
     return "Get%sIfValid(%s, %s)" % (category, display_param, found_param)
 
 
-def write_egl_stubs_header(annotation, title, data_source, out_file, all_commands, commands,
-                           cmd_packed_egl_enums):
+def write_stubs_header(api, annotation, title, data_source, out_file, all_commands, commands,
+                       cmd_packed_egl_enums, packed_param_types):
 
     stubs = []
 
@@ -2304,11 +2439,14 @@ def write_egl_stubs_header(annotation, title, data_source, out_file, all_command
             continue
 
         proto_text = "".join(proto.itertext())
-        params = ["".join(param.itertext()) for param in command.findall('param')]
-        return_type = proto_text[:-len(cmd_name)]
+        params = [] if api == apis.CL else ["Thread *thread"]
+        params += ["".join(param.itertext()) for param in command.findall('param')]
+        if params and just_the_name(params[-1]) == "errcode_ret":
+            params[-1] = "cl_int &errorCode"
+        return_type = proto_text[:-len(cmd_name)].strip()
 
-        internal_params = get_internal_params(apis.EGL, cmd_name, ["Thread *thread"] + params,
-                                              cmd_packed_egl_enums, EGL_PACKED_TYPES)
+        internal_params = get_internal_params(api, cmd_name, params, cmd_packed_egl_enums,
+                                              packed_param_types)
 
         stubs.append("%s %s(%s);" % (return_type, strip_api_prefix(cmd_name), internal_params))
 
@@ -2316,13 +2454,12 @@ def write_egl_stubs_header(annotation, title, data_source, out_file, all_command
         "annotation_lower": annotation.lower(),
         "annotation_upper": annotation.upper(),
         "data_source_name": data_source,
-        "return_type": proto[:-len(cmd_name)],
         "script_name": os.path.basename(sys.argv[0]),
         "stubs": "\n".join(stubs),
         "title": title,
     }
 
-    output = TEMPLATE_EGL_STUBS_HEADER.format(**args)
+    output = get_stubs_header_template(api).format(**args)
 
     with open(out_file, "w") as f:
         f.write(output)
@@ -2337,10 +2474,10 @@ def main():
             EGL_GET_LABELED_OBJECT_DATA_PATH
         ] + registry_xml.xml_inputs
         outputs = [
+            CL_STUBS_HEADER_PATH,
             EGL_STUBS_HEADER_PATH,
             EGL_EXT_STUBS_HEADER_PATH,
-            '../src/libOpenCL/entry_points_cl_autogen.cpp',
-            '../src/libOpenCL/entry_points_cl_autogen.h',
+            '../src/libOpenCL/libOpenCL_autogen.cpp',
             '../src/common/entry_points_enum_autogen.cpp',
             '../src/common/entry_points_enum_autogen.h',
             '../src/libANGLE/Context_gl_1_autogen.h',
@@ -2368,6 +2505,7 @@ def main():
             '../src/libANGLE/capture/frame_capture_replay_autogen.cpp',
             '../src/libANGLE/capture/frame_capture_utils_autogen.cpp',
             '../src/libANGLE/capture/frame_capture_utils_autogen.h',
+            '../src/libANGLE/validationCL_autogen.h',
             '../src/libANGLE/validationEGL_autogen.h',
             '../src/libANGLE/validationES1_autogen.h',
             '../src/libANGLE/validationES2_autogen.h',
@@ -2381,6 +2519,8 @@ def main():
             '../src/libANGLE/validationGL4_autogen.h',
             '../src/libEGL/libEGL_autogen.cpp',
             '../src/libEGL/libEGL_autogen.def',
+            '../src/libGLESv2/entry_points_cl_autogen.cpp',
+            '../src/libGLESv2/entry_points_cl_autogen.h',
             '../src/libGLESv2/entry_points_egl_autogen.cpp',
             '../src/libGLESv2/entry_points_egl_autogen.h',
             '../src/libGLESv2/entry_points_egl_ext_autogen.cpp',
@@ -2459,6 +2599,10 @@ def main():
         all_commands_with_suffix.extend(xml.commands[version])
 
         eps = GLEntryPoints(apis.GLES, xml, version_commands)
+        eps.decls.insert(0, "extern \"C\" {")
+        eps.decls.append("} // extern \"C\"")
+        eps.defs.insert(0, "extern \"C\" {")
+        eps.defs.append("} // extern \"C\"")
 
         # Write the version as a comment before the first EP.
         libgles_ep_exports.append("\n    ; OpenGL ES %s" % comment)
@@ -2498,8 +2642,8 @@ def main():
         write_capture_source(version, validation_annotation, comment, eps.capture_methods)
 
     # After we finish with the main entry points, we process the extensions.
-    extension_defs = []
-    extension_decls = []
+    extension_decls = ["extern \"C\" {"]
+    extension_defs = ["extern \"C\" {"]
     extension_commands = []
 
     # Accumulated validation prototypes.
@@ -2561,55 +2705,6 @@ def main():
         all_commands_with_suffix.append(name)
         all_commands_no_suffix.append(strip_suffix(apis.GLES, name))
 
-    # Special handling for EGL_ANGLE_explicit_context extension
-    if registry_xml.support_EGL_ANGLE_explicit_context:
-        comment = "\n// EGL_ANGLE_explicit_context"
-        extension_defs.append(comment)
-        extension_decls.append(comment)
-        libgles_ep_defs.append(comment)
-
-        cmds = xml.all_cmd_names.get_all_commands()
-
-        # Get the explicit context entry points
-        eps = GLEntryPoints(apis.GLES, xml, cmds, is_explicit_context=True)
-
-        # Append the explicit context entry points
-        extension_decls += eps.decls
-        extension_defs += eps.defs
-        libgles_ep_defs += eps.export_defs
-
-        libgles_ep_exports.append("\n    ; EGL_ANGLE_explicit_context")
-        libgles_ep_exports += get_exports(cmds, lambda x: "%sContextANGLE" % x)
-
-        # Generate .inc files for extension function pointers and declarations
-        for major, minor in registry_xml.GLES_VERSIONS:
-            annotation = "{}_{}".format(major, minor)
-
-            major_if_not_one = major if major != 1 else ""
-            minor_if_not_zero = minor if minor != 0 else ""
-            version = "{}{}".format(major_if_not_one, minor_if_not_zero)
-
-            glext_ptrs, glext_protos = get_glext_decls(xml.all_commands,
-                                                       xml.all_cmd_names.get_commands(annotation),
-                                                       version, True)
-
-            glext_ext_ptrs = []
-            glext_ext_protos = []
-
-            # Append extensions for 1.0 and 2.0
-            if (annotation == "1_0"):
-                glext_ext_ptrs, glext_ext_protos = get_glext_decls(
-                    xml.all_commands, xml.all_cmd_names.get_commands("glext"), version, True)
-            elif (annotation == "2_0"):
-                glext_ext_ptrs, glext_ext_protos = get_glext_decls(
-                    xml.all_commands, xml.all_cmd_names.get_commands("gl2ext"), version, True)
-
-            glext_ptrs += glext_ext_ptrs
-            glext_protos += glext_ext_protos
-
-            write_glext_explicit_context_inc(version, "\n".join(glext_ptrs),
-                                             "\n".join(glext_protos))
-
     # Now we generate entry points for the desktop implementation
     desktop_gl_decls = {}
     desktop_gl_decls['core'] = {}
@@ -2625,8 +2720,8 @@ def main():
             set([major for (major, minor) in registry_xml.DESKTOP_GL_VERSIONS])):
         is_major = lambda ver: ver[0] == major_version
 
-        ver_decls = []
-        ver_defs = []
+        ver_decls = ["extern \"C\" {"]
+        ver_defs = ["extern \"C\" {"]
         validation_protos = []
 
         for _, minor_version in filter(is_major, registry_xml.DESKTOP_GL_VERSIONS):
@@ -2668,6 +2763,8 @@ def main():
             ver_decls += [cpp_comment] + eps.decls
             ver_defs += [cpp_comment] + eps.defs
 
+        ver_decls.append("} // extern \"C\"")
+        ver_defs.append("} // extern \"C\"")
         annotation = "GL_%d" % major_version
         name = "Desktop GL %s.x" % major_version
 
@@ -2683,12 +2780,88 @@ def main():
         # Validation files
         write_gl_validation_header("GL%s" % major_version, name, validation_protos, "gl.xml")
 
+    # OpenCL
+    clxml = registry_xml.RegistryXML('cl.xml')
+
+    cl_validation_protos = []
+    cl_decls = ["namespace cl\n{"]
+    cl_defs = ["namespace cl\n{"]
+    libcl_ep_defs = []
+    libcl_windows_def_exports = []
+    cl_commands = []
+
+    for major_version, minor_version in registry_xml.CL_VERSIONS:
+        version = "%d_%d" % (major_version, minor_version)
+        annotation = "CL_%s" % version
+        name_prefix = "CL_VERSION_"
+
+        comment = version.replace("_", ".")
+        feature_name = "%s%s" % (name_prefix, version)
+
+        clxml.AddCommands(feature_name, version)
+
+        cl_version_commands = clxml.commands[version]
+        cl_commands += cl_version_commands
+
+        # Spec revs may have no new commands.
+        if not cl_version_commands:
+            continue
+
+        eps = CLEntryPoints(clxml, cl_version_commands)
+
+        comment = "\n// CL %d.%d" % (major_version, minor_version)
+        win_def_comment = "\n    ; CL %d.%d" % (major_version, minor_version)
+
+        cl_decls += [comment] + eps.decls
+        cl_defs += [comment] + eps.defs
+        libcl_ep_defs += [comment] + eps.export_defs
+        cl_validation_protos += [comment] + eps.validation_protos
+        libcl_windows_def_exports += [win_def_comment] + get_exports(clxml.commands[version])
+
+    clxml.AddExtensionCommands(registry_xml.supported_cl_extensions, ['cl'])
+    for extension_name, ext_cmd_names in sorted(clxml.ext_data.items()):
+
+        # Extensions may have no new commands.
+        if not ext_cmd_names:
+            continue
+
+        # Detect and filter duplicate extensions.
+        eps = CLEntryPoints(clxml, ext_cmd_names)
+
+        comment = "\n// %s" % extension_name
+        win_def_comment = "\n    ; %s" % (extension_name)
+
+        cl_commands += ext_cmd_names
+
+        cl_decls += [comment] + eps.decls
+        cl_defs += [comment] + eps.defs
+        libcl_ep_defs += [comment] + eps.export_defs
+        cl_validation_protos += [comment] + eps.validation_protos
+        libcl_windows_def_exports += [win_def_comment] + get_exports(ext_cmd_names)
+
+        # Avoid writing out entry points defined by a prior extension.
+        for dupe in clxml.ext_dupes[extension_name]:
+            msg = "// %s is already defined.\n" % strip_api_prefix(dupe)
+            cl_defs.append(msg)
+
+    cl_decls.append("}  // namespace cl")
+    cl_defs.append("}  // namespace cl")
+
+    write_file("cl", "CL", TEMPLATE_ENTRY_POINT_HEADER, "\n".join(cl_decls), "h",
+               LIBCL_HEADER_INCLUDES, "libGLESv2", "cl.xml")
+    write_file("cl", "CL", TEMPLATE_ENTRY_POINT_SOURCE, "\n".join(cl_defs), "cpp",
+               LIBCL_SOURCE_INCLUDES, "libGLESv2", "cl.xml")
+    write_validation_header("CL", "CL", cl_validation_protos, "cl.xml",
+                            TEMPLATE_CL_VALIDATION_HEADER)
+    write_stubs_header("CL", "cl", "CL", "cl.xml", CL_STUBS_HEADER_PATH, clxml.all_commands,
+                       cl_commands, CLEntryPoints.get_packed_enums(), CL_PACKED_TYPES)
+
     # EGL
     eglxml = registry_xml.RegistryXML('egl.xml', 'egl_angle_ext.xml')
 
     egl_validation_protos = []
-    egl_decls = []
-    egl_defs = []
+    egl_decls = ["extern \"C\" {"]
+    egl_defs = ["extern \"C\" {"]
     libegl_ep_defs = []
     libegl_windows_def_exports = []
     egl_commands = []
@@ -2721,16 +2894,19 @@ def main():
         egl_validation_protos += [comment] + eps.validation_protos
         libegl_windows_def_exports += [win_def_comment] + get_exports(eglxml.commands[version])
 
+    egl_decls.append("} // extern \"C\"")
+    egl_defs.append("} // extern \"C\"")
+
     write_file("egl", "EGL", TEMPLATE_ENTRY_POINT_HEADER, "\n".join(egl_decls), "h",
                EGL_HEADER_INCLUDES, "libGLESv2", "egl.xml")
     write_file("egl", "EGL", TEMPLATE_ENTRY_POINT_SOURCE, "\n".join(egl_defs), "cpp",
                EGL_SOURCE_INCLUDES, "libGLESv2", "egl.xml")
-    write_egl_stubs_header("egl", "EGL", "egl.xml", EGL_STUBS_HEADER_PATH, eglxml.all_commands,
-                           egl_commands, EGLEntryPoints.get_packed_enums())
+    write_stubs_header("EGL", "egl", "EGL", "egl.xml", EGL_STUBS_HEADER_PATH, eglxml.all_commands,
+                       egl_commands, EGLEntryPoints.get_packed_enums(), EGL_PACKED_TYPES)
 
     eglxml.AddExtensionCommands(registry_xml.supported_egl_extensions, ['egl'])
-    egl_ext_decls = []
-    egl_ext_defs = []
+    egl_ext_decls = ["extern \"C\" {"]
+    egl_ext_defs = ["extern \"C\" {"]
     egl_ext_commands = []
 
     for extension_name, ext_cmd_names in sorted(eglxml.ext_data.items()):
@@ -2758,15 +2934,18 @@ def main():
             msg = "// %s is already defined.\n" % strip_api_prefix(dupe)
             egl_ext_defs.append(msg)
 
+    egl_ext_decls.append("} // extern \"C\"")
+    egl_ext_defs.append("} // extern \"C\"")
+
     write_file("egl_ext", "EGL Extension", TEMPLATE_ENTRY_POINT_HEADER, "\n".join(egl_ext_decls),
                "h", EGL_EXT_HEADER_INCLUDES, "libGLESv2", "egl.xml and egl_angle_ext.xml")
     write_file("egl_ext", "EGL Extension", TEMPLATE_ENTRY_POINT_SOURCE, "\n".join(egl_ext_defs),
                "cpp", EGL_EXT_SOURCE_INCLUDES, "libGLESv2", "egl.xml and egl_angle_ext.xml")
     write_validation_header("EGL", "EGL", egl_validation_protos, "egl.xml and egl_angle_ext.xml",
                             TEMPLATE_EGL_VALIDATION_HEADER)
-    write_egl_stubs_header("egl_ext", "EXT extension", "egl.xml and egl_angle_ext.xml",
-                           EGL_EXT_STUBS_HEADER_PATH, eglxml.all_commands, egl_ext_commands,
-                           EGLEntryPoints.get_packed_enums())
+    write_stubs_header("EGL", "egl_ext", "EXT extension", "egl.xml and egl_angle_ext.xml",
+                       EGL_EXT_STUBS_HEADER_PATH, eglxml.all_commands, egl_ext_commands,
+                       EGLEntryPoints.get_packed_enums(), EGL_PACKED_TYPES)
 
     # WGL
     wglxml = registry_xml.RegistryXML('wgl.xml')
@@ -2788,6 +2967,8 @@ def main():
     wgl_commands.remove("wglUseFontOutlines")
 
     libgl_ep_exports += get_exports(wgl_commands)
+    extension_decls.append("} // extern \"C\"")
+    extension_defs.append("} // extern \"C\"")
 
     write_file("gles_ext", "GLES extension", TEMPLATE_ENTRY_POINT_HEADER,
                "\n".join([item for item in extension_decls]), "h", GLES_EXT_HEADER_INCLUDES,
@@ -2805,14 +2986,16 @@ def main():
     write_context_api_decls(desktop_gl_decls, "gl")
 
     # Entry point enum
+    cl_cmd_names = [strip_api_prefix(cmd) for cmd in clxml.all_cmd_names.get_all_commands()]
     egl_cmd_names = [strip_api_prefix(cmd) for cmd in eglxml.all_cmd_names.get_all_commands()]
     gles_cmd_names = ["Invalid"
                      ] + [strip_api_prefix(cmd) for cmd in xml.all_cmd_names.get_all_commands()]
     gl_cmd_names = [strip_api_prefix(cmd) for cmd in glxml.all_cmd_names.get_all_commands()]
     wgl_cmd_names = [strip_api_prefix(cmd) for cmd in wglxml.all_cmd_names.get_all_commands()]
-    unsorted_enums = [("EGL%s" % cmd, "egl%s" % cmd) for cmd in egl_cmd_names] + [
-        ("GL%s" % cmd, "gl%s" % cmd) for cmd in set(gles_cmd_names + gl_cmd_names)
-    ] + [("WGL%s" % cmd, "wgl%s" % cmd) for cmd in wgl_cmd_names]
+    unsorted_enums = [("CL%s" % cmd, "cl%s" % cmd) for cmd in cl_cmd_names] + [
+        ("EGL%s" % cmd, "egl%s" % cmd) for cmd in egl_cmd_names
+    ] + [("GL%s" % cmd, "gl%s" % cmd) for cmd in set(gles_cmd_names + gl_cmd_names)
+        ] + [("WGL%s" % cmd, "wgl%s" % cmd) for cmd in wgl_cmd_names]
     all_enums = sorted(unsorted_enums)
 
     entry_points_enum_header = TEMPLATE_ENTRY_POINTS_ENUM_HEADER.format(
@@ -2847,6 +3030,8 @@ def main():
     write_export_files("\n".join([item for item in libegl_ep_defs]),
                        LIBEGL_EXPORT_INCLUDES_AND_PREAMBLE, "egl.xml and egl_angle_ext.xml",
                        "libEGL", "EGL")
+    write_export_files("\n".join([item for item in libcl_ep_defs]), LIBCL_EXPORT_INCLUDES,
+                       "cl.xml", "libOpenCL", "CL")
 
     libgles_ep_exports += get_egl_exports()
 
@@ -2863,49 +3048,6 @@ def main():
     write_capture_helper_source(all_gles_param_types)
     write_capture_replay_source(apis.GLES, xml.all_commands, all_commands_no_suffix,
                                 GLEntryPoints.get_packed_enums(), [])
-
-    # OpenCL
-    clxml = registry_xml.RegistryXML('cl.xml')
-
-    cl_validation_protos = []
-    cl_decls = []
-    cl_defs = []
-    libcl_ep_defs = []
-    libcl_windows_def_exports = []
-    cl_commands = []
-
-    for major_version, minor_version in registry_xml.CL_VERSIONS:
-        version = "%d_%d" % (major_version, minor_version)
-        annotation = "CL_%s" % version
-        name_prefix = "CL_VERSION_"
-
-        comment = version.replace("_", ".")
-        feature_name = "%s%s" % (name_prefix, version)
-
-        clxml.AddCommands(feature_name, version)
-
-        cl_version_commands = clxml.commands[version]
-        cl_commands += cl_version_commands
-
-        # Spec revs may have no new commands.
-        if not cl_version_commands:
-            continue
-
-        eps = CLEntryPoints(clxml, cl_version_commands)
-
-        comment = "\n// CL %d.%d" % (major_version, minor_version)
-        win_def_comment = "\n    ; CL %d.%d" % (major_version, minor_version)
-
-        cl_decls += [comment] + eps.decls
-        cl_defs += [comment] + eps.defs
-        libcl_ep_defs += [comment] + eps.export_defs
-        cl_validation_protos += [comment] + eps.validation_protos
-        libcl_windows_def_exports += [win_def_comment] + get_exports(clxml.commands[version])
-
-    write_file("cl", "CL", TEMPLATE_ENTRY_POINT_HEADER, "\n".join(cl_decls), "h",
-               LIBCL_HEADER_INCLUDES, "libOpenCL", "cl.xml")
-    write_file("cl", "CL", TEMPLATE_ENTRY_POINT_SOURCE, "\n".join(cl_defs), "cpp",
-               LIBCL_SOURCE_INCLUDES, "libOpenCL", "cl.xml")
 
 
 if __name__ == '__main__':

@@ -53,7 +53,7 @@ namespace v8 {
 namespace internal {
 
 #define DEBUG_PRINTF(...) \
-  if (FLAG_debug_riscv) { \
+  if (FLAG_riscv_debug) { \
     printf(__VA_ARGS__);  \
   }
 
@@ -158,8 +158,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   explicit Assembler(const AssemblerOptions&,
                      std::unique_ptr<AssemblerBuffer> = {});
 
-  virtual ~Assembler() { CHECK(constpool_.IsEmpty()); }
-
+  virtual ~Assembler();
+  void AbortedCodeGeneration();
   // GetCode emits any pending (non-emitted) code and fills the descriptor desc.
   static constexpr int kNoHandlerTable = 0;
   static constexpr SafepointTableBuilder* kNoSafepointTable = nullptr;
@@ -197,7 +197,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     kOffset20 = 20,  // RISCV imm20
     kOffset13 = 13,  // RISCV branch
     kOffset32 = 32,  // RISCV auipc + instr_I
-    kOffset11 = 11   // RISCV C_J
+    kOffset11 = 11,  // RISCV C_J
+    kOffset8 = 8     // RISCV compressed branch
   };
 
   // Determines if Label is bound and near enough so that branch instruction
@@ -208,11 +209,15 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   // Get offset from instr.
   int BranchOffset(Instr instr);
-  int BrachlongOffset(Instr auipc, Instr jalr);
+  static int BrachlongOffset(Instr auipc, Instr jalr);
+  static int PatchBranchlongOffset(Address pc, Instr auipc, Instr instr_I,
+                                   int32_t offset);
   int JumpOffset(Instr instr);
   int CJumpOffset(Instr instr);
+  int CBranchOffset(Instr instr);
   static int LdOffset(Instr instr);
   static int AuipcOffset(Instr instr);
+  static int JalrOffset(Instr instr);
 
   // Returns the branch offset to the given label from the current code
   // position. Links the label to the current position if it is still unbound.
@@ -226,6 +231,9 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   }
   inline int16_t cjump_offset(Label* L) {
     return (int16_t)branch_offset_helper(L, OffsetSize::kOffset11);
+  }
+  inline int32_t cbranch_offset(Label* L) {
+    return branch_offset_helper(L, OffsetSize::kOffset8);
   }
 
   uint64_t jump_address(Label* L);
@@ -249,6 +257,18 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   static void set_target_address_at(
       Address pc, Address constant_pool, Address target,
       ICacheFlushMode icache_flush_mode = FLUSH_ICACHE_IF_NEEDED);
+
+  // Read/Modify the code target address in the branch/call instruction at pc.
+  inline static Tagged_t target_compressed_address_at(Address pc,
+                                                      Address constant_pool);
+  inline static void set_target_compressed_address_at(
+      Address pc, Address constant_pool, Tagged_t target,
+      ICacheFlushMode icache_flush_mode = FLUSH_ICACHE_IF_NEEDED);
+
+  inline Handle<Object> code_target_object_handle_at(Address pc,
+                                                     Address constant_pool);
+  inline Handle<HeapObject> compressed_embedded_object_handle_at(
+      Address pc, Address constant_pool);
 
   static bool IsConstantPoolAt(Instruction* instr);
   static int ConstantPoolSizeAt(Instruction* instr);
@@ -318,6 +338,9 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   // Bits available for offset field in compresed jump
   static constexpr int kCJalOffsetBits = 12;
 
+  // Bits available for offset field in compressed branch
+  static constexpr int kCBranchOffsetBits = 9;
+
   // Max offset for b instructions with 12-bit offset field (multiple of 2)
   static constexpr int kMaxBranchOffset = (1 << (13 - 1)) - 1;
 
@@ -331,6 +354,15 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   // ---------------------------------------------------------------------------
   // Code generation.
 
+  // This function is called when on-heap-compilation invariants are
+  // invalidated. For instance, when the assembler buffer grows or a GC happens
+  // between Code object allocation and Code object finalization.
+  void FixOnHeapReferences(bool update_embedded_objects = true);
+
+  // This function is called when we fallback from on-heap to off-heap
+  // compilation and patch on-heap references to handles.
+  void FixOnHeapReferencesToHandles();
+
   // Insert the smallest number of nop instructions
   // possible to align the pc offset to a multiple
   // of m. m must be a power of 2 (>= 4).
@@ -340,6 +372,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void DataAlign(int m);
   // Aligns code to something that's optimal for a jump target for the platform.
   void CodeTargetAlign();
+  void LoopHeaderAlign() { CodeTargetAlign(); }
 
   // Different nop operations are used by the code generator to detect certain
   // states of the generated code.
@@ -597,7 +630,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void c_addi4spn(Register rd, int16_t uimm10);
   void c_li(Register rd, int8_t imm6);
   void c_lui(Register rd, int8_t imm6);
-  void c_slli(Register rd, uint8_t uimm6);
+  void c_slli(Register rd, uint8_t shamt6);
   void c_fldsp(FPURegister rd, uint16_t uimm9);
   void c_lwsp(Register rd, uint16_t uimm8);
   void c_ldsp(Register rd, uint16_t uimm9);
@@ -623,6 +656,15 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void c_sw(Register rs2, Register rs1, uint16_t uimm7);
   void c_sd(Register rs2, Register rs1, uint16_t uimm8);
   void c_fsd(FPURegister rs2, Register rs1, uint16_t uimm8);
+  void c_bnez(Register rs1, int16_t imm9);
+  inline void c_bnez(Register rs1, Label* L) { c_bnez(rs1, branch_offset(L)); }
+  void c_beqz(Register rs1, int16_t imm9);
+  inline void c_beqz(Register rs1, Label* L) { c_beqz(rs1, branch_offset(L)); }
+  void c_srli(Register rs1, int8_t shamt6);
+  void c_srai(Register rs1, int8_t shamt6);
+  void c_andi(Register rs1, int8_t imm6);
+  void NOP();
+  void EBREAK();
 
   // Privileged
   void uret();
@@ -795,11 +837,13 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   // Record a deoptimization reason that can be used by a log or cpu profiler.
   // Use --trace-deopt to enable.
-  void RecordDeoptReason(DeoptimizeReason reason, SourcePosition position,
-                         int id);
+  void RecordDeoptReason(DeoptimizeReason reason, uint32_t node_id,
+                         SourcePosition position, int id);
 
   static int RelocateInternalReference(RelocInfo::Mode rmode, Address pc,
                                        intptr_t pc_delta);
+  static void RelocateRelativeReference(RelocInfo::Mode rmode, Address pc,
+                                        intptr_t pc_delta);
 
   // Writes a single byte or word of data in the code stream.  Used for
   // inline tables, e.g., jump-tables.
@@ -849,6 +893,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   // Check if an instruction is a branch of some kind.
   static bool IsBranch(Instr instr);
+  static bool IsCBranch(Instr instr);
+  static bool IsNop(Instr instr);
   static bool IsJump(Instr instr);
   static bool IsJal(Instr instr);
   static bool IsCJal(Instr instr);
@@ -862,7 +908,39 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   static bool IsLd(Instr instr);
   void CheckTrampolinePool();
 
+  // Get the code target object for a pc-relative call or jump.
+  V8_INLINE Handle<Code> relative_code_target_object_handle_at(
+      Address pc_) const;
+
   inline int UnboundLabelsCount() { return unbound_labels_count_; }
+
+  using BlockPoolsScope = BlockTrampolinePoolScope;
+
+  void RecordConstPool(int size);
+
+  void ForceConstantPoolEmissionWithoutJump() {
+    constpool_.Check(Emission::kForced, Jump::kOmitted);
+  }
+  void ForceConstantPoolEmissionWithJump() {
+    constpool_.Check(Emission::kForced, Jump::kRequired);
+  }
+  // Check if the const pool needs to be emitted while pretending that {margin}
+  // more bytes of instructions have already been emitted.
+  void EmitConstPoolWithJumpIfNeeded(size_t margin = 0) {
+    constpool_.Check(Emission::kIfNeeded, Jump::kRequired, margin);
+  }
+
+  void EmitConstPoolWithoutJumpIfNeeded(size_t margin = 0) {
+    constpool_.Check(Emission::kIfNeeded, Jump::kOmitted, margin);
+  }
+
+  void RecordEntry(uint32_t data, RelocInfo::Mode rmode) {
+    constpool_.RecordEntry(data, rmode);
+  }
+
+  void RecordEntry(uint64_t data, RelocInfo::Mode rmode) {
+    constpool_.RecordEntry(data, rmode);
+  }
 
  protected:
   // Readable constants for base and offset adjustment helper, these indicate if
@@ -892,7 +970,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   int target_at(int pos, bool is_internal);
 
   // Patch branch instruction at pos to branch to given branch target pos.
-  void target_at_put(int pos, int target_pos, bool is_internal);
+  void target_at_put(int pos, int target_pos, bool is_internal,
+                     bool trampoline = false);
 
   // Say if we need to relocate with this mode.
   bool MustUseReg(RelocInfo::Mode rmode);
@@ -949,33 +1028,13 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     }
   }
 
-  using BlockPoolsScope = BlockTrampolinePoolScope;
-
-  void RecordConstPool(int size);
-
-  void ForceConstantPoolEmissionWithoutJump() {
-    constpool_.Check(Emission::kForced, Jump::kOmitted);
+#ifdef DEBUG
+  bool EmbeddedObjectMatches(int pc_offset, Handle<Object> object) {
+    return target_address_at(
+               reinterpret_cast<Address>(buffer_->start() + pc_offset)) ==
+           (IsOnHeap() ? object->ptr() : object.address());
   }
-  void ForceConstantPoolEmissionWithJump() {
-    constpool_.Check(Emission::kForced, Jump::kRequired);
-  }
-  // Check if the const pool needs to be emitted while pretending that {margin}
-  // more bytes of instructions have already been emitted.
-  void EmitConstPoolWithJumpIfNeeded(size_t margin = 0) {
-    constpool_.Check(Emission::kIfNeeded, Jump::kRequired, margin);
-  }
-
-  void EmitConstPoolWithoutJumpIfNeeded(size_t margin = 0) {
-    constpool_.Check(Emission::kIfNeeded, Jump::kOmitted, margin);
-  }
-
-  void RecordEntry(uint32_t data, RelocInfo::Mode rmode) {
-    constpool_.RecordEntry(data, rmode);
-  }
-
-  void RecordEntry(uint64_t data, RelocInfo::Mode rmode) {
-    constpool_.RecordEntry(data, rmode);
-  }
+#endif
 
  private:
   // Avoid overflows for displacements etc.
@@ -1093,6 +1152,9 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void GenInstrCS(uint8_t funct3, Opcode opcode, FPURegister rs2, Register rs1,
                   uint8_t uimm5);
   void GenInstrCJ(uint8_t funct3, Opcode opcode, uint16_t uint11);
+  void GenInstrCB(uint8_t funct3, Opcode opcode, Register rs1, uint8_t uimm8);
+  void GenInstrCBA(uint8_t funct3, uint8_t funct2, Opcode opcode, Register rs1,
+                   int8_t imm6);
 
   // ----- Instruction class templates match those in LLVM's RISCVInstrInfo.td
   void GenInstrBranchCC_rri(uint8_t funct3, Register rs1, Register rs2,
@@ -1231,6 +1293,16 @@ class V8_EXPORT_PRIVATE UseScratchRegisterScope {
 
   Register Acquire();
   bool hasAvailable() const;
+  void Include(const RegList& list) { *available_ |= list; }
+  void Exclude(const RegList& list) { *available_ &= ~list; }
+  void Include(const Register& reg1, const Register& reg2 = no_reg) {
+    RegList list(reg1.bit() | reg2.bit());
+    Include(list);
+  }
+  void Exclude(const Register& reg1, const Register& reg2 = no_reg) {
+    RegList list(reg1.bit() | reg2.bit());
+    Exclude(list);
+  }
 
  private:
   RegList* available_;

@@ -39,14 +39,12 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
                                  const ::blink::KURL& url,
                                  bool user_gesture) override;
   void DidDisplayInsecureContent() override;
-  void DidAddContentSecurityPolicies(
-      WTF::Vector<::network::mojom::blink::ContentSecurityPolicyPtr>) override;
   void DidContainInsecureFormAction() override;
   void DocumentAvailableInMainFrame(bool uses_temporary_zoom_level) override;
   void SetNeedsOcclusionTracking(bool needs_tracking) override;
   void SetVirtualKeyboardOverlayPolicy(bool vk_overlays_content) override;
   void VisibilityChanged(mojom::blink::FrameVisibility visibility) override;
-  void DidChangeThemeColor(base::Optional<::SkColor> theme_color) override;
+  void DidChangeThemeColor(absl::optional<::SkColor> theme_color) override;
   void DidChangeBackgroundColor(SkColor background_color,
                                 bool color_adjust) override;
   void DidFailLoadWithError(const ::blink::KURL& url,
@@ -75,7 +73,8 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void DidFinishLoad(const KURL& validated_url) override;
   void DispatchLoad() override;
   void GoToEntryAtOffset(int32_t offset, bool has_user_gesture) override;
-  void RenderFallbackContentInParentProcess() override;
+  void NavigateToAppHistoryKey(const WTF::String& key,
+                               bool has_user_gesture) override {}
   void UpdateTitle(const WTF::String& title,
                    base::i18n::TextDirection title_direction) override;
   void UpdateUserActivationState(
@@ -89,11 +88,14 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
       mojom::blink::ResourceTimingInfoPtr timing) override;
   void DidFinishDocumentLoad() override;
   void RunModalAlertDialog(const WTF::String& alert_message,
+                           bool disable_third_party_subframe_suppresion,
                            RunModalAlertDialogCallback callback) override;
   void RunModalConfirmDialog(const WTF::String& alert_message,
+                             bool disable_third_party_subframe_suppresion,
                              RunModalConfirmDialogCallback callback) override;
   void RunModalPromptDialog(const WTF::String& alert_message,
                             const WTF::String& default_value,
+                            bool disable_third_party_subframe_suppresion,
                             RunModalPromptDialogCallback callback) override;
   void RunBeforeUnloadConfirm(bool is_reload,
                               RunBeforeUnloadConfirmCallback callback) override;
@@ -116,6 +118,11 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
       Vector<mojom::blink::MenuItemPtr> menu_items,
       bool right_aligned,
       bool allow_multiple_selection) override;
+  void CreateNewPopupWidget(
+      mojo::PendingAssociatedReceiver<mojom::blink::PopupWidgetHost>
+          popup_widget_host,
+      mojo::PendingAssociatedReceiver<mojom::blink::WidgetHost> widget_host,
+      mojo::PendingAssociatedRemote<mojom::blink::Widget> widget) override;
   void ShowContextMenu(
       mojo::PendingAssociatedRemote<mojom::blink::ContextMenuClient>
           context_menu_client,
@@ -129,10 +136,11 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
       const blink::FrameToken& child_frame_token,
       mojom::blink::FrameOwnerPropertiesPtr frame_owner_properties) override;
   void DidChangeOpener(
-      const base::Optional<LocalFrameToken>& opener_frame) override;
-  void DidChangeCSPAttribute(const blink::FrameToken& child_frame_token,
-                             network::mojom::blink::ContentSecurityPolicyPtr
-                                 parsed_csp_attribute) override;
+      const absl::optional<LocalFrameToken>& opener_frame) override;
+  void DidChangeIframeAttributes(
+      const blink::FrameToken& child_frame_token,
+      network::mojom::blink::ContentSecurityPolicyPtr parsed_csp_attribute,
+      bool anonymous) override;
   void DidChangeFramePolicy(const blink::FrameToken& child_frame_token,
                             const FramePolicy& frame_policy) override;
   void CapturePaintPreviewOfSubframe(
@@ -151,6 +159,8 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
       const WTF::String& source_id,
       const WTF::String& untrusted_stack_trace) override;
   void FrameSizeChanged(const gfx::Size& frame_size) override;
+  void DidUpdatePreferredColorScheme(
+      blink::mojom::PreferredColorScheme preferred_color_scheme) override;
 
  private:
   void BindFrameHostReceiver(mojo::ScopedInterfaceEndpointHandle handle);

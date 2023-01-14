@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/basic_shape_functions.h"
 #include "third_party/blink/renderer/core/css/css_axis_value.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_counter_value.h"
 #include "third_party/blink/renderer/core/css/css_cursor_image_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
@@ -578,8 +578,7 @@ const CSSValue* BackgroundColor::CSSValueFromComputedStyleInternal(
     const LayoutObject*,
     bool allow_visited_style) const {
   if (allow_visited_style) {
-    return cssvalue::CSSColorValue::Create(
-        style.VisitedDependentColor(*this).Rgb());
+    return cssvalue::CSSColor::Create(style.VisitedDependentColor(*this).Rgb());
   }
 
   StyleColor background_color = style.BackgroundColor();
@@ -821,7 +820,7 @@ const CSSValue* BorderBottomColor::CSSValueFromComputedStyleInternal(
   // https://drafts.csswg.org/cssom/#resolved-values
   // For this property, the resolved value is the used value.
   return allow_visited_style
-             ? cssvalue::CSSColorValue::Create(
+             ? cssvalue::CSSColor::Create(
                    style.VisitedDependentColor(*this).Rgb())
              : ComputedStyleUtils::CurrentColorOrValidColor(
                    style, border_bottom_color, CSSValuePhase::kUsedValue);
@@ -1088,7 +1087,7 @@ const CSSValue* BorderLeftColor::CSSValueFromComputedStyleInternal(
   // https://drafts.csswg.org/cssom/#resolved-values
   // For this property, the resolved value is the used value.
   return allow_visited_style
-             ? cssvalue::CSSColorValue::Create(
+             ? cssvalue::CSSColor::Create(
                    style.VisitedDependentColor(*this).Rgb())
              : ComputedStyleUtils::CurrentColorOrValidColor(
                    style, border_left_color, CSSValuePhase::kUsedValue);
@@ -1148,7 +1147,7 @@ const CSSValue* BorderRightColor::CSSValueFromComputedStyleInternal(
   // https://drafts.csswg.org/cssom/#resolved-values
   // For this property, the resolved value is the used value.
   return allow_visited_style
-             ? cssvalue::CSSColorValue::Create(
+             ? cssvalue::CSSColor::Create(
                    style.VisitedDependentColor(*this).Rgb())
              : ComputedStyleUtils::CurrentColorOrValidColor(
                    style, border_right_color, CSSValuePhase::kUsedValue);
@@ -1222,7 +1221,7 @@ const CSSValue* BorderTopColor::CSSValueFromComputedStyleInternal(
   // https://drafts.csswg.org/cssom/#resolved-values
   // For this property, the resolved value is the used value.
   return allow_visited_style
-             ? cssvalue::CSSColorValue::Create(
+             ? cssvalue::CSSColor::Create(
                    style.VisitedDependentColor(*this).Rgb())
              : ComputedStyleUtils::ComputedStyleUtils::CurrentColorOrValidColor(
                    style, border_top_color, CSSValuePhase::kUsedValue);
@@ -1391,8 +1390,7 @@ const CSSValue* CaretColor::CSSValueFromComputedStyleInternal(
     const LayoutObject*,
     bool allow_visited_style) const {
   if (allow_visited_style) {
-    return cssvalue::CSSColorValue::Create(
-        style.VisitedDependentColor(*this).Rgb());
+    return cssvalue::CSSColor::Create(style.VisitedDependentColor(*this).Rgb());
   }
 
   StyleAutoColor auto_color = style.CaretColor();
@@ -1401,7 +1399,7 @@ const CSSValue* CaretColor::CSSValueFromComputedStyleInternal(
   StyleColor result = auto_color.IsAutoColor() ? StyleColor::CurrentColor()
                                                : auto_color.ToStyleColor();
   if (style.ShouldForceColor(result)) {
-    return cssvalue::CSSColorValue::Create(
+    return cssvalue::CSSColor::Create(
         style.GetInternalForcedCurrentColor().Rgb());
   }
 
@@ -1554,7 +1552,7 @@ const CSSValue* Color::CSSValueFromComputedStyleInternal(
     return GetCSSPropertyInternalForcedColor().CSSValueFromComputedStyle(
         style, nullptr, allow_visited_style);
   }
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       allow_visited_style ? style.VisitedDependentColor(*this).Rgb()
                           : style.GetCurrentColor().Rgb());
 }
@@ -1612,6 +1610,7 @@ const CSSValue* ColorScheme::ParseSingleValue(
   if (range.Peek().Id() == CSSValueID::kNormal)
     return css_parsing_utils::ConsumeIdent(range);
 
+  CSSValue* only = nullptr;
   CSSValueList* values = CSSValueList::CreateSpaceSeparated();
   do {
     CSSValueID id = range.Peek().Id();
@@ -1623,14 +1622,29 @@ const CSSValue* ColorScheme::ParseSingleValue(
       return nullptr;
     }
     CSSValue* value =
-        css_parsing_utils::ConsumeIdent<CSSValueID::kDark, CSSValueID::kLight>(
-            range);
+        css_parsing_utils::ConsumeIdent<CSSValueID::kDark, CSSValueID::kLight,
+                                        CSSValueID::kOnly>(range);
+    if (id == CSSValueID::kOnly &&
+        RuntimeEnabledFeatures::CSSColorSchemeOnlyEnabled()) {
+      if (only)
+        return nullptr;
+      if (values->length()) {
+        values->Append(*value);
+        return values;
+      }
+      only = value;
+      continue;
+    }
     if (!value)
       value = css_parsing_utils::ConsumeCustomIdent(range, context);
     if (!value)
       return nullptr;
     values->Append(*value);
   } while (!range.AtEnd());
+  if (!values->length())
+    return nullptr;
+  if (only)
+    values->Append(*only);
   return values;
 }
 
@@ -1654,11 +1668,13 @@ const CSSValue* ColorScheme::InitialValue() const {
 void ColorScheme::ApplyInitial(StyleResolverState& state) const {
   state.Style()->SetColorScheme(Vector<AtomicString>());
   state.Style()->SetDarkColorScheme(false);
+  state.Style()->SetColorSchemeOnly(false);
 }
 
 void ColorScheme::ApplyInherit(StyleResolverState& state) const {
   state.Style()->SetColorScheme(state.ParentStyle()->ColorScheme());
   state.Style()->SetDarkColorScheme(state.ParentStyle()->DarkColorScheme());
+  state.Style()->SetColorSchemeOnly(state.ParentStyle()->ColorSchemeOnly());
 }
 
 void ColorScheme::ApplyValue(StyleResolverState& state,
@@ -1667,28 +1683,41 @@ void ColorScheme::ApplyValue(StyleResolverState& state,
     DCHECK(identifier_value->GetValueID() == CSSValueID::kNormal);
     state.Style()->SetColorScheme(Vector<AtomicString>());
     state.Style()->SetDarkColorScheme(false);
+    state.Style()->SetColorSchemeOnly(false);
   } else if (const auto* scheme_list = DynamicTo<CSSValueList>(value)) {
     bool prefers_dark =
         state.GetDocument().GetStyleEngine().GetPreferredColorScheme() ==
         mojom::blink::PreferredColorScheme::kDark;
     bool has_dark = false;
     bool has_light = false;
+    bool has_only = false;
     Vector<AtomicString> color_schemes;
     for (auto& item : *scheme_list) {
       if (const auto* custom_ident = DynamicTo<CSSCustomIdentValue>(*item)) {
         color_schemes.push_back(custom_ident->Value());
       } else if (const auto* ident = DynamicTo<CSSIdentifierValue>(*item)) {
         color_schemes.push_back(ident->CssText());
-        if (ident->GetValueID() == CSSValueID::kDark)
-          has_dark = true;
-        else if (ident->GetValueID() == CSSValueID::kLight)
-          has_light = true;
+        switch (ident->GetValueID()) {
+          case CSSValueID::kDark:
+            has_dark = true;
+            break;
+          case CSSValueID::kLight:
+            has_light = true;
+            break;
+          case CSSValueID::kOnly:
+            has_only = true;
+            break;
+          default:
+            break;
+        }
       } else {
         NOTREACHED();
       }
     }
     state.Style()->SetColorScheme(color_schemes);
     state.Style()->SetDarkColorScheme(has_dark && (!has_light || prefers_dark));
+    if (RuntimeEnabledFeatures::CSSColorSchemeOnlyEnabled())
+      state.Style()->SetColorSchemeOnly(has_only);
 
     if (has_dark) {
       // Record kColorSchemeDarkSupportedOnRoot if dark is present (though dark
@@ -1763,7 +1792,7 @@ const CSSValue* ColumnRuleColor::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
     const LayoutObject*,
     bool allow_visited_style) const {
-  return allow_visited_style ? cssvalue::CSSColorValue::Create(
+  return allow_visited_style ? cssvalue::CSSColor::Create(
                                    style.VisitedDependentColor(*this).Rgb())
                              : ComputedStyleUtils::CurrentColorOrValidColor(
                                    style, style.ColumnRuleColor(),
@@ -1887,19 +1916,19 @@ const CSSValue* Contain::CSSValueFromComputedStyleInternal(
     return CSSIdentifierValue::Create(CSSValueID::kContent);
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  if (style.ContainsSize()) {
+  if ((style.Contain() & kContainsSize) == kContainsSize) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kSize));
   } else {
-    if (style.ContainsInlineSize())
+    if (style.Contain() & kContainsInlineSize)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kInlineSize));
-    else if (style.ContainsBlockSize())
+    else if (style.Contain() & kContainsBlockSize)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kBlockSize));
   }
-  if (style.ContainsLayout())
+  if (style.Contain() & kContainsLayout)
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kLayout));
-  if (style.ContainsStyle())
+  if (style.Contain() & kContainsStyle)
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kStyle));
-  if (style.ContainsPaint())
+  if (style.Contain() & kContainsPaint)
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kPaint));
   DCHECK(list->length());
   return list;
@@ -1938,6 +1967,43 @@ const CSSValue* ContainIntrinsicSize::CSSValueFromComputedStyleInternal(
       ComputedStyleUtils::ZoomAdjustedPixelValueForLength(
           style.ContainIntrinsicSize().Height(), style),
       CSSValuePair::kDropIdenticalValues);
+}
+
+const CSSValue* ContainerName::ParseSingleValue(
+    CSSParserTokenRange& range,
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) const {
+  return css_parsing_utils::ConsumeContainerName(range, context);
+}
+
+const CSSValue* ContainerName::CSSValueFromComputedStyleInternal(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) const {
+  if (style.ContainerName().IsNull())
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+  return MakeGarbageCollected<CSSCustomIdentValue>(style.ContainerName());
+}
+
+const CSSValue* ContainerType::ParseSingleValue(
+    CSSParserTokenRange& range,
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) const {
+  return css_parsing_utils::ConsumeContainerType(range);
+}
+
+const CSSValue* ContainerType::CSSValueFromComputedStyleInternal(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) const {
+  if (style.ContainerType() == kContainerTypeNone)
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+  if (style.ContainerType() & kContainerTypeInlineSize)
+    list->Append(*CSSIdentifierValue::Create(CSSValueID::kInlineSize));
+  if (style.ContainerType() & kContainerTypeBlockSize)
+    list->Append(*CSSIdentifierValue::Create(CSSValueID::kBlockSize));
+  return list;
 }
 
 namespace {
@@ -1982,24 +2048,14 @@ CSSValue* ConsumeCounterContent(CSSParserTokenRange args,
 
   CSSCustomIdentValue* list_style = nullptr;
   if (css_parsing_utils::ConsumeCommaIncludingWhitespace(args)) {
-    if (!RuntimeEnabledFeatures::CSSAtRuleCounterStyleEnabled()) {
-      CSSValueID id = args.Peek().Id();
-      if ((id != CSSValueID::kNone &&
-           (id < CSSValueID::kDisc || id > CSSValueID::kKatakanaIroha)))
-        return nullptr;
-      list_style = MakeGarbageCollected<CSSCustomIdentValue>(
-          AtomicString(getValueName(id)));
+    // Note: CSS3 spec doesn't allow 'none' but CSS2.1 allows it. We currently
+    // allow it for backward compatibility.
+    // See https://github.com/w3c/csswg-drafts/issues/5795 for details.
+    if (args.Peek().Id() == CSSValueID::kNone) {
+      list_style = MakeGarbageCollected<CSSCustomIdentValue>("none");
       args.ConsumeIncludingWhitespace();
     } else {
-      // Note: CSS3 spec doesn't allow 'none' but CSS2.1 allows it. We currently
-      // allow it for backward compatibility.
-      // See https://github.com/w3c/csswg-drafts/issues/5795 for details.
-      if (args.Peek().Id() == CSSValueID::kNone) {
-        list_style = MakeGarbageCollected<CSSCustomIdentValue>("none");
-        args.ConsumeIncludingWhitespace();
-      } else {
-        list_style = css_parsing_utils::ConsumeCounterStyleName(args, context);
-      }
+      list_style = css_parsing_utils::ConsumeCounterStyleName(args, context);
     }
   } else {
     list_style = MakeGarbageCollected<CSSCustomIdentValue>("decimal");
@@ -2648,8 +2704,9 @@ const CSSValue* FlexBasis::ParseSingleValue(
     CSSParserTokenRange& range,
     const CSSParserContext& context,
     const CSSParserLocalContext&) const {
-  // FIXME: Support intrinsic dimensions too.
-  if (range.Peek().Id() == CSSValueID::kAuto)
+  if (css_parsing_utils::IdentMatches<
+          CSSValueID::kAuto, CSSValueID::kContent, CSSValueID::kMinContent,
+          CSSValueID::kMaxContent, CSSValueID::kFitContent>(range.Peek().Id()))
     return css_parsing_utils::ConsumeIdent(range);
   return css_parsing_utils::ConsumeLengthOrPercent(range, context,
                                                    kValueRangeNonNegative);
@@ -3277,8 +3334,8 @@ const CSSValue* GridTemplateAreas::ParseSingleValue(
     return css_parsing_utils::ConsumeIdent(range);
 
   NamedGridAreaMap grid_area_map;
-  size_t row_count = 0;
-  size_t column_count = 0;
+  wtf_size_t row_count = 0;
+  wtf_size_t column_count = 0;
 
   while (range.Peek().GetType() == kStringToken) {
     if (!css_parsing_utils::ParseGridTemplateAreasRow(
@@ -3878,7 +3935,7 @@ InternalForcedBackgroundColor::CSSValueFromComputedStyleInternal(
     bool allow_visited_style) const {
   bool visited_link = allow_visited_style &&
                       style.InsideLink() == EInsideLink::kInsideVisitedLink;
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       ColorIncludingFallback(visited_link, style).Rgb());
 }
 
@@ -3907,7 +3964,7 @@ const CSSValue* InternalForcedBorderColor::CSSValueFromComputedStyleInternal(
     bool allow_visited_style) const {
   bool visited_link = allow_visited_style &&
                       style.InsideLink() == EInsideLink::kInsideVisitedLink;
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       ColorIncludingFallback(visited_link, style).Rgb());
 }
 
@@ -3958,7 +4015,7 @@ const CSSValue* InternalForcedColor::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
     const LayoutObject*,
     bool allow_visited_style) const {
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       allow_visited_style ? style.VisitedDependentColor(*this).Rgb()
                           : style.GetInternalForcedCurrentColor().Rgb());
 }
@@ -3988,7 +4045,7 @@ const CSSValue* InternalForcedOutlineColor::CSSValueFromComputedStyleInternal(
     bool allow_visited_style) const {
   bool visited_link = allow_visited_style &&
                       style.InsideLink() == EInsideLink::kInsideVisitedLink;
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       ColorIncludingFallback(visited_link, style).Rgb());
 }
 
@@ -4261,19 +4318,9 @@ const CSSValue* ListStyleType::ParseSingleValue(
   if (auto* none = css_parsing_utils::ConsumeIdent<CSSValueID::kNone>(range))
     return none;
 
-  if (!RuntimeEnabledFeatures::CSSAtRuleCounterStyleEnabled()) {
-    if (auto* ident = css_parsing_utils::ConsumeIdent(range)) {
-      CSSValueID value_id = ident->GetValueID();
-      if (value_id < CSSValueID::kDisc || value_id > CSSValueID::kKatakanaIroha)
-        return nullptr;
-      return MakeGarbageCollected<CSSCustomIdentValue>(
-          AtomicString(getValueName(value_id)));
-    }
-  } else {
-    if (auto* counter_style_name =
-            css_parsing_utils::ConsumeCounterStyleName(range, context))
-      return counter_style_name;
-  }
+  if (auto* counter_style_name =
+          css_parsing_utils::ConsumeCounterStyleName(range, context))
+    return counter_style_name;
 
   return css_parsing_utils::ConsumeString(range);
 }
@@ -4282,15 +4329,15 @@ const CSSValue* ListStyleType::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
     const LayoutObject*,
     bool allow_visited_style) const {
-  if (!style.GetListStyleType())
+  if (!style.ListStyleType())
     return CSSIdentifierValue::Create(CSSValueID::kNone);
-  if (style.GetListStyleType()->IsString()) {
+  if (style.ListStyleType()->IsString()) {
     return MakeGarbageCollected<CSSStringValue>(
-        style.GetListStyleType()->GetStringValue());
+        style.ListStyleType()->GetStringValue());
   }
   // TODO(crbug.com/687225): Return a scoped CSSValue?
   return MakeGarbageCollected<CSSCustomIdentValue>(
-      style.GetListStyleType()->GetCounterStyleName());
+      style.ListStyleType()->GetCounterStyleName());
 }
 
 void ListStyleType::ApplyInitial(StyleResolverState& state) const {
@@ -4299,7 +4346,7 @@ void ListStyleType::ApplyInitial(StyleResolverState& state) const {
 }
 
 void ListStyleType::ApplyInherit(StyleResolverState& state) const {
-  state.Style()->SetListStyleType(state.ParentStyle()->GetListStyleType());
+  state.Style()->SetListStyleType(state.ParentStyle()->ListStyleType());
 }
 
 void ListStyleType::ApplyValue(StyleResolverState& state,
@@ -4736,7 +4783,7 @@ const CSSValue* ObjectPosition::ParseSingleValue(
     const CSSParserLocalContext&) const {
   return ConsumePosition(range, context,
                          css_parsing_utils::UnitlessQuirk::kForbid,
-                         base::Optional<WebFeature>());
+                         absl::optional<WebFeature>());
 }
 
 const CSSValue* ObjectPosition::CSSValueFromComputedStyleInternal(
@@ -4760,7 +4807,7 @@ const CSSValue* OffsetAnchor::ParseSingleValue(
     return css_parsing_utils::ConsumeIdent(range);
   return css_parsing_utils::ConsumePosition(
       range, context, css_parsing_utils::UnitlessQuirk::kForbid,
-      base::Optional<WebFeature>());
+      absl::optional<WebFeature>());
 }
 
 const CSSValue* OffsetAnchor::CSSValueFromComputedStyleInternal(
@@ -4811,7 +4858,7 @@ const CSSValue* OffsetPosition::ParseSingleValue(
     return css_parsing_utils::ConsumeIdent(range);
   CSSValue* value = css_parsing_utils::ConsumePosition(
       range, context, css_parsing_utils::UnitlessQuirk::kForbid,
-      base::Optional<WebFeature>());
+      absl::optional<WebFeature>());
 
   // Count when we receive a valid position other than 'auto'.
   if (value && value->IsValuePair())
@@ -4904,6 +4951,42 @@ const CSSValue* OutlineColor::ParseSingleValue(
   return css_parsing_utils::ConsumeColor(range, context);
 }
 
+const CSSValue* AccentColor::ParseSingleValue(
+    CSSParserTokenRange& range,
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) const {
+  if (range.Peek().Id() == CSSValueID::kAuto)
+    return css_parsing_utils::ConsumeIdent(range);
+  return css_parsing_utils::ConsumeColor(range, context);
+}
+
+const CSSValue* AccentColor::CSSValueFromComputedStyleInternal(
+    const ComputedStyle& style,
+    const LayoutObject*,
+    bool allow_visited_style) const {
+  StyleAutoColor auto_color = style.AccentColor();
+  if (auto_color.IsAutoColor()) {
+    return CSSIdentifierValue::Create(CSSValueID::kAuto);
+  }
+
+  return ComputedStyleUtils::ValueForStyleAutoColor(
+      style, style.AccentColor(), CSSValuePhase::kComputedValue);
+}
+
+void AccentColor::ApplyInitial(StyleResolverState& state) const {
+  state.Style()->SetAccentColor(StyleAutoColor::AutoColor());
+}
+
+void AccentColor::ApplyInherit(StyleResolverState& state) const {
+  state.Style()->SetAccentColor(state.ParentStyle()->AccentColor());
+}
+
+void AccentColor::ApplyValue(StyleResolverState& state,
+                             const CSSValue& value) const {
+  state.Style()->SetAccentColor(
+      StyleBuilderConverter::ConvertStyleAutoColor(state, value));
+}
+
 const blink::Color OutlineColor::ColorIncludingFallback(
     bool visited_link,
     const ComputedStyle& style) const {
@@ -4929,7 +5012,7 @@ const CSSValue* OutlineColor::CSSValueFromComputedStyleInternal(
   // https://drafts.csswg.org/cssom/#resolved-values
   // For this property, the resolved value is the used value.
   return allow_visited_style
-             ? cssvalue::CSSColorValue::Create(
+             ? cssvalue::CSSColor::Create(
                    style.VisitedDependentColor(*this).Rgb())
              : ComputedStyleUtils::CurrentColorOrValidColor(
                    style, outline_color, CSSValuePhase::kUsedValue);
@@ -5323,20 +5406,18 @@ const CSSValue* Perspective::ParseSingleValue(
   if (range.Peek().Id() == CSSValueID::kNone)
     return css_parsing_utils::ConsumeIdent(range);
   CSSPrimitiveValue* parsed_value =
-      css_parsing_utils::ConsumeLength(range, context, kValueRangeAll);
+      css_parsing_utils::ConsumeLength(range, context, kValueRangeNonNegative);
   bool use_legacy_parsing = localContext.UseAliasParsing();
   if (!parsed_value && use_legacy_parsing) {
     double perspective;
-    if (!css_parsing_utils::ConsumeNumberRaw(range, context, perspective))
+    if (!css_parsing_utils::ConsumeNumberRaw(range, context, perspective) ||
+        perspective < 0.0)
       return nullptr;
     context.Count(WebFeature::kUnitlessPerspectiveInPerspectiveProperty);
     parsed_value = CSSNumericLiteralValue::Create(
         perspective, CSSPrimitiveValue::UnitType::kPixels);
   }
-  if (parsed_value &&
-      (parsed_value->IsCalculated() || parsed_value->GetDoubleValue() > 0))
-    return parsed_value;
-  return nullptr;
+  return parsed_value;
 }
 
 const CSSValue* Perspective::CSSValueFromComputedStyleInternal(
@@ -5354,7 +5435,7 @@ const CSSValue* PerspectiveOrigin::ParseSingleValue(
     const CSSParserLocalContext&) const {
   return ConsumePosition(range, context,
                          css_parsing_utils::UnitlessQuirk::kForbid,
-                         base::Optional<WebFeature>());
+                         absl::optional<WebFeature>());
 }
 
 bool PerspectiveOrigin::IsLayoutDependent(const ComputedStyle* style,
@@ -5400,7 +5481,7 @@ const CSSValue* Position::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
     const LayoutObject*,
     bool allow_visited_style) const {
-  return CSSIdentifierValue::Create(style.GetPosition());
+  return CSSIdentifierValue::Create(style.PositionInternal());
 }
 
 void Position::ApplyInherit(StyleResolverState& state) const {
@@ -5519,7 +5600,7 @@ const CSSValue* Rotate::ParseSingleValue(CSSParserTokenRange& range,
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
 
   CSSValue* rotation = css_parsing_utils::ConsumeAngle(
-      range, context, base::Optional<WebFeature>());
+      range, context, absl::optional<WebFeature>());
 
   CSSValue* axis = css_parsing_utils::ConsumeAxis(range, context);
   if (axis)
@@ -5529,7 +5610,7 @@ const CSSValue* Rotate::ParseSingleValue(CSSParserTokenRange& range,
 
   if (!rotation) {
     rotation = css_parsing_utils::ConsumeAngle(range, context,
-                                               base::Optional<WebFeature>());
+                                               absl::optional<WebFeature>());
     if (!rotation)
       return nullptr;
   }
@@ -5612,24 +5693,23 @@ const CSSValue* Scale::ParseSingleValue(CSSParserTokenRange& range,
   if (id == CSSValueID::kNone)
     return css_parsing_utils::ConsumeIdent(range);
 
-  CSSValue* x_scale =
-      css_parsing_utils::ConsumeNumber(range, context, kValueRangeAll);
+  CSSPrimitiveValue* x_scale =
+      css_parsing_utils::ConsumeNumberOrPercent(range, context, kValueRangeAll);
   if (!x_scale)
     return nullptr;
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   list->Append(*x_scale);
 
-  CSSValue* y_scale =
-      css_parsing_utils::ConsumeNumber(range, context, kValueRangeAll);
+  CSSPrimitiveValue* y_scale =
+      css_parsing_utils::ConsumeNumberOrPercent(range, context, kValueRangeAll);
   if (y_scale) {
-    CSSValue* z_scale =
-        css_parsing_utils::ConsumeNumber(range, context, kValueRangeAll);
+    CSSPrimitiveValue* z_scale = css_parsing_utils::ConsumeNumberOrPercent(
+        range, context, kValueRangeAll);
     if (z_scale) {
       list->Append(*y_scale);
       list->Append(*z_scale);
-    } else if (To<CSSPrimitiveValue>(x_scale)->GetDoubleValue() !=
-               To<CSSPrimitiveValue>(y_scale)->GetDoubleValue()) {
+    } else if (x_scale->GetDoubleValue() != y_scale->GetDoubleValue()) {
       list->Append(*y_scale);
     }
   }
@@ -5664,7 +5744,7 @@ const CSSValue* Scale::CSSValueFromComputedStyleInternal(
 }
 
 // https://www.w3.org/TR/css-overflow-4
-// auto | [ stable | always ] && both? && force?
+// auto | stable && both-edges?
 const CSSValue* ScrollbarGutter::ParseSingleValue(
     CSSParserTokenRange& range,
     const CSSParserContext& context,
@@ -5675,37 +5755,30 @@ const CSSValue* ScrollbarGutter::ParseSingleValue(
   if (auto* value = css_parsing_utils::ConsumeIdent<CSSValueID::kAuto>(range))
     return value;
 
-  CSSIdentifierValue* stable_or_always = nullptr;
-  CSSIdentifierValue* both = nullptr;
-  CSSIdentifierValue* force = nullptr;
+  CSSIdentifierValue* stable = nullptr;
+  CSSIdentifierValue* both_edges = nullptr;
 
   while (!range.AtEnd()) {
-    if (!stable_or_always) {
-      if ((stable_or_always =
-               css_parsing_utils::ConsumeIdent<CSSValueID::kStable,
-                                               CSSValueID::kAlways>(range)))
+    if (!stable) {
+      if ((stable =
+               css_parsing_utils::ConsumeIdent<CSSValueID::kStable>(range)))
         continue;
     }
     CSSValueID id = range.Peek().Id();
-    if (id == CSSValueID::kBoth && !both)
-      both = css_parsing_utils::ConsumeIdent(range);
-    else if (id == CSSValueID::kForce && !force)
-      force = css_parsing_utils::ConsumeIdent(range);
+    if (id == CSSValueID::kBothEdges && !both_edges)
+      both_edges = css_parsing_utils::ConsumeIdent(range);
     else
       return nullptr;
   }
-  if (!stable_or_always)
+  if (!stable)
     return nullptr;
-  if (both || force) {
+  if (both_edges) {
     CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-    list->Append(*stable_or_always);
-    if (both)
-      list->Append(*both);
-    if (force)
-      list->Append(*force);
+    list->Append(*stable);
+    list->Append(*both_edges);
     return list;
   }
-  return stable_or_always;
+  return stable;
 }
 
 const CSSValue* ScrollbarGutter::CSSValueFromComputedStyleInternal(
@@ -5716,23 +5789,19 @@ const CSSValue* ScrollbarGutter::CSSValueFromComputedStyleInternal(
   if (scrollbar_gutter == kScrollbarGutterAuto)
     return CSSIdentifierValue::Create(CSSValueID::kAuto);
 
-  DCHECK(scrollbar_gutter & (kScrollbarGutterStable | kScrollbarGutterAlways));
+  DCHECK(scrollbar_gutter & kScrollbarGutterStable);
 
-  CSSValue* main_value = nullptr;
+  CSSValue* stable = nullptr;
   if (scrollbar_gutter & kScrollbarGutterStable)
-    main_value = CSSIdentifierValue::Create(CSSValueID::kStable);
-  else
-    main_value = CSSIdentifierValue::Create(CSSValueID::kAlways);
+    stable = CSSIdentifierValue::Create(CSSValueID::kStable);
 
-  if (!(scrollbar_gutter & (kScrollbarGutterBoth | kScrollbarGutterForce)))
-    return main_value;
+  if (!(scrollbar_gutter & kScrollbarGutterBothEdges))
+    return stable;
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  list->Append(*main_value);
-  if (scrollbar_gutter & kScrollbarGutterBoth)
-    list->Append(*CSSIdentifierValue::Create(kScrollbarGutterBoth));
-  if (scrollbar_gutter & kScrollbarGutterForce)
-    list->Append(*CSSIdentifierValue::Create(kScrollbarGutterForce));
+  list->Append(*stable);
+  if (scrollbar_gutter & kScrollbarGutterBothEdges)
+    list->Append(*CSSIdentifierValue::Create(kScrollbarGutterBothEdges));
   return list;
 }
 

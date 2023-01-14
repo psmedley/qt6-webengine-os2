@@ -8,14 +8,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/strcat.h"
 #include "base/trace_event/trace_event.h"
 #include "content/common/fetch/fetch_request_type_converters.h"
-#include "content/common/service_worker/service_worker_loader_helpers.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
@@ -25,10 +22,15 @@
 #include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
+#include "third_party/blink/public/common/service_worker/service_worker_loader_helpers.h"
 #include "third_party/blink/public/common/service_worker/service_worker_type_converters.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/dispatch_fetch_event_params.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_stream_handle.mojom.h"
 #include "third_party/blink/public/platform/web_http_body.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "ui/base/page_transition_types.h"
@@ -68,6 +70,11 @@ class HeaderRewritingURLLoaderClient : public network::mojom::URLLoaderClient {
 
  private:
   // network::mojom::URLLoaderClient implementation:
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
+    DCHECK(url_loader_client_.is_bound());
+    url_loader_client_->OnReceiveEarlyHints(std::move(early_hints));
+  }
+
   void OnReceiveResponse(
       network::mojom::URLResponseHeadPtr response_head) override {
     DCHECK(url_loader_client_.is_bound());
@@ -148,7 +155,6 @@ class ServiceWorkerSubresourceLoader::StreamWaiter
 
 ServiceWorkerSubresourceLoader::ServiceWorkerSubresourceLoader(
     mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& resource_request,
@@ -159,7 +165,8 @@ ServiceWorkerSubresourceLoader::ServiceWorkerSubresourceLoader(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     base::WeakPtr<ServiceWorkerSubresourceLoaderFactory>
         service_worker_subresource_loader_factory)
-    : redirect_limit_(net::URLRequest::kMaxRedirects),
+    : response_head_(network::mojom::URLResponseHead::New()),
+      redirect_limit_(net::URLRequest::kMaxRedirects),
       url_loader_client_(std::move(client)),
       url_loader_receiver_(this, std::move(receiver)),
       body_as_blob_size_(blink::BlobUtils::kUnknownSize),
@@ -167,7 +174,6 @@ ServiceWorkerSubresourceLoader::ServiceWorkerSubresourceLoader(
       fetch_request_restarted_(false),
       body_reading_complete_(false),
       side_data_reading_complete_(false),
-      routing_id_(routing_id),
       request_id_(request_id),
       options_(options),
       traffic_annotation_(traffic_annotation),
@@ -238,7 +244,7 @@ void ServiceWorkerSubresourceLoader::DispatchFetchEvent() {
       // The controller was lost after this loader or its loader factory was
       // created.
       fallback_factory_->CreateLoaderAndStart(
-          url_loader_receiver_.Unbind(), routing_id_, request_id_, options_,
+          url_loader_receiver_.Unbind(), request_id_, options_,
           resource_request_, url_loader_client_.Unbind(), traffic_annotation_);
       delete this;
       return;
@@ -249,7 +255,7 @@ void ServiceWorkerSubresourceLoader::DispatchFetchEvent() {
     // to return an error as the client must be shutting down.
     DCHECK_EQ(ControllerServiceWorkerConnector::State::kNoContainerHost,
               controller_state);
-    SettleFetchEventDispatch(base::nullopt);
+    SettleFetchEventDispatch(absl::nullopt);
     return;
   }
 
@@ -281,7 +287,7 @@ void ServiceWorkerSubresourceLoader::DispatchFetchEventForSubresource() {
           blink::mojom::ControllerServiceWorkerPurpose::FETCH_SUB_RESOURCE);
 
   if (!controller) {
-    SettleFetchEventDispatch(base::nullopt);
+    SettleFetchEventDispatch(absl::nullopt);
     return;
   }
 
@@ -392,7 +398,7 @@ void ServiceWorkerSubresourceLoader::OnConnectionClosed() {
 }
 
 void ServiceWorkerSubresourceLoader::SettleFetchEventDispatch(
-    base::Optional<blink::ServiceWorkerStatusCode> status) {
+    absl::optional<blink::ServiceWorkerStatusCode> status) {
   if (!controller_connector_observation_.IsObserving()) {
     // Already settled.
     return;
@@ -455,8 +461,8 @@ void ServiceWorkerSubresourceLoader::OnFallback(
                               client.InitWithNewPipeAndPassReceiver());
 
   fallback_factory_->CreateLoaderAndStart(
-      url_loader_receiver_.Unbind(), routing_id_, request_id_, options_,
-      resource_request_, std::move(client), traffic_annotation_);
+      url_loader_receiver_.Unbind(), request_id_, options_, resource_request_,
+      std::move(client), traffic_annotation_);
 
   // Per spec, redirects after this point are not intercepted by the service
   // worker again (https://crbug.com/517364). So this loader is done.
@@ -492,10 +498,8 @@ void ServiceWorkerSubresourceLoader::StartResponse(
     return;
   }
 
-  ServiceWorkerLoaderHelpers::SaveResponseInfo(*response, response_head_.get());
-  ServiceWorkerLoaderHelpers::SaveResponseHeaders(
-      response->status_code, response->status_text, response->headers,
-      response_head_.get());
+  blink::ServiceWorkerLoaderHelpers::SaveResponseInfo(*response,
+                                                      response_head_.get());
   response_head_->response_start = base::TimeTicks::Now();
   response_head_->load_timing.receive_headers_start = base::TimeTicks::Now();
   response_head_->load_timing.receive_headers_end =
@@ -504,7 +508,7 @@ void ServiceWorkerSubresourceLoader::StartResponse(
 
   // Handle a redirect response. ComputeRedirectInfo returns non-null redirect
   // info if the given response is a redirect.
-  redirect_info_ = ServiceWorkerLoaderHelpers::ComputeRedirectInfo(
+  redirect_info_ = blink::ServiceWorkerLoaderHelpers::ComputeRedirectInfo(
       resource_request_, *response_head_);
   if (redirect_info_) {
     if (redirect_limit_-- == 0) {
@@ -512,7 +516,6 @@ void ServiceWorkerSubresourceLoader::StartResponse(
       return;
     }
     response_head_->encoded_data_length = 0;
-    received_redirect_for_bug1162035_ = true;
     url_loader_client_->OnReceiveRedirect(*redirect_info_,
                                           response_head_.Clone());
     TransitionToStatus(Status::kSentRedirect);
@@ -577,7 +580,7 @@ void ServiceWorkerSubresourceLoader::StartResponse(
   // Otherwise we can immediately complete side data reading so that the
   // entire resource completes when the main body is read.
   OnSideDataReadingComplete(std::move(data_pipe),
-                            base::Optional<mojo_base::BigBuffer>());
+                            absl::optional<mojo_base::BigBuffer>());
 }
 
 void ServiceWorkerSubresourceLoader::CommitResponseHeaders() {
@@ -614,10 +617,8 @@ void ServiceWorkerSubresourceLoader::CommitCompleted(int error_code) {
                           TRACE_ID_LOCAL(request_id_)),
       TRACE_EVENT_FLAG_FLOW_IN, "error_code", net::ErrorToString(error_code));
 
-  if (error_code == net::OK) {
-    bool handled = !response_head_->was_fallback_required_by_service_worker;
-    RecordTimingMetrics(handled);
-  }
+  if (error_code == net::OK)
+    RecordTimingMetrics(/*handled=*/true);
 
   TransitionToStatus(Status::kCompleted);
   DCHECK(url_loader_client_.is_bound());
@@ -636,11 +637,9 @@ void ServiceWorkerSubresourceLoader::CommitCompleted(int error_code) {
 void ServiceWorkerSubresourceLoader::RecordTimingMetrics(bool handled) {
   DCHECK(fetch_event_timing_);
 
-  // |report_raw_headers| is true when DevTools is attached. Don't record
+  // |devtools_request_id| is set when DevTools is attached. Don't record
   // metrics when DevTools is attached to reduce noise.
-  // TODO(bashi): Relying on |report_raw_header| to detect DevTools existence
-  // is brittle. Figure out a better way to check DevTools is attached.
-  if (resource_request_.report_raw_headers)
+  if (resource_request_.devtools_request_id.has_value())
     return;
 
   // |fetch_event_timing_| can be recorded in different process. We can get
@@ -703,13 +702,25 @@ void ServiceWorkerSubresourceLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   TRACE_EVENT_WITH_FLOW1(
       "ServiceWorker", "ServiceWorkerSubresourceLoader::FollowRedirect",
       TRACE_ID_WITH_SCOPE(kServiceWorkerSubresourceLoaderScope,
                           TRACE_ID_LOCAL(request_id_)),
       TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "new_url",
-      redirect_info_->new_url.spec());
+      redirect_info_ ? redirect_info_->new_url.spec() : "(none)");
+
+  // In rare cases, the client seems to call FollowRedirect() when we aren't
+  // expecting it. Just complete with error if we have not already completed.
+  // https://crbug.com/1162035
+  if (!redirect_info_) {
+    if (status_ != Status::kCompleted)
+      CommitCompleted(net::ERR_INVALID_REDIRECT);
+    return;
+  }
+
+  DCHECK_EQ(status_, Status::kSentRedirect);
+
   // TODO(arthursonzogni, juncai): This seems to be correctly implemented, but
   // not used so far. Add tests and remove this DCHECK to support this feature
   // if needed. See https://crbug.com/845683.
@@ -718,18 +729,6 @@ void ServiceWorkerSubresourceLoader::FollowRedirect(
          "https://crbug.com/845683";
   DCHECK(!new_url.has_value()) << "Redirect with modified url was not "
                                   "supported yet. crbug.com/845683";
-
-  // TODO(crbug.com/1162035): Replace with a DCHECK or early return when
-  // the bug is understood.
-  if (!redirect_info_) {
-    SCOPED_CRASH_KEY_NUMBER("bug1162035", "follow_status",
-                            static_cast<int>(status_));
-    SCOPED_CRASH_KEY_BOOL("bug1162035", "received_redirect",
-                          received_redirect_for_bug1162035_);
-    SCOPED_CRASH_KEY_BOOL("bug1162035", "followed_redirect",
-                          followed_redirect_for_bug1162035_);
-    CHECK(false);
-  }
 
   bool should_clear_upload = false;
   net::RedirectUtil::UpdateHttpRequest(
@@ -752,7 +751,6 @@ void ServiceWorkerSubresourceLoader::FollowRedirect(
   // Restart the request.
   TransitionToStatus(Status::kNotStarted);
   redirect_info_.reset();
-  followed_redirect_for_bug1162035_ = true;
   response_callback_receiver_.reset();
   StartRequest(resource_request_);
 }
@@ -776,7 +774,7 @@ int ServiceWorkerSubresourceLoader::StartBlobReading(
   DCHECK(body_pipe);
   DCHECK(!body_reading_complete_);
 
-  return ServiceWorkerLoaderHelpers::ReadBlobResponseBody(
+  return blink::ServiceWorkerLoaderHelpers::ReadBlobResponseBody(
       &body_as_blob_, body_as_blob_size_,
       base::BindOnce(&ServiceWorkerSubresourceLoader::OnBodyReadingComplete,
                      weak_factory_.GetWeakPtr()),
@@ -785,7 +783,7 @@ int ServiceWorkerSubresourceLoader::StartBlobReading(
 
 void ServiceWorkerSubresourceLoader::OnSideDataReadingComplete(
     mojo::ScopedDataPipeConsumerHandle data_pipe,
-    base::Optional<mojo_base::BigBuffer> metadata) {
+    absl::optional<mojo_base::BigBuffer> metadata) {
   TRACE_EVENT_WITH_FLOW1(
       "ServiceWorker",
       "ServiceWorkerSubresourceLoader::OnSideDataReadingComplete",
@@ -876,7 +874,6 @@ void ServiceWorkerSubresourceLoaderFactory::AddPendingWorkerTimingReceiver(
 
 void ServiceWorkerSubresourceLoaderFactory::CreateLoaderAndStart(
     mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& resource_request,
@@ -887,7 +884,7 @@ void ServiceWorkerSubresourceLoaderFactory::CreateLoaderAndStart(
   // the request, passes the request to the fallback factory, and
   // destructs itself (while the loader client continues to work).
   new ServiceWorkerSubresourceLoader(
-      std::move(receiver), routing_id, request_id, options, resource_request,
+      std::move(receiver), request_id, options, resource_request,
       std::move(client), traffic_annotation, controller_connector_,
       fallback_factory_, task_runner_, weak_factory_.GetWeakPtr());
 }
@@ -904,31 +901,25 @@ void ServiceWorkerSubresourceLoaderFactory::OnMojoDisconnect() {
 }
 
 void ServiceWorkerSubresourceLoader::TransitionToStatus(Status new_status) {
-  // TODO(crbug.com/1162035): Remove once the bug is understood and replace
-  // the CHECKs below to DCHECKs.
-  SCOPED_CRASH_KEY_NUMBER("bug1162035", "transition_old",
-                          static_cast<int>(status_));
-  SCOPED_CRASH_KEY_NUMBER("bug1162035", "transition_new",
-                          static_cast<int>(new_status));
-
+#if DCHECK_IS_ON()
   switch (new_status) {
     case Status::kNotStarted:
-      CHECK_EQ(status_, Status::kSentRedirect);
+      DCHECK_EQ(status_, Status::kSentRedirect);
       break;
     case Status::kStarted:
-      CHECK_EQ(status_, Status::kNotStarted);
+      DCHECK_EQ(status_, Status::kNotStarted);
       break;
     case Status::kSentRedirect:
-      CHECK_EQ(status_, Status::kStarted);
+      DCHECK_EQ(status_, Status::kStarted);
       break;
     case Status::kSentHeader:
-      CHECK_EQ(status_, Status::kStarted);
+      DCHECK_EQ(status_, Status::kStarted);
       break;
     case Status::kSentBody:
-      CHECK_EQ(status_, Status::kSentHeader);
+      DCHECK_EQ(status_, Status::kSentHeader);
       break;
     case Status::kCompleted:
-      CHECK(
+      DCHECK(
           // Network fallback before interception.
           status_ == Status::kNotStarted ||
           // Network fallback after interception.
@@ -939,6 +930,7 @@ void ServiceWorkerSubresourceLoader::TransitionToStatus(Status new_status) {
           status_ == Status::kSentBody);
       break;
   }
+#endif  // DCHECK_IS_ON()
 
   status_ = new_status;
 }

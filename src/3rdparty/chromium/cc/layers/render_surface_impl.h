@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cc/cc_export.h"
+#include "cc/document_transition/document_transition_shared_element_id.h"
 #include "cc/layers/draw_mode.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/trees/occlusion.h"
@@ -19,8 +20,10 @@
 #include "components/viz/common/quads/compositor_render_pass.h"
 #include "components/viz/common/quads/shared_quad_state.h"
 #include "components/viz/common/surfaces/subtree_capture_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/mask_filter_info.h"
 #include "ui/gfx/transform.h"
 
@@ -167,7 +170,7 @@ class CC_EXPORT RenderSurfaceImpl {
 
   const FilterOperations& Filters() const;
   const FilterOperations& BackdropFilters() const;
-  base::Optional<gfx::RRectF> BackdropFilterBounds() const;
+  absl::optional<gfx::RRectF> BackdropFilterBounds() const;
   LayerImpl* BackdropMaskLayer() const;
   gfx::Transform SurfaceScale() const;
 
@@ -175,7 +178,14 @@ class CC_EXPORT RenderSurfaceImpl {
 
   bool HasCopyRequest() const;
 
+  // The capture identifier for this render surface and its originating effect
+  // node. If empty, this surface has not been selected as a subtree capture and
+  // is either a root surface or will not be rendered separately.
   viz::SubtreeCaptureId SubtreeCaptureId() const;
+
+  // The size of this surface that should be used for cropping capture. If
+  // empty, the entire size of this surface should be used for capture.
+  gfx::Size SubtreeSize() const;
 
   bool ShouldCacheRenderSurface() const;
 
@@ -209,6 +219,9 @@ class CC_EXPORT RenderSurfaceImpl {
   int EffectTreeIndex() const;
 
   const EffectNode* OwningEffectNode() const;
+
+  const DocumentTransitionSharedElementId&
+  GetDocumentTransitionSharedElementId() const;
 
  private:
   void SetContentRect(const gfx::Rect& content_rect);

@@ -46,6 +46,9 @@ const char kEnableUnsafeWebGPU[] = "enable-unsafe-webgpu";
 // Enable validation layers in Dawn backends.
 const char kEnableDawnBackendValidation[] = "enable-dawn-backend-validation";
 
+// Force all WebGPU content to run on the WebGPU/Compat (GLES) backend.
+const char kForceWebGPUCompat[] = "force-webgpu-compat";
+
 // Set the Dawn features(toggles) enabled on the creation of Dawn devices.
 const char kEnableDawnFeatures[] = "enable-dawn-features";
 
@@ -94,9 +97,6 @@ const char kWebViewDrawFunctorUsesVulkan[] = "webview-draw-functor-uses-vulkan";
 // Enables using protected memory for vulkan resources.
 const char kEnableVulkanProtectedMemory[] = "enable-vulkan-protected-memory";
 
-// Forces vulkan resources to use protected memory for vulkan compositing.
-const char kEnforceVulkanProtectedMemory[] = "enforce-vulkan-protected-memory";
-
 // Disables falling back to GL based hardware rendering if initializing Vulkan
 // fails. This is to allow tests to catch regressions in Vulkan.
 const char kDisableVulkanFallbackToGLForTesting[] =
@@ -113,5 +113,8 @@ const char kVulkanSyncCpuMemoryLimitMb[] = "vulkan-sync-cpu-memory-limit-mb";
 // Crash Chrome if GPU process crashes. This is to force a test to fail when
 // GPU process crashes unexpectedly.
 const char kForceBrowserCrashOnGpuCrash[] = "force-browser-crash-on-gpu-crash";
+
+// Override value for the GPU watchdog timeout in seconds.
+const char kGpuWatchdogTimeoutSeconds[] = "gpu-watchdog-timeout-seconds";
 
 }  // namespace switches

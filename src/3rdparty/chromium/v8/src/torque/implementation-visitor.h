@@ -11,6 +11,7 @@
 #include "src/base/macros.h"
 #include "src/torque/ast.h"
 #include "src/torque/cfg.h"
+#include "src/torque/cpp-builder.h"
 #include "src/torque/declarations.h"
 #include "src/torque/global-context.h"
 #include "src/torque/type-oracle.h"
@@ -234,7 +235,7 @@ template <class T>
 class BindingsManager {
  public:
   base::Optional<Binding<T>*> TryLookup(const std::string& name) {
-    if (name.length() >= 2 && name[0] == '_' && name[1] != '_') {
+    if (StartsWithSingleUnderscore(name)) {
       Error("Trying to reference '", name, "' which is marked as unused.")
           .Throw();
     }
@@ -361,6 +362,8 @@ class LocalValue {
       : value(std::move(reference)) {}
   explicit LocalValue(std::string inaccessible_explanation)
       : inaccessible_explanation(std::move(inaccessible_explanation)) {}
+  explicit LocalValue(std::function<LocationReference()> lazy)
+      : lazy(std::move(lazy)) {}
 
   LocationReference GetLocationReference(Binding<LocalValue>* binding) {
     if (value) {
@@ -370,16 +373,19 @@ class LocalValue {
         return LocationReference::VariableAccess(ref.GetVisitResult(), binding);
       }
       return ref;
+    } else if (lazy) {
+      return (*lazy)();
     } else {
       Error("Cannot access ", binding->name(), ": ", inaccessible_explanation)
           .Throw();
     }
   }
 
-  bool IsAccessible() const { return value.has_value(); }
+  bool IsAccessibleNonLazy() const { return value.has_value(); }
 
  private:
   base::Optional<LocationReference> value;
+  base::Optional<std::function<LocationReference()>> lazy;
   std::string inaccessible_explanation;
 };
 
@@ -400,7 +406,7 @@ template <>
 inline bool Binding<LocalValue>::CheckWritten() const {
   // Do the check only for non-const variables and non struct types.
   auto binding = *manager_->current_bindings_[name_];
-  if (!binding->IsAccessible()) return false;
+  if (!binding->IsAccessibleNonLazy()) return false;
   const LocationReference& ref = binding->GetLocationReference(binding);
   if (!ref.IsVariableAccess()) return false;
   return !ref.GetVisitResult().type()->StructSupertype();
@@ -469,9 +475,9 @@ class ImplementationVisitor {
   InitializerResults VisitInitializerResults(
       const ClassType* class_type,
       const std::vector<NameAndExpression>& expressions);
-  LocationReference GenerateFieldReference(VisitResult object,
-                                           const Field& field,
-                                           const ClassType* class_type);
+  LocationReference GenerateFieldReference(
+      VisitResult object, const Field& field, const ClassType* class_type,
+      bool treat_optional_as_indexed = false);
   LocationReference GenerateFieldReferenceForInit(
       VisitResult object, const Field& field,
       const LayoutForInitialization& layout);
@@ -502,6 +508,8 @@ class ImplementationVisitor {
       bool ignore_stuct_field_constness = false,
       base::Optional<SourcePosition> pos = {});
   LocationReference GetLocationReference(ElementAccessExpression* expr);
+  LocationReference GenerateReferenceToItemInHeapSlice(LocationReference slice,
+                                                       VisitResult index);
 
   VisitResult GenerateFetchFromLocation(const LocationReference& reference);
 
@@ -735,12 +743,12 @@ class ImplementationVisitor {
   void GenerateExpressionBranch(Expression* expression, Block* true_block,
                                 Block* false_block);
 
-  void GenerateMacroFunctionDeclaration(std::ostream& o,
-                                        Macro* macro);
-  std::vector<std::string> GenerateFunctionDeclaration(
-      std::ostream& o, const std::string& macro_prefix, const std::string& name,
-      const Signature& signature, const NameVector& parameter_names,
-      bool pass_code_assembler_state = true);
+  cpp::Function GenerateMacroFunctionDeclaration(Macro* macro);
+
+  cpp::Function GenerateFunction(
+      cpp::Class* owner, const std::string& name, const Signature& signature,
+      const NameVector& parameter_names, bool pass_code_assembler_state = true,
+      std::vector<std::string>* generated_parameter_names = nullptr);
 
   VisitResult GenerateImplicitConvert(const Type* destination_type,
                                       VisitResult source);
@@ -834,6 +842,8 @@ class ImplementationVisitor {
     }
   }
 
+  class MacroInliningScope;
+
   base::Optional<CfgAssembler> assembler_;
   NullOStream null_stream_;
   bool is_dry_run_;
@@ -845,6 +855,10 @@ class ImplementationVisitor {
   // the value to load.
   std::unordered_map<const Expression*, const Identifier*>
       bitfield_expressions_;
+
+  // For emitting warnings. Contains the current set of macros being inlined in
+  // calls to InlineMacro.
+  std::unordered_set<const Macro*> inlining_macros_;
 
   // The contents of the debug macros output files. These contain all Torque
   // macros that have been generated using the C++ backend with debug purpose.

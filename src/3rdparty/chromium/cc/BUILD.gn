@@ -35,6 +35,8 @@ cc_component("cc") {
     "benchmarks/unittest_only_benchmark_impl.h",
     "document_transition/document_transition_request.cc",
     "document_transition/document_transition_request.h",
+    "document_transition/document_transition_shared_element_id.cc",
+    "document_transition/document_transition_shared_element_id.h",
     "input/actively_scrolling_type.h",
     "input/browser_controls_offset_manager.cc",
     "input/browser_controls_offset_manager.h",
@@ -371,13 +373,17 @@ cc_component("cc") {
     "trees/layer_tree_settings.h",
     "trees/managed_memory_policy.cc",
     "trees/managed_memory_policy.h",
+    "trees/mobile_optimized_viewport_util.cc",
+    "trees/mobile_optimized_viewport_util.h",
     "trees/mutator_host.h",
     "trees/mutator_host_client.h",
     "trees/occlusion.cc",
     "trees/occlusion.h",
     "trees/occlusion_tracker.cc",
     "trees/occlusion_tracker.h",
+    "trees/paint_holding_commit_trigger.cc",
     "trees/paint_holding_commit_trigger.h",
+    "trees/paint_holding_reason.h",
     "trees/presentation_time_callback_buffer.cc",
     "trees/presentation_time_callback_buffer.h",
     "trees/property_animation_state.cc",
@@ -434,6 +440,7 @@ cc_component("cc") {
     "//base",
     "//base/third_party/dynamic_annotations",
     "//build:chromeos_buildflags",
+    "//components/power_scheduler",
     "//components/viz/client",
     "//device/base/synchronization",
     "//gpu",
@@ -827,6 +834,7 @@ cc_test("cc_unittests") {
     "//build:chromeos_buildflags",
     "//cc/mojo_embedder",
     "//cc/paint",
+    "//components/power_scheduler",
     "//components/ukm:test_support",
     "//components/viz/client",
     "//components/viz/common",
@@ -860,7 +868,14 @@ cc_test("cc_unittests") {
   ]
 
   if (is_fuchsia) {
-    manifest = "//build/config/fuchsia/gfx_tests.cmx"
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/font_capabilities.test-cmx",
+
+      # TODO(crbug.com/1185811): Figure out why jit_capabilities is needed.
+      "//build/config/fuchsia/test/jit_capabilities.test-cmx",
+
+      "//build/config/fuchsia/test/vulkan_capabilities.test-cmx",
+    ]
   }
 
   if (enable_vulkan) {
@@ -905,7 +920,7 @@ cc_test("cc_perftests") {
     "//gpu/command_buffer/client:raster",
     "//gpu/command_buffer/client:raster_interface",
     "//gpu/ipc:gl_in_process_context",
-    "//gpu/ipc/common:mojom_traits",
+    "//gpu/ipc/common",
     "//media",
     "//mojo/core/embedder",
     "//mojo/public/cpp/bindings",

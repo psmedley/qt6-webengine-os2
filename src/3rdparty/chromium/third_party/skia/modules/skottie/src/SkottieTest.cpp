@@ -173,11 +173,17 @@ DEF_TEST(Skottie_Properties, reporter) {
             fTransforms.push_back({SkString(node_name), lh()});
         }
 
-        void onEnterNode(const char node_name[]) override {
+        void onEnterNode(const char node_name[], PropertyObserver::NodeType node_type) override {
+            if (node_name == nullptr) {
+                return;
+            }
             fCurrentNode = fCurrentNode.empty() ? node_name : fCurrentNode + "." + node_name;
         }
 
-        void onLeavingNode(const char node_name[]) override {
+        void onLeavingNode(const char node_name[], PropertyObserver::NodeType node_type) override {
+            if (node_name == nullptr) {
+                return;
+            }
             auto length = strlen(node_name);
             fCurrentNode =
                     fCurrentNode.length() > length
@@ -203,9 +209,9 @@ DEF_TEST(Skottie_Properties, reporter) {
     };
 
     // Returns a single specified typeface for all requests.
-    class DummyFontMgr : public SkFontMgr {
+    class FakeFontMgr : public SkFontMgr {
      public:
-        DummyFontMgr(sk_sp<SkTypeface> test_font) : fTestFont(test_font) {}
+        FakeFontMgr(sk_sp<SkTypeface> test_font) : fTestFont(test_font) {}
 
         int onCountFamilies() const override { return 1; }
         void onGetFamilyName(int index, SkString* familyName) const override {}
@@ -220,9 +226,6 @@ DEF_TEST(Skottie_Properties, reporter) {
                                                 SkUnichar character) const override {
             return nullptr;
         }
-        SkTypeface* onMatchFaceStyle(const SkTypeface*, const SkFontStyle&) const override {
-            return nullptr;
-        }
         sk_sp<SkTypeface> onMakeFromData(sk_sp<SkData>, int ttcIndex) const override {
             return fTestFont;
         }
@@ -232,9 +235,6 @@ DEF_TEST(Skottie_Properties, reporter) {
         }
         sk_sp<SkTypeface> onMakeFromStreamArgs(std::unique_ptr<SkStreamAsset>,
                                                    const SkFontArguments&) const override {
-            return fTestFont;
-        }
-        sk_sp<SkTypeface> onMakeFromFontData(std::unique_ptr<SkFontData>) const override {
             return fTestFont;
         }
         sk_sp<SkTypeface> onMakeFromFile(const char path[], int ttcIndex) const override {
@@ -247,7 +247,7 @@ DEF_TEST(Skottie_Properties, reporter) {
         sk_sp<SkTypeface> fTestFont;
     };
 
-    sk_sp<DummyFontMgr> test_font_manager = sk_make_sp<DummyFontMgr>(test_typeface);
+    sk_sp<FakeFontMgr> test_font_manager = sk_make_sp<FakeFontMgr>(test_typeface);
     SkMemoryStream stream(json, strlen(json));
     auto observer = sk_make_sp<TestPropertyObserver>();
 
@@ -316,6 +316,7 @@ DEF_TEST(Skottie_Properties, reporter) {
       test_typeface,
       SkString("inline_text"),
       100,
+      0, 100,
       0,
       120,
       12,
@@ -409,8 +410,6 @@ static SkRect ComputeBlobBounds(const sk_sp<SkTextBlob>& blob) {
 
     SkAutoSTArray<16, SkRect> glyphBounds;
 
-    SkTextBlobRunIterator it(blob.get());
-
     for (SkTextBlobRunIterator it(blob.get()); !it.done(); it.next()) {
         glyphBounds.reset(SkToInt(it.glyphCount()));
         it.font().getBounds(it.glyphs(), it.glyphCount(), glyphBounds.get(), nullptr);
@@ -470,6 +469,7 @@ DEF_TEST(Skottie_Shaper_HAlign, reporter) {
             const skottie::Shaper::TextDesc desc = {
                 typeface,
                 tsize.text_size,
+                0, tsize.text_size,
                 tsize.text_size,
                 0,
                 0,
@@ -539,6 +539,7 @@ DEF_TEST(Skottie_Shaper_VAlign, reporter) {
             const skottie::Shaper::TextDesc desc = {
                 typeface,
                 tsize.text_size,
+                0, tsize.text_size,
                 tsize.text_size,
                 0,
                 0,
@@ -578,6 +579,7 @@ DEF_TEST(Skottie_Shaper_FragmentGlyphs, reporter) {
     skottie::Shaper::TextDesc desc = {
         SkTypeface::MakeDefault(),
         18,
+        0, 18,
         18,
          0,
          0,
@@ -643,9 +645,6 @@ DEF_TEST(Skottie_Shaper_ExplicitFontMgr, reporter) {
             fFallbackCount++;
             return nullptr;
         }
-        SkTypeface* onMatchFaceStyle(const SkTypeface*, const SkFontStyle&) const override {
-            return nullptr;
-        }
 
         sk_sp<SkTypeface> onMakeFromData(sk_sp<SkData>, int) const override {
             return nullptr;
@@ -655,9 +654,6 @@ DEF_TEST(Skottie_Shaper_ExplicitFontMgr, reporter) {
         }
         sk_sp<SkTypeface> onMakeFromStreamArgs(std::unique_ptr<SkStreamAsset>,
                                                const SkFontArguments&) const override {
-            return nullptr;
-        }
-        sk_sp<SkTypeface> onMakeFromFontData(std::unique_ptr<SkFontData>) const override {
             return nullptr;
         }
         sk_sp<SkTypeface> onMakeFromFile(const char[], int) const override {
@@ -675,6 +671,7 @@ DEF_TEST(Skottie_Shaper_ExplicitFontMgr, reporter) {
     skottie::Shaper::TextDesc desc = {
         ToolUtils::create_portable_typeface(),
         18,
+        0, 18,
         18,
          0,
          0,

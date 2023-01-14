@@ -7,10 +7,12 @@
 #include <array>
 #include <memory>
 
+#include "base/check.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
+#include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
 #include "media/base/decoder_factory.h"
 #include "media/base/media_util.h"
@@ -18,6 +20,7 @@
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_decoder_adapter.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_decoder_stream_adapter.h"
+#include "third_party/blink/renderer/platform/webrtc/webrtc_video_utils.h"
 #include "third_party/webrtc/media/base/h264_profile_level_id.h"
 #include "third_party/webrtc/media/base/media_constants.h"
 #include "third_party/webrtc/media/base/vp9_profile.h"
@@ -27,9 +30,14 @@
 namespace blink {
 namespace {
 
+// The default fps and default size are used when querying gpu_factories_ to see
+// if a codec profile is supported. 1280x720 at 30 fps corresponds to level 3.1
+// for both VP9 and H264. This matches the maximum H264 profile level that is
+// returned by the internal software decoder.
+// TODO(crbug.com/1213437): Query gpu_factories_ or decoder_factory_ to
+// determine the maximum resolution and frame rate.
 const int kDefaultFps = 30;
-// Any reasonable size, will be overridden by the decoder anyway.
-const gfx::Size kDefaultSize(640, 480);
+const gfx::Size kDefaultSize(1280, 720);
 
 struct CodecConfig {
   media::VideoCodec codec;
@@ -49,9 +57,11 @@ constexpr std::array<CodecConfig, 8> kCodecConfigs = {{
 
 // Translate from media::VideoDecoderConfig to webrtc::SdpVideoFormat, or return
 // nothing if the profile isn't supported.
-base::Optional<webrtc::SdpVideoFormat> VdcToWebRtcFormat(
+absl::optional<webrtc::SdpVideoFormat> VdcToWebRtcFormat(
     const media::VideoDecoderConfig& config) {
   switch (config.codec()) {
+    case media::VideoCodec::kCodecAV1:
+      return webrtc::SdpVideoFormat("AV1X");
     case media::VideoCodec::kCodecVP8:
       return webrtc::SdpVideoFormat("VP8");
     case media::VideoCodec::kCodecVP9: {
@@ -68,7 +78,7 @@ base::Optional<webrtc::SdpVideoFormat> VdcToWebRtcFormat(
           break;
         default:
           // Unsupported profile in WebRTC.
-          return base::nullopt;
+          return absl::nullopt;
       }
       return webrtc::SdpVideoFormat(
           "VP9", {{webrtc::kVP9FmtpProfileId,
@@ -88,7 +98,7 @@ base::Optional<webrtc::SdpVideoFormat> VdcToWebRtcFormat(
           break;
         default:
           // Unsupported H264 profile in WebRTC.
-          return base::nullopt;
+          return absl::nullopt;
       }
 
       const int width = config.visible_rect().width();
@@ -108,7 +118,7 @@ base::Optional<webrtc::SdpVideoFormat> VdcToWebRtcFormat(
       return format;
     }
     default:
-      return base::nullopt;
+      return absl::nullopt;
   }
 }
 
@@ -178,17 +188,27 @@ class ScopedVideoDecoder : public webrtc::VideoDecoder {
 
 RTCVideoDecoderFactory::RTCVideoDecoderFactory(
     media::GpuVideoAcceleratorFactories* gpu_factories,
-    media::DecoderFactory* decoder_factory)
+    media::DecoderFactory* decoder_factory,
+    scoped_refptr<base::SequencedTaskRunner> media_task_runner,
+    const gfx::ColorSpace& render_color_space)
     : gpu_factories_(gpu_factories),
       decoder_factory_(decoder_factory),
-      gpu_codec_support_waiter_(gpu_factories) {
+      media_task_runner_(std::move(media_task_runner)),
+      render_color_space_(render_color_space) {
+  if (gpu_factories_) {
+    gpu_codec_support_waiter_ =
+        std::make_unique<GpuCodecSupportWaiter>(gpu_factories_);
+  }
   DVLOG(2) << __func__;
 }
 
 void RTCVideoDecoderFactory::CheckAndWaitDecoderSupportStatusIfNeeded() const {
-  if (!gpu_codec_support_waiter_.IsDecoderSupportKnown()) {
+  if (!gpu_codec_support_waiter_)
+    return;
+
+  if (!gpu_codec_support_waiter_->IsDecoderSupportKnown()) {
     DLOG(WARNING) << "Decoder support is unknown. Timeout "
-                  << gpu_codec_support_waiter_.wait_timeout_ms()
+                  << gpu_codec_support_waiter_->wait_timeout_ms()
                          .value_or(base::TimeDelta())
                          .InMilliseconds()
                   << "ms. Decoders might not be available.";
@@ -213,13 +233,14 @@ RTCVideoDecoderFactory::GetSupportedFormats() const {
         media::VideoColorSpace(), media::kNoTransformation, kDefaultSize,
         gfx::Rect(kDefaultSize), kDefaultSize, media::EmptyExtraData(),
         media::EncryptionScheme::kUnencrypted);
-    base::Optional<webrtc::SdpVideoFormat> format;
-    for (auto impl : RTCVideoDecoderAdapter::SupportedImplementations()) {
-      if (gpu_factories_->IsDecoderConfigSupported(impl, config) ==
-          media::GpuVideoAcceleratorFactories::Supported::kTrue) {
-        format = VdcToWebRtcFormat(config);
-        break;
-      }
+    absl::optional<webrtc::SdpVideoFormat> format;
+
+    // The RTCVideoDecoderAdapter is for HW decoders only, so ignore it if there
+    // are no gpu_factories_.
+    if (gpu_factories_ &&
+        gpu_factories_->IsDecoderConfigSupported(config) ==
+            media::GpuVideoAcceleratorFactories::Supported::kTrue) {
+      format = VdcToWebRtcFormat(config);
     }
 
     if (base::FeatureList::IsEnabled(media::kUseDecoderStreamForWebRTC) &&
@@ -240,6 +261,75 @@ RTCVideoDecoderFactory::GetSupportedFormats() const {
   return supported_formats;
 }
 
+webrtc::VideoDecoderFactory::CodecSupport
+RTCVideoDecoderFactory::QueryCodecSupport(
+    const webrtc::SdpVideoFormat& format,
+    absl::optional<std::string> scalability_mode) const {
+  media::VideoCodec codec =
+      WebRtcToMediaVideoCodec(webrtc::PayloadStringToCodecType(format.name));
+  if (scalability_mode) {
+    absl::optional<int> spatial_layers =
+        WebRtcScalabilityModeSpatialLayers(*scalability_mode);
+
+    // Check that the scalability mode was correctly parsed and that the
+    // configuration is valid (e.g., H264 doesn't support SVC at all and VP8
+    // doesn't support spatial layers).
+    if (!spatial_layers ||
+        (codec != media::kCodecVP8 && codec != media::kCodecVP9 &&
+         codec != media::kCodecAV1) ||
+        (codec == media::kCodecVP8 && *spatial_layers > 1)) {
+      // Ivalid scalability_mode, return unsupported.
+      return {false, false};
+    }
+    DCHECK(spatial_layers);
+    // Most HW decoders cannot handle spatial layers, so return false if the
+    // configuration contains spatial layers unless we explicitly know that the
+    // HW decoder can handle spatial layers.
+    if (codec == media::kCodecVP9 && *spatial_layers > 1 &&
+        !RTCVideoDecoderAdapter::Vp9HwSupportForSpatialLayers()) {
+      return {false, false};
+    }
+  }
+
+  CheckAndWaitDecoderSupportStatusIfNeeded();
+
+  media::VideoCodecProfile codec_profile =
+      WebRtcVideoFormatToMediaVideoCodecProfile(format);
+  media::VideoDecoderConfig config(
+      codec, codec_profile, media::VideoDecoderConfig::AlphaMode::kIsOpaque,
+      media::VideoColorSpace(), media::kNoTransformation, kDefaultSize,
+      gfx::Rect(kDefaultSize), kDefaultSize, media::EmptyExtraData(),
+      media::EncryptionScheme::kUnencrypted);
+
+  webrtc::VideoDecoderFactory::CodecSupport codec_support;
+  // Check gpu_factories for powerEfficient.
+  if (gpu_factories_) {
+    if (gpu_factories_->IsDecoderConfigSupported(config) ==
+        media::GpuVideoAcceleratorFactories::Supported::kTrue) {
+      codec_support.is_power_efficient = true;
+    }
+  }
+
+  // The codec must be supported if it's power efficient.
+  codec_support.is_supported = codec_support.is_power_efficient;
+
+  // RtcDecoderStreamAdapter supports all codecs with HW support and potentially
+  // a few codecs in SW.
+  if (!codec_support.is_supported &&
+      base::FeatureList::IsEnabled(media::kUseDecoderStreamForWebRTC)) {
+    media::SupportedVideoDecoderConfigs supported_decoder_factory_configs =
+        decoder_factory_->GetSupportedVideoDecoderConfigsForWebRTC();
+    for (auto& supported_config : supported_decoder_factory_configs) {
+      if (supported_config.Matches(config)) {
+        codec_support.is_supported = true;
+        break;
+      }
+    }
+  }
+
+  return codec_support;
+}
+
 RTCVideoDecoderFactory::~RTCVideoDecoderFactory() {
   DVLOG(2) << __func__;
 }
@@ -247,20 +337,22 @@ RTCVideoDecoderFactory::~RTCVideoDecoderFactory() {
 std::unique_ptr<webrtc::VideoDecoder>
 RTCVideoDecoderFactory::CreateVideoDecoder(
     const webrtc::SdpVideoFormat& format) {
+  TRACE_EVENT0("webrtc", "RTCVideoDecoderFactory::CreateVideoDecoder");
   DVLOG(2) << __func__;
   CheckAndWaitDecoderSupportStatusIfNeeded();
 
   std::unique_ptr<webrtc::VideoDecoder> decoder;
   if (base::FeatureList::IsEnabled(media::kUseDecoderStreamForWebRTC)) {
-    decoder = RTCVideoDecoderStreamAdapter::Create(gpu_factories_,
-                                                   decoder_factory_, format);
+    decoder = RTCVideoDecoderStreamAdapter::Create(
+        gpu_factories_, decoder_factory_, media_task_runner_,
+        render_color_space_, format);
   } else {
     decoder = RTCVideoDecoderAdapter::Create(gpu_factories_, format);
   }
   // ScopedVideoDecoder uses the task runner to make sure the decoder is
   // destructed on the correct thread.
-  return decoder ? std::make_unique<ScopedVideoDecoder>(
-                       gpu_factories_->GetTaskRunner(), std::move(decoder))
+  return decoder ? std::make_unique<ScopedVideoDecoder>(media_task_runner_,
+                                                        std::move(decoder))
                  : nullptr;
 }
 

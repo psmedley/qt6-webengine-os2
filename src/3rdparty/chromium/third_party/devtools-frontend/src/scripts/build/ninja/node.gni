@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors.  All rights reserved.
+# Copyright 2021 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,14 +12,10 @@ template("node_action") {
     script = "//third_party/node/node.py"
 
     forward_variables_from(invoker,
+                           "*",
                            [
-                             "visibility",
-                             "deps",
-                             "public_deps",
-                             "outputs",
-                             "sources",
-                             "inputs",
-                             "testonly",
+                             "args",
+                             "script",
                            ])
 
     _full_script_location = devtools_location_prepend + invoker.script

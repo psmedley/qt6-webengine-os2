@@ -1,4 +1,5 @@
 include(CMakeParseArguments)
+include(GNUInstallDirs)
 
 set(ABSL_INTERNAL_DLL_FILES
   "algorithm/algorithm.h"
@@ -131,6 +132,7 @@ set(ABSL_INTERNAL_DLL_FILES
   "numeric/int128.cc"
   "numeric/int128.h"
   "numeric/internal/bits.h"
+  "numeric/internal/representation.h"
   "random/bernoulli_distribution.h"
   "random/beta_distribution.h"
   "random/bit_gen_ref.h"
@@ -195,16 +197,35 @@ set(ABSL_INTERNAL_DLL_FILES
   "strings/cord.h"
   "strings/escaping.cc"
   "strings/escaping.h"
-  "strings/internal/cord_internal.cc"
-  "strings/internal/cord_internal.h"
-  "strings/internal/cord_rep_flat.h"
-  "strings/internal/cord_rep_ring.cc"
-  "strings/internal/cord_rep_ring.h"
-  "strings/internal/cord_rep_ring_reader.h"
   "strings/internal/charconv_bigint.cc"
   "strings/internal/charconv_bigint.h"
   "strings/internal/charconv_parse.cc"
   "strings/internal/charconv_parse.h"
+  "strings/internal/cord_internal.cc"
+  "strings/internal/cord_internal.h"
+  "strings/internal/cord_rep_consume.h"
+  "strings/internal/cord_rep_consume.cc"
+  "strings/internal/cord_rep_btree.cc"
+  "strings/internal/cord_rep_btree.h"
+  "strings/internal/cord_rep_btree_navigator.cc"
+  "strings/internal/cord_rep_btree_navigator.h"
+  "strings/internal/cord_rep_btree_reader.cc"
+  "strings/internal/cord_rep_btree_reader.h"
+  "strings/internal/cord_rep_flat.h"
+  "strings/internal/cord_rep_ring.cc"
+  "strings/internal/cord_rep_ring.h"
+  "strings/internal/cord_rep_ring_reader.h"
+  "strings/internal/cordz_functions.cc"
+  "strings/internal/cordz_functions.h"
+  "strings/internal/cordz_handle.cc"
+  "strings/internal/cordz_handle.h"
+  "strings/internal/cordz_info.cc"
+  "strings/internal/cordz_info.h"
+  "strings/internal/cordz_sample_token.cc"
+  "strings/internal/cordz_sample_token.h"
+  "strings/internal/cordz_statistics.h"
+  "strings/internal/cordz_update_scope.h"
+  "strings/internal/cordz_update_tracker.h"
   "strings/internal/stl_type_traits.h"
   "strings/internal/string_constant.h"
   "strings/match.cc"
@@ -499,7 +520,7 @@ function(absl_make_dll)
     abseil_dll
     PUBLIC
       "$<BUILD_INTERFACE:${ABSL_COMMON_INCLUDE_DIRS}>"
-      $<INSTALL_INTERFACE:${ABSL_INSTALL_INCLUDEDIR}>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
   target_compile_options(
@@ -517,8 +538,8 @@ function(absl_make_dll)
       ${ABSL_CC_LIB_DEFINES}
   )
   install(TARGETS abseil_dll EXPORT ${PROJECT_NAME}Targets
-        RUNTIME DESTINATION ${ABSL_INSTALL_BINDIR}
-        LIBRARY DESTINATION ${ABSL_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION ${ABSL_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   )
 endfunction()

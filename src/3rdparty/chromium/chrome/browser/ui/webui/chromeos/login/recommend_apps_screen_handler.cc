@@ -4,9 +4,10 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/recommend_apps_screen_handler.h"
 
+#include "ash/constants/ash_features.h"
 #include "base/metrics/histogram_macros.h"
+#include "chrome/browser/ash/arc/session/arc_session_manager.h"
 #include "chrome/browser/ash/login/screens/recommend_apps_screen.h"
-#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/arc/arc_fast_app_reinstall_starter.h"
@@ -88,9 +89,10 @@ void RecommendAppsScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_RECOMMEND_APPS_SCREEN_TITLE);
   builder->Add("recommendAppsScreenDescription",
                IDS_LOGIN_RECOMMEND_APPS_SCREEN_DESCRIPTION);
-  builder->Add("recommendAppsSkip", IDS_LOGIN_RECOMMEND_APPS_SKIP);
-  builder->Add("recommendAppsInstall", IDS_LOGIN_RECOMMEND_APPS_INSTALL);
+  builder->Add("recommendAppsSkip", IDS_LOGIN_RECOMMEND_APPS_DO_IT_LATER);
+  builder->Add("recommendAppsInstall", IDS_LOGIN_RECOMMEND_APPS_DONE);
   builder->Add("recommendAppsLoading", IDS_LOGIN_RECOMMEND_APPS_SCREEN_LOADING);
+  builder->Add("recommendAppsSelectAll", IDS_LOGIN_RECOMMEND_APPS_SELECT_ALL);
 }
 
 void RecommendAppsScreenHandler::RegisterMessages() {

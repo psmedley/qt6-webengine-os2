@@ -13,10 +13,6 @@ qhp.QtWebEngine.virtualFolder       = qtwebengine
 qhp.QtWebEngine.indexTitle          = Qt WebEngine
 qhp.QtWebEngine.indexRoot           =
 
-qhp.QtWebEngine.filterAttributes    = qtwebengine $QT_VERSION qtrefdoc
-qhp.QtWebEngine.customFilters.Qt.name = QtWebEngine $QT_VERSION
-qhp.QtWebEngine.customFilters.Qt.filterAttributes = qtwebengine $QT_VERSION
-
 qhp.QtWebEngine.subprojects         = classes qmltypes examples
 
 qhp.QtWebEngine.subprojects.classes.title = C++ Classes and Namespaces
@@ -36,9 +32,6 @@ qhp.QtWebEngine.subprojects.examples.sortPages = true
 
 manifestmeta.highlighted.names += "QtWebEngine/WebEngine Widgets Simple Browser Example" \
                 "QtWebEngine/WebEngine Quick Nano Browser"
-
-# add a generic thumbnail for an example that has no \image in its doc
-manifestmeta.thumbnail.names = "QtWebEngine/PDF Viewer Example"
 
 tagfile                 = ../../../doc/qtwebengine/qtwebengine.tags
 
@@ -61,6 +54,7 @@ depends += qtcore \
            qtquick \
            qtquickcontrols \
            qtdoc \
+           qtcmake \
            qtwebchannel \
            qtwebview \
            qtwidgets
@@ -81,6 +75,10 @@ exampledirs +=  ../../../examples \
                 ../../webenginequick/doc/snippets \
                 ../../webenginewidgets/doc/snippets
 
+#exclude Qt PDF example directories
+excludedirs += ../../../examples/pdfwidgets \
+               ../../../examples/pdf
+
 examples.fileextensions += *.aff *.dic *.html
 
 imagedirs += \
@@ -93,3 +91,6 @@ navigation.qmltypespage = "Qt WebEngine QML Types"
 
 # \QWE macro expands to 'Qt WebEngine' without auto-linking anywhere.
 macro.QWE    = "Qt \\WebEngine"
+
+# Fail the documentation build if there are more warnings than the limit
+warninglimit = 0

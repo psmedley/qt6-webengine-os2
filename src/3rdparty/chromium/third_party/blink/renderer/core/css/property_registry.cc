@@ -15,7 +15,6 @@ void PropertyRegistry::RegisterProperty(const AtomicString& name,
 
 void PropertyRegistry::DeclareProperty(const AtomicString& name,
                                        PropertyRegistration& registration) {
-  DCHECK(RuntimeEnabledFeatures::CSSVariables2AtPropertyEnabled());
   declared_properties_.Set(name, &registration);
   version_++;
 }
@@ -33,9 +32,10 @@ const PropertyRegistration* PropertyRegistry::Registration(
   // the registration from CSS.registerProperty must win.
   //
   // https://drafts.css-houdini.org/css-properties-values-api-1/#determining-registration
-  if (const auto* registration = registered_properties_.at(name))
+  if (const auto* registration =
+          registered_properties_.DeprecatedAtOrEmptyValue(name))
     return registration;
-  return declared_properties_.at(name);
+  return declared_properties_.DeprecatedAtOrEmptyValue(name);
 }
 
 bool PropertyRegistry::IsEmpty() const {

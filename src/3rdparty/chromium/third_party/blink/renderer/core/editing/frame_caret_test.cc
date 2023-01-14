@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/frame_caret.h"
 
+#include "build/build_config.h"
 #include "third_party/blink/renderer/core/editing/commands/typing_command.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
@@ -20,24 +21,23 @@ namespace blink {
 
 class FrameCaretTest : public EditingTestBase {
  public:
-  FrameCaretTest() : was_running_web_test_(WebTestSupport::IsRunningWebTest()) {
-    // The caret blink timer doesn't work if IsRunningWebTest() because
-    // LayoutTheme::CaretBlinkInterval() returns 0.
-    WebTestSupport::SetIsRunningWebTest(false);
-  }
-  ~FrameCaretTest() override {
-    WebTestSupport::SetIsRunningWebTest(was_running_web_test_);
-  }
-
   static bool ShouldShowCaret(const FrameCaret& caret) {
     return caret.ShouldShowCaret();
   }
 
  private:
-  const bool was_running_web_test_;
+  // The caret blink timer doesn't work if IsRunningWebTest() because
+  // LayoutTheme::CaretBlinkInterval() returns 0.
+  ScopedWebTestMode web_test_mode_{false};
 };
 
-TEST_F(FrameCaretTest, BlinkAfterTyping) {
+#if defined(OS_MAC) && defined(ARCH_CPU_ARM64)
+// https://crbug.com/1222649
+#define MAYBE_BlinkAfterTyping DISABLED_BlinkAfterTyping
+#else
+#define MAYBE_BlinkAfterTyping BlinkAfterTyping
+#endif
+TEST_F(FrameCaretTest, MAYBE_BlinkAfterTyping) {
   FrameCaret& caret = Selection().FrameCaretForTesting();
   scoped_refptr<scheduler::FakeTaskRunner> task_runner =
       base::MakeRefCounted<scheduler::FakeTaskRunner>();
@@ -54,7 +54,6 @@ TEST_F(FrameCaretTest, BlinkAfterTyping) {
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_TRUE(caret.IsActive());
-  EXPECT_FALSE(caret.ShouldShowBlockCursor());
   EXPECT_TRUE(caret.IsVisibleIfActiveForTesting())
       << "Initially a caret should be in visible cycle.";
 

@@ -15,7 +15,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/devtools/devtools_file_watcher.h"
 #include "chrome/browser/platform_util.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -66,7 +65,7 @@ class DevToolsFileHelper {
 
   using SaveCallback = base::OnceCallback<void(const std::string&)>;
   using ShowInfoBarCallback =
-      base::RepeatingCallback<void(const base::string16&,
+      base::RepeatingCallback<void(const std::u16string&,
                                    base::OnceCallback<void(bool)>)>;
 
   // Saves |content| to the file and associates its path with given |url|.
@@ -137,7 +136,7 @@ class DevToolsFileHelper {
                                   const base::FilePath& path,
                                   bool allowed);
   void FailedToAddFileSystem(const std::string& error);
-  void FileSystemPathsSettingChanged();
+  void FileSystemPathsSettingChangedOnUI();
   void FilePathsChanged(const std::vector<std::string>& changed_paths,
                         const std::vector<std::string>& added_paths,
                         const std::vector<std::string>& removed_paths);

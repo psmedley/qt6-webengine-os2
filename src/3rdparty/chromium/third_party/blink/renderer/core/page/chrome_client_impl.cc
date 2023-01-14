@@ -35,12 +35,14 @@
 #include <utility>
 
 #include "base/debug/alias.h"
-#include "base/optional.h"
 #include "build/build_config.h"
 #include "cc/animation/animation_host.h"
 #include "cc/layers/picture_layer.h"
+#include "cc/trees/paint_holding_reason.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_autofill_client.h"
@@ -52,7 +54,6 @@
 #include "third_party/blink/public/web/web_popup_menu_info.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view_client.h"
-#include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -108,6 +109,7 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_concatenate.h"
@@ -245,7 +247,7 @@ void ChromeClientImpl::StartDragging(LocalFrame* frame,
 
 bool ChromeClientImpl::AcceptsLoadDrops() const {
   DCHECK(web_view_);
-  return !web_view_->Client() || web_view_->Client()->AcceptsLoadDrops();
+  return web_view_->GetRendererPreferences().can_accept_load_drops;
 }
 
 Page* ChromeClientImpl::CreateWindowDelegate(
@@ -266,13 +268,11 @@ Page* ChromeClientImpl::CreateWindowDelegate(
   NotifyPopupOpeningObservers();
   const AtomicString& frame_name =
       !EqualIgnoringASCIICase(name, "_blank") ? name : g_empty_atom;
-  WebViewImpl* new_view =
-      static_cast<WebViewImpl*>(web_view_->Client()->CreateView(
-          WebLocalFrameImpl::FromFrame(frame),
-          WrappedResourceRequest(r.GetResourceRequest()), features, frame_name,
-          static_cast<WebNavigationPolicy>(r.GetNavigationPolicy()),
-          sandbox_flags, session_storage_namespace_id, consumed_user_gesture,
-          r.Impression()));
+  WebViewImpl* new_view = To<WebViewImpl>(web_view_->Client()->CreateView(
+      WebLocalFrameImpl::FromFrame(frame),
+      WrappedResourceRequest(r.GetResourceRequest()), features, frame_name,
+      static_cast<WebNavigationPolicy>(r.GetNavigationPolicy()), sandbox_flags,
+      session_storage_namespace_id, consumed_user_gesture, r.Impression()));
   if (!new_view)
     return nullptr;
   return new_view->GetPage();
@@ -387,9 +387,15 @@ void ChromeClientImpl::CloseWindowSoon() {
 bool ChromeClientImpl::OpenJavaScriptAlertDelegate(LocalFrame* frame,
                                                    const String& message) {
   NotifyPopupOpeningObservers();
+  bool disable_suppression = false;
+  if (frame && frame->GetDocument()) {
+    disable_suppression = RuntimeEnabledFeatures::
+        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+            frame->GetDocument()->GetExecutionContext());
+  }
   // Synchronous mojo call.
   frame->GetLocalFrameHostRemote().RunModalAlertDialog(
-      TruncateDialogMessage(message));
+      TruncateDialogMessage(message), disable_suppression);
   return true;
 }
 
@@ -397,9 +403,15 @@ bool ChromeClientImpl::OpenJavaScriptConfirmDelegate(LocalFrame* frame,
                                                      const String& message) {
   NotifyPopupOpeningObservers();
   bool success = false;
+  bool disable_suppression = false;
+  if (frame && frame->GetDocument()) {
+    disable_suppression = RuntimeEnabledFeatures::
+        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+            frame->GetDocument()->GetExecutionContext());
+  }
   // Synchronous mojo call.
   frame->GetLocalFrameHostRemote().RunModalConfirmDialog(
-      TruncateDialogMessage(message), &success);
+      TruncateDialogMessage(message), disable_suppression, &success);
   return success;
 }
 
@@ -409,11 +421,17 @@ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
                                                     String& result) {
   NotifyPopupOpeningObservers();
   bool success = false;
+  bool disable_suppression = false;
+  if (frame && frame->GetDocument()) {
+    disable_suppression = RuntimeEnabledFeatures::
+        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+            frame->GetDocument()->GetExecutionContext());
+  }
   // Synchronous mojo call.
   frame->GetLocalFrameHostRemote().RunModalPromptDialog(
       TruncateDialogMessage(message),
-      default_value.IsNull() ? g_empty_string : default_value, &success,
-      &result);
+      default_value.IsNull() ? g_empty_string : default_value,
+      disable_suppression, &success, &result);
   return success;
 }
 bool ChromeClientImpl::TabsToLinks() {
@@ -421,10 +439,9 @@ bool ChromeClientImpl::TabsToLinks() {
   return web_view_->TabsToLinks();
 }
 
-void ChromeClientImpl::InvalidateRect(const IntRect& update_rect) {
+void ChromeClientImpl::InvalidateContainer() {
   DCHECK(web_view_);
-  if (!update_rect.IsEmpty())
-    web_view_->InvalidateRect(update_rect);
+  web_view_->InvalidateContainer();
 }
 
 void ChromeClientImpl::ScheduleAnimation(const LocalFrameView* frame_view,
@@ -469,8 +486,14 @@ float ChromeClientImpl::WindowToViewportScalar(LocalFrame* frame,
   return frame->GetWidgetForLocalRoot()->DIPsToBlinkSpace(scalar_value);
 }
 
-const ScreenInfo& ChromeClientImpl::GetScreenInfo(LocalFrame& frame) const {
+const display::ScreenInfo& ChromeClientImpl::GetScreenInfo(
+    LocalFrame& frame) const {
   return frame.GetWidgetForLocalRoot()->GetScreenInfo();
+}
+
+const display::ScreenInfos& ChromeClientImpl::GetScreenInfos(
+    LocalFrame& frame) const {
+  return frame.GetWidgetForLocalRoot()->GetScreenInfos();
 }
 
 void ChromeClientImpl::OverrideVisibleRectForMainFrame(
@@ -569,21 +592,33 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
   web_view_->SetMouseOverURL(url);
 }
 
-void ChromeClientImpl::SetToolTip(LocalFrame& frame,
-                                  const String& tooltip_text,
-                                  TextDirection dir) {
+void ChromeClientImpl::UpdateTooltipUnderCursor(LocalFrame& frame,
+                                                const String& tooltip_text,
+                                                TextDirection dir) {
   WebFrameWidgetImpl* widget =
       WebLocalFrameImpl::FromFrame(frame)->LocalRootFrameWidget();
   if (!tooltip_text.IsEmpty()) {
-    widget->SetToolTipText(tooltip_text, dir);
+    widget->UpdateTooltipUnderCursor(tooltip_text, dir);
     did_request_non_empty_tool_tip_ = true;
   } else if (did_request_non_empty_tool_tip_) {
-    // WebFrameWidgetImpl::SetToolTipText will send a Mojo message via
+    // WebFrameWidgetImpl::UpdateTooltipUnderCursor will send a Mojo message via
     // mojom::blink::WidgetHost. We'd like to reduce the number of
-    // SetToolTipText calls.
-    widget->SetToolTipText(tooltip_text, dir);
+    // UpdateTooltipUnderCursor calls.
+    widget->UpdateTooltipUnderCursor(tooltip_text, dir);
     did_request_non_empty_tool_tip_ = false;
   }
+}
+
+void ChromeClientImpl::UpdateTooltipFromKeyboard(LocalFrame& frame,
+                                                 const String& tooltip_text,
+                                                 TextDirection dir,
+                                                 const gfx::Rect& bounds) {
+  if (!RuntimeEnabledFeatures::KeyboardAccessibleTooltipEnabled())
+    return;
+
+  WebLocalFrameImpl::FromFrame(frame)
+      ->LocalRootFrameWidget()
+      ->UpdateTooltipFromKeyboard(tooltip_text, dir, bounds);
 }
 
 void ChromeClientImpl::DispatchViewportPropertiesDidChange(
@@ -594,8 +629,8 @@ void ChromeClientImpl::DispatchViewportPropertiesDidChange(
 
 void ChromeClientImpl::PrintDelegate(LocalFrame* frame) {
   NotifyPopupOpeningObservers();
-  if (web_view_->Client())
-    web_view_->Client()->PrintPage(WebLocalFrameImpl::FromFrame(frame));
+  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
+  web_frame->Client()->ScriptedPrint();
 }
 
 ColorChooser* ChromeClientImpl::OpenColorChooser(
@@ -613,6 +648,9 @@ ColorChooser* ChromeClientImpl::OpenColorChooser(
     controller = MakeGarbageCollected<ColorChooserPopupUIController>(
         frame, this, chooser_client);
   } else {
+#if !defined(OS_ANDROID) || !defined(TOOLKIT_QT)
+    NOTREACHED() << "Page popups should be enabled on all but Android";
+#endif
     controller =
         MakeGarbageCollected<ColorChooserUIController>(frame, chooser_client);
   }
@@ -658,13 +696,9 @@ void ChromeClientImpl::OpenFileChooser(
     scoped_refptr<FileChooser> file_chooser) {
   NotifyPopupOpeningObservers();
 
-  Document* doc = frame->GetDocument();
-  if (doc)
-    doc->MaybeQueueSendDidEditFieldInInsecureContext();
-
   static const wtf_size_t kMaximumPendingFileChooseRequests = 4;
   if (file_chooser_queue_.size() > kMaximumPendingFileChooseRequests) {
-    // This sanity check prevents too many file choose requests from getting
+    // This check prevents too many file choose requests from getting
     // queued which could DoS the user. Getting these is most likely a
     // programming error (there are many ways to DoS the user so it's not
     // considered a "real" security check), either in JS requesting many file
@@ -931,6 +965,13 @@ void ChromeClientImpl::NotifyPresentationTime(LocalFrame& frame,
 
 void ChromeClientImpl::RequestBeginMainFrameNotExpected(LocalFrame& frame,
                                                         bool request) {
+  if (!frame.GetWidgetForLocalRoot()) {
+    // We're about to crash due to crbug.com/838348. Record metrics to trigger
+    // Chrometto. We only expect this to be recorded on Android in any
+    // significant numbers (because we CHECK in RenderFrameImpl::Delete).
+    UMA_HISTOGRAM_BOOLEAN("Navigation.RequestBeginMainFrameNotExpectedCrash",
+                          frame.IsMainFrame());
+  }
   frame.GetWidgetForLocalRoot()->RequestBeginMainFrameNotExpected(request);
 }
 
@@ -990,12 +1031,13 @@ void ChromeClientImpl::BeginLifecycleUpdates(LocalFrame& main_frame) {
   web_view_->StopDeferringMainFrameUpdate();
 }
 
-void ChromeClientImpl::StartDeferringCommits(LocalFrame& main_frame,
-                                             base::TimeDelta timeout) {
+bool ChromeClientImpl::StartDeferringCommits(LocalFrame& main_frame,
+                                             base::TimeDelta timeout,
+                                             cc::PaintHoldingReason reason) {
   DCHECK(main_frame.IsMainFrame());
-  WebLocalFrameImpl::FromFrame(main_frame)
+  return WebLocalFrameImpl::FromFrame(main_frame)
       ->FrameWidgetImpl()
-      ->StartDeferringCommits(timeout);
+      ->StartDeferringCommits(timeout, reason);
 }
 
 void ChromeClientImpl::StopDeferringCommits(
@@ -1105,7 +1147,6 @@ void ChromeClientImpl::DidChangeValueInTextField(
     UseCounter::Count(doc, doc.GetExecutionContext()->IsSecureContext()
                                ? WebFeature::kFieldEditInSecureContext
                                : WebFeature::kFieldEditInNonSecureContext);
-    doc.MaybeQueueSendDidEditFieldInInsecureContext();
     // The resource coordinator is not available in some tests.
     if (auto* rc = doc.GetResourceCoordinator())
       rc->SetHadFormInteraction();
@@ -1219,7 +1260,7 @@ double ChromeClientImpl::UserZoomFactor() const {
 
 void ChromeClientImpl::SetDelegatedInkMetadata(
     LocalFrame* frame,
-    std::unique_ptr<viz::DelegatedInkMetadata> metadata) {
+    std::unique_ptr<gfx::DelegatedInkMetadata> metadata) {
   frame->GetWidgetForLocalRoot()->SetDelegatedInkMetadata(std::move(metadata));
 }
 

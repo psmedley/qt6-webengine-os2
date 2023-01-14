@@ -102,10 +102,10 @@ uint16_t BluetoothLowEnergyDeviceMac::GetAppearance() const {
   return 0;
 }
 
-base::Optional<std::string> BluetoothLowEnergyDeviceMac::GetName() const {
+absl::optional<std::string> BluetoothLowEnergyDeviceMac::GetName() const {
   if ([peripheral_ name])
     return base::SysNSStringToUTF8([peripheral_ name]);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool BluetoothLowEnergyDeviceMac::IsPaired() const {
@@ -159,8 +159,7 @@ void BluetoothLowEnergyDeviceMac::SetConnectionLatency(
 }
 
 void BluetoothLowEnergyDeviceMac::Connect(PairingDelegate* pairing_delegate,
-                                          base::OnceClosure callback,
-                                          ConnectErrorCallback error_callback) {
+                                          ConnectCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -208,8 +207,12 @@ void BluetoothLowEnergyDeviceMac::ConnectToServiceInsecurely(
   NOTIMPLEMENTED();
 }
 
+bool BluetoothLowEnergyDeviceMac::IsLowEnergyDevice() {
+  return true;
+}
+
 void BluetoothLowEnergyDeviceMac::CreateGattConnectionImpl(
-    base::Optional<BluetoothUUID> serivce_uuid) {
+    absl::optional<BluetoothUUID> serivce_uuid) {
   if (!IsGattConnected()) {
     GetMacAdapter()->CreateGattConnection(this);
   }
@@ -429,7 +432,7 @@ void BluetoothLowEnergyDeviceMac::DidConnectPeripheral() {
   DVLOG(1) << *this << ": GATT connected.";
   if (!connected_) {
     connected_ = true;
-    DidConnectGatt();
+    DidConnectGatt(/*error_code=*/absl::nullopt);
     DiscoverPrimaryServices();
   } else {
     // -[<CBCentralManagerDelegate> centralManager:didConnectPeripheral:] can be
@@ -536,21 +539,21 @@ void BluetoothLowEnergyDeviceMac::DidDisconnectPeripheral(NSError* error) {
   //   1. When the connection to the device breaks (either because
   //      we closed it or the device closed it).
   //   2. When we cancel a pending connection request.
-  if (create_gatt_connection_error_callbacks_.empty()) {
+  if (create_gatt_connection_callbacks_.empty()) {
     // If there are no pending callbacks then the connection broke (#1).
     DidDisconnectGatt();
     return;
   }
   // Else we canceled the connection request (#2).
   // TODO(http://crbug.com/585897): Need to pass the error.
-  DidFailToConnectGatt(BluetoothDevice::ConnectErrorCode::ERROR_FAILED);
+  DidConnectGatt(BluetoothDevice::ConnectErrorCode::ERROR_FAILED);
 }
 
 std::ostream& operator<<(std::ostream& out,
                          const BluetoothLowEnergyDeviceMac& device) {
   // TODO(crbug.com/703878): Should use
   // BluetoothLowEnergyDeviceMac::GetNameForDisplay() instead.
-  base::Optional<std::string> name = device.GetName();
+  absl::optional<std::string> name = device.GetName();
   const char* is_gatt_connected =
       device.IsGattConnected() ? "GATT connected" : "GATT disconnected";
   return out << "<BluetoothLowEnergyDeviceMac " << device.GetAddress() << "/"

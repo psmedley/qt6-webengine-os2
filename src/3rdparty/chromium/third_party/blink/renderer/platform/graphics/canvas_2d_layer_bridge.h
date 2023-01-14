@@ -30,7 +30,6 @@
 #include <random>
 #include <utility>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/checked_math.h"
@@ -76,6 +75,8 @@ class StaticBitmapImage;
 class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
  public:
   Canvas2DLayerBridge(const IntSize&, RasterMode, const CanvasColorParams&);
+  Canvas2DLayerBridge(const Canvas2DLayerBridge&) = delete;
+  Canvas2DLayerBridge& operator=(const Canvas2DLayerBridge&) = delete;
 
   ~Canvas2DLayerBridge() override;
 
@@ -83,15 +84,14 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   bool PrepareTransferableResource(
       cc::SharedBitmapIdRegistrar* bitmap_registrar,
       viz::TransferableResource* out_resource,
-      std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback)
-      override;
+      viz::ReleaseCallback* out_release_callback) override;
 
   void FinalizeFrame();
   void SetIsInHiddenPage(bool);
   void SetIsBeingDisplayed(bool);
-  void SetFilterQuality(SkFilterQuality filter_quality);
-  void DidDraw(const FloatRect&);
-  void DoPaintInvalidation(const FloatRect& dirty_rect);
+  void SetFilterQuality(cc::PaintFlags::FilterQuality filter_quality);
+  void DidDraw();
+  void DoPaintInvalidation(const IntRect& dirty_rect);
   cc::Layer* Layer();
   bool Restore();
 
@@ -232,10 +232,8 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   sk_sp<cc::PaintRecord> last_recording_;
 
   base::WeakPtrFactory<Canvas2DLayerBridge> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Canvas2DLayerBridge);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CANVAS_2D_LAYER_BRIDGE_H_

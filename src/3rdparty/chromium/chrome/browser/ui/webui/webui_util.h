@@ -5,14 +5,18 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_WEBUI_UTIL_H_
 #define CHROME_BROWSER_UI_WEBUI_WEBUI_UTIL_H_
 
-#include <string>
-
 #include "base/containers/span.h"
 #include "base/strings/string_piece.h"
+#include "build/build_config.h"
 #include "ui/base/webui/resource_path.h"
 
 namespace content {
+class WebContents;
 class WebUIDataSource;
+}
+
+namespace ui {
+class NativeTheme;
 }
 
 namespace webui {
@@ -34,6 +38,12 @@ void SetupWebUIDataSource(content::WebUIDataSource* source,
 // no good way of detecting whether the device is managed, so always return
 // false.
 bool IsEnterpriseManaged();
+
+#if defined(TOOLKIT_VIEWS)
+// Returns whether WebContents should use dark mode colors depending on the
+// theme.
+ui::NativeTheme* GetNativeTheme(content::WebContents* web_contents);
+#endif
 
 }  // namespace webui
 

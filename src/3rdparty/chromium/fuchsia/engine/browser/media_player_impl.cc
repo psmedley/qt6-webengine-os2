@@ -47,6 +47,14 @@ fuchsia::media::sessions2::PlayerCapabilityFlags ActionToCapabilityFlag(
       return {};  // PlayerControl assumes that stop is always supported.
     case MediaSessionAction::kSwitchAudioDevice:
       return {};  // PlayerControl does not support switching audio device.
+    case MediaSessionAction::kToggleMicrophone:
+      return {};  // PlayerControl does not support toggling microphone.
+    case MediaSessionAction::kToggleCamera:
+      return {};  // PlayerControl does not support toggling camera.
+    case MediaSessionAction::kHangUp:
+      return {};  // PlayerControl does not support hanging up.
+    case MediaSessionAction::kRaise:
+      return {};  // PlayerControl does not support raising.
   }
 }
 
@@ -177,7 +185,7 @@ void MediaPlayerImpl::MediaSessionInfoChanged(
 }
 
 void MediaPlayerImpl::MediaSessionMetadataChanged(
-    const base::Optional<media_session::MediaMetadata>& metadata_mojo) {
+    const absl::optional<media_session::MediaMetadata>& metadata_mojo) {
   fuchsia::media::Metadata metadata;
   if (metadata_mojo) {
     AddMetadata(fuchsia::media::METADATA_LABEL_TITLE, metadata_mojo->title,
@@ -212,7 +220,7 @@ void MediaPlayerImpl::MediaSessionImagesChanged(
 }
 
 void MediaPlayerImpl::MediaSessionPositionChanged(
-    const base::Optional<media_session::MediaPosition>& position) {
+    const absl::optional<media_session::MediaPosition>& position) {
   // TODO(https://crbug.com/879317): Implement media position changes.
   NOTIMPLEMENTED_LOG_ONCE();
 }

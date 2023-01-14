@@ -7,7 +7,6 @@
 
 #include "ash/components/audio/cras_audio_handler.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "mojo/public/cpp/bindings/remote.h"
 

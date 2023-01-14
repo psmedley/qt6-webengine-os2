@@ -42,24 +42,23 @@ class MockHidDelegate : public HidDelegate {
   // these methods to broadcast device connections to all delegate observers.
   void OnDeviceAdded(const device::mojom::HidDeviceInfo& device);
   void OnDeviceRemoved(const device::mojom::HidDeviceInfo& device);
-  void OnPermissionRevoked(const url::Origin& requesting_origin,
-                           const url::Origin& embedding_origin);
+  void OnDeviceChanged(const device::mojom::HidDeviceInfo& device);
+  void OnPermissionRevoked(const url::Origin& origin);
 
   MOCK_METHOD0(RunChooserInternal,
                std::vector<device::mojom::HidDeviceInfoPtr>());
-  MOCK_METHOD2(CanRequestDevicePermission,
-               bool(content::WebContents* web_contents,
-                    const url::Origin& requesting_origin));
-  MOCK_METHOD3(HasDevicePermission,
-               bool(content::WebContents* web_contents,
-                    const url::Origin& requesting_origin,
+  MOCK_METHOD1(CanRequestDevicePermission,
+               bool(RenderFrameHost* render_frame_host));
+  MOCK_METHOD2(HasDevicePermission,
+               bool(RenderFrameHost* render_frame_host,
                     const device::mojom::HidDeviceInfo& device));
   MOCK_METHOD1(GetHidManager,
-               device::mojom::HidManager*(content::WebContents* web_contents));
+               device::mojom::HidManager*(RenderFrameHost* render_frame_host));
   MOCK_METHOD2(
       GetDeviceInfo,
-      const device::mojom::HidDeviceInfo*(content::WebContents* web_contents,
+      const device::mojom::HidDeviceInfo*(RenderFrameHost* render_frame_host,
                                           const std::string& guid));
+  MOCK_METHOD1(IsFidoAllowedForOrigin, bool(const url::Origin& origin));
 
  private:
   base::ObserverList<Observer> observer_list_;

@@ -16,6 +16,7 @@
 #include "build/chromeos_buildflags.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/quads/solid_color_draw_quad.h"
+#include "components/viz/service/debugger/viz_debugger.h"
 #include "components/viz/service/display/display_resource_provider.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display/overlay_candidate.h"
@@ -137,7 +138,7 @@ void OverlayProcessorUsingStrategy::SetFrameSequenceNumber(
 void OverlayProcessorUsingStrategy::ProcessForOverlays(
     DisplayResourceProvider* resource_provider,
     AggregatedRenderPassList* render_passes,
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap& render_pass_filters,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
@@ -150,6 +151,11 @@ void OverlayProcessorUsingStrategy::ProcessForOverlays(
   DCHECK(candidates->empty());
   auto* render_pass = render_passes->back().get();
   bool success = false;
+
+  DBG_DRAW_RECT("overlay.incoming.damage", (*damage_rect));
+  for (auto&& each : surface_damage_rect_list) {
+    DBG_DRAW_RECT("overlay.surface.damage", each);
+  }
 
   // If we have any copy requests, we can't remove any quads for overlays or
   // CALayers because the framebuffer would be missing the removed quads'
@@ -176,6 +182,11 @@ void OverlayProcessorUsingStrategy::ProcessForOverlays(
   NotifyOverlayPromotion(resource_provider, *candidates,
                          render_pass->quad_list);
 
+  if (!candidates->empty()) {
+    DBG_DRAW_RECT("overlay.selected.rect", (*candidates)[0].display_rect);
+  }
+  DBG_DRAW_RECT("overlay.outgoing.dmage", (*damage_rect));
+
   TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("viz.debug.overlay_planes"),
                  "Scheduled overlay planes", candidates->size());
 }
@@ -191,14 +202,15 @@ gfx::Rect ComputeDamageExcludingIndex(
     SurfaceDamageRectList* surface_damage_rect_list,
     const gfx::Rect& existing_damage,
     const gfx::Rect& display_rect,
-    bool is_opaque_pure_overlay) {
+    bool is_opaque,
+    bool is_underlay) {
   gfx::Rect root_damage_rect;
 
   if (overlay_damage_index == OverlayCandidate::kInvalidDamageIndex) {
     // An opaque overlay that is on top will hide any damage underneath.
     // TODO(petermcneeley): This is a special case optimization which could be
     // removed if we had more reliable damage.
-    if (is_opaque_pure_overlay) {
+    if (is_opaque && !is_underlay) {
       return gfx::SubtractRects(existing_damage, display_rect);
     }
     return existing_damage;
@@ -207,15 +219,26 @@ gfx::Rect ComputeDamageExcludingIndex(
   gfx::Rect occluding_rect;
   for (size_t i = 0; i < surface_damage_rect_list->size(); i++) {
     if (overlay_damage_index != i) {
+      gfx::Rect curr_surface_damage = (*surface_damage_rect_list)[i];
+
+      // The |surface_damage_rect_list| can include damage rects coming from
+      // outside and partially outside the original |existing_damage| area. This
+      // is due to the conditional inclusion of these damage rects based on
+      // target damage in surface aggregator. So by restricting this damage to
+      // the |existing_damage| we avoid unnecessary final damage output.
+      // https://crbug.com/1197609
+      curr_surface_damage.Intersect(existing_damage);
       // Only add damage back in if it is not occluded by the overlay.
-      if (!occluding_rect.Contains((*surface_damage_rect_list)[i])) {
-        root_damage_rect.Union((*surface_damage_rect_list)[i]);
+      if (!occluding_rect.Contains(curr_surface_damage)) {
+        root_damage_rect.Union(curr_surface_damage);
       }
     } else {
       // |surface_damage_rect_list| is ordered such that from here on the
       // |display_rect| for the overlay will act as an occluder for damage
       // after.
-      occluding_rect = display_rect;
+      if (is_opaque) {
+        occluding_rect = display_rect;
+      }
     }
   }
   return root_damage_rect;
@@ -240,22 +263,23 @@ void OverlayProcessorUsingStrategy::UpdateDamageRect(
   DCHECK_LE(candidates->size(), 1U);
 
   gfx::Rect this_frame_overlay_rect;
+  bool has_mask_filter = false;
   bool is_opaque_overlay = false;
   bool is_underlay = false;
   uint32_t exclude_overlay_index = OverlayCandidate::kInvalidDamageIndex;
 
   for (const OverlayCandidate& overlay : *candidates) {
     this_frame_overlay_rect = GetOverlayDamageRectForOutputSurface(overlay);
+    has_mask_filter = overlay.has_mask_filter;
     if (overlay.plane_z_order >= 0) {
       // If an overlay candidate comes from output surface, its z-order should
       // be 0.
       overlay_damage_rect_.Union(this_frame_overlay_rect);
-      if (overlay.is_opaque) {
-        is_opaque_overlay = true;
-        exclude_overlay_index = overlay.overlay_damage_index;
-      }
+      is_opaque_overlay = overlay.is_opaque;
+      exclude_overlay_index = overlay.overlay_damage_index;
     } else {
       // Underlay candidate is assumed to be opaque.
+      is_opaque_overlay = true;
       is_underlay = true;
       exclude_overlay_index = overlay.overlay_damage_index;
     }
@@ -270,15 +294,13 @@ void OverlayProcessorUsingStrategy::UpdateDamageRect(
   // Removes all damage from this overlay and occluded surface damages.
   *damage_rect = ComputeDamageExcludingIndex(
       exclude_overlay_index, surface_damage_rect_list, *damage_rect,
-      this_frame_overlay_rect, is_opaque_overlay && !is_underlay);
+      this_frame_overlay_rect, is_opaque_overlay, is_underlay);
 
-  // Track the overlay_rect from frame to frame. If it is the same and nothing
-  // is on top of it then that rect doesn't need to be damaged because the
-  // drawing is occurring on a different plane. If it is different then that
-  // indicates that a different overlay has been chosen and the previous
-  // overlay rect should be damaged because it has changed planes from the
-  // overlay plane to the main plane. https://crbug.com/875879
+  // Drawing on the overlay_rect usually occurs on a different plane, but we
+  // still need to damage the overlay_rect when certain changes occur from one
+  // frame to the next.  https://crbug.com/875879  https://crbug.com/1107460
   if ((!previous_is_underlay && is_underlay) ||
+      has_mask_filter != previous_has_mask_filter_ ||
       this_frame_overlay_rect != previous_frame_overlay_rect_) {
     damage_rect->Union(previous_frame_overlay_rect_);
 
@@ -287,17 +309,18 @@ void OverlayProcessorUsingStrategy::UpdateDamageRect(
     // black transparent hole is made for the underlay to show through
     // but its possible that the damage for this quad is less than the
     // complete size of the underlay.  https://crbug.com/1130733
-    if (!is_opaque_overlay) {
+    if (is_underlay) {
       damage_rect->Union(this_frame_overlay_rect);
     }
   }
 
   previous_frame_overlay_rect_ = this_frame_overlay_rect;
+  previous_has_mask_filter_ = has_mask_filter;
   previous_is_underlay = is_underlay;
 }
 
 void OverlayProcessorUsingStrategy::AdjustOutputSurfaceOverlay(
-    base::Optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
+    absl::optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
   if (!output_surface_plane || !output_surface_plane->has_value())
     return;
 
@@ -309,7 +332,7 @@ void OverlayProcessorUsingStrategy::AdjustOutputSurfaceOverlay(
 }
 
 bool OverlayProcessorUsingStrategy::AttemptWithStrategies(
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
     DisplayResourceProvider* resource_provider,
@@ -348,21 +371,25 @@ void OverlayProcessorUsingStrategy::SortProposedOverlayCandidatesPrioritized(
     }
   }
 
+  DBG_LOG("overlay.prioritization.num", "Frame seq: %d, ",
+          (int)frame_sequence_number_);
   // This loop fills in data for the heuristic sort and thresholds candidates.
   for (auto it = proposed_candidates->begin();
        it != proposed_candidates->end();) {
     auto key = ToProposeKey(*it);
     // If no tracking exists we create a new one here.
     auto& track_data = tracked_candidates[key];
-    auto display_area = it->candidate.display_rect.size().GetArea();
+    const auto display_area = it->candidate.display_rect.size().GetArea();
+    // The |force_update| case is where we have damage and a damage index but
+    // there are no changes in the |resource_id|. This is only known to occur
+    // for low latency surfaces (inking like in the google keeps application).
+    const bool force_update = it->candidate.overlay_damage_index !=
+                                  OverlayCandidate::kInvalidDamageIndex &&
+                              it->candidate.damage_area_estimate != 0;
     track_data.AddRecord(
         frame_sequence_number_,
         static_cast<float>(it->candidate.damage_area_estimate) / display_area,
-        it->candidate.resource_id, tracker_config_,
-        it->candidate.overlay_damage_index !=
-                OverlayCandidate::kInvalidDamageIndex ||
-            it->candidate.assume_damaged);
-
+        it->candidate.resource_id, tracker_config_, force_update);
     // Here a series of criteria are considered for wholesale rejection of a
     // candidate. The rational for rejection is usually power improvements but
     // this can indirectly reallocate limited overlay resources to another
@@ -422,7 +449,7 @@ void OverlayProcessorUsingStrategy::SortProposedOverlayCandidatesPrioritized(
 }
 
 bool OverlayProcessorUsingStrategy::AttemptWithStrategiesPrioritized(
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
     DisplayResourceProvider* resource_provider,

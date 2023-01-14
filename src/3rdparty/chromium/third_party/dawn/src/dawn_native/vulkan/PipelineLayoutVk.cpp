@@ -23,17 +23,17 @@
 namespace dawn_native { namespace vulkan {
 
     // static
-    ResultOrError<PipelineLayout*> PipelineLayout::Create(
+    ResultOrError<Ref<PipelineLayout>> PipelineLayout::Create(
         Device* device,
         const PipelineLayoutDescriptor* descriptor) {
         Ref<PipelineLayout> layout = AcquireRef(new PipelineLayout(device, descriptor));
         DAWN_TRY(layout->Initialize());
-        return layout.Detach();
+        return layout;
     }
 
     MaybeError PipelineLayout::Initialize() {
         // Compute the array of VkDescriptorSetLayouts that will be chained in the create info.
-        // TODO(cwallez@chromium.org) Vulkan doesn't allow holes in this array, should we expose
+        // TODO(crbug.com/dawn/277) Vulkan doesn't allow holes in this array, should we expose
         // this constraints at the Dawn level?
         uint32_t numSetLayouts = 0;
         std::array<VkDescriptorSetLayout, kMaxBindGroups> setLayouts;

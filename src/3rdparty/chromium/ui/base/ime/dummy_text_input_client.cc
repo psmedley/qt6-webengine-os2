@@ -8,6 +8,7 @@
 #include <vector>
 #endif
 
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -45,7 +46,7 @@ void DummyTextInputClient::ClearCompositionText() {
 }
 
 void DummyTextInputClient::InsertText(
-    const base::string16& text,
+    const std::u16string& text,
     InsertTextCursorBehavior cursor_behavior) {
   insert_text_history_.push_back(text);
 }
@@ -76,6 +77,11 @@ bool DummyTextInputClient::CanComposeInline() const {
 }
 
 gfx::Rect DummyTextInputClient::GetCaretBounds() const {
+  return gfx::Rect();
+}
+
+gfx::Rect DummyTextInputClient::GetSelectionBoundingBox() const {
+  NOTIMPLEMENTED_LOG_ONCE();
   return gfx::Rect();
 }
 
@@ -115,7 +121,7 @@ bool DummyTextInputClient::DeleteRange(const gfx::Range& range) {
 }
 
 bool DummyTextInputClient::GetTextFromRange(const gfx::Range& range,
-                                            base::string16* text) const {
+                                            std::u16string* text) const {
   return false;
 }
 
@@ -171,16 +177,37 @@ bool DummyTextInputClient::SetAutocorrectRange(
   return true;
 }
 
+absl::optional<GrammarFragment> DummyTextInputClient::GetGrammarFragment(
+    const gfx::Range& range) {
+  for (const auto& fragment : grammar_fragments_) {
+    if (fragment.range.Contains(range)) {
+      return fragment;
+    }
+  }
+  return absl::nullopt;
+}
+
+bool DummyTextInputClient::ClearGrammarFragments(const gfx::Range& range) {
+  grammar_fragments_.clear();
+  return true;
+}
+
+bool DummyTextInputClient::AddGrammarFragments(
+    const std::vector<GrammarFragment>& fragments) {
+  grammar_fragments_.insert(grammar_fragments_.end(), fragments.begin(),
+                            fragments.end());
+  return true;
+}
 #endif
 
 #if defined(OS_WIN)
 void DummyTextInputClient::GetActiveTextInputControlLayoutBounds(
-    base::Optional<gfx::Rect>* control_bounds,
-    base::Optional<gfx::Rect>* selection_bounds) {}
+    absl::optional<gfx::Rect>* control_bounds,
+    absl::optional<gfx::Rect>* selection_bounds) {}
 
 void DummyTextInputClient::SetActiveCompositionForAccessibility(
     const gfx::Range& range,
-    const base::string16& active_composition_text,
+    const std::u16string& active_composition_text,
     bool is_composition_committed) {}
 #endif
 

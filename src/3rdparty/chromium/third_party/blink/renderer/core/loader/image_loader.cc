@@ -25,11 +25,12 @@
 #include <memory>
 #include <utility>
 
+#include "services/network/public/mojom/web_client_hints_types.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/platform/web_client_hints_type.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
@@ -78,7 +79,7 @@ bool CheckForUnoptimizedImagePolicy(ExecutionContext* context,
     return false;
 
   // Render the image as a placeholder image if the image is not sufficiently
-  // well-compressed, according to the unoptimized image feature policies on
+  // well-compressed, according to the unoptimized image policies on
   // |document|.
   if (RuntimeEnabledFeatures::ExperimentalPoliciesEnabled() &&
       !new_image->IsAcceptableCompressionRatio(*context)) {
@@ -667,9 +668,6 @@ void ImageLoader::UpdateFromElement(
     delay_until_do_update_from_element_ = nullptr;
   }
 
-  // TODO(crbug.com/1175295): Remove this CHECK once the investigation is done.
-  CHECK(element_->GetDocument().GetExecutionContext());
-
   if (ShouldLoadImmediately(ImageSourceToKURL(image_source_url))) {
     DoUpdateFromElement(element_->GetExecutionContext()->GetCurrentWorld(),
                         update_behavior, referrer_policy, UpdateType::kSync);
@@ -816,9 +814,18 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* content) {
     LazyImageHelper::RecordMetricsOnLoadFinished(html_image_element);
 
   if (content->ErrorOccurred()) {
+    // Record the image fail metric if the `html_image_element` is part of paste
+    // data.
+    if (html_image_element) {
+      const auto& document = GetElement()->GetDocument();
+      LocalFrame* frame = document.GetFrame();
+      if (frame && document.IsPageVisible())
+        frame->GetSystemClipboard()->RecordImageLoadError(
+            html_image_element->ImageSourceURL().GetString());
+    }
     pending_load_event_.Cancel();
 
-    base::Optional<ResourceError> error = content->GetResourceError();
+    absl::optional<ResourceError> error = content->GetResourceError();
     if (error && error->IsAccessCheck())
       CrossSiteOrCSPViolationOccurred(AtomicString(error->FailingURL()));
 
@@ -893,8 +900,7 @@ void ImageLoader::DispatchPendingLoadEvent(
   if (!image_content_)
     return;
   CHECK(image_complete_);
-  if (GetElement()->GetDocument().GetFrame())
-    DispatchLoadEvent();
+  DispatchLoadEvent();
 
   // Checks Document's load event synchronously here for performance.
   // This is safe because DispatchPendingLoadEvent() is called asynchronously.
@@ -903,8 +909,7 @@ void ImageLoader::DispatchPendingLoadEvent(
 
 void ImageLoader::DispatchPendingErrorEvent(
     std::unique_ptr<IncrementLoadEventDelayCount> count) {
-  if (GetElement()->GetDocument().GetFrame())
-    GetElement()->DispatchEvent(*Event::Create(event_type_names::kError));
+  GetElement()->DispatchEvent(*Event::Create(event_type_names::kError));
 
   // Checks Document's load event synchronously here for performance.
   // This is safe because DispatchPendingErrorEvent() is called asynchronously.

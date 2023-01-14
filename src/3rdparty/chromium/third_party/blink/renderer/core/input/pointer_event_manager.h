@@ -5,21 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_POINTER_EVENT_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_POINTER_EVENT_MANAGER_H_
 
-#include "third_party/blink/public/common/input/web_pointer_properties.h"
-#include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/events/pointer_event.h"
-#include "third_party/blink/renderer/core/events/pointer_event_factory.h"
 #include "third_party/blink/renderer/core/input/boundary_event_dispatcher.h"
 #include "third_party/blink/renderer/core/input/touch_event_manager.h"
 #include "third_party/blink/renderer/core/page/touch_adjustment.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
 class LocalFrame;
 class MouseEventManager;
+class GestureManager;
+class WebPointerProperties;
 
 // This class takes care of dispatching all pointer events and keeps track of
 // properties of active pointer events.
@@ -76,7 +73,10 @@ class CORE_EXPORT PointerEventManager final
 
   void ElementRemoved(Element*);
 
-  bool SetPointerCapture(PointerId, Element*);
+  // Starts capturing of all events with the given |PointerId| to the given
+  // |Element|.  The paramenter |explicit_capture| identifies if this call was
+  // triggered by an explicit |elem.setPointerCapture()| call from JS.
+  bool SetPointerCapture(PointerId, Element*, bool explicit_capture);
   bool ReleasePointerCapture(PointerId, Element*);
   void ReleaseMousePointerCapture();
 
@@ -107,6 +107,13 @@ class CORE_EXPORT PointerEventManager final
   // it also clears any state that might have kept since the last call to this
   // function.
   WebInputEventResult FlushEvents();
+
+  void SetGestureManager(GestureManager* gesture_manager);
+
+  // Returns the id of the pointer event corresponding to the given pointer
+  // properties if exists otherwise s_invalidId.
+  int GetPointerEventId(
+      const WebPointerProperties& web_pointer_properties) const;
 
  private:
   class EventTargetAttributes : public GarbageCollected<EventTargetAttributes> {
@@ -280,6 +287,8 @@ class CORE_EXPORT PointerEventManager final
   // main thread, or all events (touch start/end/move).
   bool skip_touch_filter_discrete_ = false;
   bool skip_touch_filter_all_ = false;
+
+  Member<GestureManager> gesture_manager_;
 };
 
 }  // namespace blink

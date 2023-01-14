@@ -20,7 +20,6 @@
 #include "core/internal/message_lite.h"
 #include "core/internal/offline_frames_validator.h"
 #include "core/status.h"
-#include "proto/connections/offline_wire_formats.pb.h"
 #include "platform/base/byte_array.h"
 
 namespace location {
@@ -67,15 +66,16 @@ ByteArray ForConnectionRequest(const std::string& endpoint_id,
                                const ByteArray& endpoint_info,
                                std::int32_t nonce, bool supports_5_ghz,
                                const std::string& bssid,
-                               const std::vector<Medium>& mediums) {
+                               const std::vector<Medium>& mediums,
+                               std::int32_t keep_alive_interval_millis,
+                               std::int32_t keep_alive_timeout_millis) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
   v1_frame->set_type(V1Frame::CONNECTION_REQUEST);
   auto* connection_request = v1_frame->mutable_connection_request();
-  if (!endpoint_id.empty())
-    connection_request->set_endpoint_id(endpoint_id);
+  if (!endpoint_id.empty()) connection_request->set_endpoint_id(endpoint_id);
   if (!endpoint_info.Empty()) {
     connection_request->set_endpoint_name(std::string(endpoint_info));
     connection_request->set_endpoint_info(std::string(endpoint_info));
@@ -83,12 +83,19 @@ ByteArray ForConnectionRequest(const std::string& endpoint_id,
   connection_request->set_nonce(nonce);
   auto* medium_metadata = connection_request->mutable_medium_metadata();
   medium_metadata->set_supports_5_ghz(supports_5_ghz);
-  if (!bssid.empty())
-    medium_metadata->set_bssid(bssid);
+  if (!bssid.empty()) medium_metadata->set_bssid(bssid);
   if (!mediums.empty()) {
     for (const auto& medium : mediums) {
       connection_request->add_mediums(MediumToConnectionRequestMedium(medium));
     }
+  }
+  if (keep_alive_interval_millis > 0) {
+    connection_request->set_keep_alive_interval_millis(
+        keep_alive_interval_millis);
+  }
+  if (keep_alive_timeout_millis > 0) {
+    connection_request->set_keep_alive_timeout_millis(
+        keep_alive_timeout_millis);
   }
 
   return ToBytes(std::move(frame));

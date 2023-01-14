@@ -8,11 +8,12 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/component_export.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "components/variations/proto/study.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace variations {
 
@@ -31,7 +32,7 @@ enum class RestrictionPolicy {
 using IsEnterpriseFunction = base::OnceCallback<bool()>;
 
 // A container for all of the client state which is used for filtering studies.
-struct ClientFilterableState {
+struct COMPONENT_EXPORT(VARIATIONS) ClientFilterableState {
   static Study::Platform GetCurrentPlatform();
 
   // base::Version used in {min,max}_os_version filtering.
@@ -92,7 +93,7 @@ struct ClientFilterableState {
   // evaluate it if needed (i.e. if a study is filtering by enterprise) and at
   // most once.
   mutable IsEnterpriseFunction is_enterprise_function_;
-  mutable base::Optional<bool> is_enterprise_;
+  mutable absl::optional<bool> is_enterprise_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientFilterableState);
 };

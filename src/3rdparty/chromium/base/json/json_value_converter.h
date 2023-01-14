@@ -15,7 +15,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
 
@@ -161,12 +160,12 @@ class BASE_EXPORT BasicValueConverter<std::string>
 };
 
 template <>
-class BASE_EXPORT BasicValueConverter<string16>
-    : public ValueConverter<string16> {
+class BASE_EXPORT BasicValueConverter<std::u16string>
+    : public ValueConverter<std::u16string> {
  public:
   BasicValueConverter() = default;
 
-  bool Convert(const base::Value& value, string16* field) const override;
+  bool Convert(const base::Value& value, std::u16string* field) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BasicValueConverter);
@@ -221,9 +220,7 @@ class CustomFieldConverter : public ValueConverter<FieldType> {
       : convert_func_(convert_func) {}
 
   bool Convert(const base::Value& value, FieldType* field) const override {
-    std::string string_value;
-    return value.GetAsString(&string_value) &&
-        convert_func_(string_value, field);
+    return value.is_string() && convert_func_(value.GetString(), field);
   }
 
  private:
@@ -369,10 +366,11 @@ class JSONValueConverter {
   }
 
   void RegisterStringField(const std::string& field_name,
-                           string16 StructType::* field) {
+                           std::u16string StructType::*field) {
     fields_.push_back(
-        std::make_unique<internal::FieldConverter<StructType, string16>>(
-            field_name, field, new internal::BasicValueConverter<string16>));
+        std::make_unique<internal::FieldConverter<StructType, std::u16string>>(
+            field_name, field,
+            new internal::BasicValueConverter<std::u16string>));
   }
 
   void RegisterBoolField(const std::string& field_name,
@@ -438,10 +436,12 @@ class JSONValueConverter {
 
   void RegisterRepeatedString(
       const std::string& field_name,
-      std::vector<std::unique_ptr<string16>> StructType::*field) {
-    fields_.push_back(std::make_unique<internal::FieldConverter<
-                          StructType, std::vector<std::unique_ptr<string16>>>>(
-        field_name, field, new internal::RepeatedValueConverter<string16>));
+      std::vector<std::unique_ptr<std::u16string>> StructType::*field) {
+    fields_.push_back(
+        std::make_unique<internal::FieldConverter<
+            StructType, std::vector<std::unique_ptr<std::u16string>>>>(
+            field_name, field,
+            new internal::RepeatedValueConverter<std::u16string>));
   }
 
   void RegisterRepeatedDouble(

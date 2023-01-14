@@ -23,6 +23,14 @@ class ConversionInternalsHandlerImpl
   ConversionInternalsHandlerImpl(
       WebUI* web_ui,
       mojo::PendingReceiver<::mojom::ConversionInternalsHandler> receiver);
+  ConversionInternalsHandlerImpl(const ConversionInternalsHandlerImpl& other) =
+      delete;
+  ConversionInternalsHandlerImpl& operator=(
+      const ConversionInternalsHandlerImpl& other) = delete;
+  ConversionInternalsHandlerImpl(ConversionInternalsHandlerImpl&& other) =
+      delete;
+  ConversionInternalsHandlerImpl& operator=(
+      ConversionInternalsHandlerImpl&& other) = delete;
   ~ConversionInternalsHandlerImpl() override;
 
   // mojom::ConversionInternalsHandler overrides:
@@ -34,6 +42,9 @@ class ConversionInternalsHandlerImpl
           callback) override;
   void GetPendingReports(
       ::mojom::ConversionInternalsHandler::GetPendingReportsCallback callback)
+      override;
+  void GetSentReports(
+      ::mojom::ConversionInternalsHandler::GetSentReportsCallback callback)
       override;
   void SendPendingReports(
       ::mojom::ConversionInternalsHandler::SendPendingReportsCallback callback)

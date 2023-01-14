@@ -4,8 +4,10 @@
 
 #include "ui/views/examples/create_examples.h"
 
+#include <memory>
 #include <utility>
 
+#include "ui/views/examples/animation_example.h"
 #include "ui/views/examples/ax_example.h"
 #include "ui/views/examples/box_layout_example.h"
 #include "ui/views/examples/bubble_example.h"
@@ -15,6 +17,7 @@
 #include "ui/views/examples/colored_dialog_example.h"
 #include "ui/views/examples/combobox_example.h"
 #include "ui/views/examples/dialog_example.h"
+#include "ui/views/examples/fade_animation.h"
 #include "ui/views/examples/flex_layout_example.h"
 #include "ui/views/examples/label_example.h"
 #include "ui/views/examples/link_example.h"
@@ -23,6 +26,7 @@
 #include "ui/views/examples/message_box_example.h"
 #include "ui/views/examples/multiline_example.h"
 #include "ui/views/examples/native_theme_example.h"
+#include "ui/views/examples/notification_example.h"
 #include "ui/views/examples/progress_bar_example.h"
 #include "ui/views/examples/radio_button_example.h"
 #include "ui/views/examples/scroll_view_example.h"
@@ -44,6 +48,7 @@ namespace examples {
 // Creates the default set of examples.
 ExampleVector CreateExamples(ExampleVector extra_examples) {
   ExampleVector examples = std::move(extra_examples);
+  examples.push_back(std::make_unique<AnimationExample>());
   examples.push_back(std::make_unique<AxExample>());
   examples.push_back(std::make_unique<BoxLayoutExample>());
   examples.push_back(std::make_unique<BubbleExample>());
@@ -53,6 +58,7 @@ ExampleVector CreateExamples(ExampleVector extra_examples) {
   examples.push_back(std::make_unique<ColoredDialogExample>());
   examples.push_back(std::make_unique<ComboboxExample>());
   examples.push_back(std::make_unique<DialogExample>());
+  examples.push_back(std::make_unique<FadeAnimationExample>());
   examples.push_back(std::make_unique<FlexLayoutExample>());
   examples.push_back(std::make_unique<LabelExample>());
   examples.push_back(std::make_unique<LinkExample>());
@@ -61,6 +67,7 @@ ExampleVector CreateExamples(ExampleVector extra_examples) {
   examples.push_back(std::make_unique<MessageBoxExample>());
   examples.push_back(std::make_unique<MultilineExample>());
   examples.push_back(std::make_unique<NativeThemeExample>());
+  examples.push_back(std::make_unique<NotificationExample>());
   examples.push_back(std::make_unique<ProgressBarExample>());
   examples.push_back(std::make_unique<RadioButtonExample>());
   examples.push_back(std::make_unique<ScrollViewExample>());

@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/controller/blink_leak_detector.h"
 
-#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
@@ -24,6 +23,11 @@
 
 namespace blink {
 
+BlinkLeakDetector& GetLeakDetector() {
+  DEFINE_STATIC_LOCAL(BlinkLeakDetector, leak_detector, ());
+  return leak_detector;
+}
+
 BlinkLeakDetector::BlinkLeakDetector()
     : delayed_gc_timer_(Thread::Current()->GetTaskRunner(),
                         this,
@@ -32,10 +36,11 @@ BlinkLeakDetector::BlinkLeakDetector()
 BlinkLeakDetector::~BlinkLeakDetector() = default;
 
 // static
-void BlinkLeakDetector::Create(
+void BlinkLeakDetector::Bind(
     mojo::PendingReceiver<mojom::blink::LeakDetector> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<BlinkLeakDetector>(),
-                              std::move(receiver));
+  // This should be called only once per process on RenderProcessWillLaunch.
+  DCHECK(!GetLeakDetector().receiver_.is_bound());
+  GetLeakDetector().receiver_.Bind(std::move(receiver));
 }
 
 void BlinkLeakDetector::PerformLeakDetection(
@@ -45,6 +50,10 @@ void BlinkLeakDetector::PerformLeakDetection(
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
 
+  // Instruct V8 to drop its non-essential internal caches. In contrast to
+  // a memory pressure notification, this method does its work synchronously.
+  isolate->ClearCachesForTesting();
+
   // For example, calling isValidEmailAddress in EmailInputType.cpp with a
   // non-empty string creates a static ScriptRegexp value which holds a
   // V8PerContextData indirectly. This affects the number of V8PerContextData.
@@ -52,7 +61,6 @@ void BlinkLeakDetector::PerformLeakDetection(
   // here.
   V8PerIsolateData::From(isolate)->EnsureScriptRegexpContext();
 
-  WorkerThread::TerminateAllWorkersForTesting();
   GetMemoryCache()->EvictResources();
 
   // FIXME: HTML5 Notification should be closed because notification affects
@@ -67,6 +75,13 @@ void BlinkLeakDetector::PerformLeakDetection(
     resource_fetcher->PrepareForLeakDetection();
 
   Page::PrepareForLeakDetection();
+
+  // Bail out if any worker threads are still running at this point as
+  // synchronous destruction is not supported. See https://crbug.com/1221158.
+  if (WorkerThread::WorkerThreadCount() > 0) {
+    ReportInvalidResult();
+    return;
+  }
 
   // Task queue may contain delayed object destruction tasks.
   // This method is called from navigation hook inside FrameLoader,
@@ -103,6 +118,10 @@ void BlinkLeakDetector::TimerFiredGC(TimerBase*) {
   } else {
     ReportResult();
   }
+}
+
+void BlinkLeakDetector::ReportInvalidResult() {
+  std::move(callback_).Run(nullptr);
 }
 
 void BlinkLeakDetector::ReportResult() {

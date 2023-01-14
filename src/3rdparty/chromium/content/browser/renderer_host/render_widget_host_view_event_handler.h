@@ -9,12 +9,10 @@
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "content/browser/renderer_host/input/mouse_wheel_phase_handler.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "mojo/public/cpp/bindings/remote.h"
-#include "services/viz/public/mojom/compositing/delegated_ink_point.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
 #include "ui/aura/scoped_enable_unadjusted_mouse_events.h"
 #include "ui/aura/scoped_keyboard_hook.h"
@@ -126,9 +124,6 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // Sets the ContextMenuParams when a context menu is triggered. Required for
   // subsequent event processing.
   void SetContextMenuParams(const ContextMenuParams& params);
-
-  // Updates the cursor clip region. Used for mouse locking.
-  void UpdateMouseLockRegion();
 #endif  // defined(OS_WIN)
 
   bool accept_return_character() { return accept_return_character_; }
@@ -151,7 +146,7 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void UnlockMouse();
 
   // Start/Stop processing of future system keyboard events.
-  bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes);
+  bool LockKeyboard(absl::optional<base::flat_set<ui::DomCode>> codes);
   void UnlockKeyboard();
   bool IsKeyboardLocked() const;
 
@@ -254,15 +249,6 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
 
   void HandleMouseWheelEvent(ui::MouseEvent* event);
 
-  // Forward the location and timestamp of the event to viz if a delegated ink
-  // trail is requested.
-  void ForwardDelegatedInkPoint(ui::LocatedEvent* event,
-                                bool hovering,
-                                int32_t pointer_id);
-
-  // Flush the remote for testing purposes.
-  void FlushForTest() { delegated_ink_point_renderer_.FlushForTesting(); }
-
   // Whether return characters should be passed on to the RenderWidgetHostImpl.
   bool accept_return_character_ = false;
 
@@ -304,7 +290,7 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // of the window when it reaches the window borders to avoid it going outside.
   // This value is used to differentiate between these synthetic mouse move
   // events vs. normal mouse move events.
-  base::Optional<gfx::Point> synthetic_move_position_;
+  absl::optional<gfx::Point> synthetic_move_position_;
 
   bool enable_consolidated_movement_;
 
@@ -324,18 +310,6 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   MouseWheelPhaseHandler mouse_wheel_phase_handler_;
 
   std::unique_ptr<HitTestDebugKeyEventObserver> debug_observer_;
-
-  // Remote end of the connection for sending delegated ink points to viz to
-  // support the delegated ink trails feature.
-  mojo::Remote<viz::mojom::DelegatedInkPointRenderer>
-      delegated_ink_point_renderer_;
-  // Used to know if we have already told viz to reset prediction because the
-  // final point of the delegated ink trail has been sent. True when prediction
-  // has already been reset for the most recent trail, false otherwise. This
-  // flag helps make sure that we don't send more IPCs than necessary to viz to
-  // reset prediction. Sending extra IPCs wouldn't impact correctness, but can
-  // impact performance due to the IPC overhead.
-  bool ended_delegated_ink_trail_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewEventHandler);
 };

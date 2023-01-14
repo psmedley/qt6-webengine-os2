@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "components/reputation/core/safety_tips.pb.h"
 #include "components/security_state/core/security_state.h"
@@ -41,6 +40,10 @@ bool IsTargetHostAllowlistedBySafetyTipsComponent(const SafetyTipsConfig* proto,
 // This method assumes that the flagged pages in the safety tip config proto are
 // in sorted order.
 security_state::SafetyTipStatus GetSafetyTipUrlBlockType(const GURL& url);
+
+// Returns whether |word| is included in the component updater common word list
+bool IsCommonWordInConfigProto(const SafetyTipsConfig* proto,
+                               const std::string& word);
 
 }  // namespace reputation
 

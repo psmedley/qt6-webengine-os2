@@ -2,15 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 19
+// Next MinVersion: 21
 
 module arc.mojom;
 
+import "components/arc/mojom/app.mojom";
 import "components/arc/mojom/bitmap.mojom";
 import "components/arc/mojom/gfx.mojom";
 import "components/arc/mojom/intent_common.mojom";
 import "components/arc/mojom/video_common.mojom";
+import "mojo/public/mojom/base/time.mojom";
 import "url/mojom/url.mojom";
+
+// TODO(b/193097194): Use structured types (e.g., url.mojom.Url for URLs).
 
 // Represents a document in Android DocumentsProvider.
 // See Android docs of DocumentsContract.Document for details.
@@ -265,7 +269,7 @@ struct RootSize {
   int64 capacity_bytes;
 };
 
-// Next method ID: 11
+// Next method ID: 12
 interface FileSystemHost {
   // Returns the name of the file specified by the URL.
   // When an error occurs, returns null value.
@@ -275,6 +279,10 @@ interface FileSystemHost {
   // If the file does not exist or the size is unknown (e.g. directories and
   // streams), -1 is returned.
   [MinVersion=6] GetFileSize@2(string url) => (int64 size);
+
+  // Returns the last modified timestamp of the file specified by the URL.
+  [MinVersion=20] GetLastModified@11(url.mojom.Url url)
+      => (mojo_base.mojom.Time? last_modified);
 
   // Returns the MIME type of the file specified by the URL.
   // When an error occurs, returns null value.
@@ -315,7 +323,7 @@ interface FileSystemHost {
       (FileSelectorElements elements);
 };
 
-// Next method ID: 23
+// Next method ID: 24
 interface FileSystemInstance {
   // Notes about Android Documents Provider:
   //
@@ -469,9 +477,15 @@ interface FileSystemInstance {
   // |directory_paths| (non-recursively) in MediaStore and removes them.
   [MinVersion=14] RequestFileRemovalScan@20(array<string> directory_paths);
 
-  // Opens URLs by sending an intent to the specified activity.
+  // DEPRECATED. Use OpenUrlsWithPermissionAndWindowInfo() instead.
+  [MinVersion=8] OpenUrlsWithPermission@11(OpenUrlsRequest request) => ();
+
+  // Opens URLs by sending an intent to the specified activity with a specific
+  // launch window info.
+  //
   // Since this grants read/write URL permissions to the activity, callers must
   // ensure that the user is correctly aware of the URLs and the activity they
   // are passing.
-  [MinVersion=8] OpenUrlsWithPermission@11(OpenUrlsRequest request) => ();
+  [MinVersion=19] OpenUrlsWithPermissionAndWindowInfo@23(
+      OpenUrlsRequest request, WindowInfo window_info)  => ();
 };

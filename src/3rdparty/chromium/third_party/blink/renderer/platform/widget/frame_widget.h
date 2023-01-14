@@ -7,8 +7,8 @@
 
 #include "cc/input/layer_selection_bound.h"
 #include "mojo/public/mojom/base/text_direction.mojom-blink.h"
-#include "services/viz/public/mojom/compositing/delegated_ink_metadata.mojom-blink.h"
 #include "services/viz/public/mojom/compositing/frame_sink_id.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-blink.h"
 #include "third_party/blink/public/platform/web_text_input_info.h"
@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "ui/base/ime/mojom/text_input_state.mojom-blink.h"
 #include "ui/base/ime/mojom/virtual_keyboard_types.mojom-blink.h"
+#include "ui/gfx/mojom/delegated_ink_metadata.mojom-blink.h"
 
 namespace cc {
 class AnimationHost;
@@ -30,12 +31,16 @@ class PaintImage;
 struct ElementId;
 }  // namespace cc
 
+namespace display {
+struct ScreenInfo;
+struct ScreenInfos;
+}  // namespace display
+
 namespace ui {
 class Cursor;
 }  // namespace ui
 
 namespace blink {
-struct ScreenInfo;
 
 // In interface exposed within Blink from local root frames that provides
 // local-root specific things related to compositing and input. This
@@ -112,7 +117,7 @@ class PLATFORM_EXPORT FrameWidget {
 
   // Sets the ink metadata on the layer tree host
   virtual void SetDelegatedInkMetadata(
-      std::unique_ptr<viz::DelegatedInkMetadata> metadata) = 0;
+      std::unique_ptr<gfx::DelegatedInkMetadata> metadata) = 0;
 
   // Called when the main thread overscrolled.
   virtual void DidOverscroll(const gfx::Vector2dF& overscroll_delta,
@@ -151,8 +156,8 @@ class PLATFORM_EXPORT FrameWidget {
 
   // Return the edit context bounds in window coordinates.
   virtual void GetEditContextBoundsInWindow(
-      base::Optional<gfx::Rect>* control_bounds,
-      base::Optional<gfx::Rect>* selection_bounds) = 0;
+      absl::optional<gfx::Rect>* control_bounds,
+      absl::optional<gfx::Rect>* selection_bounds) = 0;
 
   virtual int32_t ComputeWebTextInputNextPreviousFlags() = 0;
   virtual void ResetVirtualKeyboardVisibilityRequest() = 0;
@@ -161,6 +166,7 @@ class PLATFORM_EXPORT FrameWidget {
   // bounds returned were different than the passed in focus and anchor bounds.
   virtual bool GetSelectionBoundsInWindow(gfx::Rect* focus,
                                           gfx::Rect* anchor,
+                                          gfx::Rect* bounding_box,
                                           base::i18n::TextDirection* focus_dir,
                                           base::i18n::TextDirection* anchor_dir,
                                           bool* is_anchor_first) = 0;
@@ -194,8 +200,11 @@ class PLATFORM_EXPORT FrameWidget {
   virtual void SetEditCommandsForNextKeyEvent(
       Vector<mojom::blink::EditCommandPtr> edit_commands) = 0;
 
-  // Returns information about the screen where this widget is being displayed.
-  virtual const ScreenInfo& GetScreenInfo() = 0;
+  // Returns information about the screen currently showing the widget.
+  virtual const display::ScreenInfo& GetScreenInfo() = 0;
+
+  // Returns information about available screens and the current screen.
+  virtual const display::ScreenInfos& GetScreenInfos() = 0;
 
   // Called to get the position of the widget's window in screen
   // coordinates. Note, the window includes any decorations such as borders,

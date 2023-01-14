@@ -4,179 +4,45 @@
 
 #include "base/time/time.h"
 
+#if defined(OS_LINUX)
+// time.h is a widely included header and its size impacts build time.
+// Try not to raise this limit unless necessary. See
+// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+#pragma clang max_tokens_here 390000
+#endif  // defined(OS_LINUX)
+
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <ostream>
 #include <tuple>
 #include <utility>
 
-#include "base/no_destructor.h"
-#include "base/optional.h"
-#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time/time_override.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
-namespace {
-
-// Strips the |expected| prefix from the start of the given string, returning
-// |true| if the strip operation succeeded or false otherwise.
-//
-// Example:
-//
-//   StringPiece input("abc");
-//   EXPECT_TRUE(ConsumePrefix(input, "a"));
-//   EXPECT_EQ(input, "bc");
-//
-// Adapted from absl::ConsumePrefix():
-// https://cs.chromium.org/chromium/src/third_party/abseil-cpp/absl/strings/strip.h?l=45&rcl=2c22e9135f107a4319582ae52e2e3e6b201b6b7c
-bool ConsumePrefix(StringPiece& str, StringPiece expected) {
-  if (!StartsWith(str, expected))
-    return false;
-  str.remove_prefix(expected.size());
-  return true;
-}
-
-// Utility struct used by ConsumeDurationNumber() to parse decimal numbers.
-// A ParsedDecimal represents the number `int_part` + `frac_part`/`frac_scale`,
-// where:
-//  (i)  0 <= `frac_part` < `frac_scale` (implies `frac_part`/`frac_scale` < 1)
-//  (ii) `frac_scale` is 10^[number of digits after the decimal point]
-//
-// Example:
-//  -42 => {.int_part = -42, .frac_part = 0, .frac_scale = 1}
-//  1.23 => {.int_part = 1, .frac_part = 23, .frac_scale = 100}
-struct ParsedDecimal {
-  int64_t int_part = 0;
-  int64_t frac_part = 0;
-  int64_t frac_scale = 1;
-};
-
-// A helper for FromString() that tries to parse a leading number from the given
-// StringPiece. |number_string| is modified to start from the first unconsumed
-// char.
-//
-// Adapted from absl:
-// https://cs.chromium.org/chromium/src/third_party/abseil-cpp/absl/time/duration.cc?l=807&rcl=2c22e9135f107a4319582ae52e2e3e6b201b6b7c
-constexpr Optional<ParsedDecimal> ConsumeDurationNumber(
-    StringPiece& number_string) {
-  ParsedDecimal res;
-  StringPiece::const_iterator orig_start = number_string.begin();
-  // Parse contiguous digits.
-  for (; !number_string.empty(); number_string.remove_prefix(1)) {
-    const int d = number_string.front() - '0';
-    if (d < 0 || d >= 10)
-      break;
-
-    if (res.int_part > std::numeric_limits<int64_t>::max() / 10)
-      return nullopt;
-    res.int_part *= 10;
-    if (res.int_part > std::numeric_limits<int64_t>::max() - d)
-      return nullopt;
-    res.int_part += d;
-  }
-  const bool int_part_empty = number_string.begin() == orig_start;
-  if (number_string.empty() || number_string.front() != '.')
-    return int_part_empty ? nullopt : make_optional(res);
-
-  number_string.remove_prefix(1);  // consume '.'
-  // Parse contiguous digits.
-  for (; !number_string.empty(); number_string.remove_prefix(1)) {
-    const int d = number_string.front() - '0';
-    if (d < 0 || d >= 10)
-      break;
-    DCHECK_LT(res.frac_part, res.frac_scale);
-    if (res.frac_scale <= std::numeric_limits<int64_t>::max() / 10) {
-      // |frac_part| will not overflow because it is always < |frac_scale|.
-      res.frac_part *= 10;
-      res.frac_part += d;
-      res.frac_scale *= 10;
-    }
-  }
-
-  return int_part_empty && res.frac_scale == 1 ? nullopt : make_optional(res);
-}
-
-// A helper for FromString() that tries to parse a leading unit designator
-// (e.g., ns, us, ms, s, m, h) from the given StringPiece. |unit_string| is
-// modified to start from the first unconsumed char.
-//
-// Adapted from absl:
-// https://cs.chromium.org/chromium/src/third_party/abseil-cpp/absl/time/duration.cc?l=841&rcl=2c22e9135f107a4319582ae52e2e3e6b201b6b7c
-Optional<TimeDelta> ConsumeDurationUnit(StringPiece& unit_string) {
-  for (const auto& str_delta : {
-           std::make_pair("ns", TimeDelta::FromNanoseconds(1)),
-           std::make_pair("us", TimeDelta::FromMicroseconds(1)),
-           // Note: "ms" MUST be checked before "m" to ensure that milliseconds
-           // are not parsed as minutes.
-           std::make_pair("ms", TimeDelta::FromMilliseconds(1)),
-           std::make_pair("s", TimeDelta::FromSeconds(1)),
-           std::make_pair("m", TimeDelta::FromMinutes(1)),
-           std::make_pair("h", TimeDelta::FromHours(1)),
-       }) {
-    if (ConsumePrefix(unit_string, str_delta.first))
-      return str_delta.second;
-  }
-
-  return nullopt;
-}
-
-}  // namespace
-
 namespace internal {
 
-TimeNowFunction g_time_now_function = &subtle::TimeNowIgnoringOverride;
+std::atomic<TimeNowFunction> g_time_now_function{
+    &subtle::TimeNowIgnoringOverride};
 
-TimeNowFunction g_time_now_from_system_time_function =
-    &subtle::TimeNowFromSystemTimeIgnoringOverride;
+std::atomic<TimeNowFunction> g_time_now_from_system_time_function{
+    &subtle::TimeNowFromSystemTimeIgnoringOverride};
 
-TimeTicksNowFunction g_time_ticks_now_function =
-    &subtle::TimeTicksNowIgnoringOverride;
+std::atomic<TimeTicksNowFunction> g_time_ticks_now_function{
+    &subtle::TimeTicksNowIgnoringOverride};
 
-ThreadTicksNowFunction g_thread_ticks_now_function =
-    &subtle::ThreadTicksNowIgnoringOverride;
+std::atomic<ThreadTicksNowFunction> g_thread_ticks_now_function{
+    &subtle::ThreadTicksNowIgnoringOverride};
 
 }  // namespace internal
 
 // TimeDelta ------------------------------------------------------------------
-
-// static
-Optional<TimeDelta> TimeDelta::FromString(StringPiece duration_string) {
-  int sign = 1;
-  if (ConsumePrefix(duration_string, "-"))
-    sign = -1;
-  else
-    ConsumePrefix(duration_string, "+");
-  if (duration_string.empty())
-    return nullopt;
-
-  // Handle special-case values that don't require units.
-  if (duration_string == "0")
-    return TimeDelta();
-  if (duration_string == "inf")
-    return sign == 1 ? TimeDelta::Max() : TimeDelta::Min();
-
-  TimeDelta delta;
-  while (!duration_string.empty()) {
-    Optional<ParsedDecimal> number_opt = ConsumeDurationNumber(duration_string);
-    if (!number_opt.has_value())
-      return nullopt;
-    Optional<TimeDelta> unit_opt = ConsumeDurationUnit(duration_string);
-    if (!unit_opt.has_value())
-      return nullopt;
-
-    ParsedDecimal number = number_opt.value();
-    TimeDelta unit = unit_opt.value();
-    if (number.int_part != 0)
-      delta += sign * number.int_part * unit;
-    if (number.frac_part != 0)
-      delta += (double(sign) * number.frac_part / number.frac_scale) * unit;
-  }
-  return delta;
-}
 
 int TimeDelta::InDays() const {
   if (!is_inf())
@@ -198,7 +64,7 @@ int TimeDelta::InDaysFloored() const {
 
 double TimeDelta::InMillisecondsF() const {
   if (!is_inf())
-    return double(delta_) / Time::kMicrosecondsPerMillisecond;
+    return static_cast<double>(delta_) / Time::kMicrosecondsPerMillisecond;
   return (delta_ < 0) ? -std::numeric_limits<double>::infinity()
                       : std::numeric_limits<double>::infinity();
 }
@@ -222,7 +88,7 @@ int64_t TimeDelta::InMillisecondsRoundedUp() const {
 
 double TimeDelta::InMicrosecondsF() const {
   if (!is_inf())
-    return double(delta_);
+    return static_cast<double>(delta_);
   return (delta_ < 0) ? -std::numeric_limits<double>::infinity()
                       : std::numeric_limits<double>::infinity();
 }
@@ -266,13 +132,14 @@ std::ostream& operator<<(std::ostream& os, TimeDelta time_delta) {
 
 // static
 Time Time::Now() {
-  return internal::g_time_now_function();
+  return internal::g_time_now_function.load(std::memory_order_relaxed)();
 }
 
 // static
 Time Time::NowFromSystemTime() {
   // Just use g_time_now_function because it returns the system time.
-  return internal::g_time_now_from_system_time_function();
+  return internal::g_time_now_from_system_time_function.load(
+      std::memory_order_relaxed)();
 }
 
 // static
@@ -323,7 +190,8 @@ double Time::ToDoubleT() const {
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
 // static
 Time Time::FromTimeSpec(const timespec& ts) {
-  return FromDoubleT(ts.tv_sec + double(ts.tv_nsec) / kNanosecondsPerSecond);
+  return FromDoubleT(ts.tv_sec +
+                     static_cast<double>(ts.tv_nsec) / kNanosecondsPerSecond);
 }
 #endif
 
@@ -463,16 +331,16 @@ std::ostream& operator<<(std::ostream& os, Time time) {
 
 // static
 TimeTicks TimeTicks::Now() {
-  return internal::g_time_ticks_now_function();
+  return internal::g_time_ticks_now_function.load(std::memory_order_relaxed)();
 }
 
 // static
 TimeTicks TimeTicks::UnixEpoch() {
-  static const NoDestructor<TimeTicks> epoch([]() {
+  static const TimeTicks epoch([]() {
     return subtle::TimeTicksNowIgnoringOverride() -
            (subtle::TimeNowIgnoringOverride() - Time::UnixEpoch());
   }());
-  return *epoch;
+  return epoch;
 }
 
 TimeTicks TimeTicks::SnappedToNextTick(TimeTicks tick_phase,
@@ -502,7 +370,8 @@ std::ostream& operator<<(std::ostream& os, TimeTicks time_ticks) {
 
 // static
 ThreadTicks ThreadTicks::Now() {
-  return internal::g_thread_ticks_now_function();
+  return internal::g_thread_ticks_now_function.load(
+      std::memory_order_relaxed)();
 }
 
 std::ostream& operator<<(std::ostream& os, ThreadTicks thread_ticks) {

@@ -19,6 +19,7 @@
 #include "quic/platform/api/quic_flag_utils.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
+#include "quic/platform/api/quic_mem_slice.h"
 
 using spdy::SpdyPriority;
 
@@ -176,7 +177,7 @@ void PendingStream::OnStreamFrame(const QuicStreamFrame& frame) {
       (kMaxStreamLength - frame.offset < frame.data_length);
   if (is_stream_too_long) {
     // Close connection if stream becomes too long.
-    QUIC_PEER_BUG
+    QUIC_PEER_BUG(quic_peer_bug_12570_1)
         << "Receive stream frame reaches max stream length. frame offset "
         << frame.offset << " length " << frame.data_length;
     OnUnrecoverableError(QUIC_STREAM_LENGTH_OVERFLOW,
@@ -424,10 +425,10 @@ void QuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
       (kMaxStreamLength - frame.offset < frame.data_length);
   if (is_stream_too_long) {
     // Close connection if stream becomes too long.
-    QUIC_PEER_BUG << "Receive stream frame on stream " << id_
-                  << " reaches max stream length. frame offset " << frame.offset
-                  << " length " << frame.data_length << ". "
-                  << sequencer_.DebugString();
+    QUIC_PEER_BUG(quic_peer_bug_10586_1)
+        << "Receive stream frame on stream " << id_
+        << " reaches max stream length. frame offset " << frame.offset
+        << " length " << frame.data_length << ". " << sequencer_.DebugString();
     OnUnrecoverableError(
         QUIC_STREAM_LENGTH_OVERFLOW,
         absl::StrCat("Peer sends more data than allowed on stream ", id_,
@@ -474,7 +475,7 @@ void QuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
       MaybeIncreaseHighestReceivedOffset(frame.offset + frame_payload_size)) {
     // As the highest received offset has changed, check to see if this is a
     // violation of flow control.
-    QUIC_BUG_IF(!flow_controller_.has_value())
+    QUIC_BUG_IF(quic_bug_12570_2, !flow_controller_.has_value())
         << ENDPOINT << "OnStreamFrame called on stream without flow control";
     if ((flow_controller_.has_value() &&
          flow_controller_->FlowControlViolation()) ||
@@ -542,7 +543,7 @@ void QuicStream::OnStreamReset(const QuicRstStreamFrame& frame) {
   }
 
   MaybeIncreaseHighestReceivedOffset(frame.byte_offset);
-  QUIC_BUG_IF(!flow_controller_.has_value())
+  QUIC_BUG_IF(quic_bug_12570_3, !flow_controller_.has_value())
       << ENDPOINT << "OnStreamReset called on stream without flow control";
   if ((flow_controller_.has_value() &&
        flow_controller_->FlowControlViolation()) ||
@@ -630,30 +631,26 @@ void QuicStream::WriteOrBufferData(
     absl::string_view data,
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  if (session()->use_write_or_buffer_data_at_level()) {
-    QUIC_BUG_IF(QuicUtils::IsCryptoStreamId(transport_version(), id_))
-        << ENDPOINT
-        << "WriteOrBufferData is used to send application data, use "
-           "WriteOrBufferDataAtLevel to send crypto data.";
-    return WriteOrBufferDataAtLevel(
-        data, fin, session()->GetEncryptionLevelToSendApplicationData(),
-        ack_listener);
-  }
-  return WriteOrBufferDataInner(data, fin, absl::nullopt, ack_listener);
+  QUIC_BUG_IF(quic_bug_12570_4,
+              QuicUtils::IsCryptoStreamId(transport_version(), id_))
+      << ENDPOINT
+      << "WriteOrBufferData is used to send application data, use "
+         "WriteOrBufferDataAtLevel to send crypto data.";
+  return WriteOrBufferDataAtLevel(
+      data, fin, session()->GetEncryptionLevelToSendApplicationData(),
+      ack_listener);
 }
 
-void QuicStream::WriteOrBufferDataInner(
-    absl::string_view data,
-    bool fin,
-    absl::optional<EncryptionLevel> level,
+void QuicStream::WriteOrBufferDataAtLevel(
+    absl::string_view data, bool fin, EncryptionLevel level,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   if (data.empty() && !fin) {
-    QUIC_BUG << "data.empty() && !fin";
+    QUIC_BUG(quic_bug_10586_2) << "data.empty() && !fin";
     return;
   }
 
   if (fin_buffered_) {
-    QUIC_BUG << "Fin already buffered";
+    QUIC_BUG(quic_bug_10586_3) << "Fin already buffered";
     return;
   }
   if (write_side_closed_) {
@@ -675,7 +672,7 @@ void QuicStream::WriteOrBufferDataInner(
     struct iovec iov(QuicUtils::MakeIovec(data));
     QuicStreamOffset offset = send_buffer_.stream_offset();
     if (kMaxStreamLength - offset < data.length()) {
-      QUIC_BUG << "Write too many data via stream " << id_;
+      QUIC_BUG(quic_bug_10586_4) << "Write too many data via stream " << id_;
       OnUnrecoverableError(
           QUIC_STREAM_LENGTH_OVERFLOW,
           absl::StrCat("Write too many data via stream ", id_));
@@ -688,16 +685,6 @@ void QuicStream::WriteOrBufferDataInner(
     // Write data if there is no buffered data before.
     WriteBufferedData(level);
   }
-}
-
-void QuicStream::WriteOrBufferDataAtLevel(
-    absl::string_view data,
-    bool fin,
-    EncryptionLevel level,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  QUICHE_DCHECK(session()->use_write_or_buffer_data_at_level());
-  QUIC_RELOADABLE_FLAG_COUNT(quic_use_write_or_buffer_data_at_level);
-  return WriteOrBufferDataInner(data, fin, level, ack_listener);
 }
 
 void QuicStream::OnCanWrite() {
@@ -719,11 +706,7 @@ void QuicStream::OnCanWrite() {
     return;
   }
   if (HasBufferedData() || (fin_buffered_ && !fin_sent_)) {
-    absl::optional<EncryptionLevel> send_level = absl::nullopt;
-    if (session()->use_write_or_buffer_data_at_level()) {
-      send_level = session()->GetEncryptionLevelToSendApplicationData();
-    }
-    WriteBufferedData(send_level);
+    WriteBufferedData(session()->GetEncryptionLevelToSendApplicationData());
   }
   if (!fin_buffered_ && !fin_sent_ && CanWriteNewData()) {
     // Notify upper layer to write new data when buffered data size is below
@@ -734,8 +717,8 @@ void QuicStream::OnCanWrite() {
 
 void QuicStream::MaybeSendBlocked() {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << ENDPOINT
-             << "MaybeSendBlocked called on stream without flow control";
+    QUIC_BUG(quic_bug_10586_5)
+        << ENDPOINT << "MaybeSendBlocked called on stream without flow control";
     return;
   }
   if (flow_controller_->ShouldSendBlocked()) {
@@ -758,14 +741,24 @@ void QuicStream::MaybeSendBlocked() {
 }
 
 QuicConsumedData QuicStream::WriteMemSlices(QuicMemSliceSpan span, bool fin) {
+  return WriteMemSlicesInner(MemSliceSpanWrapper(span), fin);
+}
+
+QuicConsumedData QuicStream::WriteMemSlices(absl::Span<QuicMemSlice> span,
+                                            bool fin) {
+  return WriteMemSlicesInner(MemSliceSpanWrapper(span), fin);
+}
+
+QuicConsumedData QuicStream::WriteMemSlicesInner(MemSliceSpanWrapper span,
+                                                 bool fin) {
   QuicConsumedData consumed_data(0, false);
   if (span.empty() && !fin) {
-    QUIC_BUG << "span.empty() && !fin";
+    QUIC_BUG(quic_bug_10586_6) << "span.empty() && !fin";
     return consumed_data;
   }
 
   if (fin_buffered_) {
-    QUIC_BUG << "Fin already buffered";
+    QUIC_BUG(quic_bug_10586_7) << "Fin already buffered";
     return consumed_data;
   }
 
@@ -785,10 +778,10 @@ QuicConsumedData QuicStream::WriteMemSlices(QuicMemSliceSpan span, bool fin) {
     if (!span.empty()) {
       // Buffer all data if buffered data size is below limit.
       QuicStreamOffset offset = send_buffer_.stream_offset();
-      consumed_data.bytes_consumed = send_buffer_.SaveMemSliceSpan(span);
+      consumed_data.bytes_consumed = span.SaveTo(send_buffer_);
       if (offset > send_buffer_.stream_offset() ||
           kMaxStreamLength < send_buffer_.stream_offset()) {
-        QUIC_BUG << "Write too many data via stream " << id_;
+        QUIC_BUG(quic_bug_10586_8) << "Write too many data via stream " << id_;
         OnUnrecoverableError(
             QUIC_STREAM_LENGTH_OVERFLOW,
             absl::StrCat("Write too many data via stream ", id_));
@@ -801,11 +794,7 @@ QuicConsumedData QuicStream::WriteMemSlices(QuicMemSliceSpan span, bool fin) {
 
   if (!had_buffered_data && (HasBufferedData() || fin_buffered_)) {
     // Write data if there is no buffered data before.
-    absl::optional<EncryptionLevel> send_level = absl::nullopt;
-    if (session()->use_write_or_buffer_data_at_level()) {
-      send_level = session()->GetEncryptionLevelToSendApplicationData();
-    }
-    WriteBufferedData(send_level);
+    WriteBufferedData(session()->GetEncryptionLevelToSendApplicationData());
   }
 
   return consumed_data;
@@ -879,7 +868,7 @@ void QuicStream::MaybeSendRstStream(QuicRstStreamErrorCode error) {
   }
 
   if (!session()->version().UsesHttp3()) {
-    QUIC_BUG_IF(error == QUIC_STREAM_NO_ERROR);
+    QUIC_BUG_IF(quic_bug_12570_5, error == QUIC_STREAM_NO_ERROR);
     stop_sending_sent_ = true;
     CloseReadSide();
   }
@@ -914,8 +903,8 @@ void QuicStream::OnClose() {
   QUICHE_DCHECK(read_side_closed_ && write_side_closed_);
 
   if (!fin_sent_ && !rst_sent_) {
-    QUIC_BUG_IF(session()->connection()->connected() &&
-                session()->version().UsesHttp3())
+    QUIC_BUG_IF(quic_bug_12570_6, session()->connection()->connected() &&
+                                      session()->version().UsesHttp3())
         << "The stream should've already sent RST in response to "
            "STOP_SENDING";
     // For flow control accounting, tell the peer how many bytes have been
@@ -949,8 +938,9 @@ void QuicStream::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   }
 
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << ENDPOINT
-             << "OnWindowUpdateFrame called on stream without flow control";
+    QUIC_BUG(quic_bug_10586_9)
+        << ENDPOINT
+        << "OnWindowUpdateFrame called on stream without flow control";
     return;
   }
 
@@ -963,9 +953,10 @@ void QuicStream::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
 bool QuicStream::MaybeIncreaseHighestReceivedOffset(
     QuicStreamOffset new_offset) {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << ENDPOINT
-             << "MaybeIncreaseHighestReceivedOffset called on stream without "
-                "flow control";
+    QUIC_BUG(quic_bug_10586_10)
+        << ENDPOINT
+        << "MaybeIncreaseHighestReceivedOffset called on stream without "
+           "flow control";
     return false;
   }
   uint64_t increment =
@@ -987,8 +978,8 @@ bool QuicStream::MaybeIncreaseHighestReceivedOffset(
 
 void QuicStream::AddBytesSent(QuicByteCount bytes) {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << ENDPOINT
-             << "AddBytesSent called on stream without flow control";
+    QUIC_BUG(quic_bug_10586_11)
+        << ENDPOINT << "AddBytesSent called on stream without flow control";
     return;
   }
   flow_controller_->AddBytesSent(bytes);
@@ -1005,7 +996,7 @@ void QuicStream::AddBytesConsumed(QuicByteCount bytes) {
     return;
   }
   if (!flow_controller_.has_value()) {
-    QUIC_BUG
+    QUIC_BUG(quic_bug_12570_7)
         << ENDPOINT
         << "AddBytesConsumed called on non-crypto stream without flow control";
     return;
@@ -1023,8 +1014,9 @@ void QuicStream::AddBytesConsumed(QuicByteCount bytes) {
 bool QuicStream::MaybeConfigSendWindowOffset(QuicStreamOffset new_offset,
                                              bool was_zero_rtt_rejected) {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << ENDPOINT
-             << "ConfigSendWindowOffset called on stream without flow control";
+    QUIC_BUG(quic_bug_10586_12)
+        << ENDPOINT
+        << "ConfigSendWindowOffset called on stream without flow control";
     return false;
   }
 
@@ -1034,7 +1026,7 @@ bool QuicStream::MaybeConfigSendWindowOffset(QuicStreamOffset new_offset,
     if (was_zero_rtt_rejected && new_offset < flow_controller_->bytes_sent()) {
       // The client is given flow control window lower than what's written in
       // 0-RTT. This QUIC implementation is unable to retransmit them.
-      QUIC_BUG_IF(perspective_ == Perspective::IS_SERVER)
+      QUIC_BUG_IF(quic_bug_12570_8, perspective_ == Perspective::IS_SERVER)
           << "Server streams' flow control should never be configured twice.";
       OnUnrecoverableError(
           QUIC_ZERO_RTT_UNRETRANSMITTABLE,
@@ -1047,7 +1039,7 @@ bool QuicStream::MaybeConfigSendWindowOffset(QuicStreamOffset new_offset,
       // In IETF QUIC, if the client receives flow control limit lower than what
       // was resumed from 0-RTT, depending on 0-RTT status, it's either the
       // peer's fault or our implementation's fault.
-      QUIC_BUG_IF(perspective_ == Perspective::IS_SERVER)
+      QUIC_BUG_IF(quic_bug_12570_9, perspective_ == Perspective::IS_SERVER)
           << "Server streams' flow control should never be configured twice.";
       OnUnrecoverableError(
           was_zero_rtt_rejected ? QUIC_ZERO_RTT_REJECTION_LIMIT_REDUCED
@@ -1144,10 +1136,6 @@ bool QuicStream::RetransmitStreamData(QuicStreamOffset offset,
   if (retransmission.Empty() && !retransmit_fin) {
     return true;
   }
-  absl::optional<EncryptionLevel> send_level = absl::nullopt;
-  if (session()->use_write_or_buffer_data_at_level()) {
-    send_level = session()->GetEncryptionLevelToSendApplicationData();
-  }
   QuicConsumedData consumed(0, false);
   for (const auto& interval : retransmission) {
     QuicStreamOffset retransmission_offset = interval.min();
@@ -1157,7 +1145,8 @@ bool QuicStream::RetransmitStreamData(QuicStreamOffset offset,
                            stream_bytes_written());
     consumed = stream_delegate_->WritevData(
         id_, retransmission_length, retransmission_offset,
-        can_bundle_fin ? FIN : NO_FIN, type, send_level);
+        can_bundle_fin ? FIN : NO_FIN, type,
+        session()->GetEncryptionLevelToSendApplicationData());
     QUIC_DVLOG(1) << ENDPOINT << "stream " << id_
                   << " is forced to retransmit stream data ["
                   << retransmission_offset << ", "
@@ -1178,8 +1167,9 @@ bool QuicStream::RetransmitStreamData(QuicStreamOffset offset,
   if (retransmit_fin) {
     QUIC_DVLOG(1) << ENDPOINT << "stream " << id_
                   << " retransmits fin only frame.";
-    consumed = stream_delegate_->WritevData(id_, 0, stream_bytes_written(), FIN,
-                                            type, send_level);
+    consumed = stream_delegate_->WritevData(
+        id_, 0, stream_bytes_written(), FIN, type,
+        session()->GetEncryptionLevelToSendApplicationData());
     if (!consumed.fin_consumed) {
       return false;
     }
@@ -1205,7 +1195,7 @@ bool QuicStream::WriteStreamData(QuicStreamOffset offset,
   return send_buffer_.WriteStreamData(offset, data_length, writer);
 }
 
-void QuicStream::WriteBufferedData(absl::optional<EncryptionLevel> level) {
+void QuicStream::WriteBufferedData(EncryptionLevel level) {
   QUICHE_DCHECK(!write_side_closed_ && (HasBufferedData() || fin_buffered_));
 
   if (session_->ShouldYield(id())) {
@@ -1227,8 +1217,9 @@ void QuicStream::WriteBufferedData(absl::optional<EncryptionLevel> level) {
     send_window = flow_controller_->SendWindowSize();
   } else {
     send_window = std::numeric_limits<QuicByteCount>::max();
-    QUIC_BUG << ENDPOINT
-             << "WriteBufferedData called on stream without flow control";
+    QUIC_BUG(quic_bug_10586_13)
+        << ENDPOINT
+        << "WriteBufferedData called on stream without flow control";
   }
   if (stream_contributes_to_connection_flow_control_) {
     send_window =
@@ -1328,15 +1319,12 @@ void QuicStream::OnStreamDataConsumed(QuicByteCount bytes_consumed) {
 void QuicStream::WritePendingRetransmission() {
   while (HasPendingRetransmission()) {
     QuicConsumedData consumed(0, false);
-    absl::optional<EncryptionLevel> send_level = absl::nullopt;
-    if (session()->use_write_or_buffer_data_at_level()) {
-      send_level = session()->GetEncryptionLevelToSendApplicationData();
-    }
     if (!send_buffer_.HasPendingRetransmission()) {
       QUIC_DVLOG(1) << ENDPOINT << "stream " << id_
                     << " retransmits fin only frame.";
       consumed = stream_delegate_->WritevData(
-          id_, 0, stream_bytes_written(), FIN, LOSS_RETRANSMISSION, send_level);
+          id_, 0, stream_bytes_written(), FIN, LOSS_RETRANSMISSION,
+          session()->GetEncryptionLevelToSendApplicationData());
       fin_lost_ = !consumed.fin_consumed;
       if (fin_lost_) {
         // Connection is write blocked.
@@ -1351,7 +1339,8 @@ void QuicStream::WritePendingRetransmission() {
           (pending.offset + pending.length == stream_bytes_written());
       consumed = stream_delegate_->WritevData(
           id_, pending.length, pending.offset, can_bundle_fin ? FIN : NO_FIN,
-          LOSS_RETRANSMISSION, send_level);
+          LOSS_RETRANSMISSION,
+          session()->GetEncryptionLevelToSendApplicationData());
       QUIC_DVLOG(1) << ENDPOINT << "stream " << id_
                     << " tries to retransmit stream data [" << pending.offset
                     << ", " << pending.offset + pending.length
@@ -1370,7 +1359,7 @@ void QuicStream::WritePendingRetransmission() {
 
 bool QuicStream::MaybeSetTtl(QuicTime::Delta ttl) {
   if (is_static_) {
-    QUIC_BUG << "Cannot set TTL of a static stream.";
+    QUIC_BUG(quic_bug_10586_14) << "Cannot set TTL of a static stream.";
     return false;
   }
   if (deadline_.IsInitialized()) {
@@ -1402,7 +1391,8 @@ void QuicStream::OnDeadlinePassed() {
 
 bool QuicStream::IsFlowControlBlocked() const {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << "Trying to access non-existent flow controller.";
+    QUIC_BUG(quic_bug_10586_15)
+        << "Trying to access non-existent flow controller.";
     return false;
   }
   return flow_controller_->IsBlocked();
@@ -1410,7 +1400,8 @@ bool QuicStream::IsFlowControlBlocked() const {
 
 QuicStreamOffset QuicStream::highest_received_byte_offset() const {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << "Trying to access non-existent flow controller.";
+    QUIC_BUG(quic_bug_10586_16)
+        << "Trying to access non-existent flow controller.";
     return 0;
   }
   return flow_controller_->highest_received_byte_offset();
@@ -1418,7 +1409,8 @@ QuicStreamOffset QuicStream::highest_received_byte_offset() const {
 
 void QuicStream::UpdateReceiveWindowSize(QuicStreamOffset size) {
   if (!flow_controller_.has_value()) {
-    QUIC_BUG << "Trying to access non-existent flow controller.";
+    QUIC_BUG(quic_bug_10586_17)
+        << "Trying to access non-existent flow controller.";
     return;
   }
   flow_controller_->UpdateReceiveWindowSize(size);
@@ -1444,6 +1436,10 @@ absl::optional<QuicByteCount> QuicStream::GetReceiveWindow() const {
              ? absl::optional<QuicByteCount>(
                    flow_controller_->receive_window_size())
              : absl::nullopt;
+}
+
+void QuicStream::OnStreamCreatedFromPendingStream() {
+  sequencer()->SetUnblocked();
 }
 
 }  // namespace quic

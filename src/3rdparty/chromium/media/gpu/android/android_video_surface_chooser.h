@@ -8,10 +8,10 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "media/base/android/android_overlay.h"
 #include "media/base/video_transformation.h"
 #include "media/gpu/media_gpu_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace media {
@@ -42,10 +42,9 @@ class MEDIA_GPU_EXPORT AndroidVideoSurfaceChooser {
     // Are we expecting a relayout soon?
     bool is_expecting_relayout = false;
 
-    // If true,  then we will default to promoting to overlay if it's power-
-    // efficient even if not otherwise required.  Otherwise, we'll require other
-    // signals, like fs or secure, before we promote.
-    bool promote_aggressively = false;
+    // If true, then we will promote to overlay only if it's required for secure
+    // video playback.
+    bool promote_secure_only = false;
 
     // Default orientation for the video.
     VideoRotation video_rotation = VIDEO_ROTATION_0;
@@ -83,7 +82,7 @@ class MEDIA_GPU_EXPORT AndroidVideoSurfaceChooser {
   // Updates the current state and makes a new surface choice with the new
   // state. If |new_factory| is empty, the factory is left as-is. Otherwise,
   // the factory is updated to |*new_factory|.
-  virtual void UpdateState(base::Optional<AndroidOverlayFactoryCB> new_factory,
+  virtual void UpdateState(absl::optional<AndroidOverlayFactoryCB> new_factory,
                            const State& new_state) = 0;
 
  private:

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "components/arc/arc_prefs.h"
-#include "components/arc/session/arc_supervision_transition.h"
+#include "components/arc/session/arc_management_transition.h"
 
 #include <string>
 
@@ -38,7 +38,7 @@ const char kArcDataRemoveRequested[] = "arc.data.remove_requested";
 // TODO(hidehiko): For historical reason, now the preference name does not
 // directly reflect "Google Play Store". We should get and set the values via
 // utility methods (IsArcPlayStoreEnabledForProfile() and
-// SetArcPlayStoreEnabledForProfile()) in chrome/browser/chromeos/arc/arc_util.
+// SetArcPlayStoreEnabledForProfile()) in chrome/browser/ash/arc/arc_util.h.
 const char kArcEnabled[] = "arc.enabled";
 // A preference to control if ARC can access removable media on the host side.
 // TODO(fukino): Remove this pref once "Play Store applications can't access
@@ -57,12 +57,12 @@ const char kArcVisibleExternalStorages[] = "arc.visible_external_storages";
 // |kArcInitialSettingsPending| can be different and
 // |kArcInitialSettingsPending| may even be handled in the next user session.
 const char kArcInitialSettingsPending[] = "arc.initial.settings.pending";
+// A preference that indicates that a management transition is necessary, in
+// response to account management state change.
+const char kArcManagementTransition[] = "arc.management_transition";
 // A preference that indicated whether Android reported it's compliance status
 // with provided policies. This is used only as a signal to start Android kiosk.
 const char kArcPolicyComplianceReported[] = "arc.policy_compliance_reported";
-// A preference that indicates that a supervision transition is necessary, in
-// response to a CHILD_ACCOUNT transiting to a REGULAR_ACCOUNT or vice-versa.
-const char kArcSupervisionTransition[] = "arc.supervision_transition";
 // A preference that indicates that user accepted PlayStore terms.
 const char kArcTermsAccepted[] = "arc.terms.accepted";
 // A preference that indicates that ToS was shown in OOBE flow.
@@ -106,6 +106,18 @@ const char kArcCompatibleFilesystemChosen[] =
 // Preferences for storing engagement time data, as per
 // GuestOsEngagementMetrics.
 const char kEngagementPrefsPrefix[] = "arc.metrics";
+
+// A boolean preference that indicates ARC management state.
+const char kArcIsManaged[] = "arc.is_managed";
+
+// A counter preference that indicates number of ARC resize-lock splash screen.
+const char kArcShowResizeLockSplashScreenLimits[] =
+    "arc.show_resize_lock_splash_screen_limits";
+
+// A preference to know whether or not the Arc.PlayStoreLaunchWithinAWeek
+// metric can been recorded.
+const char kArcPlayStoreLaunchMetricCanBeRecorded[] =
+    "arc.playstore_launched_by_user";
 
 // ======== LOCAL STATE PREFS ========
 
@@ -158,8 +170,10 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(kArcLocationServiceEnabled, false);
 
   registry->RegisterIntegerPref(
-      kArcSupervisionTransition,
-      static_cast<int>(ArcSupervisionTransition::NO_TRANSITION));
+      kArcManagementTransition,
+      static_cast<int>(ArcManagementTransition::NO_TRANSITION));
+
+  registry->RegisterBooleanPref(kArcIsManaged, false);
 
   guest_os::prefs::RegisterEngagementProfilePrefs(registry,
                                                   kEngagementPrefsPrefix);

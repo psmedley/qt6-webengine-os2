@@ -57,7 +57,6 @@ class ColorChooserTest : public views::ViewsTestBase {
     widget_->GetContentsView()->AddChildView(std::move(view));
     generator_ = std::make_unique<ui::test::EventGenerator>(
         views::GetRootWindow(widget_.get()), widget_->GetNativeWindow());
-    generator_->set_assume_window_at_origin(false);
   }
 
   void TearDown() override {
@@ -90,7 +89,7 @@ class ColorChooserTest : public views::ViewsTestBase {
   }
 
   SkColor GetTextualColor() const {
-    base::string16 text = chooser_->textfield_for_testing()->GetText();
+    std::u16string text = chooser_->textfield_for_testing()->GetText();
     if (text.empty() || text[0] != '#')
       return SK_ColorTRANSPARENT;
 

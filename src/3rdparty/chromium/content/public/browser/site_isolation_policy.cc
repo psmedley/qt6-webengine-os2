@@ -26,16 +26,40 @@ namespace content {
 
 namespace {
 
+bool g_disable_flag_caching_for_tests = false;
+
+bool IsDisableSiteIsolationFlagPresent() {
+  static const bool site_isolation_disabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSiteIsolation);
+  if (g_disable_flag_caching_for_tests) {
+    return base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableSiteIsolation);
+  }
+  return site_isolation_disabled;
+}
+
+#if defined(OS_ANDROID)
+bool IsDisableSiteIsolationForPolicyFlagPresent() {
+  static const bool site_isolation_disabled_by_policy =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSiteIsolationForPolicy);
+  if (g_disable_flag_caching_for_tests) {
+    return base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableSiteIsolationForPolicy);
+  }
+  return site_isolation_disabled_by_policy;
+}
+#endif
+
 bool IsSiteIsolationDisabled() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolation)) {
+  if (IsDisableSiteIsolationFlagPresent()) {
     return true;
   }
 
 #if defined(OS_ANDROID)
   // Desktop platforms no longer support disabling Site Isolation by policy.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolationForPolicy)) {
+  if (IsDisableSiteIsolationForPolicyFlagPresent()) {
     return true;
   }
 #endif
@@ -153,6 +177,43 @@ bool SiteIsolationPolicy::IsOriginAgentClusterEnabled() {
 }
 
 // static
+bool SiteIsolationPolicy::IsSiteIsolationForCOOPEnabled() {
+  // If the user has explicitly enabled site isolation for COOP sites from the
+  // command line, honor this regardless of policies that may disable site
+  // isolation.
+  if (base::FeatureList::GetInstance()->IsFeatureOverriddenFromCommandLine(
+          features::kSiteIsolationForCrossOriginOpenerPolicy.name,
+          base::FeatureList::OVERRIDE_ENABLE_FEATURE)) {
+    return true;
+  }
+
+  // Don't apply COOP isolation if site isolation has been disabled (e.g., due
+  // to memory thresholds).
+  if (!SiteIsolationPolicy::AreDynamicIsolatedOriginsEnabled())
+    return false;
+
+  // COOP isolation is only needed on platforms where strict site isolation is
+  // not used.
+  if (UseDedicatedProcessesForAllSites())
+    return false;
+
+  // The feature needs to be checked last, because checking the feature
+  // activates the field trial and assigns the client either to a control or an
+  // experiment group - such assignment should be final.
+  return base::FeatureList::IsEnabled(
+      features::kSiteIsolationForCrossOriginOpenerPolicy);
+}
+
+// static
+bool SiteIsolationPolicy::ShouldPersistIsolatedCOOPSites() {
+  if (!IsSiteIsolationForCOOPEnabled())
+    return false;
+
+  return features::kSiteIsolationForCrossOriginOpenerPolicyShouldPersistParam
+      .Get();
+}
+
+// static
 std::string SiteIsolationPolicy::GetIsolatedOriginsFromCommandLine() {
   std::string cmdline_arg =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -186,20 +247,25 @@ void SiteIsolationPolicy::ApplyGlobalIsolatedOrigins() {
       ChildProcessSecurityPolicy::GetInstance();
 
   std::string from_cmdline = GetIsolatedOriginsFromCommandLine();
-  policy->AddIsolatedOrigins(
+  policy->AddFutureIsolatedOrigins(
       from_cmdline,
       ChildProcessSecurityPolicy::IsolatedOriginSource::COMMAND_LINE);
 
   std::string from_trial = GetIsolatedOriginsFromFieldTrial();
-  policy->AddIsolatedOrigins(
+  policy->AddFutureIsolatedOrigins(
       from_trial,
       ChildProcessSecurityPolicy::IsolatedOriginSource::FIELD_TRIAL);
 
   std::vector<url::Origin> from_embedder =
       GetContentClient()->browser()->GetOriginsRequiringDedicatedProcess();
-  policy->AddIsolatedOrigins(
+  policy->AddFutureIsolatedOrigins(
       from_embedder,
       ChildProcessSecurityPolicy::IsolatedOriginSource::BUILT_IN);
+}
+
+// static
+void SiteIsolationPolicy::DisableFlagCachingForTesting() {
+  g_disable_flag_caching_for_tests = true;
 }
 
 }  // namespace content

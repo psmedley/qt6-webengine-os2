@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_role_properties.h"
@@ -23,25 +23,9 @@ namespace ui {
 
 namespace {
 
-bool HasFocusableChild(const AXNode* node) {
-  for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
-    AXNode* child = node->GetUnignoredChildAtIndex(i);
-    if (child->data().HasState(ax::mojom::State::kFocusable) ||
-        HasFocusableChild(child)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // TODO(muyuanli): share with BrowserAccessibility.
-bool IsSimpleTextControl(const AXNode* node, uint32_t state) {
-  return (node->data().role == ax::mojom::Role::kTextField ||
-          node->data().role == ax::mojom::Role::kTextFieldWithComboBox ||
-          node->data().role == ax::mojom::Role::kSearchBox ||
-          node->data().HasBoolAttribute(
-              ax::mojom::BoolAttribute::kEditableRoot)) &&
-         !node->data().HasState(ax::mojom::State::kRichlyEditable);
+bool IsTextField(const AXNode* node, uint32_t state) {
+  return node->data().IsTextField();
 }
 
 bool IsRichTextEditable(const AXNode* node) {
@@ -51,12 +35,12 @@ bool IsRichTextEditable(const AXNode* node) {
           !parent->data().HasState(ax::mojom::State::kRichlyEditable));
 }
 
-bool IsNativeTextControl(const AXNode* node) {
+bool IsAtomicTextField(const AXNode* node) {
   const std::string& html_tag =
-      node->data().GetStringAttribute(ax::mojom::StringAttribute::kHtmlTag);
+      node->GetStringAttribute(ax::mojom::StringAttribute::kHtmlTag);
   if (html_tag == "input") {
     std::string input_type;
-    if (!node->data().GetHtmlAttribute("type", &input_type))
+    if (!node->GetHtmlAttribute("type", &input_type))
       return true;
     return input_type.empty() || input_type == "email" ||
            input_type == "password" || input_type == "search" ||
@@ -70,7 +54,7 @@ bool IsLeaf(const AXNode* node) {
   if (node->children().empty())
     return true;
 
-  if (IsNativeTextControl(node) || node->IsText()) {
+  if (IsAtomicTextField(node) || node->IsText()) {
     return true;
   }
 
@@ -90,11 +74,11 @@ bool IsLeaf(const AXNode* node) {
   }
 }
 
-base::string16 GetInnerText(const AXNode* node) {
+std::u16string GetInnerText(const AXNode* node) {
   if (node->IsText()) {
-    return node->data().GetString16Attribute(ax::mojom::StringAttribute::kName);
+    return node->GetString16Attribute(ax::mojom::StringAttribute::kName);
   }
-  base::string16 text;
+  std::u16string text;
   for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
     AXNode* child = node->GetUnignoredChildAtIndex(i);
     text += GetInnerText(child);
@@ -102,38 +86,37 @@ base::string16 GetInnerText(const AXNode* node) {
   return text;
 }
 
-base::string16 GetValue(const AXNode* node) {
-  base::string16 value =
-      node->data().GetString16Attribute(ax::mojom::StringAttribute::kValue);
+std::u16string GetValue(const AXNode* node) {
+  std::u16string value =
+      node->GetString16Attribute(ax::mojom::StringAttribute::kValue);
 
   if (value.empty() &&
-      (IsSimpleTextControl(node, node->data().state) ||
-       IsRichTextEditable(node)) &&
-      !IsNativeTextControl(node)) {
+      (IsTextField(node, node->data().state) || IsRichTextEditable(node)) &&
+      !IsAtomicTextField(node)) {
     value = GetInnerText(node);
   }
 
   // Always obscure passwords.
   if (node->data().HasState(ax::mojom::State::kProtected))
-    value = base::string16(value.size(), kSecurePasswordBullet);
+    value = std::u16string(value.size(), kSecurePasswordBullet);
 
   return value;
 }
 
-base::string16 GetText(const AXNode* node) {
+std::u16string GetText(const AXNode* node) {
   if (node->data().role == ax::mojom::Role::kPdfRoot ||
       node->data().role == ax::mojom::Role::kIframe ||
       node->data().role == ax::mojom::Role::kIframePresentational) {
-    return base::string16();
+    return std::u16string();
   }
 
   ax::mojom::NameFrom name_from = node->data().GetNameFrom();
 
   if (!ui::IsLeaf(node) && name_from == ax::mojom::NameFrom::kContents) {
-    return base::string16();
+    return std::u16string();
   }
 
-  base::string16 value = GetValue(node);
+  std::u16string value = GetValue(node);
 
   if (!value.empty()) {
     if (node->data().HasState(ax::mojom::State::kEditable))
@@ -152,7 +135,7 @@ base::string16 GetText(const AXNode* node) {
 
   if (node->data().role == ax::mojom::Role::kColorWell) {
     unsigned int color = static_cast<unsigned int>(
-        node->data().GetIntAttribute(ax::mojom::IntAttribute::kColorValue));
+        node->GetIntAttribute(ax::mojom::IntAttribute::kColorValue));
     unsigned int red = color >> 16 & 0xFF;
     unsigned int green = color >> 8 & 0xFF;
     unsigned int blue = color >> 0 & 0xFF;
@@ -160,13 +143,13 @@ base::string16 GetText(const AXNode* node) {
         base::StringPrintf("#%02X%02X%02X", red, green, blue));
   }
 
-  base::string16 text =
-      node->data().GetString16Attribute(ax::mojom::StringAttribute::kName);
-  base::string16 description = node->data().GetString16Attribute(
-      ax::mojom::StringAttribute::kDescription);
+  std::u16string text =
+      node->GetString16Attribute(ax::mojom::StringAttribute::kName);
+  std::u16string description =
+      node->GetString16Attribute(ax::mojom::StringAttribute::kDescription);
   if (!description.empty()) {
     if (!text.empty())
-      text += base::ASCIIToUTF16(" ");
+      text += u" ";
     text += description;
   }
 
@@ -187,8 +170,8 @@ base::string16 GetText(const AXNode* node) {
 
   if (text.empty() && (ui::IsLink(node->data().role) ||
                        node->data().role == ax::mojom::Role::kImage)) {
-    base::string16 url =
-        node->data().GetString16Attribute(ax::mojom::StringAttribute::kUrl);
+    std::u16string url =
+        node->GetString16Attribute(ax::mojom::StringAttribute::kUrl);
     text = AXUrlBaseText(url);
   }
 
@@ -198,44 +181,44 @@ base::string16 GetText(const AXNode* node) {
 // Get string representation of ax::mojom::Role. We are not using ToString() in
 // ax_enums.h since the names are subject to change in the future and
 // we are only interested in a subset of the roles.
-base::Optional<std::string> AXRoleToString(ax::mojom::Role role) {
+absl::optional<std::string> AXRoleToString(ax::mojom::Role role) {
   switch (role) {
     case ax::mojom::Role::kArticle:
-      return base::Optional<std::string>("article");
+      return absl::optional<std::string>("article");
     case ax::mojom::Role::kBanner:
-      return base::Optional<std::string>("banner");
+      return absl::optional<std::string>("banner");
     case ax::mojom::Role::kCaption:
-      return base::Optional<std::string>("caption");
+      return absl::optional<std::string>("caption");
     case ax::mojom::Role::kComplementary:
-      return base::Optional<std::string>("complementary");
+      return absl::optional<std::string>("complementary");
     case ax::mojom::Role::kDate:
-      return base::Optional<std::string>("date");
+      return absl::optional<std::string>("date");
     case ax::mojom::Role::kDateTime:
-      return base::Optional<std::string>("date_time");
+      return absl::optional<std::string>("date_time");
     case ax::mojom::Role::kDefinition:
-      return base::Optional<std::string>("definition");
+      return absl::optional<std::string>("definition");
     case ax::mojom::Role::kDetails:
-      return base::Optional<std::string>("details");
+      return absl::optional<std::string>("details");
     case ax::mojom::Role::kDocument:
-      return base::Optional<std::string>("document");
+      return absl::optional<std::string>("document");
     case ax::mojom::Role::kFeed:
-      return base::Optional<std::string>("feed");
+      return absl::optional<std::string>("feed");
     case ax::mojom::Role::kHeading:
-      return base::Optional<std::string>("heading");
+      return absl::optional<std::string>("heading");
     case ax::mojom::Role::kIframe:
-      return base::Optional<std::string>("iframe");
+      return absl::optional<std::string>("iframe");
     case ax::mojom::Role::kIframePresentational:
-      return base::Optional<std::string>("iframe_presentational");
+      return absl::optional<std::string>("iframe_presentational");
     case ax::mojom::Role::kList:
-      return base::Optional<std::string>("list");
+      return absl::optional<std::string>("list");
     case ax::mojom::Role::kListItem:
-      return base::Optional<std::string>("list_item");
+      return absl::optional<std::string>("list_item");
     case ax::mojom::Role::kMain:
-      return base::Optional<std::string>("main");
+      return absl::optional<std::string>("main");
     case ax::mojom::Role::kParagraph:
-      return base::Optional<std::string>("paragraph");
+      return absl::optional<std::string>("paragraph");
     default:
-      return base::Optional<std::string>();
+      return absl::optional<std::string>();
   }
 }
 
@@ -269,18 +252,16 @@ void WalkAXTreeDepthFirst(const AXNode* node,
   result->line_through = 0;
   result->underline = 0;
 
-  if (node->data().HasFloatAttribute(ax::mojom::FloatAttribute::kFontSize)) {
+  if (node->HasFloatAttribute(ax::mojom::FloatAttribute::kFontSize)) {
     gfx::RectF text_size_rect(
-        0, 0, 1,
-        node->data().GetFloatAttribute(ax::mojom::FloatAttribute::kFontSize));
+        0, 0, 1, node->GetFloatAttribute(ax::mojom::FloatAttribute::kFontSize));
     gfx::Rect scaled_text_size_rect =
         gfx::ToEnclosingRect(tree->RelativeToTreeBounds(node, text_size_rect));
     result->text_size = scaled_text_size_rect.height();
 
-    result->color =
-        node->data().GetIntAttribute(ax::mojom::IntAttribute::kColor);
+    result->color = node->GetIntAttribute(ax::mojom::IntAttribute::kColor);
     result->bgcolor =
-        node->data().GetIntAttribute(ax::mojom::IntAttribute::kBackgroundColor);
+        node->GetIntAttribute(ax::mojom::IntAttribute::kBackgroundColor);
     result->bold = node->data().HasTextStyle(ax::mojom::TextStyle::kBold);
     result->italic = node->data().HasTextStyle(ax::mojom::TextStyle::kItalic);
     result->line_through =
@@ -318,11 +299,19 @@ void WalkAXTreeDepthFirst(const AXNode* node,
     }
     if (end_selection > 0)
       result->selection =
-          base::make_optional<gfx::Range>(start_selection, end_selection);
+          absl::make_optional<gfx::Range>(start_selection, end_selection);
   }
 
   result->html_tag =
       node->GetStringAttribute(ax::mojom::StringAttribute::kHtmlTag);
+  result->css_display =
+      node->GetStringAttribute(ax::mojom::StringAttribute::kDisplay);
+  result->html_attributes = node->data().html_attributes;
+
+  std::string class_name =
+      node->GetStringAttribute(ax::mojom::StringAttribute::kClassName);
+  if (!class_name.empty())
+    result->html_attributes.push_back({"class", class_name});
 
   for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
     AXNode* child = node->GetUnignoredChildAtIndex(i);
@@ -361,7 +350,7 @@ std::unique_ptr<AssistantTree> CreateAssistantTree(const AXTreeUpdate& update) {
   return assistant_tree;
 }
 
-base::string16 AXUrlBaseText(base::string16 url) {
+std::u16string AXUrlBaseText(std::u16string url) {
   // Given a url like http://foo.com/bar/baz.png, just return the
   // base text, e.g., "baz".
   int trailing_slashes = 0;

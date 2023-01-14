@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
@@ -72,7 +73,7 @@ class FileSurface : public SurfaceOzoneCanvas {
   ~FileSurface() override {}
 
   // SurfaceOzoneCanvas overrides:
-  void ResizeCanvas(const gfx::Size& viewport_size) override {
+  void ResizeCanvas(const gfx::Size& viewport_size, float scale) override {
     SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
     surface_ = SkSurface::MakeRaster(
         SkImageInfo::MakeN32Premul(viewport_size.width(),
@@ -161,6 +162,7 @@ class TestPixmap : public gfx::NativePixmap {
       const gfx::Rect& display_bounds,
       const gfx::RectF& crop_rect,
       bool enable_blend,
+      const gfx::Rect& damage_rect,
       std::vector<gfx::GpuFence> acquire_fences,
       std::vector<gfx::GpuFence> release_fences) override {
     return true;
@@ -201,7 +203,8 @@ class GLOzoneEGLHeadless : public GLOzoneEGL {
     return gl::EGLDisplayPlatform(EGL_DEFAULT_DISPLAY);
   }
 
-  bool LoadGLES2Bindings(gl::GLImplementation implementation) override {
+  bool LoadGLES2Bindings(
+      const gl::GLImplementationParts& implementation) override {
     return LoadDefaultEGLGLES2Bindings(implementation);
   }
 
@@ -222,16 +225,19 @@ HeadlessSurfaceFactory::HeadlessSurfaceFactory(base::FilePath base_path)
 
 HeadlessSurfaceFactory::~HeadlessSurfaceFactory() = default;
 
-std::vector<gl::GLImplementation>
+std::vector<gl::GLImplementationParts>
 HeadlessSurfaceFactory::GetAllowedGLImplementations() {
-  return std::vector<gl::GLImplementation>{gl::kGLImplementationSwiftShaderGL};
+  return std::vector<gl::GLImplementationParts>{
+      gl::GLImplementationParts(gl::kGLImplementationSwiftShaderGL),
+      gl::GLImplementationParts(gl::ANGLEImplementation::kSwiftShader)};
 }
 
 GLOzone* HeadlessSurfaceFactory::GetGLOzone(
-    gl::GLImplementation implementation) {
-  switch (implementation) {
+    const gl::GLImplementationParts& implementation) {
+  switch (implementation.gl) {
     case gl::kGLImplementationEGLGLES2:
     case gl::kGLImplementationSwiftShaderGL:
+    case gl::kGLImplementationEGLANGLE:
       return swiftshader_implementation_.get();
 
     default:
@@ -250,7 +256,7 @@ scoped_refptr<gfx::NativePixmap> HeadlessSurfaceFactory::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    base::Optional<gfx::Size> framebuffer_size) {
+    absl::optional<gfx::Size> framebuffer_size) {
   return new TestPixmap(format);
 }
 

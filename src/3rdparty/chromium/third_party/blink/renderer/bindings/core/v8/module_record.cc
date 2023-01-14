@@ -44,17 +44,18 @@ ModuleRecordProduceCacheData::ModuleRecordProduceCacheData(
 
 void ModuleRecordProduceCacheData::Trace(Visitor* visitor) const {
   visitor->Trace(cache_handler_);
-  visitor->Trace(unbound_script_.UnsafeCast<v8::Value>());
+  visitor->Trace(unbound_script_);
 }
 
 v8::Local<v8::Module> ModuleRecord::Compile(
-    v8::Isolate* isolate,
+    ScriptState* script_state,
     const ModuleScriptCreationParams& params,
     const ScriptFetchOptions& options,
     const TextPosition& text_position,
     ExceptionState& exception_state,
     mojom::blink::V8CacheOptions v8_cache_options,
     ModuleRecordProduceCacheData** out_produce_cache_data) {
+  v8::Isolate* isolate = script_state->GetIsolate();
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Module> module;
 
@@ -69,6 +70,12 @@ v8::Local<v8::Module> ModuleRecord::Compile(
   v8::ScriptCompiler::CompileOptions compile_options;
   V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
+  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+  if (params.CacheHandler()) {
+    params.CacheHandler()->Check(
+        ExecutionContext::GetCodeCacheHostFromContext(execution_context),
+        params.GetSourceText());
+  }
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
       V8CodeCache::GetCompileOptions(v8_cache_options, params.CacheHandler(),
                                      params.GetSourceText().length(),
@@ -76,8 +83,7 @@ v8::Local<v8::Module> ModuleRecord::Compile(
 
   if (!V8ScriptRunner::CompileModule(
            isolate, params, text_position, compile_options, no_cache_reason,
-           ReferrerScriptInfo(params.BaseURL(), options,
-                              ReferrerScriptInfo::BaseUrlSource::kOther))
+           ReferrerScriptInfo(params.BaseURL(), options))
            .ToLocal(&module)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
@@ -103,6 +109,9 @@ ScriptValue ModuleRecord::Instantiate(ScriptState* script_state,
 
   DCHECK(!record.IsEmpty());
   v8::Local<v8::Context> context = script_state->GetContext();
+  v8::MicrotasksScope microtasks_scope(
+      isolate, ToMicrotaskQueue(script_state),
+      v8::MicrotasksScope::kDoNotRunMicrotasks);
 
   // Script IDs are not available on errored modules or on non-source text
   // modules, so we give them a default value.
@@ -188,7 +197,7 @@ v8::MaybeLocal<v8::Module> ModuleRecord::ResolveModuleCallback(
   DCHECK(modulator);
 
   ModuleRequest module_request(
-      ToCoreStringWithNullCheck(specifier), TextPosition(),
+      ToCoreStringWithNullCheck(specifier), TextPosition::MinimumPosition(),
       ModuleRecord::ToBlinkImportAssertions(
           context, referrer, import_assertions,
           /*v8_import_assertions_has_positions=*/true));
@@ -227,7 +236,7 @@ Vector<ImportAssertion> ModuleRecord::ToBlinkImportAssertions(
     v8::Local<v8::String> v8_assertion_value =
         v8_import_assertions->Get(context, (i * kV8AssertionEntrySize) + 1)
             .As<v8::String>();
-    TextPosition assertion_position;
+    TextPosition assertion_position = TextPosition::MinimumPosition();
     if (v8_import_assertions_has_positions) {
       int32_t v8_assertion_source_offset =
           v8_import_assertions->Get(context, (i * kV8AssertionEntrySize) + 2)

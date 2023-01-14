@@ -188,8 +188,8 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
                     // (<= 269.73). We get shader link failures when testing on recent drivers
                     // using this backend.
                     if (glCtx) {
-                        auto [backend, vendor, renderer] = GrGLGetANGLEInfo(glCtx->gl());
-                        if (vendor == GrGLANGLEVendor::kNVIDIA) {
+                        GrGLDriverInfo info = GrGLGetDriverInfo(glCtx->gl());
+                        if (info.fANGLEVendor == GrGLVendor::kNVIDIA) {
                             delete glCtx;
                             return ContextInfo();
                         }
@@ -213,8 +213,11 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
                     break;
 #endif
 #ifndef SK_NO_COMMAND_BUFFER
-                case kCommandBuffer_ContextType:
-                    glCtx = CommandBufferGLTestContext::Create(glShareContext);
+                case kCommandBuffer_ES2_ContextType:
+                    glCtx = CommandBufferGLTestContext::Create(2, glShareContext);
+                    break;
+                case kCommandBuffer_ES3_ContextType:
+                    glCtx = CommandBufferGLTestContext::Create(3, glShareContext);
                     break;
 #endif
                 default:
@@ -308,6 +311,9 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
     if (ContextOverrides::kAvoidStencilBuffers & overrides) {
         grOptions.fAvoidStencilBuffers = true;
     }
+    if (ContextOverrides::kReducedShaders & overrides) {
+        grOptions.fReducedShaderVariations = true;
+    }
     sk_sp<GrDirectContext> grCtx;
     {
         auto restore = testCtx->makeCurrentAndAutoRestore();
@@ -315,6 +321,10 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
     }
     if (!grCtx) {
         return ContextInfo();
+    }
+
+    if (shareContext) {
+        SkASSERT(grCtx->directContextID() != shareContext->directContextID());
     }
 
     // We must always add new contexts by pushing to the back so that when we delete them we delete

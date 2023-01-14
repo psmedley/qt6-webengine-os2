@@ -29,7 +29,7 @@ VdaVideoFramePool::~VdaVideoFramePool() {
   weak_this_factory_.InvalidateWeakPtrs();
 }
 
-base::Optional<GpuBufferLayout> VdaVideoFramePool::Initialize(
+absl::optional<GpuBufferLayout> VdaVideoFramePool::Initialize(
     const Fourcc& fourcc,
     const gfx::Size& coded_size,
     const gfx::Rect& visible_rect,
@@ -41,7 +41,7 @@ base::Optional<GpuBufferLayout> VdaVideoFramePool::Initialize(
 
   if (use_protected) {
     LOG(ERROR) << "Cannot allocated protected buffers for VDA";
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   visible_rect_ = visible_rect;
@@ -65,7 +65,7 @@ base::Optional<GpuBufferLayout> VdaVideoFramePool::Initialize(
   // Clear the pool and reset the layout to prevent previous frames are recycled
   // back to the pool.
   frame_pool_ = {};
-  layout_ = base::nullopt;
+  layout_ = absl::nullopt;
 
   // Receive the layout from the callback. |layout_| is accessed on
   // |parent_task_runner_| except OnRequestFramesDone(). However, we block
@@ -89,25 +89,28 @@ base::Optional<GpuBufferLayout> VdaVideoFramePool::Initialize(
 
 void VdaVideoFramePool::OnRequestFramesDone(
     base::WaitableEvent* done,
-    base::Optional<GpuBufferLayout> value) {
+    absl::optional<GpuBufferLayout> layout) {
   DVLOGF(3);
   // RequestFrames() is blocked on |parent_task_runner_| to wait for this method
   // finishes, so this method must not be run on the same sequence.
   DCHECK(!parent_task_runner_->RunsTasksInCurrentSequence());
-
   DCHECK(fourcc_);
-  DCHECK_EQ(value->fourcc(), *fourcc_);
-  DCHECK_GE(value->size().height(), coded_size_.height());
-  DCHECK_GE(value->size().width(), coded_size_.width());
 
-  layout_ = value;
+  if (!layout || layout->fourcc() != *fourcc_ ||
+      layout->size().height() < coded_size_.height() ||
+      layout->size().width() < coded_size_.width()) {
+    layout_ = absl::nullopt;
+  } else {
+    layout_ = layout;
+  }
+
   done->Signal();
 }
 
 // static
 void VdaVideoFramePool::ImportFrameThunk(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    base::Optional<base::WeakPtr<VdaVideoFramePool>> weak_this,
+    absl::optional<base::WeakPtr<VdaVideoFramePool>> weak_this,
     scoped_refptr<VideoFrame> frame) {
   DVLOGF(3);
   DCHECK(weak_this);

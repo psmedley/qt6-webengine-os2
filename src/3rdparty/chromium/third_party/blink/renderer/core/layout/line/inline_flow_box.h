@@ -22,6 +22,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LINE_INLINE_FLOW_BOX_H_
 
 #include <memory>
+
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/layout/geometry/box_sides.h"
 #include "third_party/blink/renderer/core/layout/line/inline_box.h"
 #include "third_party/blink/renderer/core/layout/overflow_model.h"
@@ -489,7 +491,7 @@ class InlineFlowBox : public InlineBox {
 
   // Whether or not this line uses alphabetic or ideographic baselines by
   // default.
-  unsigned baseline_type_ : 1;  // FontBaseline
+  unsigned baseline_type_ : 3;  // FontBaseline
 
   // If the line contains any ruby runs, then this will be true.
   unsigned has_annotations_before_ : 1;

@@ -8,6 +8,7 @@
 #include "src/gpu/vk/GrVkPipelineStateBuilder.h"
 
 #include "include/gpu/GrDirectContext.h"
+#include "src/core/SkReadBuffer.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/GrAutoLocaleSetter.h"
 #include "src/gpu/GrDirectContextPriv.h"
@@ -23,20 +24,21 @@
 
 GrVkPipelineState* GrVkPipelineStateBuilder::CreatePipelineState(
         GrVkGpu* gpu,
-        GrRenderTarget* renderTarget,
         const GrProgramDesc& desc,
         const GrProgramInfo& programInfo,
         VkRenderPass compatibleRenderPass,
         bool overrideSubpassForResolveLoad) {
 
-    gpu->stats()->incShaderCompilations();
+    GrVkResourceProvider& resourceProvider = gpu->resourceProvider();
+
+    resourceProvider.pipelineStateCache()->stats()->incShaderCompilations();
 
     // ensure that we use "." as a decimal separator when creating SkSL code
     GrAutoLocaleSetter als("C");
 
     // create a builder.  This will be handed off to effects so they can use it to add
     // uniforms, varyings, textures, etc
-    GrVkPipelineStateBuilder builder(gpu, renderTarget, desc, programInfo);
+    GrVkPipelineStateBuilder builder(gpu, desc, programInfo);
 
     if (!builder.emitAndInstallProcs()) {
         return nullptr;
@@ -46,10 +48,9 @@ GrVkPipelineState* GrVkPipelineStateBuilder::CreatePipelineState(
 }
 
 GrVkPipelineStateBuilder::GrVkPipelineStateBuilder(GrVkGpu* gpu,
-                                                   GrRenderTarget* renderTarget,
                                                    const GrProgramDesc& desc,
                                                    const GrProgramInfo& programInfo)
-        : INHERITED(renderTarget, desc, programInfo)
+        : INHERITED(desc, programInfo)
         , fGpu(gpu)
         , fVaryingHandler(this)
         , fUniformHandler(this) {}
@@ -81,8 +82,8 @@ bool GrVkPipelineStateBuilder::createVkShaderModule(VkShaderStageFlagBits stage,
                                  stageInfo, settings, outSPIRV, outInputs)) {
         return false;
     }
-    if (outInputs->fRTHeight) {
-        this->addRTHeightUniform(SKSL_RTHEIGHT_NAME);
+    if (outInputs->fUseFlipRTUniform) {
+        this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
     return true;
 }
@@ -96,8 +97,8 @@ bool GrVkPipelineStateBuilder::installVkShaderModule(VkShaderStageFlagBits stage
     if (!GrInstallVkShaderModule(fGpu, spirv, stage, shaderModule, stageInfo)) {
         return false;
     }
-    if (inputs.fRTHeight) {
-        this->addRTHeightUniform(SKSL_RTHEIGHT_NAME);
+    if (inputs.fUseFlipRTUniform) {
+        this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
     return true;
 }
@@ -160,17 +161,19 @@ void GrVkPipelineStateBuilder::storeShadersInCache(const SkSL::String shaders[],
     // to the key right after the base key.
     sk_sp<SkData> key = SkData::MakeWithoutCopy(this->desc().asKey(),
                                                 this->desc().initialKeyLength()+4);
+    SkString description = GrProgramDesc::Describe(fProgramInfo, *this->caps());
 
     sk_sp<SkData> data = GrPersistentCacheUtils::PackCachedShaders(isSkSL ? kSKSL_Tag : kSPIRV_Tag,
                                                                    shaders,
                                                                    inputs, kGrShaderTypeCount);
-    this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data);
+
+    this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data, description);
 }
 
 GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                                                       VkRenderPass compatibleRenderPass,
                                                       bool overrideSubpassForResolveLoad) {
-    TRACE_EVENT0("skia.gpu", TRACE_FUNC);
+    TRACE_EVENT0("skia.shaders", TRACE_FUNC);
 
     VkDescriptorSetLayout dsLayout[GrVkUniformHandler::kDescSetCount];
     VkShaderModule shaderModules[kGrShaderTypeCount] = { VK_NULL_HANDLE,
@@ -201,13 +204,15 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
     bool usePushConstants = fUniformHandler.usePushConstants();
     VkPipelineShaderStageCreateInfo shaderStageInfo[3];
     SkSL::Program::Settings settings;
-    settings.fRTHeightBinding = this->gpu()->vkCaps().getFragmentUniformBinding();
-    settings.fRTHeightSet = this->gpu()->vkCaps().getFragmentUniformSet();
-    settings.fFlipY = fUniformHandler.getFlipY();
+    settings.fRTFlipBinding = this->gpu()->vkCaps().getFragmentUniformBinding();
+    settings.fRTFlipSet = this->gpu()->vkCaps().getFragmentUniformSet();
     settings.fSharpenTextures =
                         this->gpu()->getContext()->priv().options().fSharpenMipmappedTextures;
-    settings.fRTHeightOffset = fUniformHandler.getRTHeightOffset();
+    settings.fRTFlipOffset = fUniformHandler.getRTFlipOffset();
     settings.fUsePushConstants = usePushConstants;
+    if (fFS.fForceHighPrecision) {
+        settings.fForceHighPrecision = true;
+    }
     SkASSERT(!this->fragColorIsInOut());
 
     sk_sp<SkData> cached;
@@ -270,7 +275,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                                                         &shaders[kFragment_GrShaderType],
                                                         &inputs[kFragment_GrShaderType]);
 
-        if (this->primitiveProcessor().willUseGeoShader()) {
+        if (this->geometryProcessor().willUseGeoShader()) {
             success = success && this->createVkShaderModule(VK_SHADER_STAGE_GEOMETRY_BIT,
                                                             *sksl[kGeometry_GrShaderType],
                                                             &shaderModules[kGeometry_GrShaderType],
@@ -374,7 +379,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                                  fUniformHandler.currentOffset(),
                                  fUniformHandler.usePushConstants(),
                                  fUniformHandler.fSamplers,
-                                 std::move(fGeometryProcessor),
-                                 std::move(fXferProcessor),
+                                 std::move(fGPImpl),
+                                 std::move(fXPImpl),
                                  std::move(fFPImpls));
 }

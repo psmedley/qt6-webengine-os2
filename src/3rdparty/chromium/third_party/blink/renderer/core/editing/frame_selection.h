@@ -29,8 +29,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
@@ -53,6 +52,7 @@ class GranularityStrategy;
 class GraphicsContext;
 class NGInlineCursor;
 class NGInlineCursorPosition;
+class NGPhysicalBoxFragment;
 class Range;
 class SelectionEditor;
 class LayoutSelection;
@@ -130,6 +130,8 @@ class CORE_EXPORT FrameSelection final
       public SynchronousMutationObserver {
  public:
   explicit FrameSelection(LocalFrame&);
+  FrameSelection(const FrameSelection&) = delete;
+  FrameSelection& operator=(const FrameSelection&) = delete;
   ~FrameSelection();
 
   bool IsAvailable() const;
@@ -137,7 +139,7 @@ class CORE_EXPORT FrameSelection final
   Document& GetDocument() const;
   LocalFrame* GetFrame() const { return frame_; }
   Element* RootEditableElementOrDocumentElement() const;
-  size_t CharacterIndexForPoint(const IntPoint&) const;
+  wtf_size_t CharacterIndexForPoint(const IntPoint&) const;
 
   // An implementation of |WebFrame::moveCaretSelection()|
   void MoveCaretSelection(const IntPoint&);
@@ -196,6 +198,7 @@ class CORE_EXPORT FrameSelection final
   // Returns true if specified layout block should paint caret. This function is
   // called during painting only.
   bool ShouldPaintCaret(const LayoutBlock&) const;
+  bool ShouldPaintCaret(const NGPhysicalBoxFragment&) const;
 
   // Bounds of (possibly transformed) caret in absolute coords
   IntRect AbsoluteCaretBounds() const;
@@ -271,8 +274,6 @@ class CORE_EXPORT FrameSelection final
   void SetSelectionFromNone();
 
   void UpdateAppearance();
-  bool ShouldShowBlockCursor() const;
-  void SetShouldShowBlockCursor(bool);
 
   void CacheRangeOfDocument(Range*);
   Range* DocumentCachedRange() const;
@@ -341,8 +342,6 @@ class CORE_EXPORT FrameSelection final
   std::unique_ptr<GranularityStrategy> granularity_strategy_;
 
   const Member<FrameCaret> frame_caret_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameSelection);
 };
 
 }  // namespace blink

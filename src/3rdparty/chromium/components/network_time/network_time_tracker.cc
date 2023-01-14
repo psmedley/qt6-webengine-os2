@@ -13,8 +13,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_macros_local.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -31,8 +30,10 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace network_time {
 
@@ -125,16 +126,16 @@ const char kVariationsServiceRandomQueryProbability[] =
 const char kVariationsServiceFetchBehavior[] = "FetchBehavior";
 
 // This is an ECDSA prime256v1 named-curve key.
-const int kKeyVersion = 4;
+const int kKeyVersion = 5;
 const uint8_t kKeyPubBytes[] = {
     0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02,
     0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03,
-    0x42, 0x00, 0x04, 0x6E, 0xF3, 0xC6, 0x54, 0xA9, 0x86, 0x09, 0xF1, 0x1C,
-    0xEE, 0x7B, 0x9D, 0x33, 0xA6, 0x04, 0x8C, 0x44, 0xA2, 0xF7, 0x8C, 0x2D,
-    0x62, 0x35, 0xB3, 0x67, 0x6F, 0x1D, 0x38, 0x66, 0xF3, 0xBB, 0xAB, 0x0D,
-    0x6C, 0xCE, 0x93, 0x30, 0x73, 0xBB, 0x33, 0x1D, 0x94, 0xF1, 0xB5, 0xE9,
-    0x37, 0x13, 0xD9, 0xB2, 0x64, 0x37, 0x89, 0xD0, 0xE2, 0x49, 0xE3, 0x4B,
-    0x34, 0x0F, 0x81, 0x8E, 0x5C, 0xA8, 0x61};
+    0x42, 0x00, 0x04, 0xE4, 0xA5, 0xA5, 0xA1, 0x99, 0x27, 0x83, 0x2B, 0x93,
+    0xF6, 0x30, 0xA6, 0x87, 0x78, 0x62, 0xB1, 0x81, 0x72, 0xD1, 0xA0, 0xB0,
+    0xFD, 0x48, 0x5F, 0x29, 0x60, 0x9C, 0x96, 0xC5, 0x10, 0xE3, 0x42, 0x43,
+    0x61, 0xB9, 0xDA, 0xEC, 0x30, 0xA8, 0x22, 0xA8, 0x69, 0xF7, 0x1F, 0x17,
+    0x5D, 0x83, 0xF7, 0xFD, 0xAE, 0x41, 0xDB, 0x31, 0x40, 0xAF, 0xA2, 0x32,
+    0xAE, 0x68, 0xFE, 0xD1, 0x6B, 0xB4, 0xB0};
 
 std::string GetServerProof(
     scoped_refptr<net::HttpResponseHeaders> response_headers) {
@@ -167,7 +168,7 @@ double RandomQueryProbability() {
 }
 
 void RecordFetchValidHistogram(bool valid) {
-  UMA_HISTOGRAM_BOOLEAN("NetworkTimeTracker.UpdateTimeFetchValid", valid);
+  LOCAL_HISTOGRAM_BOOLEAN("NetworkTimeTracker.UpdateTimeFetchValid", valid);
 }
 
 }  // namespace
@@ -357,7 +358,7 @@ NetworkTimeTracker::NetworkTimeResult NetworkTimeTracker::GetNetworkTime(
   base::TimeDelta time_delta = clock_->Now() - time_at_last_measurement_;
   if (time_delta.InMilliseconds() < 0) {  // Has wall clock run backward?
     DVLOG(1) << "Discarding network time due to wall clock running backward";
-    UMA_HISTOGRAM_CUSTOM_TIMES(
+    LOCAL_HISTOGRAM_CUSTOM_TIMES(
         "NetworkTimeTracker.WallClockRanBackwards", time_delta.magnitude(),
         base::TimeDelta::FromSeconds(1), base::TimeDelta::FromDays(7), 50);
     network_time_at_last_measurement_ = base::Time();
@@ -376,11 +377,11 @@ NetworkTimeTracker::NetworkTimeResult NetworkTimeTracker::GetNetworkTime(
     // without causing the buckets to change and making data from
     // old/new clients incompatible.
     if (divergence.InMilliseconds() < 0) {
-      UMA_HISTOGRAM_CUSTOM_TIMES(
+      LOCAL_HISTOGRAM_CUSTOM_TIMES(
           "NetworkTimeTracker.ClockDivergence.Negative", divergence.magnitude(),
           base::TimeDelta::FromSeconds(60), base::TimeDelta::FromDays(7), 50);
     } else {
-      UMA_HISTOGRAM_CUSTOM_TIMES(
+      LOCAL_HISTOGRAM_CUSTOM_TIMES(
           "NetworkTimeTracker.ClockDivergence.Positive", divergence.magnitude(),
           base::TimeDelta::FromSeconds(60), base::TimeDelta::FromDays(7), 50);
     }
@@ -499,8 +500,10 @@ bool NetworkTimeTracker::UpdateTimeFromResponse(
     DVLOG(1) << "fetch failed code=" << response_code;
     // The error code is negated because net errors are negative, but
     // the corresponding histogram enum is positive.
-    base::UmaHistogramSparse("NetworkTimeTracker.UpdateTimeFetchFailed",
-                             -time_fetcher_->NetError());
+    const int kPositiveError = -time_fetcher_->NetError();
+    DCHECK_LE(kPositiveError, 10000);
+    LOCAL_HISTOGRAM_COUNTS_10000("NetworkTimeTracker.UpdateTimeFetchFailed",
+                                 kPositiveError);
     return false;
   }
 
@@ -545,12 +548,12 @@ bool NetworkTimeTracker::UpdateTimeFromResponse(
   // Record histograms for the latency of the time query and the time delta
   // between time fetches.
   base::TimeDelta latency = tick_clock_->NowTicks() - fetch_started_;
-  UMA_HISTOGRAM_TIMES("NetworkTimeTracker.TimeQueryLatency", latency);
+  LOCAL_HISTOGRAM_TIMES("NetworkTimeTracker.TimeQueryLatency", latency);
   if (!last_fetched_time_.is_null()) {
-    UMA_HISTOGRAM_CUSTOM_TIMES("NetworkTimeTracker.TimeBetweenFetches",
-                               current_time - last_fetched_time_,
-                               base::TimeDelta::FromHours(1),
-                               base::TimeDelta::FromDays(7), 50);
+    LOCAL_HISTOGRAM_CUSTOM_TIMES("NetworkTimeTracker.TimeBetweenFetches",
+                                 current_time - last_fetched_time_,
+                                 base::TimeDelta::FromHours(1),
+                                 base::TimeDelta::FromDays(7), 50);
   }
   last_fetched_time_ = current_time;
 

@@ -13,7 +13,6 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/audio/audio_io.h"
@@ -47,7 +46,8 @@ TEST_F(AudioStreamHandlerTest, Play) {
   std::unique_ptr<AudioStreamHandler> audio_stream_handler;
 
   SetObserverForTesting(&observer);
-  audio_stream_handler.reset(new AudioStreamHandler(base::DoNothing(), data));
+  audio_stream_handler =
+      std::make_unique<AudioStreamHandler>(base::DoNothing(), data);
 
   ASSERT_TRUE(audio_stream_handler->IsInitialized());
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(20u),
@@ -71,7 +71,8 @@ TEST_F(AudioStreamHandlerTest, ConsecutivePlayRequests) {
   std::unique_ptr<AudioStreamHandler> audio_stream_handler;
 
   SetObserverForTesting(&observer);
-  audio_stream_handler.reset(new AudioStreamHandler(base::DoNothing(), data));
+  audio_stream_handler =
+      std::make_unique<AudioStreamHandler>(base::DoNothing(), data);
 
   ASSERT_TRUE(audio_stream_handler->IsInitialized());
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(20u),

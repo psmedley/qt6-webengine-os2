@@ -109,12 +109,11 @@ bool wrapEvaluateResultAsync(InjectedScript* injectedScript,
 }
 
 void innerCallFunctionOn(
-    V8InspectorSessionImpl* session,
-    InjectedScript::Scope& scope,  // NOLINT(runtime/references)
+    V8InspectorSessionImpl* session, InjectedScript::Scope& scope,
     v8::Local<v8::Value> recv, const String16& expression,
     Maybe<protocol::Array<protocol::Runtime::CallArgument>> optionalArguments,
     bool silent, WrapMode wrapMode, bool userGesture, bool awaitPromise,
-    const String16& objectGroup,
+    const String16& objectGroup, bool throw_on_side_effect,
     std::unique_ptr<V8RuntimeAgentImpl::CallFunctionOnCallback> callback) {
   V8InspectorImpl* inspector = session->inspector();
 
@@ -179,8 +178,9 @@ void innerCallFunctionOn(
   {
     v8::MicrotasksScope microtasksScope(inspector->isolate(),
                                         v8::MicrotasksScope::kRunMicrotasks);
-    maybeResultValue = functionValue.As<v8::Function>()->Call(
-        scope.context(), recv, argc, argv.get());
+    maybeResultValue = v8::debug::CallFunctionOn(
+        scope.context(), functionValue.As<v8::Function>(), recv, argc,
+        argv.get(), throw_on_side_effect);
   }
   // Re-initialize after running client's code, as it could have destroyed
   // context or session.
@@ -362,6 +362,7 @@ void V8RuntimeAgentImpl::callFunctionOn(
     Maybe<bool> silent, Maybe<bool> returnByValue, Maybe<bool> generatePreview,
     Maybe<bool> userGesture, Maybe<bool> awaitPromise,
     Maybe<int> executionContextId, Maybe<String16> objectGroup,
+    Maybe<bool> throwOnSideEffect,
     std::unique_ptr<CallFunctionOnCallback> callback) {
   if (objectId.isJust() && executionContextId.isJust()) {
     callback->sendFailure(Response::ServerError(
@@ -383,13 +384,13 @@ void V8RuntimeAgentImpl::callFunctionOn(
       callback->sendFailure(response);
       return;
     }
-    innerCallFunctionOn(m_session, scope, scope.object(), expression,
-                        std::move(optionalArguments), silent.fromMaybe(false),
-                        mode, userGesture.fromMaybe(false),
-                        awaitPromise.fromMaybe(false),
-                        objectGroup.isJust() ? objectGroup.fromMaybe(String16())
-                                             : scope.objectGroupName(),
-                        std::move(callback));
+    innerCallFunctionOn(
+        m_session, scope, scope.object(), expression,
+        std::move(optionalArguments), silent.fromMaybe(false), mode,
+        userGesture.fromMaybe(false), awaitPromise.fromMaybe(false),
+        objectGroup.isJust() ? objectGroup.fromMaybe(String16())
+                             : scope.objectGroupName(),
+        throwOnSideEffect.fromMaybe(false), std::move(callback));
   } else {
     int contextId = 0;
     Response response = ensureContext(m_inspector, m_session->contextGroupId(),
@@ -405,11 +406,12 @@ void V8RuntimeAgentImpl::callFunctionOn(
       callback->sendFailure(response);
       return;
     }
-    innerCallFunctionOn(m_session, scope, scope.context()->Global(), expression,
-                        std::move(optionalArguments), silent.fromMaybe(false),
-                        mode, userGesture.fromMaybe(false),
-                        awaitPromise.fromMaybe(false),
-                        objectGroup.fromMaybe(""), std::move(callback));
+    innerCallFunctionOn(
+        m_session, scope, scope.context()->Global(), expression,
+        std::move(optionalArguments), silent.fromMaybe(false), mode,
+        userGesture.fromMaybe(false), awaitPromise.fromMaybe(false),
+        objectGroup.fromMaybe(""), throwOnSideEffect.fromMaybe(false),
+        std::move(callback));
   }
 }
 
@@ -694,7 +696,6 @@ protocol::DictionaryValue* getOrCreateDictionary(
 Response V8RuntimeAgentImpl::addBinding(const String16& name,
                                         Maybe<int> executionContextId,
                                         Maybe<String16> executionContextName) {
-  if (m_activeBindings.count(name)) return Response::Success();
   if (executionContextId.isJust()) {
     if (executionContextName.isJust()) {
       return Response::InvalidParams(
@@ -743,8 +744,8 @@ void V8RuntimeAgentImpl::bindingCallback(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
   if (info.Length() != 1 || !info[0]->IsString()) {
-    info.GetIsolate()->ThrowException(toV8String(
-        isolate, "Invalid arguments: should be exactly one string."));
+    info.GetIsolate()->ThrowError(
+        "Invalid arguments: should be exactly one string.");
     return;
   }
   V8InspectorImpl* inspector =
@@ -764,6 +765,10 @@ void V8RuntimeAgentImpl::bindingCallback(
 
 void V8RuntimeAgentImpl::addBinding(InspectedContext* context,
                                     const String16& name) {
+  auto it = m_activeBindings.find(name);
+  if (it != m_activeBindings.end() && it->second.count(context->contextId())) {
+    return;
+  }
   v8::HandleScope handles(m_inspector->isolate());
   v8::Local<v8::Context> localContext = context->context();
   v8::Local<v8::Object> global = localContext->Global();
@@ -775,7 +780,12 @@ void V8RuntimeAgentImpl::addBinding(InspectedContext* context,
           .ToLocal(&functionValue)) {
     v8::Maybe<bool> success = global->Set(localContext, v8Name, functionValue);
     USE(success);
-    m_activeBindings.insert(name);
+    if (it == m_activeBindings.end()) {
+      m_activeBindings.emplace(name,
+                               std::unordered_set<int>(context->contextId()));
+    } else {
+      m_activeBindings.at(name).insert(context->contextId());
+    }
   }
 }
 
@@ -792,6 +802,7 @@ void V8RuntimeAgentImpl::bindingCalled(const String16& name,
                                        int executionContextId) {
   if (!m_activeBindings.count(name)) return;
   m_frontend.bindingCalled(name, payload, executionContextId);
+  m_frontend.flush();
 }
 
 void V8RuntimeAgentImpl::addBindings(InspectedContext* context) {
@@ -904,9 +915,10 @@ void V8RuntimeAgentImpl::reportExecutionContextDestroyed(
 
 void V8RuntimeAgentImpl::inspect(
     std::unique_ptr<protocol::Runtime::RemoteObject> objectToInspect,
-    std::unique_ptr<protocol::DictionaryValue> hints) {
+    std::unique_ptr<protocol::DictionaryValue> hints, int executionContextId) {
   if (m_enabled)
-    m_frontend.inspectRequested(std::move(objectToInspect), std::move(hints));
+    m_frontend.inspectRequested(std::move(objectToInspect), std::move(hints),
+                                executionContextId);
 }
 
 void V8RuntimeAgentImpl::messageAdded(V8ConsoleMessage* message) {

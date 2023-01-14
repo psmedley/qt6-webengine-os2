@@ -50,10 +50,11 @@ typedef enum {
   FPDF_TEXTRENDERMODE_LAST = FPDF_TEXTRENDERMODE_CLIP,
 } FPDF_TEXT_RENDERMODE;
 
-// PDF types - use incomplete types (never completed) just for API type safety.
+// PDF types - use incomplete types (never completed) to force API type safety.
 typedef struct fpdf_action_t__* FPDF_ACTION;
 typedef struct fpdf_annotation_t__* FPDF_ANNOTATION;
 typedef struct fpdf_attachment_t__* FPDF_ATTACHMENT;
+typedef struct fpdf_avail_t__* FPDF_AVAIL;
 typedef struct fpdf_bitmap_t__* FPDF_BITMAP;
 typedef struct fpdf_bookmark_t__* FPDF_BOOKMARK;
 typedef struct fpdf_clippath_t__* FPDF_CLIPPATH;
@@ -76,6 +77,7 @@ typedef struct fpdf_structelement_t__* FPDF_STRUCTELEMENT;
 typedef struct fpdf_structtree_t__* FPDF_STRUCTTREE;
 typedef struct fpdf_textpage_t__* FPDF_TEXTPAGE;
 typedef struct fpdf_widget_t__* FPDF_WIDGET;
+typedef struct fpdf_xobject_t__* FPDF_XOBJECT;
 
 // Basic data types
 typedef int FPDF_BOOL;

@@ -68,9 +68,6 @@ const char kEnableDisableValue2[] = "value2";
 const char kEnableFeatures[] = "dummy-enable-features";
 const char kDisableFeatures[] = "dummy-disable-features";
 
-const char kDummySentinelBeginSwitch[] = "dummy-begin";
-const char kDummySentinelEndSwitch[] = "dummy-end";
-
 const char kTestTrial[] = "TestTrial";
 const char kTestParam1[] = "param1";
 const char kTestParam2[] = "param2";
@@ -184,7 +181,7 @@ class FlagsStateTest : public ::testing::Test,
     while (os_other_than_current == FlagsState::GetCurrentPlatform())
       os_other_than_current <<= 1;
     kEntries[2].supported_platforms = os_other_than_current;
-    flags_state_.reset(new FlagsState(kEntries, this));
+    flags_state_ = std::make_unique<FlagsState>(kEntries, this);
   }
 
   ~FlagsStateTest() override {
@@ -247,16 +244,13 @@ TEST_F(FlagsStateTest, AddTwoFlagsRemoveOne) {
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, true);
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags2, true);
 
-  const base::ListValue* entries_list =
-      prefs_.GetList(prefs::kAboutFlagsEntries);
+  const base::Value* entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
   ASSERT_TRUE(entries_list != nullptr);
 
-  ASSERT_EQ(2u, entries_list->GetSize());
+  ASSERT_EQ(2u, entries_list->GetList().size());
 
-  std::string s0;
-  ASSERT_TRUE(entries_list->GetString(0, &s0));
-  std::string s1;
-  ASSERT_TRUE(entries_list->GetString(1, &s1));
+  std::string s0 = entries_list->GetList()[0].GetString();
+  std::string s1 = entries_list->GetList()[1].GetString();
 
   EXPECT_TRUE(s0 == kFlags1 || s1 == kFlags1);
   EXPECT_TRUE(s0 == kFlags2 || s1 == kFlags2);
@@ -266,8 +260,8 @@ TEST_F(FlagsStateTest, AddTwoFlagsRemoveOne) {
 
   entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
   ASSERT_TRUE(entries_list != nullptr);
-  ASSERT_EQ(1u, entries_list->GetSize());
-  ASSERT_TRUE(entries_list->GetString(0, &s0));
+  ASSERT_EQ(1u, entries_list->GetList().size());
+  s0 = entries_list->GetList()[0].GetString();
   EXPECT_TRUE(s0 == kFlags1);
 }
 
@@ -275,15 +269,14 @@ TEST_F(FlagsStateTest, AddTwoFlagsRemoveBoth) {
   // Add two entries, check the pref exists.
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, true);
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags2, true);
-  const base::ListValue* entries_list =
-      prefs_.GetList(prefs::kAboutFlagsEntries);
+  const base::Value* entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
   ASSERT_TRUE(entries_list != nullptr);
 
   // Remove both, the pref should have been removed completely.
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, false);
   flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags2, false);
   entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
-  EXPECT_TRUE(entries_list == nullptr || entries_list->GetSize() == 0);
+  EXPECT_TRUE(entries_list == nullptr || entries_list->GetList().size() == 0);
 }
 
 TEST_F(FlagsStateTest, ConvertFlagsToSwitches) {
@@ -430,124 +423,6 @@ base::CommandLine::StringType CreateSwitch(const std::string& value) {
 #endif
 }
 
-TEST_F(FlagsStateTest, CompareSwitchesToCurrentCommandLine) {
-  // Start with the active command line containing no flags, and the new command
-  // line having the |kFlags1| flag.
-
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, true);
-
-  const std::string kDoubleDash("--");
-
-  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitch("foo");
-
-  base::CommandLine new_command_line(base::CommandLine::NO_PROGRAM);
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &new_command_line,
-                                       kAddSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-
-  EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, command_line, nullptr, nullptr, nullptr));
-  {
-    std::set<base::CommandLine::StringType> difference;
-    EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-        new_command_line, command_line, &difference, nullptr, nullptr));
-    EXPECT_EQ(1U, difference.size());
-    EXPECT_EQ(1U, difference.count(CreateSwitch(kDoubleDash + kSwitch1)));
-  }
-
-  // Now both command lines have the |kFlags1| flag.
-
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &command_line,
-                                       kAddSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-
-  EXPECT_TRUE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, command_line, nullptr, nullptr, nullptr));
-  {
-    std::set<base::CommandLine::StringType> difference;
-    EXPECT_TRUE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-        new_command_line, command_line, &difference, nullptr, nullptr));
-    EXPECT_TRUE(difference.empty());
-  }
-
-  // Now the active command line has the |kFlags2| flag, and the new command
-  // line has the |kFlags1| flag.
-
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, false);
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags2, true);
-
-  base::CommandLine another_command_line(base::CommandLine::NO_PROGRAM);
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &another_command_line,
-                                       kAddSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-
-  EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr, nullptr, nullptr));
-  {
-    std::set<base::CommandLine::StringType> difference;
-    EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-        new_command_line, another_command_line, &difference, nullptr, nullptr));
-    EXPECT_EQ(2U, difference.size());
-    EXPECT_EQ(1U, difference.count(CreateSwitch(kDoubleDash + kSwitch1)));
-    EXPECT_EQ(1U, difference.count(CreateSwitch(kDoubleDash + kSwitch2 + "=" +
-                                                kValueForSwitch2)));
-  }
-
-  // Now both command lines have both flags |kFlags1| and |kFlags2|, but each
-  // flag is surrounded by dummy sentinels in one of the command lines.
-
-  new_command_line.AppendSwitch(kDummySentinelBeginSwitch);
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &new_command_line,
-                                       kNoSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-  new_command_line.AppendSwitch(kDummySentinelEndSwitch);
-
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, true);
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags2, false);
-
-  another_command_line.AppendSwitch(kDummySentinelBeginSwitch);
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &another_command_line,
-                                       kNoSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-  another_command_line.AppendSwitch(kDummySentinelEndSwitch);
-
-  EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr, nullptr, nullptr));
-  EXPECT_TRUE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr,
-      kDummySentinelBeginSwitch, kDummySentinelEndSwitch));
-
-  // Now the new command line additionally contains |kFlags3|, which is
-  // followed by another dummy end sentinel.
-
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags1, false);
-  flags_state_->SetFeatureEntryEnabled(&flags_storage_, kFlags3, true);
-
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &new_command_line,
-                                       kNoSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-  new_command_line.AppendSwitch(kDummySentinelEndSwitch);
-
-  EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr,
-      kDummySentinelBeginSwitch, kDummySentinelEndSwitch));
-
-  // Now both command lines contain the |kFlags3| flag followed by the second
-  // dummy end sentinel.
-
-  flags_state_->ConvertFlagsToSwitches(&flags_storage_, &another_command_line,
-                                       kNoSentinels, kEnableFeatures,
-                                       kDisableFeatures);
-  another_command_line.AppendSwitch(kDummySentinelEndSwitch);
-
-  EXPECT_FALSE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr, nullptr, nullptr));
-  EXPECT_TRUE(FlagsState::AreSwitchesIdenticalToCurrentCommandLine(
-      new_command_line, another_command_line, nullptr,
-      kDummySentinelBeginSwitch, kDummySentinelEndSwitch));
-}
-
 TEST_F(FlagsStateTest, RemoveFlagSwitches) {
   base::CommandLine::SwitchMap switch_list;
   switch_list[kSwitch1] = base::CommandLine::StringType();
@@ -672,15 +547,12 @@ TEST_F(FlagsStateTest, PersistAndPrune) {
   EXPECT_FALSE(command_line.HasSwitch(kSwitch3));
 
   // FeatureEntry 3 should show still be persisted in preferences though.
-  const base::ListValue* entries_list =
-      prefs_.GetList(prefs::kAboutFlagsEntries);
+  const base::Value* entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
   ASSERT_TRUE(entries_list);
-  EXPECT_EQ(2U, entries_list->GetSize());
-  std::string s0;
-  ASSERT_TRUE(entries_list->GetString(0, &s0));
+  EXPECT_EQ(2U, entries_list->GetList().size());
+  std::string s0 = entries_list->GetList()[0].GetString();
   EXPECT_EQ(kFlags1, s0);
-  std::string s1;
-  ASSERT_TRUE(entries_list->GetString(1, &s1));
+  std::string s1 = entries_list->GetList()[1].GetString();
   EXPECT_EQ(kFlags3, s1);
 }
 
@@ -727,15 +599,12 @@ TEST_F(FlagsStateTest, CheckValues) {
 #endif
 
   // And it should persist.
-  const base::ListValue* entries_list =
-      prefs_.GetList(prefs::kAboutFlagsEntries);
+  const base::Value* entries_list = prefs_.GetList(prefs::kAboutFlagsEntries);
   ASSERT_TRUE(entries_list);
-  EXPECT_EQ(2U, entries_list->GetSize());
-  std::string s0;
-  ASSERT_TRUE(entries_list->GetString(0, &s0));
+  EXPECT_EQ(2U, entries_list->GetList().size());
+  std::string s0 = entries_list->GetList()[0].GetString();
   EXPECT_EQ(kFlags1, s0);
-  std::string s1;
-  ASSERT_TRUE(entries_list->GetString(1, &s1));
+  std::string s1 = entries_list->GetList()[1].GetString();
   EXPECT_EQ(kFlags2, s1);
 }
 
@@ -940,16 +809,17 @@ TEST_F(FlagsStateTest, FeatureValues) {
 }
 
 TEST_F(FlagsStateTest, GetFlagFeatureEntries) {
-  base::ListValue supported_entries;
-  base::ListValue unsupported_entries;
+  base::Value::ListStorage supported_entries;
+  base::Value::ListStorage unsupported_entries;
   flags_state_->GetFlagFeatureEntries(&flags_storage_, kGeneralAccessFlagsOnly,
-                                      &supported_entries, &unsupported_entries,
+                                      supported_entries, unsupported_entries,
                                       base::BindRepeating(&SkipFeatureEntry));
   // All |kEntries| except for |kFlags3| should be supported.
-  EXPECT_EQ(11u, supported_entries.GetSize());
-  EXPECT_EQ(1u, unsupported_entries.GetSize());
-  EXPECT_EQ(base::size(kEntries),
-            supported_entries.GetSize() + unsupported_entries.GetSize());
+  auto supported_count = supported_entries.size();
+  auto unsupported_count = unsupported_entries.size();
+  EXPECT_EQ(11u, supported_count);
+  EXPECT_EQ(1u, unsupported_count);
+  EXPECT_EQ(base::size(kEntries), supported_count + unsupported_count);
 }
 
 }  // namespace flags_ui

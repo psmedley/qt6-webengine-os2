@@ -6,7 +6,7 @@
 
 #include "cc/paint/skia_paint_canvas.h"
 #include "components/viz/common/resources/resource_format_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -24,14 +24,11 @@ gfx::ColorSpace CanvasColorSpaceToGfxColorSpace2(CanvasColorSpace color_space) {
   switch (color_space) {
     case CanvasColorSpace::kSRGB:
       return gfx::ColorSpace::CreateSRGB();
-      break;
     case CanvasColorSpace::kRec2020:
       return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
                              gfx::ColorSpace::TransferID::GAMMA24);
-      break;
     case CanvasColorSpace::kP3:
       return gfx::ColorSpace::CreateDisplayP3D65();
-      break;
   }
   NOTREACHED();
 }
@@ -52,11 +49,8 @@ CanvasResourceParams::CanvasResourceParams(const SkImageInfo& info)
   // TODO(https://crbug.com/1157747): This ignores |info|'s SkAlphaType.
 }
 
-const SkSurfaceProps* CanvasResourceParams::GetSkSurfaceProps() const {
-  static const SkSurfaceProps disable_lcd_props(0, kUnknown_SkPixelGeometry);
-  if (alpha_type_ == kOpaque_SkAlphaType)
-    return nullptr;
-  return &disable_lcd_props;
+SkSurfaceProps CanvasResourceParams::GetSkSurfaceProps() const {
+  return skia::LegacyDisplayGlobals::ComputeSurfaceProps(CanUseLcdText());
 }
 
 uint8_t CanvasResourceParams::BytesPerPixel() const {

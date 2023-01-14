@@ -14,9 +14,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 
 class GURL;
+
+namespace network {
+struct CrossOriginEmbedderPolicy;
+}
 
 namespace content {
 
@@ -73,7 +78,7 @@ class CONTENT_EXPORT ServiceWorkerProcessManager {
   blink::ServiceWorkerStatusCode AllocateWorkerProcess(
       int embedded_worker_id,
       const GURL& script_url,
-      const base::Optional<network::CrossOriginEmbedderPolicy>&
+      const absl::optional<network::CrossOriginEmbedderPolicy>&
           cross_origin_embedder_policy,
       bool can_use_existing_process,
       AllocatedProcessInfo* out_info);

@@ -8,6 +8,10 @@ import("//third_party/angle/dotfile_settings.gni")
 # The location of the build configuration file.
 buildconfig = "//build/config/BUILDCONFIG.gn"
 
+# The python interpreter to use by default. On Windows, this will look
+# for python3.exe and python3.bat.
+script_executable = "python3"
+
 # These arguments override the default values for items in a declare_args
 # block. "gn args" in turn can override these.
 #
@@ -33,10 +37,6 @@ default_args = {
   v8_experimental_extra_library_files = []
   v8_enable_gdbjit = false
   v8_imminent_deprecation_warnings = false
-
-  # TODO(jochen): Remove this. http://crbug.com/v8/5830,
-  # http://crbug.com/728583.
-  v8_check_microtasks_scopes_consistency = false
 
   # Don't include webrtc's builtin task queue implementation.
   rtc_link_task_queue_impl = false

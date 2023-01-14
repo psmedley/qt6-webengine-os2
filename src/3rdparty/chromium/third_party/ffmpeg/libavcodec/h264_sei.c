@@ -25,13 +25,19 @@
  * @author Michael Niedermayer <michaelni@gmx.at>
  */
 
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include "libavutil/common.h"
+#include "libavutil/error.h"
+#include "libavutil/log.h"
+#include "libavutil/mem.h"
 #include "atsc_a53.h"
-#include "avcodec.h"
 #include "get_bits.h"
 #include "golomb.h"
 #include "h264_ps.h"
 #include "h264_sei.h"
-#include "internal.h"
+#include "sei.h"
 
 #define AVERROR_PS_NOT_FOUND      FFERRTAG(0xF8,'?','P','S')
 
@@ -49,6 +55,7 @@ void ff_h264_sei_uninit(H264SEIContext *h)
     h->picture_timing.present      = 0;
     h->buffering_period.present    = 0;
     h->frame_packing.present       = 0;
+    h->film_grain_characteristics.present = 0;
     h->display_orientation.present = 0;
     h->afd.present                 =  0;
 
@@ -183,33 +190,59 @@ static int decode_registered_user_data_closed_caption(H264SEIA53Caption *h,
 static int decode_registered_user_data(H264SEIContext *h, GetBitContext *gb,
                                        void *logctx, int size)
 {
-    uint32_t country_code;
-    uint32_t user_identifier;
+    int country_code, provider_code;
 
-    if (size < 7)
+    if (size < 3)
         return AVERROR_INVALIDDATA;
-    size -= 7;
+    size -= 3;
 
     country_code = get_bits(gb, 8); // itu_t_t35_country_code
     if (country_code == 0xFF) {
+        if (size < 1)
+            return AVERROR_INVALIDDATA;
+
         skip_bits(gb, 8);           // itu_t_t35_country_code_extension_byte
         size--;
     }
 
-    /* itu_t_t35_payload_byte follows */
-    skip_bits(gb, 8);              // terminal provider code
-    skip_bits(gb, 8);              // terminal provider oriented code
-    user_identifier = get_bits_long(gb, 32);
+    if (country_code != 0xB5) { // usa_country_code
+        av_log(logctx, AV_LOG_VERBOSE,
+               "Unsupported User Data Registered ITU-T T35 SEI message (country_code = %d)\n",
+               country_code);
+        return 0;
+    }
 
-    switch (user_identifier) {
+    /* itu_t_t35_payload_byte follows */
+    provider_code = get_bits(gb, 16);
+
+    switch (provider_code) {
+    case 0x31: { // atsc_provider_code
+        uint32_t user_identifier;
+
+        if (size < 4)
+            return AVERROR_INVALIDDATA;
+        size -= 4;
+
+        user_identifier = get_bits_long(gb, 32);
+        switch (user_identifier) {
         case MKBETAG('D', 'T', 'G', '1'):       // afd_data
             return decode_registered_user_data_afd(&h->afd, gb, size);
         case MKBETAG('G', 'A', '9', '4'):       // closed captions
             return decode_registered_user_data_closed_caption(&h->a53_caption, gb,
                                                               logctx, size);
         default:
-            skip_bits(gb, size * 8);
+            av_log(logctx, AV_LOG_VERBOSE,
+                   "Unsupported User Data Registered ITU-T T35 SEI message (atsc user_identifier = 0x%04x)\n",
+                   user_identifier);
             break;
+        }
+        break;
+    }
+    default:
+        av_log(logctx, AV_LOG_VERBOSE,
+               "Unsupported User Data Registered ITU-T T35 SEI message (provider_code = %d)\n",
+               provider_code);
+        break;
     }
 
     return 0;
@@ -384,6 +417,49 @@ static int decode_alternative_transfer(H264SEIAlternativeTransfer *h,
     return 0;
 }
 
+static int decode_film_grain_characteristics(H264SEIFilmGrainCharacteristics *h,
+                                             GetBitContext *gb)
+{
+    h->present = !get_bits1(gb); // film_grain_characteristics_cancel_flag
+
+    if (h->present) {
+        memset(h, 0, sizeof(*h));
+        h->model_id = get_bits(gb, 8);
+        h->separate_colour_description_present_flag = get_bits1(gb);
+        if (h->separate_colour_description_present_flag) {
+            h->bit_depth_luma = get_bits(gb, 3) + 8;
+            h->bit_depth_chroma = get_bits(gb, 3) + 8;
+            h->full_range = get_bits1(gb);
+            h->color_primaries = get_bits(gb, 8);
+            h->transfer_characteristics = get_bits(gb, 8);
+            h->matrix_coeffs = get_bits(gb, 8);
+        }
+        h->blending_mode_id = get_bits(gb, 2);
+        h->log2_scale_factor = get_bits(gb, 4);
+        for (int c = 0; c < 3; c++)
+            h->comp_model_present_flag[c] = get_bits1(gb);
+        for (int c = 0; c < 3; c++) {
+            if (h->comp_model_present_flag[c]) {
+                h->num_intensity_intervals[c] = get_bits(gb, 8) + 1;
+                h->num_model_values[c] = get_bits(gb, 3) + 1;
+                if (h->num_model_values[c] > 6)
+                    return AVERROR_INVALIDDATA;
+                for (int i = 0; i < h->num_intensity_intervals[c]; i++) {
+                    h->intensity_interval_lower_bound[c][i] = get_bits(gb, 8);
+                    h->intensity_interval_upper_bound[c][i] = get_bits(gb, 8);
+                    for (int j = 0; j < h->num_model_values[c]; j++)
+                        h->comp_model_value[c][i][j] = get_se_golomb_long(gb);
+                }
+            }
+        }
+        h->repetition_period = get_ue_golomb_long(gb);
+
+        h->present = 1;
+    }
+
+    return 0;
+}
+
 int ff_h264_sei_decode(H264SEIContext *h, GetBitContext *gb,
                        const H264ParamSets *ps, void *logctx)
 {
@@ -418,32 +494,35 @@ int ff_h264_sei_decode(H264SEIContext *h, GetBitContext *gb,
             return ret;
 
         switch (type) {
-        case H264_SEI_TYPE_PIC_TIMING: // Picture timing SEI
+        case SEI_TYPE_PIC_TIMING: // Picture timing SEI
             ret = decode_picture_timing(&h->picture_timing, &gb_payload, logctx);
             break;
-        case H264_SEI_TYPE_USER_DATA_REGISTERED:
+        case SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35:
             ret = decode_registered_user_data(h, &gb_payload, logctx, size);
             break;
-        case H264_SEI_TYPE_USER_DATA_UNREGISTERED:
+        case SEI_TYPE_USER_DATA_UNREGISTERED:
             ret = decode_unregistered_user_data(&h->unregistered, &gb_payload, logctx, size);
             break;
-        case H264_SEI_TYPE_RECOVERY_POINT:
+        case SEI_TYPE_RECOVERY_POINT:
             ret = decode_recovery_point(&h->recovery_point, &gb_payload, logctx);
             break;
-        case H264_SEI_TYPE_BUFFERING_PERIOD:
+        case SEI_TYPE_BUFFERING_PERIOD:
             ret = decode_buffering_period(&h->buffering_period, &gb_payload, ps, logctx);
             break;
-        case H264_SEI_TYPE_FRAME_PACKING:
+        case SEI_TYPE_FRAME_PACKING_ARRANGEMENT:
             ret = decode_frame_packing_arrangement(&h->frame_packing, &gb_payload);
             break;
-        case H264_SEI_TYPE_DISPLAY_ORIENTATION:
+        case SEI_TYPE_DISPLAY_ORIENTATION:
             ret = decode_display_orientation(&h->display_orientation, &gb_payload);
             break;
-        case H264_SEI_TYPE_GREEN_METADATA:
+        case SEI_TYPE_GREEN_METADATA:
             ret = decode_green_metadata(&h->green_metadata, &gb_payload);
             break;
-        case H264_SEI_TYPE_ALTERNATIVE_TRANSFER:
+        case SEI_TYPE_ALTERNATIVE_TRANSFER_CHARACTERISTICS:
             ret = decode_alternative_transfer(&h->alternative_transfer, &gb_payload);
+            break;
+        case SEI_TYPE_FILM_GRAIN_CHARACTERISTICS:
+            ret = decode_film_grain_characteristics(&h->film_grain_characteristics, &gb_payload);
             break;
         default:
             av_log(logctx, AV_LOG_DEBUG, "unknown SEI type %d\n", type);

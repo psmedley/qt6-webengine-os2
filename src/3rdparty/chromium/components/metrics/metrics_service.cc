@@ -124,6 +124,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -135,11 +136,14 @@
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/process/process_handle.h"
+#include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/metrics/clean_exit_beacon.h"
 #include "components/metrics/environment_recorder.h"
 #include "components/metrics/field_trials_provider.h"
 #include "components/metrics/metrics_log.h"
@@ -175,20 +179,7 @@ const int kInitializationDelaySeconds = 30;
 // The browser last live timestamp is updated every 15 minutes.
 const int kUpdateAliveTimestampSeconds = 15 * 60;
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
-void MarkAppCleanShutdownAndCommit(CleanExitBeacon* clean_exit_beacon,
-                                   PrefService* local_state) {
-  clean_exit_beacon->WriteBeaconValue(true);
-  // Start writing right away (write happens on a different thread).
-  local_state->CommitPendingWrite();
-}
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
-
 }  // namespace
-
-// static
-MetricsService::ShutdownCleanliness MetricsService::clean_shutdown_status_ =
-    MetricsService::CLEANLY_SHUTDOWN;
 
 // static
 void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -247,13 +238,13 @@ void MetricsService::InitializeMetricsRecordingState() {
   base::RepeatingClosure upload_callback = base::BindRepeating(
       &MetricsService::StartScheduledUpload, self_ptr_factory_.GetWeakPtr());
 
-  rotation_scheduler_.reset(new MetricsRotationScheduler(
+  rotation_scheduler_ = std::make_unique<MetricsRotationScheduler>(
       upload_callback,
       // MetricsServiceClient outlives MetricsService, and
       // MetricsRotationScheduler is tied to the lifetime of |this|.
       base::BindRepeating(&MetricsServiceClient::GetUploadInterval,
                           base::Unretained(client_)),
-      client_->ShouldStartUpFastForTesting()));
+      client_->ShouldStartUpFastForTesting());
 
   // Init() has to be called after LogCrash() in order for LogCrash() to work.
   delegating_provider_.Init();
@@ -401,8 +392,9 @@ void MetricsService::OnAppEnterBackground(bool keep_recording_in_background) {
     reporting_service_.Stop();
   }
 
-  MarkAppCleanShutdownAndCommit(state_manager_->clean_exit_beacon(),
-                                local_state_);
+  state_manager_->LogHasSessionShutdownCleanly(true);
+  // Schedule a write, which happens on a different thread.
+  local_state_->CommitPendingWrite();
 
   // Give providers a chance to persist histograms as part of being
   // backgrounded.
@@ -423,7 +415,7 @@ void MetricsService::OnAppEnterBackground(bool keep_recording_in_background) {
 
 void MetricsService::OnAppEnterForeground(bool force_open_new_log) {
   is_in_foreground_ = true;
-  state_manager_->clean_exit_beacon()->WriteBeaconValue(false);
+  state_manager_->LogHasSessionShutdownCleanly(false);
   StartSchedulerIfNecessary();
 
   if (force_open_new_log && recording_active() && state_ >= SENDING_LOGS) {
@@ -436,16 +428,35 @@ void MetricsService::OnAppEnterForeground(bool force_open_new_log) {
 
 #else
 void MetricsService::LogNeedForCleanShutdown() {
-  state_manager_->clean_exit_beacon()->WriteBeaconValue(false);
-  // Redundant setting to be sure we call for a clean shutdown.
-  clean_shutdown_status_ = NEED_TO_SHUTDOWN;
+  state_manager_->LogHasSessionShutdownCleanly(false);
 }
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
-
 
 void MetricsService::ClearSavedStabilityMetrics() {
   delegating_provider_.ClearSavedStabilityMetrics();
 }
+
+#if defined(OS_CHROMEOS)
+void MetricsService::SetUserLogStore(
+    std::unique_ptr<UnsentLogStore> user_log_store) {
+  // This should only be set after the service has finished initializing.
+  DCHECK_EQ(SENDING_LOGS, state_);
+
+  // Closes the current log so that a new log can be opened in the user log
+  // store.
+  PushPendingLogsToPersistentStorage();
+  log_store()->SetAlternateOngoingLogStore(std::move(user_log_store));
+  OpenNewLog();
+}
+
+void MetricsService::UnsetUserLogStore() {
+  DCHECK_EQ(SENDING_LOGS, state_);
+  // Pushes all the existing logs to user log store before unbound.
+  PushPendingLogsToPersistentStorage();
+  log_store()->UnsetAlternateOngoingLogStore();
+  OpenNewLog();
+}
+#endif
 
 bool MetricsService::StageCurrentLogForTest() {
   CloseCurrentLog();
@@ -463,12 +474,11 @@ bool MetricsService::StageCurrentLogForTest() {
 // private methods
 //------------------------------------------------------------------------------
 
-
 //------------------------------------------------------------------------------
 // Initialization methods
 
 void MetricsService::InitializeMetricsState() {
-  SCOPED_UMA_HISTOGRAM_SHORT_TIMER("UMA.MetricsService.Initialize.Time");
+  SCOPED_UMA_HISTOGRAM_TIMER_MICROS("UMA.MetricsService.Initialize.Time");
 
   const int64_t buildtime = MetricsLog::GetBuildTime();
   const std::string version = client_->GetVersionString();
@@ -533,6 +543,15 @@ void MetricsService::InitializeMetricsState() {
   // Mod the value with 1000 to limit the number of unique values reported.
   base::UmaHistogramSparse("Stability.Experimental.SessionId",
                            session_id_ % 1000);
+
+  // Log a random number to diagnose crbug.com/1176977.
+  base::UmaHistogramSparse("Stability.Experimental.RandInt",
+                           base::RandInt(0, 999));
+
+  // Log the process id to diagnose crbug.com/1176977.
+  // Mod the value with 1000 to limit the number of unique values reported.
+  base::UmaHistogramSparse("Stability.Experimental.ProcessId",
+                           base::GetCurrentProcId() % 1000);
 
   // Notify stability metrics providers about the launch.
   UMA_HISTOGRAM_BOOLEAN("UMA.MetricsService.Initialize", true);
@@ -670,8 +689,7 @@ void MetricsService::StartSchedulerIfNecessary() {
   // Even if reporting is disabled, the scheduler is needed to trigger the
   // creation of the initial log, which must be done in order for any logs to be
   // persisted on shutdown or backgrounding.
-  if (recording_active() &&
-      (reporting_active() || state_ < SENDING_LOGS)) {
+  if (recording_active() && (reporting_active() || state_ < SENDING_LOGS)) {
     rotation_scheduler_->Start();
     reporting_service_.Start();
   }
@@ -689,8 +707,7 @@ void MetricsService::StartScheduledUpload() {
   // that has to happen in order for logs to be cut and stored when persisting.
   // TODO(stuartmorgan): Call Stop() on the scheduler when reporting and/or
   // recording are turned off instead of letting it fire and then aborting.
-  if (idle_since_last_transmission_ ||
-      !recording_active() ||
+  if (idle_since_last_transmission_ || !recording_active() ||
       (!reporting_active() && state_ >= SENDING_LOGS)) {
     rotation_scheduler_->Stop();
     rotation_scheduler_->RotationFinished();
@@ -806,12 +823,6 @@ void MetricsService::PrepareInitialMetricsLog() {
 void MetricsService::IncrementLongPrefsValue(const char* path) {
   int64_t value = local_state_->GetInt64(path);
   local_state_->SetInt64(path, value + 1);
-}
-
-bool MetricsService::UmaMetricsProperlyShutdown() {
-  CHECK(clean_shutdown_status_ == CLEANLY_SHUTDOWN ||
-        clean_shutdown_status_ == NEED_TO_SHUTDOWN);
-  return clean_shutdown_status_ == CLEANLY_SHUTDOWN;
 }
 
 void MetricsService::RegisterMetricsProvider(
@@ -957,11 +968,7 @@ void MetricsService::PrepareProviderMetricsTask() {
 
 void MetricsService::LogCleanShutdown(bool end_completed) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Redundant setting to assure that we always reset this value at shutdown
-  // (and that we don't use some alternate path, and not call LogCleanShutdown).
-  clean_shutdown_status_ = CLEANLY_SHUTDOWN;
-  client_->OnLogCleanShutdown();
-  state_manager_->clean_exit_beacon()->WriteBeaconValue(true);
+  state_manager_->LogHasSessionShutdownCleanly(true);
   StabilityMetricsProvider(local_state_).MarkSessionEndCompleted(end_completed);
 }
 

@@ -14,6 +14,7 @@
 
 #include "dawn_native/d3d12/DeviceD3D12.h"
 
+#include "common/GPUInfo.h"
 #include "dawn_native/Instance.h"
 #include "dawn_native/d3d12/AdapterD3D12.h"
 #include "dawn_native/d3d12/BackendD3D12.h"
@@ -159,7 +160,7 @@ namespace dawn_native { namespace d3d12 {
 
         // The environment can only use DXC when it's available. Override the decision if it is not
         // applicable.
-        ApplyUseDxcToggle();
+        DAWN_TRY(ApplyUseDxcToggle());
         return {};
     }
 
@@ -195,25 +196,33 @@ namespace dawn_native { namespace d3d12 {
         return ToBackend(GetAdapter())->GetBackend()->GetFactory();
     }
 
-    void Device::ApplyUseDxcToggle() {
+    MaybeError Device::ApplyUseDxcToggle() {
         if (!ToBackend(GetAdapter())->GetBackend()->GetFunctions()->IsDXCAvailable()) {
             ForceSetToggle(Toggle::UseDXC, false);
         } else if (IsExtensionEnabled(Extension::ShaderFloat16)) {
             // Currently we can only use DXC to compile HLSL shaders using float16.
             ForceSetToggle(Toggle::UseDXC, true);
         }
+
+        if (IsToggleEnabled(Toggle::UseDXC)) {
+            DAWN_TRY(ToBackend(GetAdapter())->GetBackend()->EnsureDxcCompiler());
+            DAWN_TRY(ToBackend(GetAdapter())->GetBackend()->EnsureDxcLibrary());
+            DAWN_TRY(ToBackend(GetAdapter())->GetBackend()->EnsureDxcValidator());
+        }
+
+        return {};
     }
 
-    ResultOrError<IDxcLibrary*> Device::GetOrCreateDxcLibrary() const {
-        return ToBackend(GetAdapter())->GetBackend()->GetOrCreateDxcLibrary();
+    ComPtr<IDxcLibrary> Device::GetDxcLibrary() const {
+        return ToBackend(GetAdapter())->GetBackend()->GetDxcLibrary();
     }
 
-    ResultOrError<IDxcCompiler*> Device::GetOrCreateDxcCompiler() const {
-        return ToBackend(GetAdapter())->GetBackend()->GetOrCreateDxcCompiler();
+    ComPtr<IDxcCompiler> Device::GetDxcCompiler() const {
+        return ToBackend(GetAdapter())->GetBackend()->GetDxcCompiler();
     }
 
-    ResultOrError<IDxcValidator*> Device::GetOrCreateDxcValidator() const {
-        return ToBackend(GetAdapter())->GetBackend()->GetOrCreateDxcValidator();
+    ComPtr<IDxcValidator> Device::GetDxcValidator() const {
+        return ToBackend(GetAdapter())->GetBackend()->GetDxcValidator();
     }
 
     const PlatformFunctions* Device::GetFunctions() const {
@@ -268,24 +277,32 @@ namespace dawn_native { namespace d3d12 {
     }
 
     MaybeError Device::WaitForSerial(ExecutionSerial serial) {
-        CheckPassedSerials();
+        DAWN_TRY(CheckPassedSerials());
         if (GetCompletedCommandSerial() < serial) {
             DAWN_TRY(CheckHRESULT(mFence->SetEventOnCompletion(uint64_t(serial), mFenceEvent),
                                   "D3D12 set event on completion"));
             WaitForSingleObject(mFenceEvent, INFINITE);
-            CheckPassedSerials();
+            DAWN_TRY(CheckPassedSerials());
         }
         return {};
     }
 
-    ExecutionSerial Device::CheckAndUpdateCompletedSerials() {
-        ExecutionSerial completeSerial = ExecutionSerial(mFence->GetCompletedValue());
+    ResultOrError<ExecutionSerial> Device::CheckAndUpdateCompletedSerials() {
+        ExecutionSerial completedSerial = ExecutionSerial(mFence->GetCompletedValue());
+        if (DAWN_UNLIKELY(completedSerial == ExecutionSerial(UINT64_MAX))) {
+            // GetCompletedValue returns UINT64_MAX if the device was removed.
+            // Try to query the failure reason.
+            DAWN_TRY(CheckHRESULT(mD3d12Device->GetDeviceRemovedReason(),
+                                  "ID3D12Device::GetDeviceRemovedReason"));
+            // Otherwise, return a generic device lost error.
+            return DAWN_DEVICE_LOST_ERROR("Device lost");
+        }
 
-        if (completeSerial <= GetCompletedCommandSerial()) {
+        if (completedSerial <= GetCompletedCommandSerial()) {
             return ExecutionSerial(0);
         }
 
-        return completeSerial;
+        return completedSerial;
     }
 
     void Device::ReferenceUntilUnused(ComPtr<IUnknown> object) {
@@ -296,63 +313,69 @@ namespace dawn_native { namespace d3d12 {
         return mPendingCommands.ExecuteCommandList(this);
     }
 
-    ResultOrError<BindGroupBase*> Device::CreateBindGroupImpl(
+    ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
         const BindGroupDescriptor* descriptor) {
         return BindGroup::Create(this, descriptor);
     }
-    ResultOrError<BindGroupLayoutBase*> Device::CreateBindGroupLayoutImpl(
+    ResultOrError<Ref<BindGroupLayoutBase>> Device::CreateBindGroupLayoutImpl(
         const BindGroupLayoutDescriptor* descriptor) {
-        return new BindGroupLayout(this, descriptor);
+        return BindGroupLayout::Create(this, descriptor);
     }
     ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(const BufferDescriptor* descriptor) {
-        Ref<Buffer> buffer = AcquireRef(new Buffer(this, descriptor));
-        DAWN_TRY(buffer->Initialize(descriptor->mappedAtCreation));
-        return std::move(buffer);
+        return Buffer::Create(this, descriptor);
     }
-    CommandBufferBase* Device::CreateCommandBuffer(CommandEncoder* encoder,
-                                                   const CommandBufferDescriptor* descriptor) {
-        return new CommandBuffer(encoder, descriptor);
+    ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
+        CommandEncoder* encoder,
+        const CommandBufferDescriptor* descriptor) {
+        return CommandBuffer::Create(encoder, descriptor);
     }
-    ResultOrError<ComputePipelineBase*> Device::CreateComputePipelineImpl(
+    ResultOrError<Ref<ComputePipelineBase>> Device::CreateComputePipelineImpl(
         const ComputePipelineDescriptor* descriptor) {
         return ComputePipeline::Create(this, descriptor);
     }
-    ResultOrError<PipelineLayoutBase*> Device::CreatePipelineLayoutImpl(
+    ResultOrError<Ref<PipelineLayoutBase>> Device::CreatePipelineLayoutImpl(
         const PipelineLayoutDescriptor* descriptor) {
         return PipelineLayout::Create(this, descriptor);
     }
-    ResultOrError<QuerySetBase*> Device::CreateQuerySetImpl(const QuerySetDescriptor* descriptor) {
+    ResultOrError<Ref<QuerySetBase>> Device::CreateQuerySetImpl(
+        const QuerySetDescriptor* descriptor) {
         return QuerySet::Create(this, descriptor);
     }
-    ResultOrError<RenderPipelineBase*> Device::CreateRenderPipelineImpl(
+    ResultOrError<Ref<RenderPipelineBase>> Device::CreateRenderPipelineImpl(
         const RenderPipelineDescriptor* descriptor) {
         return RenderPipeline::Create(this, descriptor);
     }
-    ResultOrError<SamplerBase*> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
-        return new Sampler(this, descriptor);
+    ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
+        return Sampler::Create(this, descriptor);
     }
-    ResultOrError<ShaderModuleBase*> Device::CreateShaderModuleImpl(
+    ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
         const ShaderModuleDescriptor* descriptor,
         ShaderModuleParseResult* parseResult) {
         return ShaderModule::Create(this, descriptor, parseResult);
     }
-    ResultOrError<SwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(
         const SwapChainDescriptor* descriptor) {
-        return new SwapChain(this, descriptor);
+        return OldSwapChain::Create(this, descriptor);
     }
-    ResultOrError<NewSwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<NewSwapChainBase>> Device::CreateSwapChainImpl(
         Surface* surface,
         NewSwapChainBase* previousSwapChain,
         const SwapChainDescriptor* descriptor) {
-        return DAWN_VALIDATION_ERROR("New swapchains not implemented.");
+        return SwapChain::Create(this, surface, previousSwapChain, descriptor);
     }
     ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(const TextureDescriptor* descriptor) {
         return Texture::Create(this, descriptor);
     }
-    ResultOrError<TextureViewBase*> Device::CreateTextureViewImpl(
+    ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor) {
-        return new TextureView(texture, descriptor);
+        return TextureView::Create(texture, descriptor);
+    }
+    void Device::CreateComputePipelineAsyncImpl(const ComputePipelineDescriptor* descriptor,
+                                                size_t blueprintHash,
+                                                WGPUCreateComputePipelineAsyncCallback callback,
+                                                void* userdata) {
+        ComputePipeline::CreateAsync(this, descriptor, blueprintHash, callback, userdata);
     }
 
     ResultOrError<std::unique_ptr<StagingBufferBase>> Device::CreateStagingBuffer(size_t size) {
@@ -404,7 +427,7 @@ namespace dawn_native { namespace d3d12 {
         CommandRecordingContext* commandContext;
         DAWN_TRY_ASSIGN(commandContext, GetPendingCommandContext());
         Texture* texture = ToBackend(dst->texture.Get());
-        ASSERT(texture->GetDimension() == wgpu::TextureDimension::e2D);
+        ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
 
         SubresourceRange range = GetSubresourcesAffectedByCopy(*dst, copySizePixels);
 
@@ -416,10 +439,9 @@ namespace dawn_native { namespace d3d12 {
 
         texture->TrackUsageAndTransitionNow(commandContext, wgpu::TextureUsage::CopyDst, range);
 
-        // compute the copySplits and record the CopyTextureRegion commands
-        CopyBufferToTextureWithCopySplit(commandContext, *dst, copySizePixels, texture,
-                                         ToBackend(source)->GetResource(), src.offset,
-                                         src.bytesPerRow, src.rowsPerImage, range.aspects);
+        RecordCopyBufferToTexture(commandContext, *dst, ToBackend(source)->GetResource(),
+                                  src.offset, src.bytesPerRow, src.rowsPerImage, copySizePixels,
+                                  texture, range.aspects);
 
         return {};
     }
@@ -436,13 +458,16 @@ namespace dawn_native { namespace d3d12 {
                                                          initialUsage);
     }
 
-    Ref<TextureBase> Device::WrapSharedHandle(const ExternalImageDescriptor* descriptor,
-                                              HANDLE sharedHandle,
-                                              ExternalMutexSerial acquireMutexKey,
-                                              bool isSwapChainTexture) {
+    Ref<TextureBase> Device::CreateExternalTexture(const TextureDescriptor* descriptor,
+                                                   ComPtr<ID3D12Resource> d3d12Texture,
+                                                   ExternalMutexSerial acquireMutexKey,
+                                                   ExternalMutexSerial releaseMutexKey,
+                                                   bool isSwapChainTexture,
+                                                   bool isInitialized) {
         Ref<Texture> dawnTexture;
-        if (ConsumedError(Texture::Create(this, descriptor, sharedHandle, acquireMutexKey,
-                                          isSwapChainTexture),
+        if (ConsumedError(Texture::CreateExternalImage(this, descriptor, std::move(d3d12Texture),
+                                                       acquireMutexKey, releaseMutexKey,
+                                                       isSwapChainTexture, isInitialized),
                           &dawnTexture)) {
             return nullptr;
         }
@@ -529,10 +554,26 @@ namespace dawn_native { namespace d3d12 {
         SetToggle(Toggle::UseD3D12RenderPass, GetDeviceInfo().supportsRenderPass);
         SetToggle(Toggle::UseD3D12ResidencyManagement, true);
         SetToggle(Toggle::UseDXC, false);
-        SetToggle(Toggle::UseTintGenerator, false);
+
+#if defined(_DEBUG)
+        // Enable better shader debugging with the graphics debugging tools.
+        SetToggle(Toggle::EmitHLSLDebugSymbols, true);
+#endif
 
         // By default use the maximum shader-visible heap size allowed.
         SetToggle(Toggle::UseD3D12SmallShaderVisibleHeapForTesting, false);
+
+        PCIInfo pciInfo = GetAdapter()->GetPCIInfo();
+
+        // Currently this workaround is only needed on Intel Gen9 and Gen9.5 GPUs.
+        // See http://crbug.com/1161355 for more information.
+        if (gpu_info::IsIntel(pciInfo.vendorId) &&
+            (gpu_info::IsSkylake(pciInfo.deviceId) || gpu_info::IsKabylake(pciInfo.deviceId) ||
+             gpu_info::IsCoffeelake(pciInfo.deviceId))) {
+            SetToggle(
+                Toggle::UseTempBufferInSmallFormatTextureToTextureCopyFromGreaterToLessMipLevel,
+                true);
+        }
     }
 
     MaybeError Device::WaitForIdleForDestruction() {

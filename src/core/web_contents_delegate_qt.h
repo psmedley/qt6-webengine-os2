@@ -126,7 +126,7 @@ public:
     void CloseContents(content::WebContents *source) override;
     void LoadProgressChanged(double progress) override;
     bool HandleKeyboardEvent(content::WebContents *source, const content::NativeWebKeyboardEvent &event) override;
-    content::ColorChooser* OpenColorChooser(content::WebContents *source, SkColor color, const std::vector<blink::mojom::ColorSuggestionPtr> &suggestions) override;
+    std::unique_ptr<content::ColorChooser> OpenColorChooser(content::WebContents *source, SkColor color, const std::vector<blink::mojom::ColorSuggestionPtr> &suggestions) override;
     void WebContentsCreated(content::WebContents *source_contents, int opener_render_process_id, int opener_render_frame_id,
                             const std::string &frame_name, const GURL &target_url, content::WebContents *new_contents) override;
     content::JavaScriptDialogManager *GetJavaScriptDialogManager(content::WebContents *source) override;
@@ -137,7 +137,7 @@ public:
                         scoped_refptr<content::FileSelectListener> listener,
                         const blink::mojom::FileChooserParams& params) override;
     bool DidAddMessageToConsole(content::WebContents *source, blink::mojom::ConsoleMessageLevel log_level,
-                                const base::string16 &message, int32_t line_no, const base::string16 &source_id) override;
+                                const std::u16string &message, int32_t line_no, const std::u16string &source_id) override;
     void FindReply(content::WebContents *source, int request_id, int number_of_matches, const gfx::Rect& selection_rect, int active_match_ordinal, bool final_update) override;
     void RequestMediaAccessPermission(content::WebContents *web_contents,
                                       const content::MediaStreamRequest &request,

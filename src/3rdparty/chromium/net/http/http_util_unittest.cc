@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <limits>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_util.h"
 #include "net/http/http_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -975,6 +975,17 @@ TEST(HttpUtilTest, ParseContentType) {
       true,
       ""
     },
+    // Empty subtype should be accepted.
+    { "text/",
+      "text/",
+      "",
+      false,
+      ""
+    },
+    // "*/*" is ignored unless it has params, or is not an exact match.
+    { "*/*", "", "", false, "" },
+    { "*/*; charset=utf-8", "*/*", "utf-8", true, "" },
+    { "*/* ", "*/*", "", false, "" },
     // TODO(abarth): Add more interesting test cases.
   };
   // clang-format on
@@ -1529,6 +1540,24 @@ TEST(HttpUtilTest, IsLWS) {
 
   EXPECT_TRUE(HttpUtil::IsLWS('\t'));
   EXPECT_TRUE(HttpUtil::IsLWS(' '));
+}
+
+TEST(HttpUtilTest, IsControlChar) {
+  EXPECT_FALSE(HttpUtil::IsControlChar('1'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('a'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('.'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('$'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('\x7E'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('\x80'));
+  EXPECT_FALSE(HttpUtil::IsControlChar('\xFF'));
+
+  EXPECT_TRUE(HttpUtil::IsControlChar('\0'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\v'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\n'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\r'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\t'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\x01'));
+  EXPECT_TRUE(HttpUtil::IsControlChar('\x7F'));
 }
 
 TEST(HttpUtilTest, ParseAcceptEncoding) {

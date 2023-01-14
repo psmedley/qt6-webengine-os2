@@ -13,8 +13,8 @@ group("remoting_all") {
 
   if (is_win) {
     deps += [
-      "//remoting:remoting_breakpad_tester",
       "//remoting/host/win:all",
+      "//remoting/tools:remoting_breakpad_tester",
     ]
 
     if (is_chrome_branded) {
@@ -38,7 +38,7 @@ group("remoting_all") {
 
   if (enable_remoting_host) {
     deps += [
-      "//remoting:remoting_perftests",
+      ":remoting_perftests",
       "//remoting/host",
     ]
 
@@ -74,31 +74,6 @@ group("remoting_all") {
   }
 }
 
-if (is_win) {
-  executable("remoting_breakpad_tester") {
-    deps = [
-      "//base",
-      "//build/win:default_exe_manifest",
-      "//remoting/host",
-    ]
-
-    libs = []
-
-    configs += [ "//build/config/compiler:wexit_time_destructors" ]
-
-    sources = [ "tools/breakpad_tester_win.cc" ]
-
-    if (is_win) {
-      libs += [
-        "rpcrt4.lib",
-        "wtsapi32.lib",
-      ]
-
-      deps += [ "//remoting/host:base" ]
-    }
-  }
-}
-
 group("test_support") {
   testonly = true
 
@@ -130,12 +105,7 @@ test("remoting_unittests") {
   defines = []
   libs = []
 
-  configs += [
-    "//remoting/build/config:version",
-
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
+  configs += [ "//remoting/build/config:version" ]
 
   deps = [
     ":test_support",

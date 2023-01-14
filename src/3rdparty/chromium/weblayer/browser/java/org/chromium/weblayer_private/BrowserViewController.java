@@ -6,7 +6,6 @@ package org.chromium.weblayer_private;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.os.Build;
 import android.os.RemoteException;
 import android.util.AndroidRuntimeException;
 import android.view.View;
@@ -18,24 +17,30 @@ import android.widget.RelativeLayout;
 
 import androidx.annotation.Nullable;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.cc.input.BrowserControlsState;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerFactory;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
+import org.chromium.components.browser_ui.bottomsheet.EmptyBottomSheetObserver;
+import org.chromium.components.browser_ui.bottomsheet.ManagedBottomSheetController;
 import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
 import org.chromium.components.browser_ui.widget.InsetObserverView;
+import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator;
+import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator.SystemUiScrimDelegate;
 import org.chromium.components.content_capture.ContentCaptureConsumer;
-import org.chromium.components.content_capture.ContentCaptureConsumerImpl;
-import org.chromium.components.content_capture.ExperimentContentCaptureConsumer;
+import org.chromium.components.content_capture.OnscreenContentProvider;
 import org.chromium.components.embedder_support.view.ContentView;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.modaldialog.SimpleModalDialogController;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.util.TokenHolder;
 import org.chromium.weblayer_private.interfaces.BrowserEmbeddabilityMode;
-
-import java.util.ArrayList;
 
 /**
  * BrowserViewController controls the set of Views needed to show the WebContents.
@@ -62,6 +67,8 @@ public final class BrowserViewController
     // accessible (ContentView provides it's own accessible implementation that interacts with
     // WebContents).
     private final ContentView mContentView;
+    // Child of mContentViewRenderView, holds the SurfaceView for WebXR.
+    private final FrameLayout mArViewHolder;
     // Child of mContentViewRenderView, holds top-view from client.
     private final BrowserControlsContainerView mTopControlsContainerView;
     // Child of mContentViewRenderView, holds bottom-view from client.
@@ -73,6 +80,12 @@ public final class BrowserViewController
     private final FragmentWindowAndroid mWindowAndroid;
     private final View.OnAttachStateChangeListener mOnAttachedStateChangeListener;
     private final ModalDialogManager mModalDialogManager;
+
+    private final ScrimCoordinator mScrim;
+
+    private final ViewGroup mBottomSheetContainer;
+    private final ManagedBottomSheetController mBottomSheetController;
+    private final BottomSheetObserver mBottomSheetObserver;
 
     private TabImpl mTab;
 
@@ -88,15 +101,7 @@ public final class BrowserViewController
      */
     private boolean mCachedDoBrowserControlsShrinkRendererSize;
 
-    /**
-     * ContentCaptureConsumer could be null in some cases, e.g. when the platform decided to not
-     * capture data for different apps. Therefore checking if |mContentCaptureConsumers| is empty is
-     * not enough to determine if this is the first time we are trying to create
-     * ContentCaptureConsumer. Having the flag below is to create ContentCaptureConsumers only once.
-     */
-    private boolean mShouldCreateContentCaptureConsumer = true;
-    // TODO: (crbug.com/1119663) Move consumers out of this class while support multiple consumers.
-    private ArrayList<ContentCaptureConsumer> mContentCaptureConsumers = new ArrayList<>();
+    private OnscreenContentProvider mOnscreenContentProvider;
 
     public BrowserViewController(FragmentWindowAndroid windowAndroid,
             View.OnAttachStateChangeListener listener, @Nullable State savedState,
@@ -122,6 +127,12 @@ public final class BrowserViewController
         mContentViewRenderView.addView(mContentView,
                 new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT,
                         RelativeLayout.LayoutParams.MATCH_PARENT));
+
+        mArViewHolder = new FrameLayout(context);
+        mArViewHolder.setVisibility(View.GONE);
+        mContentViewRenderView.addView(mArViewHolder,
+                new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
         mContentViewRenderView.addView(mTopControlsContainerView,
                 new RelativeLayout.LayoutParams(
                         LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -146,12 +157,80 @@ public final class BrowserViewController
         mModalDialogManager.registerPresenter(
                 new WebLayerTabModalPresenter(this, context), ModalDialogType.TAB);
         mWindowAndroid.setModalDialogManager(mModalDialogManager);
+
+        SystemUiScrimDelegate systemUiDelegate = new SystemUiScrimDelegate() {
+            @Override
+            public void setStatusBarScrimFraction(float scrimFraction) {
+                // TODO(mdjones): Support status bar tinting if it is needed by WebLayer.
+            }
+
+            @Override
+            public void setNavigationBarScrimFraction(float scrimFraction) {}
+        };
+        mScrim = new ScrimCoordinator(context, systemUiDelegate, mContentViewRenderView,
+                context.getResources().getColor(R.color.default_scrim_color));
+        mBottomSheetContainer = new FrameLayout(context);
+        mBottomSheetContainer.setLayoutParams(
+                new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        mBottomSheetContainer.setClipChildren(false);
+        mBottomSheetContainer.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                // Allow the sheet container to layout once before hiding it until it is used.
+                mBottomSheetContainer.setVisibility(View.GONE);
+                mBottomSheetContainer.removeOnLayoutChangeListener(this);
+            }
+        });
+        mContentViewRenderView.addView(mBottomSheetContainer);
+
+        mBottomSheetController = BottomSheetControllerFactory.createBottomSheetController(
+                () -> mScrim, (v) -> {}, ContextUtils.activityFromContext(context).getWindow(),
+                KeyboardVisibilityDelegate.getInstance(), () -> mBottomSheetContainer);
+        BottomSheetControllerFactory.attach(mWindowAndroid, mBottomSheetController);
+
+        mBottomSheetObserver = new EmptyBottomSheetObserver() {
+            /** A token for suppressing app modal dialogs. */
+            private int mAppModalToken = TokenHolder.INVALID_TOKEN;
+
+            /** A token for suppressing tab modal dialogs. */
+            private int mTabModalToken = TokenHolder.INVALID_TOKEN;
+
+            @Override
+            public void onSheetOpened(int reason) {
+                assert mAppModalToken == TokenHolder.INVALID_TOKEN;
+                assert mTabModalToken == TokenHolder.INVALID_TOKEN;
+                mAppModalToken =
+                        mModalDialogManager.suspendType(ModalDialogManager.ModalDialogType.APP);
+                mTabModalToken =
+                        mModalDialogManager.suspendType(ModalDialogManager.ModalDialogType.TAB);
+            }
+
+            @Override
+            public void onSheetClosed(int reason) {
+                if (mAppModalToken != TokenHolder.INVALID_TOKEN
+                        || mTabModalToken != TokenHolder.INVALID_TOKEN) {
+                    // If one modal dialog token is set, the other should be as well.
+                    assert mAppModalToken != TokenHolder.INVALID_TOKEN
+                            && mTabModalToken != TokenHolder.INVALID_TOKEN;
+                    mModalDialogManager.resumeType(
+                            ModalDialogManager.ModalDialogType.APP, mAppModalToken);
+                    mModalDialogManager.resumeType(
+                            ModalDialogManager.ModalDialogType.TAB, mTabModalToken);
+                }
+                mAppModalToken = TokenHolder.INVALID_TOKEN;
+                mTabModalToken = TokenHolder.INVALID_TOKEN;
+            }
+        };
+        mBottomSheetController.addObserver(mBottomSheetObserver);
     }
 
     public void destroy() {
+        BottomSheetControllerFactory.detach(mBottomSheetController);
+        mBottomSheetController.removeObserver(mBottomSheetObserver);
         mWindowAndroid.setModalDialogManager(null);
         setActiveTab(null);
-        mContentCaptureConsumers.clear();
+        if (mOnscreenContentProvider != null) mOnscreenContentProvider.destroy();
         mContentViewRenderView.removeOnAttachStateChangeListener(mOnAttachedStateChangeListener);
         mTopControlsContainerView.destroy();
         mBottomControlsContainerView.destroy();
@@ -178,6 +257,14 @@ public final class BrowserViewController
 
     public FrameLayout getWebContentsOverlayView() {
         return mWebContentsOverlayView;
+    }
+
+    public ViewGroup getArViewHolder() {
+        return mArViewHolder;
+    }
+
+    public void setSurfaceProperties(boolean requiresAlphaChannel, boolean zOrderMediaOverlay) {
+        mContentViewRenderView.setSurfaceProperties(requiresAlphaChannel, zOrderMediaOverlay);
     }
 
     // Returns the index at which the infobar container view should be inserted.
@@ -227,22 +314,11 @@ public final class BrowserViewController
             mContentView.requestFocus();
         }
 
-        if (mShouldCreateContentCaptureConsumer) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentCaptureConsumer consumer = ContentCaptureConsumerImpl.create(
-                        mWindowAndroid.getContext().get(), mContentViewRenderView, webContents);
-                if (consumer != null) mContentCaptureConsumers.add(consumer);
-            }
-            // ExperimentContentCaptureConsumer is used to verify the content capture integration
-            // manually. We also use it for experiment later. It is not depending on the system API
-            // and it is controlled by its own flag in the ContentCapture component.
-            ContentCaptureConsumer consumer = ExperimentContentCaptureConsumer.create(webContents);
-            if (consumer != null) mContentCaptureConsumers.add(consumer);
-            mShouldCreateContentCaptureConsumer = false;
+        if (mOnscreenContentProvider == null) {
+            mOnscreenContentProvider = new OnscreenContentProvider(
+                    mWindowAndroid.getContext().get(), mContentViewRenderView, webContents);
         } else {
-            for (ContentCaptureConsumer consumer : mContentCaptureConsumers) {
-                consumer.onWebContentsChanged(webContents);
-            }
+            mOnscreenContentProvider.onWebContentsChanged(webContents);
         }
     }
 
@@ -269,9 +345,7 @@ public final class BrowserViewController
     }
 
     public void addContentCaptureConsumerForTesting(ContentCaptureConsumer consumer) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
-        mShouldCreateContentCaptureConsumer = false;
-        mContentCaptureConsumers.add(consumer);
+        mOnscreenContentProvider.addConsumer(consumer);
     }
 
     public void setTopControlsAnimationsEnabled(boolean animationsEnabled) {

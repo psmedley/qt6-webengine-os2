@@ -14,8 +14,8 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
+#include "media/base/bitrate.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/base/media_export.h"
 #include "media/base/video_bitrate_allocation.h"
@@ -23,18 +23,33 @@
 #include "media/base/video_frame.h"
 #include "media/video/h264_parser.h"
 #include "media/video/video_encoder_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
 class BitstreamBuffer;
 class VideoFrame;
 
+//  Metadata for a H264 bitstream buffer.
+//  |temporal_idx|  indicates the temporal index for this frame.
+//  |layer_sync|    is true iff this frame has |temporal_idx| > 0 and does NOT
+//                  reference any reference buffer containing a frame with
+//                  temporal_idx > 0.
+struct MEDIA_EXPORT H264Metadata final {
+  H264Metadata();
+  ~H264Metadata();
+  H264Metadata(const H264Metadata&);
+
+  uint8_t temporal_idx = 0;
+  bool layer_sync = false;
+};
+
 //  Metadata for a VP8 bitstream buffer.
 //  |non_reference| is true iff this frame does not update any reference buffer,
 //                  meaning dropping this frame still results in a decodable
 //                  stream.
 //  |temporal_idx|  indicates the temporal index for this frame.
-//  |layer_sync|    if true iff this frame has |temporal_idx| > 0 and does NOT
+//  |layer_sync|    is true iff this frame has |temporal_idx| > 0 and does NOT
 //                  reference any reference buffer containing a frame with
 //                  temporal_idx > 0.
 struct MEDIA_EXPORT Vp8Metadata final {
@@ -44,24 +59,35 @@ struct MEDIA_EXPORT Vp8Metadata final {
   bool layer_sync;
 };
 
-// Metadata for a VP9 bitstream buffer
-// |has_reference|      is true iff this frame depends on previously coded frame
-//                      on the same spatial layer.
-// |temporal_up_switch| is true iff this frame only references TL0 frames.
-// |tempora_idx|        indicates the temporal index for this frame.
-// |p_diffs|            indicates the differences between the picture id of this
-//                      frame and picture ids of reference frames.
-// CAVEATS: This Vp9 metadata is for temporal layer bitstream and not sufficient
-// for spatial layer bitstream.
+// Metadata for a VP9 bitstream buffer, this struct resembles
+// webrtc::CodecSpecificInfoVP9 [1]
+// https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/video_coding/include/video_codec_interface.h;l=56;drc=e904161cecbe5e2ca31382e2a62fc776151bb8f2
 struct MEDIA_EXPORT Vp9Metadata final {
   Vp9Metadata();
   ~Vp9Metadata();
   Vp9Metadata(const Vp9Metadata&);
 
-  // Default values are for keyframe.
-  bool has_reference = false;
+  // True iff this layer frame is dependent on previously coded frame(s).
+  bool inter_pic_predicted = false;
+  // True iff this frame only references TL0 frames.
   bool temporal_up_switch = false;
+  // True iff frame is referenced by upper spatial layer frame.
+  bool referenced_by_upper_spatial_layers = false;
+  // True iff frame is dependent on directly lower spatial layer frame.
+  bool reference_lower_spatial_layers = false;
+  // True iff frame is last layer frame of picture.
+  bool end_of_picture = true;
+
+  // The temporal index for this frame.
   uint8_t temporal_idx = 0;
+  // The spatial index for this frame.
+  uint8_t spatial_idx = 0;
+  // The resolutions of active spatial layers, filled if and only if keyframe or
+  // the number of active spatial layers is changed.
+  std::vector<gfx::Size> spatial_layer_resolutions;
+
+  // The differences between the picture id of this frame and picture ids
+  // of reference frames, only be filled for non key frames.
   std::vector<uint8_t> p_diffs;
 };
 
@@ -84,10 +110,11 @@ struct MEDIA_EXPORT BitstreamBufferMetadata final {
   bool key_frame;
   base::TimeDelta timestamp;
 
-  // Either |vp8| or |vp9| may be set, but not both of them. Presumably, it's
-  // also possible for none of them to be set.
-  base::Optional<Vp8Metadata> vp8;
-  base::Optional<Vp9Metadata> vp9;
+  // |h264|, |vp8| or |vp9| may be set, but not multiple of them. Presumably,
+  // it's also possible for none of them to be set.
+  absl::optional<H264Metadata> h264;
+  absl::optional<Vp8Metadata> vp8;
+  absl::optional<Vp9Metadata> vp9;
 };
 
 // Video encoder interface.
@@ -100,6 +127,8 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
                      const gfx::Size& max_resolution,
                      uint32_t max_framerate_numerator = 0u,
                      uint32_t max_framerate_denominator = 1u);
+    SupportedProfile(const SupportedProfile& other) = default;
+    SupportedProfile& operator=(const SupportedProfile& other) = default;
     ~SupportedProfile();
     VideoCodecProfile profile;
     gfx::Size min_resolution;
@@ -132,6 +161,11 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // Indicates if video content should be treated as a "normal" camera feed
     // or as generated (e.g. screen capture).
     enum class ContentType { kCamera, kDisplay };
+    enum class InterLayerPredMode : int {
+      kOff = 0,      // Inter-layer prediction is disabled.
+      kOn = 1,       // Inter-layer prediction is enabled.
+      kOnKeyPic = 2  // Inter-layer prediction is enabled for key picture.
+    };
     // Indicates the storage type of a video frame provided on Encode().
     // kShmem if a video frame has a shared memory.
     // kGpuMemoryBuffer if a video frame has a GpuMemoryBuffer.
@@ -159,14 +193,15 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     Config(VideoPixelFormat input_format,
            const gfx::Size& input_visible_size,
            VideoCodecProfile output_profile,
-           uint32_t initial_bitrate,
-           base::Optional<uint32_t> initial_framerate = base::nullopt,
-           base::Optional<uint32_t> gop_length = base::nullopt,
-           base::Optional<uint8_t> h264_output_level = base::nullopt,
+           const Bitrate& bitrate,
+           absl::optional<uint32_t> initial_framerate = absl::nullopt,
+           absl::optional<uint32_t> gop_length = absl::nullopt,
+           absl::optional<uint8_t> h264_output_level = absl::nullopt,
            bool is_constrained_h264 = false,
-           base::Optional<StorageType> storage_type = base::nullopt,
+           absl::optional<StorageType> storage_type = absl::nullopt,
            ContentType content_type = ContentType::kCamera,
-           const std::vector<SpatialLayer>& spatial_layers = {});
+           const std::vector<SpatialLayer>& spatial_layers = {},
+           InterLayerPredMode inter_layer_pred = InterLayerPredMode::kOnKeyPic);
 
     ~Config();
 
@@ -186,22 +221,23 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // Codec profile of encoded output stream.
     VideoCodecProfile output_profile;
 
-    // Initial bitrate of encoded output stream in bits per second.
-    uint32_t initial_bitrate;
+    // Configuration details for the bitrate, indicating the bitrate mode (ex.
+    // variable or constant) and target bitrate.
+    Bitrate bitrate;
 
     // Initial encoding framerate in frames per second. This is optional and
     // VideoEncodeAccelerator should use |kDefaultFramerate| if not given.
-    base::Optional<uint32_t> initial_framerate;
+    absl::optional<uint32_t> initial_framerate;
 
     // Group of picture length for encoded output stream, indicates the
     // distance between two key frames, i.e. IPPPIPPP would be represent as 4.
-    base::Optional<uint32_t> gop_length;
+    absl::optional<uint32_t> gop_length;
 
     // Codec level of encoded output stream for H264 only. This value should
     // be aligned to the H264 standard definition of SPS.level_idc.
     // If this is not given, VideoEncodeAccelerator selects one of proper H.264
     // levels for |input_visible_size| and |initial_framerate|.
-    base::Optional<uint8_t> h264_output_level;
+    absl::optional<uint8_t> h264_output_level;
 
     // Indicates baseline profile or constrained baseline profile for H264 only.
     bool is_constrained_h264;
@@ -211,7 +247,7 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // Encode().
     // This is kShmem iff a video frame is mapped in user space.
     // This is kDmabuf iff a video frame has dmabuf.
-    base::Optional<StorageType> storage_type;
+    absl::optional<StorageType> storage_type;
 
     // Indicates captured video (from a camera) or generated (screen grabber).
     // Screen content has a number of special properties such as lack of noise,
@@ -225,6 +261,13 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // empty, VideoEncodeAccelerator should refer the width, height, bitrate and
     // etc. of |spatial_layers|.
     std::vector<SpatialLayer> spatial_layers;
+
+    // Indicates the inter layer prediction mode for SVC encoding.
+    InterLayerPredMode inter_layer_pred;
+
+    // This flag forces the encoder to use low latency mode, suitable for
+    // RTC use cases.
+    bool require_low_delay = true;
   };
 
   // Interface for clients that use VideoEncodeAccelerator. These callbacks will
@@ -309,9 +352,11 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
   // Request a change to the encoding parameters. This is only a request,
   // fulfilled on a best-effort basis.
   // Parameters:
-  //  |bitrate| is the requested new bitrate, in bits per second.
-  //  |framerate| is the requested new framerate, in frames per second.
-  virtual void RequestEncodingParametersChange(uint32_t bitrate,
+  //  |bitrate| is the requested new bitrate. The bitrate mode cannot be changed
+  //  using this method and attempting to do so will result in an error.
+  //  Instead, re-create a VideoEncodeAccelerator. |framerate| is the requested
+  //  new framerate, in frames per second.
+  virtual void RequestEncodingParametersChange(const Bitrate& bitrate,
                                                uint32_t framerate) = 0;
 
   // Request a change to the encoding parameters. This is only a request,

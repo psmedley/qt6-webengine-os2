@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/device_info_sync_service_factory.h"
+#include "components/sync/protocol/sync_enums.pb.h"
 #include "components/sync_device_info/device_info.h"
 #include "components/sync_device_info/device_info_util.h"
 #include "components/sync_device_info/fake_device_info_sync_service.h"
@@ -34,9 +35,11 @@ std::unique_ptr<DeviceInfo> CreateDevice(const std::string& guid,
   return std::make_unique<DeviceInfo>(
       guid, name, "chrome_version", "user_agent",
       sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id", "manufacturer",
-      "model", base::Time(), syncer::DeviceInfoUtil::GetPulseInterval(),
+      "model", "full_hardware_class", base::Time(),
+      syncer::DeviceInfoUtil::GetPulseInterval(),
       /*send_tab_to_self_receiving_enabled=*/true,
-      /*sharing_info=*/base::nullopt,
+      /*sharing_info=*/absl::nullopt,
+      /*passk_info=*/absl::nullopt,
       /*fcm_registration_token=*/std::string(),
       /*interested_data_types=*/syncer::ModelTypeSet());
 }

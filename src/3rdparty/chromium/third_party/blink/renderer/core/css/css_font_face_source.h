@@ -62,6 +62,8 @@ class CORE_EXPORT CSSFontFaceSource
   // Returns nullptr unless the source is a loaded RemoteFontFaceSource.
   virtual String GetURL() const { return g_null_atom; }
 
+  virtual bool IsPendingDataUrl() const { return false; }
+
   // Returns nullptr unless the source is a loaded RemoteFontFaceSource.
   virtual const FontCustomPlatformData* GetCustomPlaftormData() const {
     return nullptr;
@@ -115,4 +117,4 @@ class CORE_EXPORT CSSFontFaceSource
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_FONT_FACE_SOURCE_H_

@@ -22,9 +22,7 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
@@ -43,6 +41,7 @@
 #include "media/gpu/macros.h"
 #include "media/video/h264_level_limits.h"
 #include "media/video/h264_parser.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #define NOTIFY_ERROR(x)                      \
   do {                                       \
@@ -102,7 +101,7 @@ namespace media {
 
 namespace {
 // Convert VideoFrameLayout to ImageProcessor::PortConfig.
-base::Optional<ImageProcessor::PortConfig> VideoFrameLayoutToPortConfig(
+absl::optional<ImageProcessor::PortConfig> VideoFrameLayoutToPortConfig(
     const VideoFrameLayout& layout,
     const gfx::Rect& visible_rect,
     const std::vector<VideoFrame::StorageType>& preferred_storage_types) {
@@ -111,7 +110,7 @@ base::Optional<ImageProcessor::PortConfig> VideoFrameLayoutToPortConfig(
   if (!fourcc) {
     DVLOGF(1) << "Failed to create Fourcc from video pixel format "
               << VideoPixelFormatToString(layout.format());
-    return base::nullopt;
+    return absl::nullopt;
   }
   return ImageProcessor::PortConfig(*fourcc, layout.coded_size(),
                                     layout.planes(), visible_rect,
@@ -119,10 +118,10 @@ base::Optional<ImageProcessor::PortConfig> VideoFrameLayoutToPortConfig(
 }
 
 // Create Layout from |layout| with is_multi_planar = true.
-base::Optional<VideoFrameLayout> AsMultiPlanarLayout(
+absl::optional<VideoFrameLayout> AsMultiPlanarLayout(
     const VideoFrameLayout& layout) {
   if (layout.is_multi_planar())
-    return base::make_optional<VideoFrameLayout>(layout);
+    return absl::make_optional<VideoFrameLayout>(layout);
   return VideoFrameLayout::CreateMultiPlanar(
       layout.format(), layout.coded_size(), layout.planes());
 }
@@ -341,8 +340,8 @@ void V4L2VideoEncodeAccelerator::InitializeTask(const Config& config,
 
   encoder_state_ = kInitialized;
   RequestEncodingParametersChangeTask(
-      config.initial_bitrate, config.initial_framerate.value_or(
-                                  VideoEncodeAccelerator::kDefaultFramerate));
+      config.bitrate, config.initial_framerate.value_or(
+                          VideoEncodeAccelerator::kDefaultFramerate));
 
   // input_frame_size_ is the size of input_config of |image_processor_|.
   // On native_input_mode_, since the passed size in RequireBitstreamBuffers()
@@ -545,7 +544,7 @@ void V4L2VideoEncodeAccelerator::UseOutputBitstreamBuffer(
 }
 
 void V4L2VideoEncodeAccelerator::RequestEncodingParametersChange(
-    uint32_t bitrate,
+    const Bitrate& bitrate,
     uint32_t framerate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(child_sequence_checker_);
 
@@ -1046,7 +1045,7 @@ void V4L2VideoEncodeAccelerator::Enqueue() {
       break;
     }
 
-    base::Optional<V4L2WritableBufferRef> input_buffer;
+    absl::optional<V4L2WritableBufferRef> input_buffer;
     switch (input_memory_type_) {
       case V4L2_MEMORY_DMABUF:
         input_buffer = input_queue_->GetFreeBufferForFrame(
@@ -1060,7 +1059,7 @@ void V4L2VideoEncodeAccelerator::Enqueue() {
         input_buffer = input_queue_->GetFreeBuffer();
         break;
     }
-    // input_buffer cannot be base::nullopt since we checked for
+    // input_buffer cannot be absl::nullopt since we checked for
     // input_queue_->FreeBuffersCount() > 0 before entering the loop.
     DCHECK(input_buffer);
     if (!EnqueueInputRecord(std::move(*input_buffer)))
@@ -1469,21 +1468,26 @@ void V4L2VideoEncodeAccelerator::SetErrorState(Error error) {
 }
 
 void V4L2VideoEncodeAccelerator::RequestEncodingParametersChangeTask(
-    uint32_t bitrate,
+    const Bitrate& bitrate,
     uint32_t framerate) {
-  if (current_bitrate_ == bitrate && current_framerate_ == framerate)
-    return;
-  if (bitrate == 0 || framerate == 0)
+  // If this is changed to use variable bitrate encoding, change this to check
+  // that the mode matches the current mode.
+  if (bitrate.mode() != Bitrate::Mode::kConstant)
     return;
 
-  VLOGF(2) << "bitrate=" << bitrate << ", framerate=" << framerate;
+  if (current_bitrate_ == bitrate.target() && current_framerate_ == framerate)
+    return;
+  if (bitrate.target() == 0 || framerate == 0)
+    return;
+
+  VLOGF(2) << "bitrate=" << bitrate.ToString() << ", framerate=" << framerate;
   DCHECK_CALLED_ON_VALID_SEQUENCE(encoder_sequence_checker_);
   TRACE_EVENT2("media,gpu", "V4L2VEA::RequestEncodingParametersChangeTask",
-               "bitrate", bitrate, "framerate", framerate);
-  if (current_bitrate_ != bitrate &&
+               "bitrate", bitrate.ToString(), "framerate", framerate);
+  if (current_bitrate_ != bitrate.target() &&
       !device_->SetExtCtrls(
           V4L2_CTRL_CLASS_MPEG,
-          {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_BITRATE, bitrate)})) {
+          {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_BITRATE, bitrate.target())})) {
     VLOGF(1) << "Failed changing bitrate";
     NOTIFY_ERROR(kPlatformFailureError);
     return;
@@ -1500,7 +1504,7 @@ void V4L2VideoEncodeAccelerator::RequestEncodingParametersChangeTask(
     IOCTL_OR_ERROR_RETURN(VIDIOC_S_PARM, &parms);
   }
 
-  current_bitrate_ = bitrate;
+  current_bitrate_ = bitrate.target();
   current_framerate_ = framerate;
 }
 
@@ -1516,7 +1520,7 @@ bool V4L2VideoEncodeAccelerator::SetOutputFormat(
 
   // Sets 0 to width and height in CAPTURE queue, which should be ignored by the
   // driver.
-  base::Optional<struct v4l2_format> format = output_queue_->SetFormat(
+  absl::optional<struct v4l2_format> format = output_queue_->SetFormat(
       output_format_fourcc_, gfx::Size(), output_buffer_byte_size_);
   if (!format) {
     return false;
@@ -1530,7 +1534,7 @@ bool V4L2VideoEncodeAccelerator::SetOutputFormat(
   return true;
 }
 
-base::Optional<struct v4l2_format>
+absl::optional<struct v4l2_format>
 V4L2VideoEncodeAccelerator::NegotiateInputFormat(VideoPixelFormat input_format,
                                                  const gfx::Size& size) {
   VLOGF(2);
@@ -1544,7 +1548,7 @@ V4L2VideoEncodeAccelerator::NegotiateInputFormat(VideoPixelFormat input_format,
   if (!input_fourcc) {
     DVLOGF(2) << "Invalid input format "
               << VideoPixelFormatToString(input_format);
-    return base::nullopt;
+    return absl::nullopt;
   }
   pix_fmt_candidates.push_back(input_fourcc->ToV4L2PixFmt());
   // Second try preferred input formats for both single-planar and
@@ -1557,7 +1561,7 @@ V4L2VideoEncodeAccelerator::NegotiateInputFormat(VideoPixelFormat input_format,
   for (const auto pix_fmt : pix_fmt_candidates) {
     DVLOGF(3) << "Trying S_FMT with " << FourccToString(pix_fmt);
 
-    base::Optional<struct v4l2_format> format =
+    absl::optional<struct v4l2_format> format =
         input_queue_->SetFormat(pix_fmt, size, 0);
     if (!format)
       continue;
@@ -1566,7 +1570,7 @@ V4L2VideoEncodeAccelerator::NegotiateInputFormat(VideoPixelFormat input_format,
     device_input_layout_ = V4L2Device::V4L2FormatToVideoFrameLayout(*format);
     if (!device_input_layout_) {
       VLOGF(1) << "Invalid device_input_layout_";
-      return base::nullopt;
+      return absl::nullopt;
     }
     DVLOG(3) << "Negotiated device_input_layout_: " << *device_input_layout_;
     if (!gfx::Rect(device_input_layout_->coded_size())
@@ -1574,17 +1578,17 @@ V4L2VideoEncodeAccelerator::NegotiateInputFormat(VideoPixelFormat input_format,
       VLOGF(1) << "Input size " << size.ToString()
                << " exceeds encoder capability. Size encoder can handle: "
                << device_input_layout_->coded_size().ToString();
-      return base::nullopt;
+      return absl::nullopt;
     }
     // Make sure that the crop is preserved as we have changed the input
     // resolution.
     if (!ApplyCrop()) {
-      return base::nullopt;
+      return absl::nullopt;
     }
 
     return format;
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool V4L2VideoEncodeAccelerator::ApplyCrop() {
@@ -1671,6 +1675,10 @@ bool V4L2VideoEncodeAccelerator::SetFormats(VideoPixelFormat input_format,
 bool V4L2VideoEncodeAccelerator::InitControls(const Config& config) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(encoder_sequence_checker_);
 
+  // Don't expect other output formats.
+  CHECK(output_format_fourcc_ == V4L2_PIX_FMT_H264 ||
+        output_format_fourcc_ == V4L2_PIX_FMT_VP8);
+
   // Enable frame-level bitrate control. This is the only mandatory control.
   if (!device_->SetExtCtrls(
           V4L2_CTRL_CLASS_MPEG,
@@ -1680,93 +1688,23 @@ bool V4L2VideoEncodeAccelerator::InitControls(const Config& config) {
     return false;
   }
 
-  if (output_format_fourcc_ == V4L2_PIX_FMT_H264) {
-#ifndef V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR
-#define V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR (V4L2_CID_MPEG_BASE + 644)
-#endif
-    // Request to inject SPS and PPS before each IDR, if the device supports
-    // that feature. Otherwise we'll have to cache and inject ourselves.
-    if (device_->IsCtrlExposed(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR)) {
-      if (!device_->SetExtCtrls(
-              V4L2_CTRL_CLASS_MPEG,
-              {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR, 1)})) {
-        NOTIFY_ERROR(kPlatformFailureError);
+  switch (output_format_fourcc_) {
+    case V4L2_PIX_FMT_H264:
+      if (!InitControlsH264(config)) {
         return false;
       }
-      inject_sps_and_pps_ = false;
-      DVLOGF(2) << "Device supports injecting SPS+PPS before each IDR";
-    } else {
-      inject_sps_and_pps_ = true;
-      DVLOGF(2) << "Will inject SPS+PPS before each IDR, unsupported by device";
-    }
-
-    // Optional H264 controls.
-    std::vector<V4L2ExtCtrl> h264_ctrls;
-
-    // No B-frames, for lowest decoding latency.
-    h264_ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_B_FRAMES, 0);
-    // Quantization parameter maximum value (for variable bitrate control).
-    h264_ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 51);
-
-    // Set H.264 profile.
-    int32_t profile_value =
-        V4L2Device::VideoCodecProfileToV4L2H264Profile(config.output_profile);
-    if (profile_value < 0) {
-      NOTIFY_ERROR(kInvalidArgumentError);
+      break;
+    case V4L2_PIX_FMT_VP8:
+      InitControlsVP8(config);
+      break;
+    default:
+      NOTREACHED() << "Unsupported codec "
+                   << FourccToString(output_format_fourcc_);
       return false;
-    }
-    h264_ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_PROFILE, profile_value);
-
-    // Set H.264 output level from config. Use Level 4.0 as fallback default.
-    uint8_t h264_level =
-        config.h264_output_level.value_or(H264SPS::kLevelIDC4p0);
-    constexpr size_t kH264MacroblockSizeInPixels = 16;
-    const uint32_t framerate = config.initial_framerate.value_or(
-        VideoEncodeAccelerator::kDefaultFramerate);
-    const uint32_t mb_width =
-        base::bits::Align(config.input_visible_size.width(),
-                          kH264MacroblockSizeInPixels) /
-        kH264MacroblockSizeInPixels;
-    const uint32_t mb_height =
-        base::bits::Align(config.input_visible_size.height(),
-                          kH264MacroblockSizeInPixels) /
-        kH264MacroblockSizeInPixels;
-    const uint32_t framesize_in_mbs = mb_width * mb_height;
-
-    // Check whether the h264 level is valid.
-    if (!CheckH264LevelLimits(config.output_profile, h264_level,
-                              config.initial_bitrate, framerate,
-                              framesize_in_mbs)) {
-      base::Optional<uint8_t> valid_level =
-          FindValidH264Level(config.output_profile, config.initial_bitrate,
-                             framerate, framesize_in_mbs);
-      if (!valid_level) {
-        VLOGF(1) << "Could not find a valid h264 level for"
-                 << " profile=" << config.output_profile
-                 << " bitrate=" << config.initial_bitrate
-                 << " framerate=" << framerate
-                 << " size=" << config.input_visible_size.ToString();
-        NOTIFY_ERROR(kInvalidArgumentError);
-        return false;
-      }
-
-      h264_level = *valid_level;
-    }
-
-    int32_t level_value = V4L2Device::H264LevelIdcToV4L2H264Level(h264_level);
-    h264_ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_LEVEL, level_value);
-
-    // Ask not to put SPS and PPS into separate bitstream buffers.
-    h264_ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_HEADER_MODE,
-                            V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME);
-
-    // Ignore return value as these controls are optional.
-    device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG, std::move(h264_ctrls));
   }
 
   // Optional controls:
   // - Enable macroblock-level bitrate control.
-
   device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
                        {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1)});
 
@@ -1774,6 +1712,141 @@ bool V4L2VideoEncodeAccelerator::InitControls(const Config& config) {
   device_->SetGOPLength(config.gop_length.value_or(0));
 
   return true;
+}
+
+bool V4L2VideoEncodeAccelerator::InitControlsH264(const Config& config) {
+#ifndef V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR
+#define V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR (V4L2_CID_MPEG_BASE + 644)
+#endif
+  // Request to inject SPS and PPS before each IDR, if the device supports
+  // that feature. Otherwise we'll have to cache and inject ourselves.
+  if (device_->IsCtrlExposed(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR)) {
+    if (!device_->SetExtCtrls(
+            V4L2_CTRL_CLASS_MPEG,
+            {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR, 1)})) {
+      NOTIFY_ERROR(kPlatformFailureError);
+      return false;
+    }
+    inject_sps_and_pps_ = false;
+    DVLOGF(2) << "Device supports injecting SPS+PPS before each IDR";
+  } else {
+    inject_sps_and_pps_ = true;
+    DVLOGF(2) << "Will inject SPS+PPS before each IDR, unsupported by device";
+  }
+
+  // No B-frames, for lowest decoding latency.
+  device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                       {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_B_FRAMES, 0)});
+
+  // Set H.264 profile.
+  int32_t profile_value =
+      V4L2Device::VideoCodecProfileToV4L2H264Profile(config.output_profile);
+  if (profile_value < 0) {
+    NOTIFY_ERROR(kInvalidArgumentError);
+    return false;
+  }
+  if (!device_->SetExtCtrls(
+          V4L2_CTRL_CLASS_MPEG,
+          {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_PROFILE, profile_value)})) {
+    VLOGF(1) << "Unsupported profile: "
+             << GetProfileName(config.output_profile);
+    NOTIFY_ERROR(kInvalidArgumentError);
+    return false;
+  }
+
+  // Set H.264 output level from config. Use Level 4.0 as fallback default.
+  uint8_t h264_level = config.h264_output_level.value_or(H264SPS::kLevelIDC4p0);
+  constexpr size_t kH264MacroblockSizeInPixels = 16;
+  const uint32_t framerate = config.initial_framerate.value_or(
+      VideoEncodeAccelerator::kDefaultFramerate);
+  const uint32_t mb_width =
+      base::bits::AlignUp(config.input_visible_size.width(),
+                          kH264MacroblockSizeInPixels) /
+      kH264MacroblockSizeInPixels;
+  const uint32_t mb_height =
+      base::bits::AlignUp(config.input_visible_size.height(),
+                          kH264MacroblockSizeInPixels) /
+      kH264MacroblockSizeInPixels;
+  const uint32_t framesize_in_mbs = mb_width * mb_height;
+
+  // Check whether the h264 level is valid.
+  if (!CheckH264LevelLimits(config.output_profile, h264_level,
+                            config.bitrate.target(), framerate,
+                            framesize_in_mbs)) {
+    absl::optional<uint8_t> valid_level =
+        FindValidH264Level(config.output_profile, config.bitrate.target(),
+                           framerate, framesize_in_mbs);
+    if (!valid_level) {
+      VLOGF(1) << "Could not find a valid h264 level for"
+               << " profile=" << config.output_profile
+               << " bitrate=" << config.bitrate.target()
+               << " framerate=" << framerate
+               << " size=" << config.input_visible_size.ToString();
+      NOTIFY_ERROR(kInvalidArgumentError);
+      return false;
+    }
+
+    h264_level = *valid_level;
+  }
+
+  int32_t level_value = V4L2Device::H264LevelIdcToV4L2H264Level(h264_level);
+  device_->SetExtCtrls(
+      V4L2_CTRL_CLASS_MPEG,
+      {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_LEVEL, level_value)});
+
+  // Ask not to put SPS and PPS into separate bitstream buffers.
+  device_->SetExtCtrls(
+      V4L2_CTRL_CLASS_MPEG,
+      {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_HEADER_MODE,
+                   V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME)});
+
+  // H264 coding tools parameter. Since a driver may not support some of them,
+  // EXT_S_CTRLS is called to each of them to enable as many coding tools as
+  // possible.
+  // Don't produce Intra-only frame.
+  device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                       {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_I_PERIOD, 0)});
+  // Enable deblocking filter.
+  device_->SetExtCtrls(
+      V4L2_CTRL_CLASS_MPEG,
+      {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_MODE,
+                   V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED)});
+  // Use CABAC in Main and High profiles.
+  if (config.output_profile == H264PROFILE_MAIN ||
+      config.output_profile == H264PROFILE_HIGH) {
+    device_->SetExtCtrls(
+        V4L2_CTRL_CLASS_MPEG,
+        {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE,
+                     V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC)});
+  }
+  // Use 8x8 transform in High profile.
+  if (config.output_profile == H264PROFILE_HIGH) {
+    device_->SetExtCtrls(
+        V4L2_CTRL_CLASS_MPEG,
+        {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM, true)});
+  }
+
+  // Quantization parameter. The h264 qp range is 0-51.
+  // Note: Webrtc default values are 24 and 37 respectively, see
+  // h264_encoder_impl.cc.
+  // These values were copied from the VA-API encoder.
+  // Ignore return values as these controls are optional.
+  device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                       {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 42)});
+  // Don't set MIN_QP with other controls since it is not supported by
+  // some devices and may prevent other controls from being set.
+  device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                       {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_MIN_QP, 24)});
+  return true;
+}
+
+void V4L2VideoEncodeAccelerator::InitControlsVP8(const Config& config) {
+  // Quantization parameter. They are vp8 ac/dc indices and their ranges are
+  // 0-127. These values were copied from the VA-API encoder.
+  // Ignore return values as these controls are optional.
+  device_->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                       {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_VPX_MIN_QP, 4),
+                        V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_VPX_MAX_QP, 117)});
 }
 
 bool V4L2VideoEncodeAccelerator::CreateInputBuffers() {

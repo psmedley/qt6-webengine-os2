@@ -62,6 +62,10 @@ class FFmpegGlue;
 
 typedef std::unique_ptr<AVPacket, ScopedPtrAVFreePacket> ScopedAVPacket;
 
+// Use av_packet_alloc() to create a packet, which is scoped to delete with
+// av_packet_free at the end of it's lifetime.
+MEDIA_EXPORT ScopedAVPacket MakeScopedAVPacket();
+
 class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
  public:
   // Attempts to create FFmpegDemuxerStream form the given AVStream. Will return
@@ -229,7 +233,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   std::vector<DemuxerStream*> GetAllStreams() override;
   base::TimeDelta GetStartTime() const override;
   int64_t GetMemoryUsage() const override;
-  base::Optional<container_names::MediaContainerName> GetContainerForMetrics()
+  absl::optional<container_names::MediaContainerName> GetContainerForMetrics()
       const override;
 
   // Calls |encrypted_media_init_data_cb_| with the initialization data

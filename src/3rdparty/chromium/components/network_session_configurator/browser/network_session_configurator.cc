@@ -25,6 +25,7 @@
 #include "components/variations/variations_associated_data.h"
 #include "components/variations/variations_switches.h"
 #include "net/base/host_mapping_rules.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_stream_factory.h"
 #include "net/quic/platform/impl/quic_flags_impl.h"
 #include "net/quic/quic_context.h"
@@ -98,17 +99,6 @@ spdy::SettingsMap GetHttp2Settings(
   return http2_settings;
 }
 
-bool ConfigureWebsocketOverHttp2(
-    const base::CommandLine& command_line,
-    const VariationParameters& http2_trial_params) {
-  if (command_line.HasSwitch(switches::kEnableWebsocketOverHttp2))
-    return true;
-
-  const std::string websocket_value =
-      GetVariationParam(http2_trial_params, "websocket_over_http2");
-  return websocket_value == "true";
-}
-
 int ConfigureSpdySessionMaxQueuedCappedFrames(
     const base::CommandLine& /*command_line*/,
     const VariationParameters& http2_trial_params) {
@@ -125,7 +115,7 @@ int ConfigureSpdySessionMaxQueuedCappedFrames(
 void ConfigureHttp2Params(const base::CommandLine& command_line,
                           base::StringPiece http2_trial_group,
                           const VariationParameters& http2_trial_params,
-                          net::HttpNetworkSession::Params* params) {
+                          net::HttpNetworkSessionParams* params) {
   if (GetVariationParam(http2_trial_params, "http2_enabled") == "false") {
     params->enable_http2 = false;
     return;
@@ -161,7 +151,7 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
         (length > 0) ? base::RandBytesAsString(length) : std::string();
 
     params->greased_http2_frame =
-        base::Optional<net::SpdySessionPool::GreasedHttp2Frame>(
+        absl::optional<net::SpdySessionPool::GreasedHttp2Frame>(
             {type, flags, payload});
   }
 
@@ -170,9 +160,6 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
                         "http2_end_stream_with_data_frame") == "true") {
     params->http2_end_stream_with_data_frame = true;
   }
-
-  params->enable_websocket_over_http2 =
-      ConfigureWebsocketOverHttp2(command_line, http2_trial_params);
 
   params->spdy_session_max_queued_capped_frames =
       ConfigureSpdySessionMaxQueuedCappedFrames(command_line,
@@ -535,7 +522,7 @@ void ConfigureQuicParams(const base::CommandLine& command_line,
                          const VariationParameters& quic_trial_params,
                          bool is_quic_force_disabled,
                          const std::string& quic_user_agent_id,
-                         net::HttpNetworkSession::Params* params,
+                         net::HttpNetworkSessionParams* params,
                          net::QuicParams* quic_params) {
   if (ShouldDisableQuic(quic_trial_group, quic_trial_params,
                         is_quic_force_disabled)) {
@@ -682,7 +669,7 @@ namespace network_session_configurator {
 void ParseCommandLineAndFieldTrials(const base::CommandLine& command_line,
                                     bool is_quic_force_disabled,
                                     const std::string& quic_user_agent_id,
-                                    net::HttpNetworkSession::Params* params,
+                                    net::HttpNetworkSessionParams* params,
                                     net::QuicParams* quic_params) {
   is_quic_force_disabled |= command_line.HasSwitch(switches::kDisableQuic);
 

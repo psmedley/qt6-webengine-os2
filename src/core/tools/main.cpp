@@ -48,13 +48,16 @@ inline base::FilePath toFilePath(const QString &str)
     return base::FilePath(toFilePathString(str));
 }
 
-inline QString toQt(const base::string16 &string)
+#if defined(Q_OS_WIN)
+inline QString toQt(const std::wstring &string)
 {
-#if defined(OS_WIN)
     return QString::fromStdWString(string);
-#else
-    return QString::fromUtf16(reinterpret_cast<const char16_t *>(string.data()), string.size());
+}
 #endif
+
+inline QString toQt(const std::u16string &string)
+{
+    return QString::fromStdU16String(string);
 }
 
 inline QString toQt(const std::string &string)

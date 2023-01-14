@@ -41,7 +41,7 @@ HEADER_TEMPLATE = """// GENERATED FILE - DO NOT EDIT.
 #ifndef COMMON_SPIRV_{file_name_capitalized}AUTOGEN_H_
 #define COMMON_SPIRV_{file_name_capitalized}AUTOGEN_H_
 
-#include <vector>
+#include <spirv/unified1/spirv.hpp>
 
 #include "spirv_types.h"
 
@@ -92,7 +92,34 @@ uint32_t MakeLengthOp(size_t length, spv::Op op)
 
     return static_cast<uint32_t>(length) << 16 | op;
 }
-}  // anonymous namespace"""
+}  // anonymous namespace
+
+void WriteSpirvHeader(std::vector<uint32_t> *blob, uint32_t idCount)
+{
+    // Header:
+    //
+    //  - Magic number
+    //  - Version (1.0)
+    //  - ANGLE's Generator number:
+    //     * 24 for tool id (higher 16 bits)
+    //     * 0 for tool version (lower 16 bits))
+    //  - Bound (idCount)
+    //  - 0 (reserved)
+    constexpr uint32_t kANGLEGeneratorId = 24;
+
+    ASSERT(blob->empty());
+
+    blob->push_back(spv::MagicNumber);
+    blob->push_back(0x00010000);
+    blob->push_back(kANGLEGeneratorId << 16 | 0);
+    blob->push_back(idCount);
+    blob->push_back(0x00000000);
+}
+"""
+
+BUILDER_HELPER_FUNCTION_PROTOTYPE = """
+    void WriteSpirvHeader(std::vector<uint32_t> *blob, uint32_t idCount);
+"""
 
 PARSER_FIXED_FUNCTIONS_PROTOTYPES = """void GetInstructionOpAndLength(const uint32_t *_instruction,
     spv::Op *opOut, uint32_t *lengthOut);
@@ -107,7 +134,7 @@ PARSER_FIXED_FUNCTIONS = """void GetInstructionOpAndLength(const uint32_t *_inst
 }
 """
 
-TEMPLATE_BUILDER_FUNCTION_PROTOTYPE = """void Write{op}(std::vector<uint32_t> *blob {param_list})"""
+TEMPLATE_BUILDER_FUNCTION_PROTOTYPE = """void Write{op}(Blob *blob {param_list})"""
 TEMPLATE_BUILDER_FUNCTION_BODY = """{{
     const size_t startSize = blob->size();
     blob->push_back(0);
@@ -152,14 +179,14 @@ class Writer:
         # If an instruction has a parameter of these types, the instruction is ignored
         self.unsupported_kinds = set(['LiteralSpecConstantOpInteger'])
         # If an instruction requires a capability of these kinds, the instruction is ignored
-        self.unsupported_capabilities = set(['Kernel'])
+        self.unsupported_capabilities = set(['Kernel', 'Addresses'])
         # If an instruction requires an extension other than these, the instruction is ignored
         self.supported_extensions = set([])
         # List of bit masks.  These have 'Mask' added to their typename in SPIR-V headers.
         self.bit_mask_types = set([])
 
         # List of generated instructions builder/parser functions so far.
-        self.instruction_builder_prototypes = []
+        self.instruction_builder_prototypes = [BUILDER_HELPER_FUNCTION_PROTOTYPE]
         self.instruction_builder_impl = []
         self.instruction_parser_prototypes = [PARSER_FIXED_FUNCTIONS_PROTOTYPES]
         self.instruction_parser_impl = [PARSER_FIXED_FUNCTIONS]
@@ -218,7 +245,9 @@ class Writer:
 
     def requires_unsupported_capability(self, item):
         depends = item.get('capabilities', [])
-        return any([dep in self.unsupported_capabilities for dep in depends])
+        if len(depends) == 0:
+            return False
+        return all([dep in self.unsupported_capabilities for dep in depends])
 
     def requires_unsupported_extension(self, item):
         extensions = item.get('extensions', [])
@@ -262,16 +291,21 @@ class Writer:
 
         # First, a number of special-cases for optional lists
         if quantifier == '*':
+            suffix = 'List'
+
             # For IdRefs, change 'Xyz 1', +\n'Xyz 2', +\n...' to xyzList
             if kind == 'IdRef':
                 if name.find(' ') != -1:
                     name = name[0:name.find(' ')]
-                return make_camel_case(name) + 'List'
 
-            # Otherwise, it's a pair in the form of 'Xyz, Abc, ...', which is changed to
-            # xyzAbcPairList
+            # Otherwise, if it's a pair in the form of 'Xyz, Abc, ...', change it to xyzAbcPairList
+            elif kind.startswith('Pair'):
+                suffix = 'PairList'
+
+            # Otherwise, it's just a list, so change `xyz abc` to `xyzAbcList
+
             name = remove_chars(name, " ,.")
-            return make_camel_case(name) + 'PairList'
+            return make_camel_case(name) + suffix
 
         # Otherwise, remove invalid characters and make the first letter lower case.
         name = remove_chars(name, " .,+\n~")
@@ -468,6 +502,19 @@ class Writer:
                     'quantifier': '*'
                 }
                 self.process_operand(decoration_operands, cpp_operands_in, cpp_operands_out,
+                                     cpp_in_parse_lines, cpp_out_push_back_lines)
+
+            elif operand['kind'] == 'ExecutionMode':
+                # Special handling of OpExecutionMode instruction with an ExecutionMode operand.
+                # That operand always comes last, and implies a number of LiteralIntegers to follow.
+                assert (len(cpp_in_parse_lines) == len(operands))
+
+                execution_mode_operands = {
+                    'name': 'operands',
+                    'kind': 'LiteralInteger',
+                    'quantifier': '*'
+                }
+                self.process_operand(execution_mode_operands, cpp_operands_in, cpp_operands_out,
                                      cpp_in_parse_lines, cpp_out_push_back_lines)
 
             elif operand['kind'] == 'ImageOperands':

@@ -5,7 +5,6 @@
 #include "components/arc/storage_manager/arc_storage_manager.h"
 
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/memory/singleton.h"
@@ -40,6 +39,12 @@ class ArcStorageManagerFactory
 ArcStorageManager* ArcStorageManager::GetForBrowserContext(
     content::BrowserContext* context) {
   return ArcStorageManagerFactory::GetForBrowserContext(context);
+}
+
+// static
+ArcStorageManager* ArcStorageManager::GetForBrowserContextForTesting(
+    content::BrowserContext* context) {
+  return ArcStorageManagerFactory::GetForBrowserContextForTesting(context);
 }
 
 ArcStorageManager::ArcStorageManager(content::BrowserContext* context,

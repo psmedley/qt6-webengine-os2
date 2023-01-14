@@ -12,7 +12,7 @@ namespace autofill {
 TestPersonalDataManager::TestPersonalDataManager()
     : PersonalDataManager("en-US", "US") {}
 
-TestPersonalDataManager::~TestPersonalDataManager() {}
+TestPersonalDataManager::~TestPersonalDataManager() = default;
 
 void TestPersonalDataManager::OnSyncServiceInitialized(
     syncer::SyncService* sync_service) {
@@ -269,7 +269,7 @@ void TestPersonalDataManager::ClearAllLocalData() {
 CreditCard* TestPersonalDataManager::GetCreditCardByNumber(
     const std::string& number) {
   CreditCard numbered_card;
-  numbered_card.SetNumber(base::ASCIIToUTF16(number));
+  numbered_card.SetNumber(base::UTF8ToUTF16(number));
   for (CreditCard* credit_card : GetCreditCards()) {
     DCHECK(credit_card);
     if (credit_card->HasSameNumberAs(numbered_card))
@@ -289,6 +289,16 @@ bool TestPersonalDataManager::IsSyncFeatureEnabled() const {
 CoreAccountInfo TestPersonalDataManager::GetAccountInfoForPaymentsServer()
     const {
   return account_info_;
+}
+
+const AutofillProfileSaveStrikeDatabase*
+TestPersonalDataManager::GetProfileSaveStrikeDatabase() const {
+  return &inmemory_profile_save_strike_database_;
+}
+
+const AutofillProfileUpdateStrikeDatabase*
+TestPersonalDataManager::GetProfileUpdateStrikeDatabase() const {
+  return &inmemory_profile_update_strike_database_;
 }
 
 void TestPersonalDataManager::ClearProfiles() {
@@ -340,7 +350,7 @@ void TestPersonalDataManager::AddCloudTokenData(
   NotifyPersonalDataObserver();
 }
 
-void TestPersonalDataManager::AddCreditCardOfferData(
+void TestPersonalDataManager::AddAutofillOfferData(
     const AutofillOfferData& offer_data) {
   std::unique_ptr<AutofillOfferData> data =
       std::make_unique<AutofillOfferData>(offer_data);

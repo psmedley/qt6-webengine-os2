@@ -44,14 +44,12 @@ using ::testing::StrictMock;
 
 enum class NetworkIsolationKeyMode {
   kDisabled,
-  kTopFrameOriginOnly,
-  kTopFrameOriginAndFrameOrigin,
+  kEnabled,
 };
 
 const NetworkIsolationKeyMode kNetworkIsolationKeyModes[] = {
     NetworkIsolationKeyMode::kDisabled,
-    NetworkIsolationKeyMode::kTopFrameOriginOnly,
-    NetworkIsolationKeyMode::kTopFrameOriginAndFrameOrigin,
+    NetworkIsolationKeyMode::kEnabled,
 };
 
 std::unique_ptr<base::test::ScopedFeatureList> SetNetworkIsolationKeyMode(
@@ -62,20 +60,9 @@ std::unique_ptr<base::test::ScopedFeatureList> SetNetworkIsolationKeyMode(
       feature_list->InitAndDisableFeature(
           features::kPartitionHttpServerPropertiesByNetworkIsolationKey);
       break;
-    case NetworkIsolationKeyMode::kTopFrameOriginOnly:
-      feature_list->InitWithFeatures(
-          // enabled_features
-          {features::kPartitionHttpServerPropertiesByNetworkIsolationKey},
-          // disabled_features
-          {features::kAppendFrameOriginToNetworkIsolationKey});
-      break;
-    case NetworkIsolationKeyMode::kTopFrameOriginAndFrameOrigin:
-      feature_list->InitWithFeatures(
-          // enabled_features
-          {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-           features::kAppendFrameOriginToNetworkIsolationKey},
-          // disabled_features
-          {});
+    case NetworkIsolationKeyMode::kEnabled:
+      feature_list->InitAndEnableFeature(
+          features::kPartitionHttpServerPropertiesByNetworkIsolationKey);
       break;
   }
   return feature_list;
@@ -1528,8 +1515,8 @@ TEST_F(HttpServerPropertiesManagerTest, PersistAdvertisedVersionsToPref) {
       "\"isolation\":[],"
       "\"server\":\"https://www.google.com:80\"},"
       "{\"alternative_service\":[{"
-      "\"advertised_alpns\":[\"h3-Q050\",\"h3-29\"],\"expiration\":"
-      "\"9223372036854775807\","
+      "\"advertised_alpns\":[\"h3\",\"h3-29\",\"h3-Q050\"],"
+      "\"expiration\":\"9223372036854775807\","
       "\"host\":\"foo.google.com\",\"port\":444,\"protocol_str\":\"quic\"}],"
       "\"isolation\":[],"
       "\"network_stats\":{\"srtt\":42},"
@@ -1640,7 +1627,8 @@ TEST_F(HttpServerPropertiesManagerTest,
       "\"server_id\":\"https://mail.google.com:80\","
       "\"server_info\":\"quic_server_info1\"}],"
       "\"servers\":["
-      "{\"alternative_service\":[{\"advertised_alpns\":[\"h3-Q050\",\"h3-29\"],"
+      "{\"alternative_service\":[{"
+      "\"advertised_alpns\":[\"h3\",\"h3-29\",\"h3-Q050\"],"
       "\"expiration\":\"13756212000000000\",\"port\":443,"
       "\"protocol_str\":\"quic\"}],"
       "\"isolation\":[],"

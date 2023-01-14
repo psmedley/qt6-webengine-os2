@@ -31,37 +31,27 @@ void FormFieldTestBase::AddFormFieldDataWithLength(
   field_data.unique_renderer_id = MakeFieldRendererId();
   list_.push_back(std::make_unique<AutofillField>(field_data));
   expected_classifications_.insert(
-      std::make_pair(field_data.unique_renderer_id, expected_type));
+      std::make_pair(field_data.global_id(), expected_type));
 }
 
 void FormFieldTestBase::AddSelectOneFormFieldData(
     std::string name,
     std::string label,
-    const std::vector<std::string>& options_contents,
-    const std::vector<std::string>& options_values,
+    const std::vector<SelectOption>& options,
     ServerFieldType expected_type) {
-  AddSelectOneFormFieldDataWithLength(name, label, 0, options_contents,
-                                      options_values, expected_type);
+  AddSelectOneFormFieldDataWithLength(name, label, 0, options, expected_type);
 }
 
 void FormFieldTestBase::AddSelectOneFormFieldDataWithLength(
     std::string name,
     std::string label,
     int max_length,
-    const std::vector<std::string>& options_contents,
-    const std::vector<std::string>& options_values,
+    const std::vector<SelectOption>& options,
     ServerFieldType expected_type) {
   AddFormFieldData("select-one", name, label, expected_type);
   FormFieldData* field_data = list_.back().get();
   field_data->max_length = max_length;
-
-  for (auto option_content : options_contents) {
-    field_data->option_contents.push_back(base::UTF8ToUTF16(option_content));
-  }
-
-  for (auto option_value : options_values) {
-    field_data->option_values.push_back(base::UTF8ToUTF16(option_value));
-  }
+  field_data->options = options;
 }
 
 // Convenience wrapper for text control elements.
@@ -92,29 +82,29 @@ void FormFieldTestBase::ClassifyAndVerify(ParseResult parse_result,
 }
 
 void FormFieldTestBase::TestClassificationExpectations() {
-  for (const std::pair<FieldRendererId, ServerFieldType> it :
+  for (const std::pair<FieldGlobalId, ServerFieldType> p :
        expected_classifications_) {
-    if (it.second != UNKNOWN_TYPE) {
+    if (p.second != UNKNOWN_TYPE) {
       SCOPED_TRACE(testing::Message()
                    << "Found type "
                    << AutofillType::ServerFieldTypeToString(
-                          field_candidates_map_[it.first].BestHeuristicType())
+                          field_candidates_map_[p.first].BestHeuristicType())
                    << ", expected type "
-                   << AutofillType::ServerFieldTypeToString(it.second));
+                   << AutofillType::ServerFieldTypeToString(p.second));
 
-      ASSERT_TRUE(field_candidates_map_.find(it.first) !=
+      ASSERT_TRUE(field_candidates_map_.find(p.first) !=
                   field_candidates_map_.end());
-      EXPECT_EQ(it.second, field_candidates_map_[it.first].BestHeuristicType());
+      EXPECT_EQ(p.second, field_candidates_map_[p.first].BestHeuristicType());
     } else {
       SCOPED_TRACE(
           testing::Message()
           << "Expected type UNKNOWN_TYPE but got "
           << AutofillType::ServerFieldTypeToString(
-                 field_candidates_map_.find(it.first) !=
+                 field_candidates_map_.find(p.first) !=
                          field_candidates_map_.end()
-                     ? field_candidates_map_[it.first].BestHeuristicType()
+                     ? field_candidates_map_[p.first].BestHeuristicType()
                      : UNKNOWN_TYPE));
-      EXPECT_EQ(field_candidates_map_.find(it.first),
+      EXPECT_EQ(field_candidates_map_.find(p.first),
                 field_candidates_map_.end());
     }
   }

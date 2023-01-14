@@ -8,6 +8,7 @@
 #include "cc/layers/texture_layer.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
+#include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/resources/shared_bitmap.h"
 #include "components/viz/common/resources/transferable_resource.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -38,7 +39,7 @@ scoped_refptr<StaticBitmapImage> MakeAccelerated(
 
   auto paint_image = source->PaintImageForCurrentFrame();
   auto provider = CanvasResourceProvider::CreateSharedImageProvider(
-      source->Size(), kLow_SkFilterQuality,
+      source->Size(), cc::PaintFlags::FilterQuality::kLow,
       CanvasResourceParams(paint_image.GetSkImageInfo()),
       CanvasResourceProvider::ShouldInitialize::kNo, context_provider_wrapper,
       RasterMode::kGPU, source->IsOriginTopLeft(),
@@ -59,7 +60,8 @@ ImageLayerBridge::ImageLayerBridge(OpacityMode opacity_mode)
   layer_ = cc::TextureLayer::CreateForMailbox(this);
   layer_->SetIsDrawable(true);
   layer_->SetHitTestable(true);
-  layer_->SetNearestNeighbor(filter_quality_ == kNone_SkFilterQuality);
+  layer_->SetNearestNeighbor(filter_quality_ ==
+                             cc::PaintFlags::FilterQuality::kNone);
   if (opacity_mode_ == kOpaque) {
     layer_->SetContentsOpaque(true);
     layer_->SetBlendBackgroundColor(false);
@@ -123,7 +125,7 @@ void ImageLayerBridge::Dispose() {
 bool ImageLayerBridge::PrepareTransferableResource(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
+    viz::ReleaseCallback* out_release_callback) {
   if (disposed_)
     return false;
 
@@ -154,9 +156,19 @@ bool ImageLayerBridge::PrepareTransferableResource(
 
     const gfx::Size size(image_for_compositor->width(),
                          image_for_compositor->height());
-    uint32_t filter =
-        filter_quality_ == kNone_SkFilterQuality ? GL_NEAREST : GL_LINEAR;
+    uint32_t filter = filter_quality_ == cc::PaintFlags::FilterQuality::kNone
+                          ? GL_NEAREST
+                          : GL_LINEAR;
     auto mailbox_holder = image_for_compositor->GetMailboxHolder();
+
+    if (mailbox_holder.mailbox.IsZero()) {
+      // This can happen, for example, if an ImageBitmap is produced from a
+      // WebGL-rendered OffscreenCanvas and then the WebGL context is forcibly
+      // lost. This seems to be the only reliable point where this can be
+      // detected.
+      return false;
+    }
+
     auto* sii = image_for_compositor->ContextProvider()->SharedImageInterface();
     bool is_overlay_candidate = sii->UsageForMailbox(mailbox_holder.mailbox) &
                                 gpu::SHARED_IMAGE_USAGE_SCANOUT;
@@ -164,10 +176,27 @@ bool ImageLayerBridge::PrepareTransferableResource(
     *out_resource = viz::TransferableResource::MakeGL(
         mailbox_holder.mailbox, filter, mailbox_holder.texture_target,
         mailbox_holder.sync_token, size, is_overlay_candidate);
+
+    // If the transferred ImageBitmap contained in this ImageLayerBridge was
+    // originated in a WebGPU context, we need to set the layer to be flipped
+    // and check if the underlying resource is RGB or BGR. Canvas2D and WebGL
+    // contexts handle this aspect internally, whereas WebGPU does not.
+
+    if (sii->UsageForMailbox(mailbox_holder.mailbox) &
+        gpu::SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE) {
+      layer_->SetFlipped(false);
+      // TODO (crbug/1200808): We are doing this matching of the color format
+      // only for WebGPU, ideally we'd like to do this for Canvas2d and WebGL as
+      // well, but they have their own logic handling this.
+      SkColorType color_type =
+          image_->PaintImageForCurrentFrame().GetSkImageInfo().colorType();
+      out_resource->format = viz::SkColorTypeToResourceFormat(color_type);
+    }
+
     auto func =
         WTF::Bind(&ImageLayerBridge::ResourceReleasedGpu,
                   WrapWeakPersistent(this), std::move(image_for_compositor));
-    *out_release_callback = viz::SingleReleaseCallback::Create(std::move(func));
+    *out_release_callback = std::move(func);
   } else {
     // Readback if needed and retain the readback in image_ to prevent future
     // readbacks
@@ -198,14 +227,12 @@ bool ImageLayerBridge::PrepareTransferableResource(
 
     *out_resource = viz::TransferableResource::MakeSoftware(
         registered.bitmap->id(), size, resource_format);
-    if (RuntimeEnabledFeatures::CanvasColorManagementEnabled()) {
-      out_resource->color_space = sk_image->colorSpace()
-                                      ? gfx::ColorSpace(*sk_image->colorSpace())
-                                      : gfx::ColorSpace::CreateSRGB();
-    }
+    out_resource->color_space = sk_image->colorSpace()
+                                    ? gfx::ColorSpace(*sk_image->colorSpace())
+                                    : gfx::ColorSpace::CreateSRGB();
     auto func = WTF::Bind(&ImageLayerBridge::ResourceReleasedSoftware,
                           WrapWeakPersistent(this), std::move(registered));
-    *out_release_callback = viz::SingleReleaseCallback::Create(std::move(func));
+    *out_release_callback = std::move(func);
   }
 
   return true;
@@ -224,7 +251,8 @@ ImageLayerBridge::RegisteredBitmap ImageLayerBridge::CreateOrRecycleBitmap(
         return (registered.bitmap->size().GetArea() * src_bytes_per_pixel !=
                 size.GetArea() * target_bytes_per_pixel);
       });
-  recycled_bitmaps_.Shrink(it - recycled_bitmaps_.begin());
+  recycled_bitmaps_.Shrink(
+      static_cast<wtf_size_t>(it - recycled_bitmaps_.begin()));
 
   if (!recycled_bitmaps_.IsEmpty()) {
     RegisteredBitmap registered = std::move(recycled_bitmaps_.back());

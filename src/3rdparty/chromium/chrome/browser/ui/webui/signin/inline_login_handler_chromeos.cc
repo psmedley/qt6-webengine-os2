@@ -7,18 +7,18 @@
 #include <memory>
 #include <string>
 
-#include "ash/components/account_manager/account_manager_ash.h"
 #include "ash/components/account_manager/account_manager_factory.h"
 #include "ash/constants/ash_pref_names.h"
 #include "base/base64.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
+#include "chrome/browser/account_manager_facade_factory.h"
+#include "chrome/browser/ash/child_accounts/secondary_account_consent_logger.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/child_accounts/secondary_account_consent_logger.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_device_id_helper.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -30,6 +30,9 @@
 #include "chrome/browser/ui/webui/signin/signin_helper_chromeos.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/util/version_loader.h"
+#include "components/account_manager_core/account.h"
+#include "components/account_manager_core/account_manager_facade.h"
+#include "components/account_manager_core/chromeos/account_manager_mojo_service.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/account_info.h"
@@ -42,7 +45,7 @@
 namespace chromeos {
 namespace {
 
-using ::ash::AccountManager;
+using ::account_manager::AccountManager;
 
 constexpr char kCrosAddAccountFlow[] = "crosAddAccount";
 constexpr char kCrosAddAccountEduFlow[] = "crosAddAccountEdu";
@@ -71,7 +74,7 @@ std::string GetInlineLoginFlowName(Profile* profile, const std::string* email) {
 
   std::string primary_account_email =
       IdentityManagerFactory::GetForProfile(profile)
-          ->GetPrimaryAccountInfo(signin::ConsentLevel::kNotRequired)
+          ->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
           .email;
   // If provided email is for primary account - it's a reauthentication, use
   // normal add account flow.
@@ -89,8 +92,8 @@ std::string GetInlineLoginFlowName(Profile* profile, const std::string* email) {
 class ChildSigninHelper : public SigninHelper {
  public:
   ChildSigninHelper(
-      ash::AccountManager* account_manager,
-      crosapi::AccountManagerAsh* account_manager_ash,
+      account_manager::AccountManager* account_manager,
+      crosapi::AccountManagerMojoService* account_manager_mojo_service,
       const base::RepeatingClosure& close_dialog_closure,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const std::string& gaia_id,
@@ -102,7 +105,7 @@ class ChildSigninHelper : public SigninHelper {
       const std::string& parent_obfuscated_gaia_id,
       const std::string& re_auth_proof_token)
       : SigninHelper(account_manager,
-                     account_manager_ash,
+                     account_manager_mojo_service,
                      close_dialog_closure,
                      url_loader_factory,
                      gaia_id,
@@ -136,7 +139,6 @@ class ChildSigninHelper : public SigninHelper {
 
   void OnConsentLogged(const std::string& refresh_token,
                        SecondaryAccountConsentLogger::Result result) {
-    UMA_HISTOGRAM_ENUMERATION("Signin.SecondaryAccountConsentLog", result);
     secondary_account_consent_logger_.reset();
     if (result == SecondaryAccountConsentLogger::Result::kSuccess) {
       // The EDU account has been added/re-authenticated. Mark migration to
@@ -169,8 +171,8 @@ class ChildSigninHelper : public SigninHelper {
 class EduCoexistenceChildSigninHelper : public SigninHelper {
  public:
   EduCoexistenceChildSigninHelper(
-      ash::AccountManager* account_manager,
-      crosapi::AccountManagerAsh* account_manager_ash,
+      account_manager::AccountManager* account_manager,
+      crosapi::AccountManagerMojoService* account_manager_mojo_service,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const std::string& gaia_id,
       const std::string& email,
@@ -179,7 +181,7 @@ class EduCoexistenceChildSigninHelper : public SigninHelper {
       PrefService* pref_service,
       const content::WebUI* web_ui)
       : SigninHelper(account_manager,
-                     account_manager_ash,
+                     account_manager_mojo_service,
                      // EduCoexistenceChildSigninHelper will not be closing the
                      // dialog. Therefore, passing a void callback.
                      base::DoNothing(),
@@ -325,16 +327,15 @@ void InlineLoginHandlerChromeOS::CompleteLogin(const std::string& email,
                               ->GetAccountManagerFactory()
                               ->GetAccountManager(profile->GetPath().value());
 
-  crosapi::AccountManagerAsh* account_manager_ash =
+  crosapi::AccountManagerMojoService* account_manager_mojo_service =
       g_browser_process->platform_part()
           ->GetAccountManagerFactory()
-          ->GetAccountManagerAsh(profile->GetPath().value());
+          ->GetAccountManagerMojoService(profile->GetPath().value());
 
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   std::string primary_account_email =
-      identity_manager
-          ->GetPrimaryAccountInfo(signin::ConsentLevel::kNotRequired)
+      identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
           .email;
 
   // Child user added a secondary account.
@@ -348,20 +349,18 @@ void InlineLoginHandlerChromeOS::CompleteLogin(const std::string& email,
       const std::string* parentId =
           edu_login_params.FindStringKey("parentObfuscatedGaiaId");
       CHECK(parentId);
-      InlineLoginDialogChromeOS::UpdateEduCoexistenceFlowResult(
-          InlineLoginDialogChromeOS::EduCoexistenceFlowResult::kFlowCompleted);
 
       // ChildSigninHelper deletes itself after its work is done.
       new ChildSigninHelper(
-          account_manager, account_manager_ash, close_dialog_closure_,
+          account_manager, account_manager_mojo_service, close_dialog_closure_,
           profile->GetURLLoaderFactory(), gaia_id, email, auth_code,
           GetAccountDeviceId(GetSigninScopedDeviceIdForProfile(profile),
                              gaia_id),
           identity_manager, profile->GetPrefs(), *parentId, *rapt);
     } else {
       new EduCoexistenceChildSigninHelper(
-          account_manager, account_manager_ash, profile->GetURLLoaderFactory(),
-          gaia_id, email, auth_code,
+          account_manager, account_manager_mojo_service,
+          profile->GetURLLoaderFactory(), gaia_id, email, auth_code,
           GetAccountDeviceId(GetSigninScopedDeviceIdForProfile(profile),
                              gaia_id),
           profile->GetPrefs(), web_ui());
@@ -372,7 +371,7 @@ void InlineLoginHandlerChromeOS::CompleteLogin(const std::string& email,
 
   // SigninHelper deletes itself after its work is done.
   new SigninHelper(
-      account_manager, account_manager_ash, close_dialog_closure_,
+      account_manager, account_manager_mojo_service, close_dialog_closure_,
       profile->GetURLLoaderFactory(), gaia_id, email, auth_code,
       GetAccountDeviceId(GetSigninScopedDeviceIdForProfile(profile), gaia_id));
 }
@@ -392,13 +391,9 @@ void InlineLoginHandlerChromeOS::GetAccountsInSession(
     const base::ListValue* args) {
   const std::string& callback_id = args->GetList()[0].GetString();
   const Profile* profile = Profile::FromWebUI(web_ui());
-  auto* account_manager = g_browser_process->platform_part()
-                              ->GetAccountManagerFactory()
-                              ->GetAccountManager(profile->GetPath().value());
-
-  account_manager->GetAccounts(
-      base::BindOnce(&InlineLoginHandlerChromeOS::OnGetAccounts,
-                     weak_factory_.GetWeakPtr(), callback_id));
+  ::GetAccountManagerFacade(profile->GetPath().value())
+      ->GetAccounts(base::BindOnce(&InlineLoginHandlerChromeOS::OnGetAccounts,
+                                   weak_factory_.GetWeakPtr(), callback_id));
 }
 
 void InlineLoginHandlerChromeOS::OnGetAccounts(

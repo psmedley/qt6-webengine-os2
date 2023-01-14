@@ -6,7 +6,7 @@
  *
  * Other contributors:
  *   Robert O'Callahan <roc+@cs.cmu.edu>
- *   David Baron <dbaron@fas.harvard.edu>
+ *   David Baron <dbaron@dbaron.org>
  *   Christian Biesinger <cbiesinger@web.de>
  *   Randall Jesup <rjesup@wgate.com>
  *   Roland Mainz <roland.mainz@informatik.med.uni-giessen.de>
@@ -245,7 +245,7 @@ void PaintLayerStackingNode::CollectLayers(PaintLayer& paint_layer,
   if (object.IsStackingContext())
     return;
 
-  base::Optional<HighestLayers> subtree_highest_layers;
+  absl::optional<HighestLayers> subtree_highest_layers;
   bool has_overlay_overflow_controls =
       paint_layer.GetScrollableArea() &&
       paint_layer.GetScrollableArea()->HasOverlayOverflowControls();

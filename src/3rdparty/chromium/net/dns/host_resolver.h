@@ -13,18 +13,22 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "net/base/address_family.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/network_isolation_key.h"
 #include "net/base/request_priority.h"
 #include "net/dns/host_cache.h"
-#include "net/dns/host_resolver_source.h"
 #include "net/dns/public/dns_config_overrides.h"
 #include "net/dns/public/dns_query_type.h"
+#include "net/dns/public/host_resolver_source.h"
+#include "net/dns/public/mdns_listener_update_type.h"
 #include "net/dns/public/resolve_error_info.h"
-#include "net/dns/public/secure_dns_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
+#include "net/log/net_log_with_source.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
 
 namespace base {
 class Value;
@@ -38,7 +42,6 @@ class DnsClient;
 struct DnsConfigOverrides;
 class HostResolverManager;
 class NetLog;
-class NetLogWithSource;
 class URLRequestContext;
 
 // This class represents the task of resolving hostnames (or IP address
@@ -80,12 +83,12 @@ class NET_EXPORT HostResolver {
     // Address record (A or AAAA) results of the request. Should only be called
     // after Start() signals completion, either by invoking the callback or by
     // returning a result other than |ERR_IO_PENDING|.
-    virtual const base::Optional<AddressList>& GetAddressResults() const = 0;
+    virtual const absl::optional<AddressList>& GetAddressResults() const = 0;
 
     // Text record (TXT) results of the request. Should only be called after
     // Start() signals completion, either by invoking the callback or by
     // returning a result other than |ERR_IO_PENDING|.
-    virtual const base::Optional<std::vector<std::string>>& GetTextResults()
+    virtual const absl::optional<std::vector<std::string>>& GetTextResults()
         const = 0;
 
     // Hostname record (SRV or PTR) results of the request. For SRV results,
@@ -95,7 +98,7 @@ class NET_EXPORT HostResolver {
     // Should only be called after Start() signals completion, either by
     // invoking the callback or by returning a result other than
     // |ERR_IO_PENDING|.
-    virtual const base::Optional<std::vector<HostPortPair>>&
+    virtual const absl::optional<std::vector<HostPortPair>>&
     GetHostnameResults() const = 0;
 
     // Any DNS record aliases, such as CNAME aliases, found as a result of an
@@ -106,13 +109,13 @@ class NET_EXPORT HostResolver {
     // list of aliases that has been sanitized and canonicalized (as URL
     // hostnames), and thus may differ from the results stored directly in the
     // AddressList.
-    virtual const base::Optional<std::vector<std::string>>& GetDnsAliasResults()
+    virtual const absl::optional<std::vector<std::string>>& GetDnsAliasResults()
         const = 0;
 
     // Result of an experimental query. Meaning depends on the specific query
     // type, but each boolean value generally refers to a valid or invalid
     // record of the experimental type.
-    NET_EXPORT virtual const base::Optional<std::vector<bool>>&
+    NET_EXPORT virtual const absl::optional<std::vector<bool>>&
     GetExperimentalResultsForTesting() const;
 
     // Error info for the request.
@@ -128,7 +131,7 @@ class NET_EXPORT HostResolver {
     // Should only be called after Start() signals completion, either by
     // invoking the callback or by returning a result other than
     // |ERR_IO_PENDING|.
-    virtual const base::Optional<HostCache::EntryStaleness>& GetStaleInfo()
+    virtual const absl::optional<HostCache::EntryStaleness>& GetStaleInfo()
         const = 0;
 
     // Changes the priority of the specified request. Can only be called while
@@ -173,6 +176,10 @@ class NET_EXPORT HostResolver {
     // asynchronous DnsClient is enabled or disabled. See HostResolverManager::
     // SetInsecureDnsClientEnabled() for details.
     bool insecure_dns_client_enabled = false;
+
+    // Initial setting for whether additional DNS types (e.g. HTTPS) may be
+    // queried when using the built-in resolver for insecure DNS.
+    bool additional_types_via_insecure_dns_enabled = true;
 
     // Initial configuration overrides for the built-in asynchronous DnsClient.
     // See HostResolverManager::SetDnsConfigOverrides() for details.
@@ -253,7 +260,7 @@ class NET_EXPORT HostResolver {
     // Set |true| iff the host resolve request is only being made speculatively
     // to fill the cache and the result addresses will not be used. The request
     // will receive special logging/observer treatment, and the result addresses
-    // will always be |base::nullopt|.
+    // will always be |absl::nullopt|.
     bool is_speculative = false;
 
     // If `true`, resolver may (but is not guaranteed to) take steps to avoid
@@ -262,8 +269,8 @@ class NET_EXPORT HostResolver {
     // as is typically the case for LLMNR or mDNS queries without any results.
     bool avoid_multicast_resolution = false;
 
-    // Set to override the resolver's default secure dns mode for this request.
-    base::Optional<SecureDnsMode> secure_dns_mode_override = base::nullopt;
+    // Controls the resolver's Secure DNS behavior for this request.
+    SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow;
   };
 
   // Handler for an ongoing MDNS listening operation. Created by
@@ -276,23 +283,21 @@ class NET_EXPORT HostResolver {
     // multiple types for the same host.
     class Delegate {
      public:
-      enum class UpdateType { ADDED, CHANGED, REMOVED };
-
       virtual ~Delegate() {}
 
-      virtual void OnAddressResult(UpdateType update_type,
+      virtual void OnAddressResult(MdnsListenerUpdateType update_type,
                                    DnsQueryType result_type,
                                    IPEndPoint address) = 0;
-      virtual void OnTextResult(UpdateType update_type,
+      virtual void OnTextResult(MdnsListenerUpdateType update_type,
                                 DnsQueryType result_type,
                                 std::vector<std::string> text_records) = 0;
-      virtual void OnHostnameResult(UpdateType update_type,
+      virtual void OnHostnameResult(MdnsListenerUpdateType update_type,
                                     DnsQueryType result_type,
                                     HostPortPair host) = 0;
 
       // For results which may be valid MDNS but are not handled/parsed by
       // HostResolver, e.g. pointers to the root domain.
-      virtual void OnUnhandledResult(UpdateType update_type,
+      virtual void OnUnhandledResult(MdnsListenerUpdateType update_type,
                                      DnsQueryType result_type) = 0;
     };
 
@@ -320,12 +325,20 @@ class NET_EXPORT HostResolver {
   // Profiling information for the request is saved to |net_log| if non-NULL.
   //
   // Additional parameters may be set using |optional_parameters|. Reasonable
-  // defaults will be used if passed |base::nullopt|.
+  // defaults will be used if passed |nullptr|.
+  virtual std::unique_ptr<ResolveHostRequest> CreateRequest(
+      url::SchemeHostPort host,
+      NetworkIsolationKey network_isolation_key,
+      NetLogWithSource net_log,
+      absl::optional<ResolveHostParameters> optional_parameters) = 0;
+
+  // Create requests when scheme is unknown or non-standard.
+  // TODO(crbug.com/1206799): Rename to discourage use when scheme is known.
   virtual std::unique_ptr<ResolveHostRequest> CreateRequest(
       const HostPortPair& host,
       const NetworkIsolationKey& network_isolation_key,
       const NetLogWithSource& net_log,
-      const base::Optional<ResolveHostParameters>& optional_parameters) = 0;
+      const absl::optional<ResolveHostParameters>& optional_parameters) = 0;
 
   // Creates a request to probe configured DoH servers to find which can be used
   // successfully.
@@ -367,7 +380,7 @@ class NET_EXPORT HostResolver {
   // requests.  See MappedHostResolver for details.
   static std::unique_ptr<HostResolver> CreateStandaloneResolver(
       NetLog* net_log,
-      base::Optional<ManagerOptions> options = base::nullopt,
+      absl::optional<ManagerOptions> options = absl::nullopt,
       base::StringPiece host_mapping_rules = "",
       bool enable_caching = true);
   // Same, but explicitly returns the implementing ContextHostResolver. Only
@@ -375,7 +388,7 @@ class NET_EXPORT HostResolver {
   // applied because doing so requires wrapping the ContextHostResolver.
   static std::unique_ptr<ContextHostResolver> CreateStandaloneContextResolver(
       NetLog* net_log,
-      base::Optional<ManagerOptions> options = base::nullopt,
+      absl::optional<ManagerOptions> options = absl::nullopt,
       bool enable_caching = true);
 
   // Helpers for interacting with HostCache and ProcResolver.

@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef MEDIA_GPU_D3D11_VIDEO_DECODER_H_
-#define MEDIA_GPU_D3D11_VIDEO_DECODER_H_
+#ifndef MEDIA_GPU_WINDOWS_D3D11_VIDEO_DECODER_H_
+#define MEDIA_GPU_WINDOWS_D3D11_VIDEO_DECODER_H_
 
 #include <d3d11.h>
-#include <string>
 #include <vector>
 
 #include "base/memory/ptr_util.h"
@@ -67,7 +66,6 @@ class MEDIA_GPU_EXPORT D3D11VideoDecoder : public VideoDecoder,
       bool is_hdr_supported);
 
   // VideoDecoder implementation:
-  std::string GetDisplayName() const override;
   VideoDecoderType GetDecoderType() const override;
   void Initialize(const VideoDecoderConfig& config,
                   bool low_delay,
@@ -309,4 +307,4 @@ class MEDIA_GPU_EXPORT D3D11VideoDecoder : public VideoDecoder,
 
 }  // namespace media
 
-#endif  // MEDIA_GPU_D3D11_VIDEO_DECODER_H_
+#endif  // MEDIA_GPU_WINDOWS_D3D11_VIDEO_DECODER_H_

@@ -11,6 +11,8 @@
 
 #include "base/json/string_escape.h"
 #include "base/logging.h"
+#include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -82,8 +84,7 @@ bool JSONWriter::BuildJSONString(const Value& node, size_t depth) {
     case Value::Type::DOUBLE: {
       double value = node.GetDouble();
       if (omit_double_type_preservation_ &&
-          value <= std::numeric_limits<int64_t>::max() &&
-          value >= std::numeric_limits<int64_t>::min() &&
+          IsValueInRangeForNumericType<int64_t>(value) &&
           std::floor(value) == value) {
         json_string_->append(NumberToString(static_cast<int64_t>(value)));
         return true;
@@ -153,7 +154,7 @@ bool JSONWriter::BuildJSONString(const Value& node, size_t depth) {
 
       bool first_value_has_been_output = false;
       bool result = true;
-      for (const auto& pair : node.DictItems()) {
+      for (auto pair : node.DictItems()) {
         const auto& key = pair.first;
         const auto& value = pair.second;
         if (omit_binary_values_ && value.type() == Value::Type::BINARY)
@@ -192,15 +193,9 @@ bool JSONWriter::BuildJSONString(const Value& node, size_t depth) {
       // Successful only if we're allowed to omit it.
       DLOG_IF(ERROR, !omit_binary_values_) << "Cannot serialize binary value.";
       return omit_binary_values_;
-
-    // TODO(crbug.com/859477): Remove after root cause is found.
-    case Value::Type::DEAD:
-      CHECK(false);
-      return false;
   }
 
-  // TODO(crbug.com/859477): Revert to NOTREACHED() after root cause is found.
-  CHECK(false);
+  NOTREACHED();
   return false;
 }
 

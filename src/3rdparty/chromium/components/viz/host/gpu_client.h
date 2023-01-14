@@ -9,6 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/weak_ptr.h"
+#include "base/process/process_handle.h"
 #include "build/chromeos_buildflags.h"
 #include "components/viz/host/gpu_client_delegate.h"
 #include "components/viz/host/gpu_host_impl.h"
@@ -37,6 +38,10 @@ class VIZ_HOST_EXPORT GpuClient : public mojom::GpuMemoryBufferFactory,
   void Add(mojo::PendingReceiver<mojom::Gpu> receiver);
 
   void PreEstablishGpuChannel();
+
+  // Sets the PID of the client that will use this channel once the PID is
+  // known.
+  void SetClientPid(base::ProcessId client_pid);
 
   void SetConnectionErrorHandler(
       ConnectionErrorHandlerClosure connection_error_handler);
@@ -98,9 +103,9 @@ class VIZ_HOST_EXPORT GpuClient : public mojom::GpuMemoryBufferFactory,
   gpu::GPUInfo gpu_info_;
   gpu::GpuFeatureInfo gpu_feature_info_;
   ConnectionErrorHandlerClosure connection_error_handler_;
-  // |task_runner_| is associated with the thread |gpu_bindings_| is bound on.
-  // GpuClient instance is bound to this thread, and must be destroyed on this
-  // thread.
+  // |task_runner_| is associated with the thread |gpu_bindings_| is bound
+  // on. GpuClient instance is bound to this thread, and must be destroyed on
+  // this thread.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::WeakPtrFactory<GpuClient> weak_factory_{this};
 

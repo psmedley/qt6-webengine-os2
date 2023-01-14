@@ -8,26 +8,31 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/feature_list.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "components/back_forward_cache/back_forward_cache_disable.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/safe_browsing/content/base_ui_manager.h"
+#include "components/safe_browsing/content/browser/base_ui_manager.h"
 #include "components/safe_browsing/content/browser/threat_details_cache.h"
 #include "components/safe_browsing/content/browser/threat_details_history.h"
-#include "components/safe_browsing/content/web_ui/safe_browsing_ui.h"
+#include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui.h"
+#include "components/safe_browsing/core/browser/db/hit_report.h"
 #include "components/safe_browsing/core/browser/referrer_chain_provider.h"
-#include "components/safe_browsing/core/db/hit_report.h"
-#include "components/safe_browsing/core/features.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "components/security_interstitials/content/unsafe_resource_util.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -123,6 +128,7 @@ ClientSafeBrowsingReportRequest::ReportType GetReportTypeFromSBThreatType(
     case SB_THREAT_TYPE_SUBRESOURCE_FILTER:
     case SB_THREAT_TYPE_CSD_ALLOWLIST:
     case SB_THREAT_TYPE_HIGH_CONFIDENCE_ALLOWLIST:
+    case SB_THREAT_TYPE_ACCURACY_TIPS:
     case DEPRECATED_SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING:
       // Gated by SafeBrowsingBlockingPage::ShouldReportThreatDetails.
       NOTREACHED() << "We should not send report for threat type: "
@@ -564,7 +570,7 @@ void ThreatDetails::AddDomElement(
 
 void ThreatDetails::StartCollection() {
   DVLOG(1) << "Starting to compute threat details.";
-  report_.reset(new ClientSafeBrowsingReportRequest());
+  report_ = std::make_unique<ClientSafeBrowsingReportRequest>();
 
   if (IsReportableUrl(resource_.url)) {
     report_->set_url(resource_.url.spec());
@@ -632,14 +638,16 @@ void ThreatDetails::StartCollection() {
     // OnReceivedThreatDOMDetails will be called when the renderer replies.
     // TODO(mattm): In theory, if the user proceeds through the warning DOM
     // detail collection could be started once the page loads.
-    web_contents()->ForEachFrame(base::BindRepeating(
+    web_contents()->GetMainFrame()->ForEachRenderFrameHost(base::BindRepeating(
         &ThreatDetails::RequestThreatDOMDetails, GetWeakPtr()));
   }
 }
 
 void ThreatDetails::RequestThreatDOMDetails(content::RenderFrameHost* frame) {
   content::BackForwardCache::DisableForRenderFrameHost(
-      frame, "safe_browsing::ThreatDetails");
+      frame,
+      back_forward_cache::DisabledReason(
+          back_forward_cache::DisabledReasonId::kSafeBrowsingThreatDetails));
   if (!frame->IsRenderFrameCreated()) {
     // A child frame may have been created browser-side but has not completed
     // setting up the renderer for it yet. In particular, this occurs if the
@@ -656,13 +664,13 @@ void ThreatDetails::RequestThreatDOMDetails(content::RenderFrameHost* frame) {
   pending_render_frame_hosts_.push_back(frame);
   raw_threat_report->GetThreatDOMDetails(
       base::BindOnce(&ThreatDetails::OnReceivedThreatDOMDetails, GetWeakPtr(),
-                     std::move(threat_reporter), frame->GetGlobalFrameRoutingId()));
+                     std::move(threat_reporter), frame->GetGlobalId()));
 }
 
 // When the renderer is done, this is called.
 void ThreatDetails::OnReceivedThreatDOMDetails(
     mojo::Remote<mojom::ThreatReporter> threat_reporter,
-    content::GlobalFrameRoutingId sender_id,
+    content::GlobalRenderFrameHostId sender_id,
     std::vector<mojom::ThreatDOMDetailsNodePtr> params) {
   // If the RenderFrameHost was closed between sending the IPC and this callback
   // running, |sender| will be invalid.
@@ -890,7 +898,7 @@ void ThreatDetails::AllDone() {
                                 base::Unretained(web_contents())));
 }
 
-void ThreatDetails::FrameDeleted(RenderFrameHost* render_frame_host) {
+void ThreatDetails::RenderFrameDeleted(RenderFrameHost* render_frame_host) {
   base::Erase(pending_render_frame_hosts_, render_frame_host);
 }
 

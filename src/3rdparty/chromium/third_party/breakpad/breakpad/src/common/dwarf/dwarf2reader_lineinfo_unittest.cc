@@ -29,7 +29,7 @@
 
 // Original author: Sterling Augustine <saugustine@google.com>
 
-// dwarf2reader_lineinfo_unittest.cc: Unit tests for dwarf2reader::LineInfo
+// dwarf2reader_lineinfo_unittest.cc: Unit tests for google_breakpad::LineInfo
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -49,7 +49,7 @@ using testing::Sequence;
 using testing::Test;
 using testing::_;
 
-using namespace dwarf2reader;
+using namespace google_breakpad;
 
 namespace {
 
@@ -169,7 +169,7 @@ TEST_F(LineProgram, ReadLinesDwarf4) {
   // dwarf4 line info headers don't encode the address size.
   byte_reader.SetAddressSize(8);
   LineInfo line_reader(dwarf4_line_program,
-                       sizeof(dwarf5_line_program),
+                       sizeof(dwarf4_line_program),
                        &byte_reader,
                        // dwarf4 line tables can't access the string sections
                        // so pass values likely to make assertions fail if

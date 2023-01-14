@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <stddef.h>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/gtest_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -186,7 +186,7 @@ TEST(URLCanonTest, UTF) {
       out_str.clear();
       StdStringCanonOutput output(&out_str);
 
-      base::string16 input_str(
+      std::u16string input_str(
           test_utils::TruncateWStringToUTF16(utf_cases[i].input16));
       int input_len = static_cast<int>(input_str.length());
       bool success = true;
@@ -205,7 +205,7 @@ TEST(URLCanonTest, UTF) {
 
       // UTF-16 -> UTF-8
       std::string input8_str(utf_cases[i].input8);
-      base::string16 input16_str(
+      std::u16string input16_str(
           test_utils::TruncateWStringToUTF16(utf_cases[i].input16));
       EXPECT_EQ(input8_str, base::UTF16ToUTF8(input16_str));
 
@@ -258,7 +258,7 @@ TEST(URLCanonTest, Scheme) {
     out_str.clear();
     StdStringCanonOutput output2(&out_str);
 
-    base::string16 wide_input(base::UTF8ToUTF16(scheme_cases[i].input));
+    std::u16string wide_input(base::UTF8ToUTF16(scheme_cases[i].input));
     in_comp.len = static_cast<int>(wide_input.length());
     success = CanonicalizeScheme(wide_input.c_str(), in_comp, &output2,
                                  &out_comp);
@@ -529,7 +529,7 @@ TEST(URLCanonTest, Host) {
 
     // Wide version.
     if (host_cases[i].input16) {
-      base::string16 input16(
+      std::u16string input16(
           test_utils::TruncateWStringToUTF16(host_cases[i].input16));
       int host_len = static_cast<int>(input16.length());
       Component in_comp(0, host_len);
@@ -580,7 +580,7 @@ TEST(URLCanonTest, Host) {
 
     // Wide version.
     if (host_cases[i].input16) {
-      base::string16 input16(
+      std::u16string input16(
           test_utils::TruncateWStringToUTF16(host_cases[i].input16));
       int host_len = static_cast<int>(input16.length());
       Component in_comp(0, host_len);
@@ -703,7 +703,7 @@ TEST(URLCanonTest, IPv4) {
     }
 
     // 16-bit version.
-    base::string16 input16(
+    std::u16string input16(
         test_utils::TruncateWStringToUTF16(cases[i].input16));
     component = Component(0, static_cast<int>(input16.length()));
 
@@ -856,7 +856,7 @@ TEST(URLCanonTest, IPv6) {
     }
 
     // 16-bit version.
-    base::string16 input16(
+    std::u16string input16(
         test_utils::TruncateWStringToUTF16(cases[i].input16));
     component = Component(0, static_cast<int>(input16.length()));
 
@@ -988,7 +988,7 @@ TEST(URLCanonTest, UserInfo) {
     // Now try the wide version
     out_str.clear();
     StdStringCanonOutput output2(&out_str);
-    base::string16 wide_input(base::UTF8ToUTF16(user_info_cases[i].input));
+    std::u16string wide_input(base::UTF8ToUTF16(user_info_cases[i].input));
     success = CanonicalizeUserInfo(wide_input.c_str(),
                                    parsed.username,
                                    wide_input.c_str(),
@@ -1051,7 +1051,7 @@ TEST(URLCanonTest, Port) {
     // Now try the wide version
     out_str.clear();
     StdStringCanonOutput output2(&out_str);
-    base::string16 wide_input(base::UTF8ToUTF16(port_cases[i].input));
+    std::u16string wide_input(base::UTF8ToUTF16(port_cases[i].input));
     success = CanonicalizePort(wide_input.c_str(),
                                in_comp,
                                port_cases[i].default_port,
@@ -1066,105 +1066,117 @@ TEST(URLCanonTest, Port) {
   }
 }
 
-TEST(URLCanonTest, Path) {
-  DualComponentCase path_cases[] = {
-      // ----- path collapsing tests -----
-      {"/././foo", L"/././foo", "/foo", Component(0, 4), true},
-      {"/./.foo", L"/./.foo", "/.foo", Component(0, 5), true},
-      {"/foo/.", L"/foo/.", "/foo/", Component(0, 5), true},
-      {"/foo/./", L"/foo/./", "/foo/", Component(0, 5), true},
-      // double dots followed by a slash or the end of the string count
-      {"/foo/bar/..", L"/foo/bar/..", "/foo/", Component(0, 5), true},
-      {"/foo/bar/../", L"/foo/bar/../", "/foo/", Component(0, 5), true},
-      // don't count double dots when they aren't followed by a slash
-      {"/foo/..bar", L"/foo/..bar", "/foo/..bar", Component(0, 10), true},
-      // some in the middle
-      {"/foo/bar/../ton", L"/foo/bar/../ton", "/foo/ton", Component(0, 8),
-       true},
-      {"/foo/bar/../ton/../../a", L"/foo/bar/../ton/../../a", "/a",
-       Component(0, 2), true},
-      // we should not be able to go above the root
-      {"/foo/../../..", L"/foo/../../..", "/", Component(0, 1), true},
-      {"/foo/../../../ton", L"/foo/../../../ton", "/ton", Component(0, 4),
-       true},
-      // escaped dots should be unescaped and treated the same as dots
-      {"/foo/%2e", L"/foo/%2e", "/foo/", Component(0, 5), true},
-      {"/foo/%2e%2", L"/foo/%2e%2", "/foo/.%2", Component(0, 8), true},
-      {"/foo/%2e./%2e%2e/.%2e/%2e.bar", L"/foo/%2e./%2e%2e/.%2e/%2e.bar",
-       "/..bar", Component(0, 6), true},
-      // Multiple slashes in a row should be preserved and treated like empty
-      // directory names.
-      {"////../..", L"////../..", "//", Component(0, 2), true},
+DualComponentCase kCommonPathCases[] = {
+    // ----- path collapsing tests -----
+    {"/././foo", L"/././foo", "/foo", Component(0, 4), true},
+    {"/./.foo", L"/./.foo", "/.foo", Component(0, 5), true},
+    {"/foo/.", L"/foo/.", "/foo/", Component(0, 5), true},
+    {"/foo/./", L"/foo/./", "/foo/", Component(0, 5), true},
+    // double dots followed by a slash or the end of the string count
+    {"/foo/bar/..", L"/foo/bar/..", "/foo/", Component(0, 5), true},
+    {"/foo/bar/../", L"/foo/bar/../", "/foo/", Component(0, 5), true},
+    // don't count double dots when they aren't followed by a slash
+    {"/foo/..bar", L"/foo/..bar", "/foo/..bar", Component(0, 10), true},
+    // some in the middle
+    {"/foo/bar/../ton", L"/foo/bar/../ton", "/foo/ton", Component(0, 8), true},
+    {"/foo/bar/../ton/../../a", L"/foo/bar/../ton/../../a", "/a",
+     Component(0, 2), true},
+    // we should not be able to go above the root
+    {"/foo/../../..", L"/foo/../../..", "/", Component(0, 1), true},
+    {"/foo/../../../ton", L"/foo/../../../ton", "/ton", Component(0, 4), true},
+    // escaped dots should be unescaped and treated the same as dots
+    {"/foo/%2e", L"/foo/%2e", "/foo/", Component(0, 5), true},
+    {"/foo/%2e%2", L"/foo/%2e%2", "/foo/.%2", Component(0, 8), true},
+    {"/foo/%2e./%2e%2e/.%2e/%2e.bar", L"/foo/%2e./%2e%2e/.%2e/%2e.bar",
+     "/..bar", Component(0, 6), true},
+    // Multiple slashes in a row should be preserved and treated like empty
+    // directory names.
+    {"////../..", L"////../..", "//", Component(0, 2), true},
 
-      // ----- escaping tests -----
-      {"/foo", L"/foo", "/foo", Component(0, 4), true},
-      // Valid escape sequence
-      {"/%20foo", L"/%20foo", "/%20foo", Component(0, 7), true},
-      // Invalid escape sequence we should pass through unchanged.
-      {"/foo%", L"/foo%", "/foo%", Component(0, 5), true},
-      {"/foo%2", L"/foo%2", "/foo%2", Component(0, 6), true},
-      // Invalid escape sequence: bad characters should be treated the same as
-      // the sourrounding text, not as escaped (in this case, UTF-8).
-      {"/foo%2zbar", L"/foo%2zbar", "/foo%2zbar", Component(0, 10), true},
-      {"/foo%2\xc2\xa9zbar", nullptr, "/foo%2%C2%A9zbar", Component(0, 16),
-       true},
-      {nullptr, L"/foo%2\xc2\xa9zbar", "/foo%2%C3%82%C2%A9zbar",
-       Component(0, 22), true},
-      // Regular characters that are escaped should be unescaped
-      {"/foo%41%7a", L"/foo%41%7a", "/fooAz", Component(0, 6), true},
-      // Funny characters that are unescaped should be escaped
-      {"/foo\x09\x91%91", nullptr, "/foo%09%91%91", Component(0, 13), true},
-      {nullptr, L"/foo\x09\x91%91", "/foo%09%C2%91%91", Component(0, 16), true},
-      // Invalid characters that are escaped should cause a failure.
-      {"/foo%00%51", L"/foo%00%51", "/foo%00Q", Component(0, 8), false},
-      // Some characters should be passed through unchanged regardless of esc.
-      {"/(%28:%3A%29)", L"/(%28:%3A%29)", "/(%28:%3A%29)", Component(0, 13),
-       true},
-      // Characters that are properly escaped should not have the case changed
-      // of hex letters.
-      {"/%3A%3a%3C%3c", L"/%3A%3a%3C%3c", "/%3A%3a%3C%3c", Component(0, 13),
-       true},
-      // Funny characters that are unescaped should be escaped
-      {"/foo\tbar", L"/foo\tbar", "/foo%09bar", Component(0, 10), true},
-      // Backslashes should get converted to forward slashes
-      {"\\foo\\bar", L"\\foo\\bar", "/foo/bar", Component(0, 8), true},
-      // Hashes found in paths (possibly only when the caller explicitly sets
-      // the path on an already-parsed URL) should be escaped.
-      {"/foo#bar", L"/foo#bar", "/foo%23bar", Component(0, 10), true},
-      // %7f should be allowed and %3D should not be unescaped (these were wrong
-      // in a previous version).
-      {"/%7Ffp3%3Eju%3Dduvgw%3Dd", L"/%7Ffp3%3Eju%3Dduvgw%3Dd",
-       "/%7Ffp3%3Eju%3Dduvgw%3Dd", Component(0, 24), true},
-      // @ should be passed through unchanged (escaped or unescaped).
-      {"/@asdf%40", L"/@asdf%40", "/@asdf%40", Component(0, 9), true},
-      // Nested escape sequences should result in escaping the leading '%' if
-      // unescaping would result in a new escape sequence.
-      {"/%A%42", L"/%A%42", "/%25AB", Component(0, 6), true},
-      {"/%%41B", L"/%%41B", "/%25AB", Component(0, 6), true},
-      {"/%%41%42", L"/%%41%42", "/%25AB", Component(0, 6), true},
-      // Make sure truncated "nested" escapes don't result in reading off the
-      // string end.
-      {"/%%41", L"/%%41", "/%A", Component(0, 3), true},
-      // Don't unescape the leading '%' if unescaping doesn't result in a valid
-      // new escape sequence.
-      {"/%%470", L"/%%470", "/%G0", Component(0, 4), true},
-      {"/%%2D%41", L"/%%2D%41", "/%-A", Component(0, 4), true},
-      // Don't erroneously downcast a UTF-16 charater in a way that makes it
-      // look like part of an escape sequence.
-      {nullptr, L"/%%41\x0130", "/%A%C4%B0", Component(0, 9), true},
+    // ----- escaping tests -----
+    {"/foo", L"/foo", "/foo", Component(0, 4), true},
+    // Valid escape sequence
+    {"/%20foo", L"/%20foo", "/%20foo", Component(0, 7), true},
+    // Invalid escape sequence we should pass through unchanged.
+    {"/foo%", L"/foo%", "/foo%", Component(0, 5), true},
+    {"/foo%2", L"/foo%2", "/foo%2", Component(0, 6), true},
+    // Invalid escape sequence: bad characters should be treated the same as
+    // the surrounding text, not as escaped (in this case, UTF-8).
+    {"/foo%2zbar", L"/foo%2zbar", "/foo%2zbar", Component(0, 10), true},
+    {"/foo%2\xc2\xa9zbar", nullptr, "/foo%2%C2%A9zbar", Component(0, 16), true},
+    {nullptr, L"/foo%2\xc2\xa9zbar", "/foo%2%C3%82%C2%A9zbar", Component(0, 22),
+     true},
+    // Regular characters that are escaped should be unescaped
+    {"/foo%41%7a", L"/foo%41%7a", "/fooAz", Component(0, 6), true},
+    // Funny characters that are unescaped should be escaped
+    {"/foo\x09\x91%91", nullptr, "/foo%09%91%91", Component(0, 13), true},
+    {nullptr, L"/foo\x09\x91%91", "/foo%09%C2%91%91", Component(0, 16), true},
+    // Invalid characters that are escaped should cause a failure.
+    {"/foo%00%51", L"/foo%00%51", "/foo%00Q", Component(0, 8), false},
+    // Some characters should be passed through unchanged regardless of esc.
+    {"/(%28:%3A%29)", L"/(%28:%3A%29)", "/(%28:%3A%29)", Component(0, 13),
+     true},
+    // Characters that are properly escaped should not have the case changed
+    // of hex letters.
+    {"/%3A%3a%3C%3c", L"/%3A%3a%3C%3c", "/%3A%3a%3C%3c", Component(0, 13),
+     true},
+    // Funny characters that are unescaped should be escaped
+    {"/foo\tbar", L"/foo\tbar", "/foo%09bar", Component(0, 10), true},
+    // Backslashes should get converted to forward slashes
+    {"\\foo\\bar", L"\\foo\\bar", "/foo/bar", Component(0, 8), true},
+    // Hashes found in paths (possibly only when the caller explicitly sets
+    // the path on an already-parsed URL) should be escaped.
+    {"/foo#bar", L"/foo#bar", "/foo%23bar", Component(0, 10), true},
+    // %7f should be allowed and %3D should not be unescaped (these were wrong
+    // in a previous version).
+    {"/%7Ffp3%3Eju%3Dduvgw%3Dd", L"/%7Ffp3%3Eju%3Dduvgw%3Dd",
+     "/%7Ffp3%3Eju%3Dduvgw%3Dd", Component(0, 24), true},
+    // @ should be passed through unchanged (escaped or unescaped).
+    {"/@asdf%40", L"/@asdf%40", "/@asdf%40", Component(0, 9), true},
+    // Nested escape sequences should result in escaping the leading '%' if
+    // unescaping would result in a new escape sequence.
+    {"/%A%42", L"/%A%42", "/%25AB", Component(0, 6), true},
+    {"/%%41B", L"/%%41B", "/%25AB", Component(0, 6), true},
+    {"/%%41%42", L"/%%41%42", "/%25AB", Component(0, 6), true},
+    // Make sure truncated "nested" escapes don't result in reading off the
+    // string end.
+    {"/%%41", L"/%%41", "/%A", Component(0, 3), true},
+    // Don't unescape the leading '%' if unescaping doesn't result in a valid
+    // new escape sequence.
+    {"/%%470", L"/%%470", "/%G0", Component(0, 4), true},
+    {"/%%2D%41", L"/%%2D%41", "/%-A", Component(0, 4), true},
+    // Don't erroneously downcast a UTF-16 character in a way that makes it
+    // look like part of an escape sequence.
+    {nullptr, L"/%%41\x0130", "/%A%C4%B0", Component(0, 9), true},
 
-      // ----- encoding tests -----
-      // Basic conversions
-      {"/\xe4\xbd\xa0\xe5\xa5\xbd\xe4\xbd\xa0\xe5\xa5\xbd",
-       L"/\x4f60\x597d\x4f60\x597d", "/%E4%BD%A0%E5%A5%BD%E4%BD%A0%E5%A5%BD",
-       Component(0, 37), true},
-      // Invalid unicode characters should fail. We only do validation on
-      // UTF-16 input, so this doesn't happen on 8-bit.
-      {"/\xef\xb7\x90zyx", nullptr, "/%EF%B7%90zyx", Component(0, 13), true},
-      {nullptr, L"/\xfdd0zyx", "/%EF%BF%BDzyx", Component(0, 13), false},
-  };
+    // ----- encoding tests -----
+    // Basic conversions
+    {"/\xe4\xbd\xa0\xe5\xa5\xbd\xe4\xbd\xa0\xe5\xa5\xbd",
+     L"/\x4f60\x597d\x4f60\x597d", "/%E4%BD%A0%E5%A5%BD%E4%BD%A0%E5%A5%BD",
+     Component(0, 37), true},
+    // Invalid unicode characters should fail. We only do validation on
+    // UTF-16 input, so this doesn't happen on 8-bit.
+    {"/\xef\xb7\x90zyx", nullptr, "/%EF%B7%90zyx", Component(0, 13), true},
+    {nullptr, L"/\xfdd0zyx", "/%EF%BF%BDzyx", Component(0, 13), false},
+};
 
-  for (size_t i = 0; i < base::size(path_cases); i++) {
+typedef bool (*CanonFunc8Bit)(const char*,
+                              const Component&,
+                              CanonOutput*,
+                              Component*);
+typedef bool (*CanonFunc16Bit)(const char16_t*,
+                               const Component&,
+                               CanonOutput*,
+                               Component*);
+
+void DoPathTest(const DualComponentCase* path_cases,
+                size_t num_cases,
+                CanonFunc8Bit canon_func_8,
+                CanonFunc16Bit canon_func_16) {
+  for (size_t i = 0; i < num_cases; i++) {
+    testing::Message scope_message;
+    scope_message << path_cases[i].input8 << "," << path_cases[i].input16;
+    SCOPED_TRACE(scope_message);
     if (path_cases[i].input8) {
       int len = static_cast<int>(strlen(path_cases[i].input8));
       Component in_comp(0, len);
@@ -1172,7 +1184,7 @@ TEST(URLCanonTest, Path) {
       std::string out_str;
       StdStringCanonOutput output(&out_str);
       bool success =
-          CanonicalizePath(path_cases[i].input8, in_comp, &output, &out_comp);
+          canon_func_8(path_cases[i].input8, in_comp, &output, &out_comp);
       output.Complete();
 
       EXPECT_EQ(path_cases[i].expected_success, success);
@@ -1182,7 +1194,7 @@ TEST(URLCanonTest, Path) {
     }
 
     if (path_cases[i].input16) {
-      base::string16 input16(
+      std::u16string input16(
           test_utils::TruncateWStringToUTF16(path_cases[i].input16));
       int len = static_cast<int>(input16.length());
       Component in_comp(0, len);
@@ -1191,7 +1203,7 @@ TEST(URLCanonTest, Path) {
       StdStringCanonOutput output(&out_str);
 
       bool success =
-          CanonicalizePath(input16.c_str(), in_comp, &output, &out_comp);
+          canon_func_16(input16.c_str(), in_comp, &output, &out_comp);
       output.Complete();
 
       EXPECT_EQ(path_cases[i].expected_success, success);
@@ -1200,6 +1212,11 @@ TEST(URLCanonTest, Path) {
       EXPECT_EQ(path_cases[i].expected, out_str);
     }
   }
+}
+
+TEST(URLCanonTest, Path) {
+  DoPathTest(kCommonPathCases, base::size(kCommonPathCases), CanonicalizePath,
+             CanonicalizePath);
 
   // Manual test: embedded NULLs should be escaped and the URL should be marked
   // as invalid.
@@ -1213,6 +1230,18 @@ TEST(URLCanonTest, Path) {
   output.Complete();
   EXPECT_FALSE(success);
   EXPECT_EQ("/ab%00c", out_str);
+}
+
+TEST(URLCanonTest, PartialPath) {
+  DualComponentCase partial_path_cases[] = {
+      {".html", L".html", ".html", Component(0, 5), true},
+      {"", L"", "", Component(0, 0), true},
+  };
+
+  DoPathTest(kCommonPathCases, base::size(kCommonPathCases),
+             CanonicalizePartialPath, CanonicalizePartialPath);
+  DoPathTest(partial_path_cases, base::size(partial_path_cases),
+             CanonicalizePartialPath, CanonicalizePartialPath);
 }
 
 TEST(URLCanonTest, Query) {
@@ -1258,7 +1287,7 @@ TEST(URLCanonTest, Query) {
     }
 
     if (query_cases[i].input16) {
-      base::string16 input16(
+      std::u16string input16(
           test_utils::TruncateWStringToUTF16(query_cases[i].input16));
       int len = static_cast<int>(input16.length());
       Component in_comp(0, len);
@@ -1332,7 +1361,7 @@ TEST(URLCanonTest, Ref) {
 
     // 16-bit input
     if (ref_cases[i].input16) {
-      base::string16 input16(
+      std::u16string input16(
           test_utils::TruncateWStringToUTF16(ref_cases[i].input16));
       int len = static_cast<int>(input16.length());
       Component in_comp(0, len);
@@ -1360,8 +1389,8 @@ TEST(URLCanonTest, Ref) {
   output.Complete();
 
   EXPECT_EQ(1, out_comp.begin);
-  EXPECT_EQ(3, out_comp.len);
-  EXPECT_EQ("#abz", out_str);
+  EXPECT_EQ(6, out_comp.len);
+  EXPECT_EQ("#ab%00z", out_str);
 }
 
 TEST(URLCanonTest, CanonicalizeStandardURL) {
@@ -1821,20 +1850,28 @@ TEST(URLCanonTest, CanonicalizeFileURL) {
       // Busted refs shouldn't make the whole thing fail.
       {"file:///C:/asdf#\xc2", "file:///C:/asdf#%EF%BF%BD", true, Component(),
        Component(7, 8)},
+      {"file:///./s:", "file:///S:", true, Component(), Component(7, 3)},
 #else
       // Unix-style paths
-    {"file:///home/me", "file:///home/me", true, Component(), Component(7, 8)},
+      {"file:///home/me", "file:///home/me", true, Component(),
+       Component(7, 8)},
       // Windowsy ones should get still treated as Unix-style.
-    {"file:c:\\foo\\bar.html", "file:///c:/foo/bar.html", true, Component(), Component(7, 16)},
-    {"file:c|//foo\\bar.html", "file:///c%7C//foo/bar.html", true, Component(), Component(7, 19)},
+      {"file:c:\\foo\\bar.html", "file:///c:/foo/bar.html", true, Component(),
+       Component(7, 16)},
+      {"file:c|//foo\\bar.html", "file:///c%7C//foo/bar.html", true,
+       Component(), Component(7, 19)},
+      {"file:///./s:", "file:///s:", true, Component(), Component(7, 3)},
       // file: tests from WebKit (LayoutTests/fast/loader/url-parse-1.html)
-    {"//", "file:///", true, Component(), Component(7, 1)},
-    {"///", "file:///", true, Component(), Component(7, 1)},
-    {"///test", "file:///test", true, Component(), Component(7, 5)},
-    {"file://test", "file://test/", true, Component(7, 4), Component(11, 1)},
-    {"file://localhost",  "file://localhost/", true, Component(7, 9), Component(16, 1)},
-    {"file://localhost/", "file://localhost/", true, Component(7, 9), Component(16, 1)},
-    {"file://localhost/test", "file://localhost/test", true, Component(7, 9), Component(16, 5)},
+      {"//", "file:///", true, Component(), Component(7, 1)},
+      {"///", "file:///", true, Component(), Component(7, 1)},
+      {"///test", "file:///test", true, Component(), Component(7, 5)},
+      {"file://test", "file://test/", true, Component(7, 4), Component(11, 1)},
+      {"file://localhost", "file://localhost/", true, Component(7, 9),
+       Component(16, 1)},
+      {"file://localhost/", "file://localhost/", true, Component(7, 9),
+       Component(16, 1)},
+      {"file://localhost/test", "file://localhost/test", true, Component(7, 9),
+       Component(16, 5)},
 #endif  // _WIN32
   };
 
@@ -1949,6 +1986,53 @@ TEST(URLCanonTest, CanonicalizePathURL) {
       EXPECT_EQ(0, out_parsed.GetContent().begin);
       EXPECT_EQ(-1, out_parsed.GetContent().len);
     }
+  }
+}
+
+TEST(URLCanonTest, CanonicalizePathURLPath) {
+  struct PathCase {
+    std::string input;
+    std::wstring input16;
+    std::string expected;
+  } path_cases[] = {
+      {"Foo", L"Foo", "Foo"},
+      {"\":This /is interesting;?#", L"\":This /is interesting;?#",
+       "\":This /is interesting;?#"},
+      {"\uFFFF", L"\uFFFF", "%EF%BF%BD"},
+  };
+
+  for (size_t i = 0; i < base::size(path_cases); i++) {
+    // 8-bit string input
+    std::string out_str;
+    StdStringCanonOutput output(&out_str);
+    url::Component out_component;
+    CanonicalizePathURLPath(path_cases[i].input.data(),
+                            Component(0, path_cases[i].input.size()), &output,
+                            &out_component);
+    output.Complete();
+
+    EXPECT_EQ(path_cases[i].expected, out_str);
+
+    EXPECT_EQ(0, out_component.begin);
+    EXPECT_EQ(path_cases[i].expected.size(),
+              static_cast<size_t>(out_component.len));
+
+    // 16-bit string input
+    std::string out_str16;
+    StdStringCanonOutput output16(&out_str16);
+    url::Component out_component16;
+    std::u16string input16(
+        test_utils::TruncateWStringToUTF16(path_cases[i].input16.data()));
+    CanonicalizePathURLPath(input16.c_str(),
+                            Component(0, path_cases[i].input16.size()),
+                            &output16, &out_component16);
+    output16.Complete();
+
+    EXPECT_EQ(path_cases[i].expected, out_str16);
+
+    EXPECT_EQ(0, out_component16.begin);
+    EXPECT_EQ(path_cases[i].expected.size(),
+              static_cast<size_t>(out_component16.len));
   }
 }
 
@@ -2086,17 +2170,17 @@ TEST(URLCanonTest, _itow_s) {
   // We fill the buffer with 0xff to ensure that it's getting properly
   // null-terminated. We also allocate one byte more than what we tell
   // _itoa_s about, and ensure that the extra byte is untouched.
-  base::char16 buf[6];
+  char16_t buf[6];
   const char fill_mem = 0xff;
-  const base::char16 fill_char = 0xffff;
+  const char16_t fill_char = 0xffff;
   memset(buf, fill_mem, sizeof(buf));
   EXPECT_EQ(0, _itow_s(12, buf, sizeof(buf) / 2 - 1, 10));
-  EXPECT_EQ(base::UTF8ToUTF16("12"), base::string16(buf));
+  EXPECT_EQ(u"12", std::u16string(buf));
   EXPECT_EQ(fill_char, buf[3]);
 
   // Test the edge cases - exactly the buffer size and one over
   EXPECT_EQ(0, _itow_s(1234, buf, sizeof(buf) / 2 - 1, 10));
-  EXPECT_EQ(base::UTF8ToUTF16("1234"), base::string16(buf));
+  EXPECT_EQ(u"1234", std::u16string(buf));
   EXPECT_EQ(fill_char, buf[5]);
 
   memset(buf, fill_mem, sizeof(buf));
@@ -2106,13 +2190,12 @@ TEST(URLCanonTest, _itow_s) {
   // Test the template overload (note that this will see the full buffer)
   memset(buf, fill_mem, sizeof(buf));
   EXPECT_EQ(0, _itow_s(12, buf, 10));
-  EXPECT_EQ(base::UTF8ToUTF16("12"),
-            base::string16(buf));
+  EXPECT_EQ(u"12", std::u16string(buf));
   EXPECT_EQ(fill_char, buf[3]);
 
   memset(buf, fill_mem, sizeof(buf));
   EXPECT_EQ(0, _itow_s(12345, buf, 10));
-  EXPECT_EQ(base::UTF8ToUTF16("12345"), base::string16(buf));
+  EXPECT_EQ(u"12345", std::u16string(buf));
 
   EXPECT_EQ(EINVAL, _itow_s(123456, buf, 10));
 }
@@ -2343,12 +2426,12 @@ TEST(URLCanonTest, ReplacementOverflow) {
 
   // Override two components, the path with something short, and the query with
   // something long enough to trigger the bug.
-  Replacements<base::char16> repl;
-  base::string16 new_query;
+  Replacements<char16_t> repl;
+  std::u16string new_query;
   for (int i = 0; i < 4800; i++)
     new_query.push_back('a');
 
-  base::string16 new_path(test_utils::TruncateWStringToUTF16(L"/foo"));
+  std::u16string new_path(test_utils::TruncateWStringToUTF16(L"/foo"));
   repl.SetPath(new_path.c_str(), Component(0, 4));
   repl.SetQuery(new_query.c_str(),
                 Component(0, static_cast<int>(new_query.length())));
@@ -2398,41 +2481,41 @@ TEST(URLCanonTest, IDNToASCII) {
   RawCanonOutputW<1024> output;
 
   // Basic ASCII test.
-  base::string16 str = base::UTF8ToUTF16("hello");
+  std::u16string str = u"hello";
   EXPECT_TRUE(IDNToASCII(str.data(), str.length(), &output));
-  EXPECT_EQ(base::UTF8ToUTF16("hello"), base::string16(output.data()));
+  EXPECT_EQ(u"hello", std::u16string(output.data()));
   output.set_length(0);
 
   // Mixed ASCII/non-ASCII.
-  str = base::UTF8ToUTF16("hellö");
+  str = u"hellö";
   EXPECT_TRUE(IDNToASCII(str.data(), str.length(), &output));
-  EXPECT_EQ(base::UTF8ToUTF16("xn--hell-8qa"), base::string16(output.data()));
+  EXPECT_EQ(u"xn--hell-8qa", std::u16string(output.data()));
   output.set_length(0);
 
   // All non-ASCII.
-  str = base::UTF8ToUTF16("你好");
+  str = u"你好";
   EXPECT_TRUE(IDNToASCII(str.data(), str.length(), &output));
-  EXPECT_EQ(base::UTF8ToUTF16("xn--6qq79v"), base::string16(output.data()));
+  EXPECT_EQ(u"xn--6qq79v", std::u16string(output.data()));
   output.set_length(0);
 
   // Characters that need mapping (the resulting Punycode is the encoding for
   // "1⁄4").
-  str = base::UTF8ToUTF16("¼");
+  str = u"¼";
   EXPECT_TRUE(IDNToASCII(str.data(), str.length(), &output));
-  EXPECT_EQ(base::UTF8ToUTF16("xn--14-c6t"), base::string16(output.data()));
+  EXPECT_EQ(u"xn--14-c6t", std::u16string(output.data()));
   output.set_length(0);
 
   // String to encode already starts with "xn--", and all ASCII. Should not
   // modify the string.
-  str = base::UTF8ToUTF16("xn--hell-8qa");
+  str = u"xn--hell-8qa";
   EXPECT_TRUE(IDNToASCII(str.data(), str.length(), &output));
-  EXPECT_EQ(base::UTF8ToUTF16("xn--hell-8qa"), base::string16(output.data()));
+  EXPECT_EQ(u"xn--hell-8qa", std::u16string(output.data()));
   output.set_length(0);
 
   // String to encode already starts with "xn--", and mixed ASCII/non-ASCII.
   // Should fail, due to a special case: if the label starts with "xn--", it
   // should be parsed as Punycode, which must be all ASCII.
-  str = base::UTF8ToUTF16("xn--hellö");
+  str = u"xn--hellö";
   EXPECT_FALSE(IDNToASCII(str.data(), str.length(), &output));
   output.set_length(0);
 
@@ -2440,7 +2523,7 @@ TEST(URLCanonTest, IDNToASCII) {
   // This tests that there is still an error for the character '⁄' (U+2044),
   // which would be a valid ASCII character, U+0044, if the high byte were
   // ignored.
-  str = base::UTF8ToUTF16("xn--1⁄4");
+  str = u"xn--1⁄4";
   EXPECT_FALSE(IDNToASCII(str.data(), str.length(), &output));
   output.set_length(0);
 }

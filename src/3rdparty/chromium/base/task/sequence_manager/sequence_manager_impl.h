@@ -9,10 +9,8 @@
 #include <list>
 #include <map>
 #include <memory>
-#include <random>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 #include "base/atomic_sequence_num.h"
@@ -23,6 +21,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/pending_task.h"
+#include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -129,6 +128,7 @@ class BASE_EXPORT SequenceManagerImpl
   std::string DescribeAllPendingTasks() const override;
   std::unique_ptr<NativeWorkHandle> OnNativeWorkPending(
       TaskQueue::QueuePriority priority) override;
+  void PrioritizeYieldingToNative(base::TimeTicks prioritize_until) override;
   void AddTaskObserver(TaskObserver* task_observer) override;
   void RemoveTaskObserver(TaskObserver* task_observer) override;
 
@@ -161,8 +161,6 @@ class BASE_EXPORT SequenceManagerImpl
 #endif
   bool IsIdleForTesting() override;
   void BindToCurrentThread(std::unique_ptr<MessagePump> pump);
-  void DeletePendingTasks();
-  bool HasTasks();
   MessagePumpType GetType() const;
 
   // Requests that a task to process work is scheduled.
@@ -279,8 +277,7 @@ class BASE_EXPORT SequenceManagerImpl
     std::array<char, static_cast<size_t>(debug::CrashKeySize::Size64)>
         async_stack_buffer = {};
 
-    std::mt19937_64 random_generator;
-    std::uniform_real_distribution<double> uniform_distribution;
+    base::InsecureRandomGenerator random_generator;
 
     internal::TaskQueueSelector selector;
     ObserverList<TaskObserver>::Unchecked task_observers;

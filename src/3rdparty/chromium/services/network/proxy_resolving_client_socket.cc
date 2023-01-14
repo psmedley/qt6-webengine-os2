@@ -13,13 +13,13 @@
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/notreached.h"
-#include "base/optional.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
@@ -28,9 +28,11 @@
 #include "net/log/net_log_source_type.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_resolution_request.h"
+#include "net/socket/connect_job_factory.h"
 #include "net/socket/socket_tag.h"
 #include "net/ssl/ssl_config.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace network {
 
@@ -39,9 +41,11 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
     const net::CommonConnectJobParams* common_connect_job_params,
     const GURL& url,
     const net::NetworkIsolationKey& network_isolation_key,
-    bool use_tls)
+    bool use_tls,
+    const net::ConnectJobFactory* connect_job_factory)
     : network_session_(network_session),
       common_connect_job_params_(common_connect_job_params),
+      connect_job_factory_(connect_job_factory),
       url_(url),
       network_isolation_key_(network_isolation_key),
       use_tls_(use_tls),
@@ -51,6 +55,7 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
   // TODO(xunjieli): Handle invalid URLs more gracefully (at mojo API layer
   // or when the request is created).
   DCHECK(url_.is_valid());
+  DCHECK(connect_job_factory_);
 }
 
 ProxyResolvingClientSocket::~ProxyResolvingClientSocket() {}
@@ -284,10 +289,10 @@ int ProxyResolvingClientSocket::DoInitConnection() {
 
   next_state_ = STATE_INIT_CONNECTION_COMPLETE;
 
-  base::Optional<net::NetworkTrafficAnnotationTag> proxy_annotation_tag =
+  absl::optional<net::NetworkTrafficAnnotationTag> proxy_annotation_tag =
       proxy_info_.is_direct()
-          ? base::nullopt
-          : base::Optional<net::NetworkTrafficAnnotationTag>(
+          ? absl::nullopt
+          : absl::optional<net::NetworkTrafficAnnotationTag>(
                 proxy_info_.traffic_annotation());
 
   // Now that the proxy is resolved, create and start a ConnectJob. Using an
@@ -297,12 +302,12 @@ int ProxyResolvingClientSocket::DoInitConnection() {
   //
   // TODO(mmenke): Investigate that.
   net::SSLConfig ssl_config;
-  connect_job_ = net::ConnectJob::CreateConnectJob(
+  connect_job_ = connect_job_factory_->CreateConnectJob(
       use_tls_, net::HostPortPair::FromURL(url_), proxy_info_.proxy_server(),
       proxy_annotation_tag, &ssl_config, &ssl_config, true /* force_tunnel */,
       net::PRIVACY_MODE_DISABLED, net::OnHostResolutionCallback(),
       net::MAXIMUM_PRIORITY, net::SocketTag(), network_isolation_key_,
-      false /* disable_secure_dns */, common_connect_job_params_, this);
+      net::SecureDnsPolicy::kAllow, common_connect_job_params_, this);
   return connect_job_->Connect();
 }
 

@@ -31,6 +31,22 @@ bool ShouldSkipFetchingUrl(const KURL& url) {
   return !url.IsValid() || url.IsAboutBlankURL() || url.IsAboutSrcdocURL();
 }
 
+bool IsServiceWorkerPresent(Document* document) {
+  DocumentLoader* loader = document->Loader();
+  if (!loader)
+    return false;
+
+  if (loader->GetResponse().WasFetchedViaServiceWorker())
+    return true;
+
+  WebServiceWorkerNetworkProvider* provider =
+      loader->GetServiceWorkerNetworkProvider();
+  if (!provider)
+    return false;
+
+  return provider->ControllerServiceWorkerID() >= 0;
+}
+
 }  // namespace
 
 // NOTE: While this is a RawResourceClient, it loads both raw and css stylesheet
@@ -80,7 +96,6 @@ void InspectorResourceContentLoader::Start() {
     if (frame->GetDocument()->IsInitialEmptyDocument())
       continue;
     documents.push_back(frame->GetDocument());
-    documents.AppendVector(InspectorPageAgent::ImportsForFrame(frame));
   }
   for (Document* document : documents) {
     HashSet<String> urls_to_fetch;
@@ -97,19 +112,16 @@ void InspectorResourceContentLoader::Start() {
     }
     resource_request.SetRequestContext(
         mojom::blink::RequestContextType::INTERNAL);
-    if (document->Loader() &&
-        document->Loader()->GetResponse().WasFetchedViaServiceWorker()) {
+
+    if (IsServiceWorkerPresent(document)) {
+      // If the request is going to be intercepted by a service worker, then
+      // don't use only-if-cached. only-if-cached will cause the service worker
+      // to throw an exception if it repeats the request, which is a problem:
+      // crbug.com/823392 crbug.com/1098389
       resource_request.SetCacheMode(mojom::FetchCacheMode::kDefault);
     }
 
     ResourceFetcher* fetcher = document->Fetcher();
-    if (document->ImportsController()) {
-      // For @imports from HTML imported Documents, we use the
-      // context document for getting origin and ResourceFetcher to use the
-      // main Document's origin, while using the element document for
-      // CompleteURL() to use imported Documents' base URLs.
-      fetcher = document->GetExecutionContext()->Fetcher();
-    }
 
     scoped_refptr<const DOMWrapperWorld> world =
         document->GetExecutionContext()->GetCurrentWorld();

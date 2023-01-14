@@ -111,7 +111,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/windows_keyboard_codes.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -246,7 +245,9 @@ EventHandler::EventHandler(LocalFrame& frame)
                                                *selection_controller_)),
       active_interval_timer_(frame.GetTaskRunner(TaskType::kUserInteraction),
                              this,
-                             &EventHandler::ActiveIntervalTimerFired) {}
+                             &EventHandler::ActiveIntervalTimerFired) {
+  pointer_event_manager_->SetGestureManager(gesture_manager_.Get());
+}
 
 void EventHandler::Trace(Visitor* visitor) const {
   visitor->Trace(frame_);
@@ -427,17 +428,16 @@ IntPoint EventHandler::DragDataTransferLocationForTesting() {
   return IntPoint();
 }
 
-static bool IsSubmitImage(Node* node) {
+static bool IsSubmitImage(const Node* node) {
   auto* html_input_element = DynamicTo<HTMLInputElement>(node);
   return html_input_element &&
          html_input_element->type() == input_type_names::kImage;
 }
 
-bool EventHandler::UseHandCursor(Node* node, bool is_over_link) {
+bool EventHandler::UsesHandCursor(const Node* node) {
   if (!node)
     return false;
-
-  return ((is_over_link || IsSubmitImage(node)) && !HasEditableStyle(*node));
+  return ((node->IsLink() || IsSubmitImage(node)) && !HasEditableStyle(*node));
 }
 
 void EventHandler::CursorUpdateTimerFired(TimerBase*) {
@@ -472,7 +472,7 @@ void EventHandler::UpdateCursor() {
   layout_view->HitTest(location, result);
 
   if (LocalFrame* frame = result.InnerNodeFrame()) {
-    base::Optional<ui::Cursor> optional_cursor =
+    absl::optional<ui::Cursor> optional_cursor =
         frame->GetEventHandler().SelectCursor(location, result);
     if (optional_cursor.has_value()) {
       view->SetCursor(optional_cursor.value());
@@ -519,17 +519,17 @@ bool EventHandler::ShouldShowIBeamForNode(const Node* node,
   return HasEditableStyle(*node);
 }
 
-base::Optional<ui::Cursor> EventHandler::SelectCursor(
+absl::optional<ui::Cursor> EventHandler::SelectCursor(
     const HitTestLocation& location,
     const HitTestResult& result) {
   if (scroll_manager_->InResizeMode())
-    return base::nullopt;
+    return absl::nullopt;
 
   Page* page = frame_->GetPage();
   if (!page)
-    return base::nullopt;
+    return absl::nullopt;
   if (scroll_manager_->MiddleClickAutoscrollInProgress())
-    return base::nullopt;
+    return absl::nullopt;
 
   if (result.GetScrollbar() && !result.GetScrollbar()->IsCustomScrollbar())
     return PointerCursor();
@@ -569,7 +569,7 @@ base::Optional<ui::Cursor> EventHandler::SelectCursor(
       case kSetCursor:
         return override_cursor;
       case kDoNotSetCursor:
-        return base::nullopt;
+        return absl::nullopt;
     }
   }
 
@@ -747,7 +747,7 @@ base::Optional<ui::Cursor> EventHandler::SelectCursor(
   return PointerCursor();
 }
 
-base::Optional<ui::Cursor> EventHandler::SelectAutoCursor(
+absl::optional<ui::Cursor> EventHandler::SelectAutoCursor(
     const HitTestResult& result,
     Node* node,
     const ui::Cursor& i_beam) {
@@ -765,8 +765,10 @@ WebInputEventResult EventHandler::HandlePointerEvent(
     const WebPointerEvent& web_pointer_event,
     const Vector<WebPointerEvent>& coalesced_events,
     const Vector<WebPointerEvent>& predicted_events) {
-  return pointer_event_manager_->HandlePointerEvent(
+  WebInputEventResult event_result = pointer_event_manager_->HandlePointerEvent(
       web_pointer_event, coalesced_events, predicted_events);
+  gesture_manager_->NotifyPointerEventHandled(web_pointer_event);
+  return event_result;
 }
 
 WebInputEventResult EventHandler::HandleMousePressEvent(
@@ -1004,6 +1006,12 @@ WebInputEventResult EventHandler::HandleMouseMoveOrLeaveEvent(
     mouse_event_manager_->ClearDragHeuristicState();
     capturing_mouse_events_element_ = nullptr;
     ReleaseMouseCaptureFromLocalRoot();
+
+    // If the scrollbar still thinks it's being dragged, tell it to stop.
+    // Can happen on Win if we lose focus (e.g. from Alt-Tab) mid-drag.
+    if (last_scrollbar_under_mouse_ &&
+        last_scrollbar_under_mouse_->PressedPart() != ScrollbarPart::kNoPart)
+      last_scrollbar_under_mouse_->MouseUp(mouse_event);
   }
 
   if (RuntimeEnabledFeatures::MiddleClickAutoscrollEnabled()) {
@@ -1116,7 +1124,7 @@ WebInputEventResult EventHandler::HandleMouseMoveOrLeaveEvent(
     }
     LocalFrameView* view = frame_->View();
     if ((!is_remote_frame || is_portal) && view) {
-      base::Optional<ui::Cursor> optional_cursor =
+      absl::optional<ui::Cursor> optional_cursor =
           SelectCursor(mev.GetHitTestLocation(), mev.GetHitTestResult());
       if (optional_cursor.has_value()) {
         view->SetCursor(optional_cursor.value());
@@ -1430,15 +1438,17 @@ LocalFrame* EventHandler::DetermineActivePointerTrackerFrame(
   return nullptr;
 }
 
-void EventHandler::SetPointerCapture(PointerId pointer_id, Element* target) {
+void EventHandler::SetPointerCapture(PointerId pointer_id,
+                                     Element* target,
+                                     bool explicit_capture) {
   // TODO(crbug.com/591387): This functionality should be per page not per
   // frame.
   LocalFrame* tracking_frame = DetermineActivePointerTrackerFrame(pointer_id);
 
   bool captured =
-      tracking_frame &&
-      tracking_frame->GetEventHandler()
-          .pointer_event_manager_->SetPointerCapture(pointer_id, target);
+      tracking_frame && tracking_frame->GetEventHandler()
+                            .pointer_event_manager_->SetPointerCapture(
+                                pointer_id, target, explicit_capture);
 
   if (captured && pointer_id == PointerEventFactory::kMouseId) {
     CaptureMouseEventsToWidget(true);
@@ -1483,18 +1493,9 @@ void EventHandler::ReleasePointerCapture(PointerId pointer_id,
     // approach for removing mouse subframe capture. It must be re-write
     // before enable the flag.
     if (RuntimeEnabledFeatures::MouseSubframeNoImplicitCaptureEnabled()) {
-      LocalFrame* frame = frame_;
       LocalFrame* parent = DynamicTo<LocalFrame>(frame_->Tree().Parent());
       while (parent) {
-        Element* subframe_element = nullptr;
-        if (frame->OwnerLayoutObject() &&
-            frame->OwnerLayoutObject()->GetNode()) {
-          subframe_element =
-              DynamicTo<Element>(frame->OwnerLayoutObject()->GetNode());
-        }
-
         parent->GetEventHandler().capturing_subframe_element_ = nullptr;
-        frame = parent;
         parent = DynamicTo<LocalFrame>(parent->Tree().Parent());
       }
     }
@@ -2141,6 +2142,15 @@ WebInputEventResult EventHandler::ShowNonLocatedContextMenu(
     int right = std::max(start_point.X(), end_point.X());
     int bottom = std::max(start_point.Y(), end_point.Y());
 
+    // If selection is a caret and is inside an anchor element, then set that
+    // as the "focused" element so we can show "open link" option in context
+    // menu.
+    if (visible_selection.IsCaret()) {
+      Element* anchor_element =
+          EnclosingAnchorElement(visible_selection.ComputeStartPosition());
+      if (anchor_element)
+        focused_element = anchor_element;
+    }
     // Intersect the selection rect and the visible bounds of focused_element.
     if (focused_element) {
       IntRect clipped_rect = view->ViewportToFrame(

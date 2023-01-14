@@ -1,34 +1,37 @@
 /****************************************************************************
 **
 ** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtPDF module of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL3$
+** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
 ** GNU Lesser General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU Lesser
 ** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
+** Foundation and appearing in the file LICENSE.LGPL3 included in the
 ** packaging of this file. Please review the following information to
 ** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
+** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 **
 ** GNU General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
+** General Public License version 2.0 or (at your option) the GNU General
+** Public license version 3 or any later version approved by the KDE Free
+** Qt Foundation. The licenses are as published by the Free Software
+** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-2.0.html and
+** https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
@@ -476,6 +479,9 @@ QPdfDocument::~QPdfDocument()
 {
 }
 
+/*!
+    Loads the document contents from \a fileName.
+*/
 QPdfDocument::DocumentError QPdfDocument::load(const QString &fileName)
 {
     qCDebug(qLcDoc) << "loading" << fileName;
@@ -510,13 +516,18 @@ QPdfDocument::DocumentError QPdfDocument::load(const QString &fileName)
 */
 
 /*!
-    Returns the current status of the document.
+    \property QPdfDocument::status
+
+    This property holds the current status of the document.
 */
 QPdfDocument::Status QPdfDocument::status() const
 {
     return d->status;
 }
 
+/*!
+    Loads the document contents from \a device.
+*/
 void QPdfDocument::load(QIODevice *device)
 {
     close();
@@ -526,6 +537,14 @@ void QPdfDocument::load(QIODevice *device)
     d->load(device, /*transfer ownership*/false);
 }
 
+/*!
+    \property QPdfDocument::password
+
+    This property holds the document password.
+
+    If the document is protected by a password, the user must provide it, and
+    the application must set this property. Otherwise, it's not needed.
+*/
 void QPdfDocument::setPassword(const QString &password)
 {
     const QByteArray newPassword = password.toUtf8();
@@ -635,13 +654,33 @@ QVariant QPdfDocument::metaData(MetaDataField field) const
     return QVariant();
 }
 
+/*!
+    \enum QPdfDocument::DocumentError
+
+    This enum describes the error while attempting the last operation on the document.
+
+    \value NoError No error occurred.
+    \value UnknownError Unknown type of error.
+    \value DataNotYetAvailableError The document is still loading, it's too early to attempt the operation.
+    \value FileNotFoundError The file given to load() was not found.
+    \value InvalidFileFormatError The file given to load() is not a valid PDF file.
+    \value IncorrectPasswordError The password given to setPassword() is not correct for this file.
+    \value UnsupportedSecuritySchemeError QPdfDocument is not able to unlock this kind of PDF file.
+
+    \sa QPdfDocument::error()
+*/
+
+/*!
+    Returns the type of error if \l status is \c Error, or \c NoError if there
+    is no error.
+*/
 QPdfDocument::DocumentError QPdfDocument::error() const
 {
     return d->lastError;
 }
 
 /*!
-  Closes the document.
+    Closes the document.
 */
 void QPdfDocument::close()
 {
@@ -661,14 +700,19 @@ void QPdfDocument::close()
 }
 
 /*!
-  Returns the amount of pages for the loaded document or \c 0 if
-  no document is loaded.
+    \property QPdfDocument::pageCount
+
+    This property holds the number of pages in the loaded document or \c 0 if
+    no document is loaded.
 */
 int QPdfDocument::pageCount() const
 {
     return d->pageCount;
 }
 
+/*!
+    Returns the size of page \a page in points (1/72 of an inch).
+*/
 QSizeF QPdfDocument::pageSize(int page) const
 {
     QSizeF result;
@@ -836,7 +880,7 @@ QPdfSelection QPdfDocument::getSelection(int page, QPointF start, QPointF end)
 
 /*!
     Returns information about the text on the given \a page that can be found
-    beginning at the given \a startIndex with at most \l maxLength characters.
+    beginning at the given \a startIndex with at most \a maxLength characters.
 */
 QPdfSelection QPdfDocument::getSelectionAtIndex(int page, int startIndex, int maxLength)
 {

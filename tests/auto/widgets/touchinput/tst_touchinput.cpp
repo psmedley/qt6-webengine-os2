@@ -37,6 +37,12 @@
 
 static QPointingDevice* s_touchDevice = nullptr;
 
+struct Page : QWebEnginePage
+{
+    QStringList alerts;
+    void javaScriptAlert(const QUrl &/*origin*/, const QString &msg) override { alerts.append(msg); }
+};
+
 class TouchInputTest : public QObject
 {
     Q_OBJECT
@@ -54,29 +60,38 @@ private Q_SLOTS:
     void pinchZoom_data();
     void pinchZoom();
     void complexSequence();
+    void buttonClickHandler();
+    void htmlSelectPopup();
 
 private:
+    Page page;
     QWebEngineView view;
     QSignalSpy loadSpy { &view, &QWebEngineView::loadFinished };
     QPoint notextCenter, textCenter, inputCenter;
 
     QString activeElement() { return evaluateJavaScriptSync(view.page(), "document.activeElement.id").toString(); }
 
+    void makeTouch(QWindow *w, const QPoint &p) {
+        QTest::touchEvent(w, s_touchDevice).press(1, p);
+        QTest::touchEvent(w, s_touchDevice).release(1, p);
+    }
+    void makeTouch(const QPoint &p) { makeTouch(view.windowHandle(), p); }
+
     void gestureScroll(bool down) {
         auto target = view.focusProxy();
         QPoint p(target->width() / 2, target->height() / 4 * (down ? 3 : 1));
 
-        QTest::touchEvent(target, s_touchDevice).press(42, p, target);
+        QTest::touchEvent(target, s_touchDevice).press(1, p, target);
 
         QSignalSpy spy(view.page(), &QWebEnginePage::scrollPositionChanged);
         for (int i = 0; i < 3; ++i) {
             down ? p -= QPoint(5, 15) : p += QPoint(5, 15);
             QTest::qWait(100); // too fast and events are recognized as fling gesture
-            QTest::touchEvent(target, s_touchDevice).move(42, p, target);
+            QTest::touchEvent(target, s_touchDevice).move(1, p, target);
             spy.wait();
         }
 
-        QTest::touchEvent(target, s_touchDevice).release(42, p, target);
+        QTest::touchEvent(target, s_touchDevice).release(1, p, target);
     }
 
     void gesturePinch(bool zoomIn, bool tapOneByOne = false) {
@@ -85,10 +100,10 @@ private:
         auto t1 = p - QPoint(zoomIn ? 50 : 150, 10), t2 = p + QPoint(zoomIn ? 50 : 150, 10);
 
         if (tapOneByOne) {
-            QTest::touchEvent(target, s_touchDevice).press(42, t1, target);
-            QTest::touchEvent(target, s_touchDevice).stationary(42).press(24, t2, target);
+            QTest::touchEvent(target, s_touchDevice).press(0, t1, target);
+            QTest::touchEvent(target, s_touchDevice).stationary(0).press(1, t2, target);
         } else {
-            QTest::touchEvent(target, s_touchDevice).press(42, t1, target).press(24, t2, target);
+            QTest::touchEvent(target, s_touchDevice).press(0, t1, target).press(1, t2, target);
         }
 
         for (int i = 0; i < 3; ++i) {
@@ -100,14 +115,14 @@ private:
                 t2 -= QPoint(35, 5);
             }
             QTest::qWait(100); // too fast and events are recognized as fling gesture
-            QTest::touchEvent(target, s_touchDevice).move(24, t1, target).move(42, t2, target);
+            QTest::touchEvent(target, s_touchDevice).move(1, t1, target).move(0, t2, target);
         }
 
         if (tapOneByOne) {
-            QTest::touchEvent(target, s_touchDevice).stationary(42).release(24, t2, target);
-            QTest::touchEvent(target, s_touchDevice).release(42, t1, target);
+            QTest::touchEvent(target, s_touchDevice).stationary(0).release(1, t2, target);
+            QTest::touchEvent(target, s_touchDevice).release(0, t1, target);
         } else {
-            QTest::touchEvent(target, s_touchDevice).release(42, t1, target).release(24, t2, target);
+            QTest::touchEvent(target, s_touchDevice).release(0, t1, target).release(1, t2, target);
         }
     }
 
@@ -131,6 +146,7 @@ void TouchInputTest::initTestCase()
 {
     s_touchDevice = QTest::createTouchDevice();
 
+    view.setPage(&page);
     view.settings()->setAttribute(QWebEngineSettings::FocusOnNavigationEnabled, false);
 
     view.show(); view.resize(480, 320);
@@ -140,6 +156,9 @@ void TouchInputTest::initTestCase()
                  "<p id='text' style='width: 150px;'>The Qt Company</p>"
                  "<div id='notext' style='width: 150px; height: 100px; background-color: #f00;'></div>"
                  "<form><input id='input' width='150px' type='text' value='The Qt Company2' /></form>"
+                 "<button id='btn' type='button' onclick='alert(\"button clicked!\")'>Click Me!</button>"
+                 "<select id='select' onchange='alert(\"option changed to: \" + this.value)'>"
+                 "<option value='O1'>O1</option><option value='O2'>O2</option><option value='O3'>O3</option></select>"
                  "<table style='width: 100%; padding: 15px; text-align: center;'>"
                  "<tr><td>BEFORE</td><td><div class='rect' style='background-color: #00f;'></div></td><td>AFTER</td></tr>"
                  "<tr><td>BEFORE</td><td><div class='rect' style='background-color: #0f0;'></div></td><td>AFTER</td></tr>"
@@ -163,6 +182,7 @@ void TouchInputTest::cleanup()
     evaluateJavaScriptSync(view.page(), "window.scrollTo(0, 0)");
     QTRY_COMPARE(getScrollPosition(), 0);
     QTRY_COMPARE(pageScrollPosition(), 0);
+    page.alerts.clear();
 }
 
 void TouchInputTest::touchTap()
@@ -343,6 +363,34 @@ void TouchInputTest::complexSequence()
             QTRY_VERIFY2(getScaleFactor(&s) > scaleBefore, qPrintable(QString("i: %1, scale: %2").arg(i).arg(s)));
         }
     }
+}
+
+void TouchInputTest::buttonClickHandler()
+{
+    auto buttonCenter = elementGeometry(view.page(), "btn").center();
+    makeTouch(buttonCenter);
+    QTRY_VERIFY(!page.alerts.isEmpty());
+    QCOMPARE(page.alerts.first(), "button clicked!");
+    QCOMPARE(page.alerts.size(), 1);
+    QEXPECT_FAIL("", "Shouldn't trigger twice due to synthesized mouse events for touch", Continue);
+    QTRY_VERIFY_WITH_TIMEOUT(page.alerts.size() == 2, 500);
+}
+
+void TouchInputTest::htmlSelectPopup()
+{
+    auto selectRect = elementGeometry(view.page(), "select");
+    makeTouch(selectRect.center());
+    QTRY_VERIFY(QApplication::activePopupWidget());
+    QCOMPARE(activeElement(), QStringLiteral("select"));
+
+    auto popup = QApplication::activePopupWidget();
+    makeTouch(popup->windowHandle(), QPoint(popup->width() / 2, popup->height() / 2));
+    QTRY_VERIFY(!QApplication::activePopupWidget());
+
+    QTRY_VERIFY(!page.alerts.isEmpty());
+    QCOMPARE(page.alerts.first(), "option changed to: O2");
+    QEXPECT_FAIL("", "Shouldn't trigger twice due to synthesized mouse events for touch", Continue);
+    QTRY_VERIFY_WITH_TIMEOUT(page.alerts.size() == 2, 500);
 }
 
 QTEST_MAIN(TouchInputTest)

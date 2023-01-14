@@ -5,7 +5,6 @@
 #ifndef CONTENT_RENDERER_PEPPER_PEPPER_HUNG_PLUGIN_FILTER_H_
 #define CONTENT_RENDERER_PEPPER_PEPPER_HUNG_PLUGIN_FILTER_H_
 
-#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -50,6 +49,9 @@ class PepperHungPluginFilter
   void OnChannelError() override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
+  // Notification the HostDispatcher on the main thread has been destroyed.
+  void HostDispatcherDestroyed();
+
  protected:
   ~PepperHungPluginFilter() override;
 
@@ -57,6 +59,9 @@ class PepperHungPluginFilter
   // Binds the mojo channel on the IO thread (where it will be used).
   void BindHungDetectorHostOnIOThread(
       mojo::PendingRemote<mojom::PepperHungDetectorHost> hung_host);
+
+  // Unbinds the mojo channel on the IO thread.
+  void UnbindHungDetectorHostOnIOThread();
 
   // Makes sure that the hung timer is scheduled.
   void EnsureTimerScheduled();

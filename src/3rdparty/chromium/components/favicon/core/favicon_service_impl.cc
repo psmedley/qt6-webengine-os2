@@ -207,7 +207,7 @@ void FaviconServiceImpl::SetImportedFavicons(
 
 void FaviconServiceImpl::AddPageNoVisitForBookmark(
     const GURL& url,
-    const base::string16& title) {
+    const std::u16string& title) {
   history_service_->AddPageNoVisitForBookmark(url, title);
 }
 

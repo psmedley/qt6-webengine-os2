@@ -20,15 +20,10 @@ source_set("printer_provider") {
     "printer_provider_print_job.h",
   ]
 
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
-
   deps = [
     "//components/keyed_service/content",
     "//content/public/browser",
-    "//extensions/browser/api/usb",
+    "//extensions/browser/api",
     "//extensions/common",
     "//extensions/common/api",
     "//services/device/public/cpp/usb",

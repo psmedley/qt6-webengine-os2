@@ -5,7 +5,6 @@
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/features.gni")
 import("//build/config/jumbo.gni")
-import("//tools/grit/grit_rule.gni")
 
 jumbo_static_library("driver") {
   sources = [
@@ -27,6 +26,8 @@ jumbo_static_library("driver") {
     "glue/sync_engine_backend.h",
     "glue/sync_engine_impl.cc",
     "glue/sync_engine_impl.h",
+    "glue/sync_transport_data_prefs.cc",
+    "glue/sync_transport_data_prefs.h",
     "model_load_manager.cc",
     "model_load_manager.h",
     "model_type_controller.cc",
@@ -35,8 +36,6 @@ jumbo_static_library("driver") {
     "non_ui_syncable_service_based_model_type_controller.h",
     "passphrase_type_metrics_provider.cc",
     "passphrase_type_metrics_provider.h",
-    "profile_sync_service.cc",
-    "profile_sync_service.h",
     "startup_controller.cc",
     "startup_controller.h",
     "sync_api_component_factory.h",
@@ -49,10 +48,14 @@ jumbo_static_library("driver") {
     "sync_driver_switches.h",
     "sync_internals_util.cc",
     "sync_internals_util.h",
+    "sync_policy_handler.cc",
+    "sync_policy_handler.h",
     "sync_service.cc",
     "sync_service.h",
     "sync_service_crypto.cc",
     "sync_service_crypto.h",
+    "sync_service_impl.cc",
+    "sync_service_impl.h",
     "sync_service_observer.cc",
     "sync_service_observer.h",
     "sync_service_utils.cc",
@@ -76,7 +79,6 @@ jumbo_static_library("driver") {
     "//components/invalidation/public",
     "//components/sync/base",
     "//components/sync/engine",
-    "//components/sync/js",
     "//components/sync/model",
     "//components/sync/nigori",
     "//components/sync/protocol",
@@ -86,6 +88,7 @@ jumbo_static_library("driver") {
     "//url",
   ]
   deps = [
+    "//base",
     "//base:i18n",
     "//build:chromeos_buildflags",
     "//components/data_use_measurement/core",
@@ -103,28 +106,11 @@ jumbo_static_library("driver") {
     "//services/network/public/cpp",
   ]
 
-  if (!is_ios) {
-    sources += [
-      "sync_policy_handler.cc",
-      "sync_policy_handler.h",
-    ]
-  }
-
   if (is_chromeos_ash) {
     deps += [ "//ash/constants" ]
   }
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
-}
-
-grit("resources") {
-  source = "resources.grd"
-
-  outputs = [
-    "grit/sync_driver_resources.h",
-    "sync_driver_resources.pak",
-  ]
-  output_dir = "$root_gen_dir/components"
 }
 
 static_library("test_support") {
@@ -140,10 +126,10 @@ static_library("test_support") {
     "fake_sync_service.h",
     "mock_sync_service.cc",
     "mock_sync_service.h",
-    "profile_sync_service_bundle.cc",
-    "profile_sync_service_bundle.h",
     "sync_client_mock.cc",
     "sync_client_mock.h",
+    "sync_service_impl_bundle.cc",
+    "sync_service_impl_bundle.h",
     "sync_user_settings_mock.cc",
     "sync_user_settings_mock.h",
     "test_sync_service.cc",

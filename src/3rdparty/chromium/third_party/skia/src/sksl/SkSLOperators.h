@@ -8,10 +8,13 @@
 #ifndef SKSL_OPERATORS
 #define SKSL_OPERATORS
 
-#include "src/sksl/SkSLDefines.h"
+#include "include/private/SkSLDefines.h"
 #include "src/sksl/SkSLLexer.h"
 
 namespace SkSL {
+
+class Context;
+class Type;
 
 class Operator {
 public:
@@ -19,7 +22,7 @@ public:
 
     // Allow implicit conversion from Token::Kind, since this is just a utility wrapper on top.
     Operator(Token::Kind t) : fKind(t) {
-        SkASSERTF(this->isOperator(), "token-kind %d is not an operator", fKind);
+        SkASSERTF(this->isOperator(), "token-kind %d is not an operator", (int)fKind);
     }
 
     enum class Precedence {
@@ -84,8 +87,21 @@ public:
         return !this->isOnlyValidForIntegralTypes();
     }
 
+    /**
+     * Determines the operand and result types of a binary expression. Returns true if the
+     * expression is legal, false otherwise. If false, the values of the out parameters are
+     * undefined.
+     */
+    bool determineBinaryType(const Context& context,
+                             const Type& left,
+                             const Type& right,
+                             const Type** outLeftType,
+                             const Type** outRightType,
+                             const Type** outResultType);
+
 private:
     bool isOperator() const;
+    bool isMatrixMultiply(const Type& left, const Type& right);
 
     Kind fKind;
 };

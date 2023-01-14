@@ -18,6 +18,7 @@
 #include "base/time/default_tick_clock.h"
 #include "net/base/test_proxy_delegate.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_response_headers.h"
@@ -55,6 +56,8 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/scheme_host_port.h"
+#include "url/url_constants.h"
 
 using testing::_;
 using testing::AnyNumber;
@@ -178,8 +181,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
                       false),
         random_generator_(0),
         user_agent_(kUserAgent),
-        proxy_host_port_(kProxyHost, kProxyPort),
-        endpoint_host_port_(kOriginHost, kOriginPort),
+        proxy_endpoint_(url::kHttpsScheme, kProxyHost, kProxyPort),
+        destination_endpoint_(url::kHttpsScheme, kOriginHost, kOriginPort),
         http_auth_cache_(
             false /* key_server_entries_by_network_isolation_key */),
         host_resolver_(new MockCachingHostResolver()),
@@ -221,8 +224,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
     EXPECT_CALL(*send_algorithm_, OnApplicationLimited(_)).Times(AnyNumber());
     EXPECT_CALL(*send_algorithm_, GetCongestionControlType())
         .Times(AnyNumber());
-    helper_.reset(
-        new QuicChromiumConnectionHelper(&clock_, &random_generator_));
+    helper_ = std::make_unique<QuicChromiumConnectionHelper>(
+        &clock_, &random_generator_);
     alarm_factory_ =
         std::make_unique<QuicChromiumAlarmFactory>(runner_.get(), &clock_);
 
@@ -256,9 +259,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
         base::WrapUnique(static_cast<QuicServerInfo*>(nullptr)),
         QuicSessionKey("mail.example.org", 80, PRIVACY_MODE_DISABLED,
                        SocketTag(), NetworkIsolationKey(),
-                       false /* disable_secure_dns */),
+                       SecureDnsPolicy::kAllow),
         /*require_confirmation=*/false,
-        /*max_allowed_push_id=*/0,
         /*migrate_session_early_v2=*/false,
         /*migrate_session_on_network_change_v2=*/false,
         /*default_network=*/NetworkChangeNotifier::kInvalidNetworkHandle,
@@ -283,8 +285,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
 
     writer->set_delegate(session_.get());
 
-    session_handle_ =
-        session_->CreateHandle(HostPortPair("mail.example.org", 80));
+    session_handle_ = session_->CreateHandle(
+        url::SchemeHostPort(url::kHttpsScheme, "mail.example.org", 80));
 
     session_->Initialize();
 
@@ -307,10 +309,16 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
 
     sock_ = std::make_unique<QuicProxyClientSocket>(
         std::move(stream_handle), std::move(session_handle_),
-        ProxyServer(ProxyServer::SCHEME_HTTPS, proxy_host_port_), user_agent_,
-        endpoint_host_port_, net_log_.bound(),
-        new HttpAuthController(HttpAuth::AUTH_PROXY,
-                               GURL("https://" + proxy_host_port_.ToString()),
+        // TODO(crbug.com/1206799) Construct `ProxyServer` with plain
+        // `proxy_endpoint_` once it supports `url::SchemeHostPort`.
+        ProxyServer(ProxyServer::SCHEME_HTTPS,
+                    HostPortPair::FromSchemeHostPort(proxy_endpoint_)),
+        user_agent_,
+        // TODO(crbug.com/1206799) Construct `QuicProxyClientSocket` with plain
+        // `proxy_endpoint_` once it supports `url::SchemeHostPort`.
+        HostPortPair::FromSchemeHostPort(destination_endpoint_),
+        net_log_.bound(),
+        new HttpAuthController(HttpAuth::AUTH_PROXY, proxy_endpoint_.GetURL(),
                                NetworkIsolationKey(), &http_auth_cache_,
                                http_auth_handler_factory_.get(),
                                host_resolver_.get()),
@@ -321,7 +329,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
 
   void PopulateConnectRequestIR(spdy::Http2HeaderBlock* block) {
     (*block)[":method"] = "CONNECT";
-    (*block)[":authority"] = endpoint_host_port_.ToString();
+    (*block)[":authority"] =
+        HostPortPair::FromSchemeHostPort(destination_endpoint_).ToString();
     (*block)["user-agent"] = kUserAgent;
   }
 
@@ -380,7 +389,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
       RequestPriority request_priority = LOWEST) {
     spdy::Http2HeaderBlock block;
     block[":method"] = "CONNECT";
-    block[":authority"] = endpoint_host_port_.ToString();
+    block[":authority"] =
+        HostPortPair::FromSchemeHostPort(destination_endpoint_).ToString();
     for (const auto& header : extra_headers) {
       block[header.first] = header.second;
     }
@@ -588,10 +598,9 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
     if (!version_.HasIetfQuicFrames()) {
       return "";
     }
-    std::unique_ptr<char[]> buffer;
-    auto header_length =
-        quic::HttpEncoder::SerializeDataFrameHeader(body_len, &buffer);
-    return std::string(buffer.get(), header_length);
+    quic::QuicBuffer buffer = quic::HttpEncoder::SerializeDataFrameHeader(
+        body_len, quic::SimpleBufferAllocator::Get());
+    return std::string(buffer.data(), buffer.size());
   }
 
   RecordingBoundTestNetLog net_log_;
@@ -626,8 +635,8 @@ class QuicProxyClientSocketTest : public ::testing::TestWithParam<TestParams>,
   MockCryptoClientStreamFactory crypto_client_stream_factory_;
 
   std::string user_agent_;
-  HostPortPair proxy_host_port_;
-  HostPortPair endpoint_host_port_;
+  url::SchemeHostPort proxy_endpoint_;
+  url::SchemeHostPort destination_endpoint_;
   HttpAuthCache http_auth_cache_;
   std::unique_ptr<MockHostResolverBase> host_resolver_;
   std::unique_ptr<HttpAuthHandlerRegistryFactory> http_auth_handler_factory_;
@@ -669,7 +678,10 @@ TEST_P(QuicProxyClientSocketTest, ConnectSendsCorrectRequest) {
 
 TEST_P(QuicProxyClientSocketTest, ProxyDelegateExtraHeaders) {
   proxy_delegate_ = std::make_unique<TestProxyDelegate>();
-  ProxyServer proxy_server(ProxyServer::SCHEME_HTTPS, proxy_host_port_);
+  // TODO(crbug.com/1206799) Construct `ProxyServer` with plain
+  // `proxy_endpoint_` once it supports `url::SchemeHostPort`.
+  ProxyServer proxy_server(ProxyServer::SCHEME_HTTPS,
+                           HostPortPair::FromSchemeHostPort(proxy_endpoint_));
 
   const char kResponseHeaderName[] = "foo";
   const char kResponseHeaderValue[] = "testing";
@@ -747,8 +759,8 @@ TEST_P(QuicProxyClientSocketTest, ConnectWithAuthCredentials) {
   Initialize();
 
   // Add auth to cache
-  const base::string16 kFoo(base::ASCIIToUTF16("foo"));
-  const base::string16 kBar(base::ASCIIToUTF16("bar"));
+  const std::u16string kFoo(u"foo");
+  const std::u16string kBar(u"bar");
   http_auth_cache_.Add(GURL(kProxyUrl), HttpAuth::AUTH_PROXY, "MyRealm1",
                        HttpAuth::AUTH_SCHEME_BASIC, NetworkIsolationKey(),
                        "Basic realm=MyRealm1", AuthCredentials(kFoo, kBar),
@@ -1268,29 +1280,23 @@ TEST_P(QuicProxyClientSocketTest, MultipleShortReadsThenMoreRead) {
   mock_quic_data_.AddRead(ASYNC, ConstructServerConnectReplyPacket(1, !kFin));
   mock_quic_data_.AddRead(ASYNC, ERR_IO_PENDING);  // Pause
 
-  int offset = 0;
-
   std::string header = ConstructDataHeader(kLen1);
   mock_quic_data_.AddRead(
       ASYNC, ConstructServerDataPacket(2, header + std::string(kMsg1, kLen1)));
-  offset += kLen1 + header.length();
   mock_quic_data_.AddWrite(SYNCHRONOUS,
                            ConstructAckPacket(packet_number++, 2, 1));
 
   std::string header2 = ConstructDataHeader(kLen3);
   mock_quic_data_.AddRead(
       ASYNC, ConstructServerDataPacket(3, header2 + std::string(kMsg3, kLen3)));
-  offset += kLen3 + header2.length();
   mock_quic_data_.AddRead(
       ASYNC, ConstructServerDataPacket(4, header2 + std::string(kMsg3, kLen3)));
-  offset += kLen3 + header2.length();
   mock_quic_data_.AddWrite(SYNCHRONOUS,
                            ConstructAckPacket(packet_number++, 4, 3));
 
   std::string header3 = ConstructDataHeader(kLen2);
   mock_quic_data_.AddRead(
       ASYNC, ConstructServerDataPacket(5, header3 + std::string(kMsg2, kLen2)));
-  offset += kLen2 + header3.length();
   mock_quic_data_.AddRead(SYNCHRONOUS, ERR_IO_PENDING);
 
   mock_quic_data_.AddWrite(

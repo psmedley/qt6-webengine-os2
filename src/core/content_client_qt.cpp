@@ -53,6 +53,7 @@
 #include "extensions/common/constants.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
+#include "media/cdm/supported_audio_codecs.h"
 #include "media/media_buildflags.h"
 #include "ui/base/layout.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -89,6 +90,8 @@ const char kWidevineCdmFileName[] =
 const char kPdfPluginMimeType[] = "application/x-google-chrome-pdf";
 const char kPdfPluginPath[] = "internal-pdf-viewer";
 #endif // QT_CONFIG(webengine_printing_and_pdf)
+
+using Robustness = content::CdmInfo::Robustness;
 
 static QString webenginePluginsPath()
 {
@@ -180,7 +183,7 @@ namespace QtWebEngineCore {
 
 #if defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
 static bool IsWidevineAvailable(base::FilePath *cdm_path,
-                                content::CdmCapability *capability)
+                                media::CdmCapability *capability)
 {
     QStringList pluginPaths;
     const base::CommandLine::StringType widevine_argument = base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(switches::kCdmWidevinePath);
@@ -248,15 +251,56 @@ static bool IsWidevineAvailable(base::FilePath *cdm_path,
         }
     }
 #elif defined(Q_OS_LINUX)
-        pluginPaths << QStringLiteral("/opt/google/chrome/libwidevinecdm.so") // Old Google Chrome
+        QList<QDir> potentialWidevineVersionDirs;
+
+        // Google Chrome widevine modules
+        QDir chromeWidevineDir(QDir::homePath() + "/.config/google-chrome/WidevineCdm");
+        if (chromeWidevineDir.exists())
+            potentialWidevineVersionDirs << chromeWidevineDir;
+
+        // Firefox widevine modules
+        QDir firefoxPotentialProfilesDir(QDir::homePath() + "/.mozilla/firefox");
+        if (firefoxPotentialProfilesDir.exists()) {
+            QFileInfoList firefoxProfileDirs = firefoxPotentialProfilesDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+            for (const QFileInfo &info : firefoxProfileDirs) {
+                QDir widevinePluginsDir(info.absoluteFilePath() + "/gmp-widevinecdm");
+                if (widevinePluginsDir.exists())
+                    potentialWidevineVersionDirs << widevinePluginsDir;
+            }
+        }
+
+        // Chromium widevine modules (might not work with proprietary codecs)
+        QDir chromiumWidevineDir(QDir::homePath() + "/.config/chromium/WidevineCdm");
+        if (chromiumWidevineDir.exists())
+            potentialWidevineVersionDirs << chromiumWidevineDir;
+
+        // Search for widewine versions
+        for (const QDir &dir : potentialWidevineVersionDirs) {
+            QFileInfoList widevineVersionDirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+            // ### alternatively look up in the manifest.json and take the path from there.
 #if Q_PROCESSOR_WORDSIZE == 8
-                    << QStringLiteral("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so")
+            const QString library = QLatin1String("/_platform_specific/linux_x64/libwidevinecdm.so");
 #else
-                    << QStringLiteral("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x86/libwidevinecdm.so")
+            const QString library = QLatin1String("/_platform_specific/linux_x86/libwidevinecdm.so");
 #endif
-                    << QStringLiteral("/usr/lib/chromium/libwidevinecdm.so") // Arch
+            for (const QFileInfo &info : widevineVersionDirs) {
+                pluginPaths << info.absoluteFilePath() + "/libwidevinecdm.so";
+                pluginPaths << info.absoluteFilePath() + library;
+            }
+        }
+
+        // Fixed paths:
+        pluginPaths << QStringLiteral("/usr/lib/chromium/libwidevinecdm.so") // Arch
                     << QStringLiteral("/usr/lib/chromium-browser/libwidevinecdm.so") // Ubuntu/neon
-                    << QStringLiteral("/usr/lib64/chromium/libwidevinecdm.so"); // OpenSUSE style
+                    << QStringLiteral("/usr/lib64/chromium/libwidevinecdm.so") // OpenSUSE style
+#if Q_PROCESSOR_WORDSIZE == 8
+                    << QStringLiteral("/usr/lib64/chromium-browser/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so") // Gentoo
+                    << QStringLiteral("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so") // Old Google Chrome
+#else
+                    << QStringLiteral("/usr/lib/chromium-browser/WidevineCdm/_platform_specific/linux_x86/libwidevinecdm.so") // Gentoo
+                    << QStringLiteral("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x86/libwidevinecdm.so") // Old Google Chrome
+#endif
+                    << QStringLiteral("/opt/google/chrome/libwidevinecdm.so"); // Older Google Chrome
 #endif
     }
 
@@ -265,11 +309,14 @@ static bool IsWidevineAvailable(base::FilePath *cdm_path,
         if (base::PathExists(*cdm_path)) {
             // Add the supported codecs as if they came from the component manifest.
             // This list must match the CDM that is being bundled with Chrome.
-            capability->video_codecs.push_back(media::VideoCodec::kCodecVP8);
-            capability->video_codecs.push_back(media::VideoCodec::kCodecVP9);
+            const std::vector<media::VideoCodecProfile> kAllProfiles = {};
+            capability->video_codecs.emplace(media::VideoCodec::kCodecVP8, kAllProfiles);
+            capability->video_codecs.emplace(media::VideoCodec::kCodecVP9, kAllProfiles);
+            capability->video_codecs.emplace(media::VideoCodec::kCodecAV1, kAllProfiles);
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-            capability->video_codecs.push_back(media::VideoCodec::kCodecH264);
+            capability->video_codecs.emplace(media::VideoCodec::kCodecH264, kAllProfiles);
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+            capability->audio_codecs = media::GetCdmSupportedAudioCodecs();
 
             // Add the supported encryption schemes as if they came from the
             // component manifest. This list must match the CDM that is being
@@ -294,12 +341,12 @@ void ContentClientQt::AddContentDecryptionModules(std::vector<content::CdmInfo> 
     if (cdms) {
 #if defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
         base::FilePath cdm_path;
-        content::CdmCapability capability;
+        media::CdmCapability capability;
         if (IsWidevineAvailable(&cdm_path, &capability)) {
             const base::Version version;
-            cdms->push_back(content::CdmInfo(kWidevineCdmDisplayName, kWidevineCdmGuid, version, cdm_path,
-                                             kWidevineCdmFileSystemId, std::move(capability),
-                                             kWidevineKeySystem, false));
+            cdms->push_back(content::CdmInfo(kWidevineKeySystem, Robustness::kSoftwareSecure, std::move(capability),
+                                             /*supports_sub_key_systems=*/false, kWidevineCdmDisplayName,
+                                             kWidevineCdmGuid, version, cdm_path, kWidevineCdmFileSystemId));
         }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
 
@@ -317,8 +364,8 @@ void ContentClientQt::AddContentDecryptionModules(std::vector<content::CdmInfo> 
                     "org.chromium.externalclearkey.differentguid";
 
             // Supported codecs are hard-coded in ExternalClearKeyProperties.
-            content::CdmCapability capability(
-                {}, {media::EncryptionScheme::kCenc, media::EncryptionScheme::kCbcs},
+            media::CdmCapability capability(
+                {}, {}, {media::EncryptionScheme::kCenc, media::EncryptionScheme::kCbcs},
                 {media::CdmSessionType::kTemporary,
                  media::CdmSessionType::kPersistentLicense});
 
@@ -326,16 +373,17 @@ void ContentClientQt::AddContentDecryptionModules(std::vector<content::CdmInfo> 
             // Otherwise, it'll be treated as a sub-key-system of normal
             // kExternalClearKeyKeySystem. See MultipleCdmTypes test in
             // ECKEncryptedMediaTest.
-            cdms->push_back(content::CdmInfo(media::kClearKeyCdmDisplayName, media::kClearKeyCdmDifferentGuid,
-                                             base::Version("0.1.0.0"), clear_key_cdm_path,
-                                             media::kClearKeyCdmFileSystemId, capability,
-                                             kExternalClearKeyDifferentGuidTestKeySystem, false));
+            cdms->push_back(content::CdmInfo(kExternalClearKeyDifferentGuidTestKeySystem,
+                                             Robustness::kSoftwareSecure, capability,
+                                             /*supports_sub_key_systems=*/false, media::kClearKeyCdmDisplayName,
+                                             media::kClearKeyCdmDifferentGuid, base::Version("0.1.0.0"),
+                                             clear_key_cdm_path, media::kClearKeyCdmFileSystemId));
 
-            // Supported codecs are hard-coded in ExternalClearKeyProperties.
-            cdms->push_back(content::CdmInfo(media::kClearKeyCdmDisplayName, media::kClearKeyCdmGuid,
-                                             base::Version("0.1.0.0"), clear_key_cdm_path,
-                                             media::kClearKeyCdmFileSystemId, capability,
-                                             kExternalClearKeyKeySystem, true));
+            cdms->push_back(content::CdmInfo(kExternalClearKeyKeySystem,
+                                             Robustness::kSoftwareSecure, capability,
+                                             /*supports_sub_key_systems=*/true, media::kClearKeyCdmDisplayName,
+                                             media::kClearKeyCdmGuid, base::Version("0.1.0.0"),
+                                             clear_key_cdm_path, media::kClearKeyCdmFileSystemId));
         }
 #endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
     }
@@ -354,7 +402,7 @@ void ContentClientQt::AddAdditionalSchemes(Schemes* schemes)
 #endif
 }
 
-base::StringPiece ContentClientQt::GetDataResource(int resource_id, ui::ScaleFactor scale_factor)
+base::StringPiece ContentClientQt::GetDataResource(int resource_id, ui::ResourceScaleFactor scale_factor)
 {
     return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(resource_id, scale_factor);
 }
@@ -369,7 +417,7 @@ gfx::Image &ContentClientQt::GetNativeImageNamed(int resource_id)
     return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(resource_id);
 }
 
-base::string16 ContentClientQt::GetLocalizedString(int message_id)
+std::u16string ContentClientQt::GetLocalizedString(int message_id)
 {
     return l10n_util::GetStringUTF16(message_id);
 }

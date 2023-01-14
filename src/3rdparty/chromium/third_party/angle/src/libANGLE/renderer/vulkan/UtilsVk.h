@@ -34,6 +34,12 @@
 
 namespace rx
 {
+struct InternalShaderPerfCounters
+{
+    // Total descriptor set allocations for all UtilsVk::Functions
+    uint32_t descriptorSetsAllocated;
+};
+
 class UtilsVk : angle::NonCopyable
 {
   public:
@@ -52,6 +58,7 @@ class UtilsVk : angle::NonCopyable
     struct ConvertIndexIndirectParameters
     {
         uint32_t srcIndirectBufOffset = 0;
+        uint32_t srcIndexBufOffset    = 0;
         uint32_t dstIndexBufOffset    = 0;
         uint32_t maxIndex             = 0;
         uint32_t dstIndirectBufOffset = 0;
@@ -61,6 +68,7 @@ class UtilsVk : angle::NonCopyable
     {
         uint32_t indirectBufferOffset    = 0;
         uint32_t dstIndirectBufferOffset = 0;
+        uint32_t srcIndexBufferOffset    = 0;
         uint32_t dstIndexBufferOffset    = 0;
         uint32_t indicesBitsWidth        = 0;
     };
@@ -162,6 +170,7 @@ class UtilsVk : angle::NonCopyable
     struct OverlayDrawParameters
     {
         uint32_t subgroupSize[2];
+        bool rotateXY;
     };
 
     struct GenerateMipmapParameters
@@ -175,12 +184,6 @@ class UtilsVk : angle::NonCopyable
         gl::DrawBufferMask unresolveColorMask;
         bool unresolveDepth;
         bool unresolveStencil;
-    };
-
-    struct PerfCounters
-    {
-        // Total descriptor set allocations for all UtilsVk::Functions
-        uint32_t descriptorSetsAllocated;
     };
 
     // Based on the maximum number of levels in GenerateMipmap.comp.
@@ -284,7 +287,7 @@ class UtilsVk : angle::NonCopyable
                               const vk::ImageView *destView,
                               const OverlayDrawParameters &params);
 
-    const PerfCounters getObjectPerfCounters() const { return mObjectPerfCounters; }
+    InternalShaderPerfCounters getAndResetObjectPerfCounters();
 
   private:
     ANGLE_ENABLE_STRUCT_PADDING_WARNINGS
@@ -300,6 +303,7 @@ class UtilsVk : angle::NonCopyable
     struct ConvertIndexIndirectShaderParams
     {
         uint32_t srcIndirectOffsetDiv4 = 0;
+        uint32_t srcOffset             = 0;
         uint32_t dstOffsetDiv4         = 0;
         uint32_t maxIndex              = 0;
         uint32_t dstIndirectOffsetDiv4 = 0;
@@ -309,6 +313,7 @@ class UtilsVk : angle::NonCopyable
     {
         uint32_t cmdOffsetDiv4    = 0;
         uint32_t dstCmdOffsetDiv4 = 0;
+        uint32_t srcOffset        = 0;
         uint32_t dstOffsetDiv4    = 0;
         uint32_t isRestartEnabled = 0;
     };
@@ -411,6 +416,7 @@ class UtilsVk : angle::NonCopyable
     {
         // Structure matching PushConstants in OverlayDraw.comp
         uint32_t outputSize[2] = {};
+        uint32_t rotateXY;
     };
 
     struct GenerateMipmapShaderParams
@@ -567,7 +573,8 @@ class UtilsVk : angle::NonCopyable
     vk::Sampler mPointSampler;
     vk::Sampler mLinearSampler;
 
-    PerfCounters mObjectPerfCounters;
+    InternalShaderPerfCounters mPerfCounters;
+    InternalShaderPerfCounters mCumulativePerfCounters;
 };
 
 }  // namespace rx

@@ -28,7 +28,6 @@
 #include "platform/base/prng.h"
 #include "platform/public/cancelable_alarm.h"
 #include "platform/public/mutex.h"
-#include "proto/connections_enums.pb.h"
 // Prefer using absl:: versions of a set and a map; they tend to be more
 // efficient: implementation is using open-addressing hash tables.
 #include "absl/container/flat_hash_map.h"
@@ -240,6 +239,8 @@ class ClientProxy final {
   void ScheduleClearLocalHighVisModeCacheEndpointIdAlarm();
   void CancelClearLocalHighVisModeCacheEndpointIdAlarm();
 
+  std::string ToString(PayloadProgressInfo::Status status) const;
+
   mutable RecursiveMutex mutex_;
   Prng prng_;
   std::int64_t client_id_;
@@ -298,10 +299,6 @@ class ClientProxy final {
   std::unique_ptr<CancellationFlag> default_cancellation_flag_ =
       std::make_unique<CancellationFlag>(true);
 };
-
-// Operator overloads when comparing Ptr<ClientProxy>.
-bool operator==(const ClientProxy& lhs, const ClientProxy& rhs);
-bool operator<(const ClientProxy& lhs, const ClientProxy& rhs);
 
 }  // namespace connections
 }  // namespace nearby

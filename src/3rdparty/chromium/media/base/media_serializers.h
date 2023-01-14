@@ -14,10 +14,12 @@
 #include "media/base/buffering_state.h"
 #include "media/base/decoder.h"
 #include "media/base/media_serializers_base.h"
+#include "media/base/renderer_factory_selector.h"
 #include "media/base/status.h"
 #include "media/base/status_codes.h"
 #include "media/base/text_track_config.h"
 #include "media/base/video_decoder_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/hdr_metadata.h"
 
@@ -61,8 +63,8 @@ struct MediaSerializer<std::vector<VecType>> {
 
 // serialize optional types
 template <typename OptType>
-struct MediaSerializer<base::Optional<OptType>> {
-  static base::Value Serialize(const base::Optional<OptType>& opt) {
+struct MediaSerializer<absl::optional<OptType>> {
+  static base::Value Serialize(const absl::optional<OptType>& opt) {
     return opt ? MediaSerializer<OptType>::Serialize(opt.value())
                : base::Value("unset");  // TODO(tmathmeyer) maybe empty string?
   }
@@ -131,6 +133,14 @@ template <>
 struct MediaSerializer<base::TimeDelta> {
   static inline base::Value Serialize(const base::TimeDelta value) {
     return MediaSerializer<double>::Serialize(value.InSecondsF());
+  }
+};
+
+// Enum (simple)
+template <>
+struct MediaSerializer<RendererType> {
+  static inline base::Value Serialize(RendererType value) {
+    return base::Value(GetRendererName(value));
   }
 };
 
@@ -233,21 +243,22 @@ struct MediaSerializer<gfx::HDRMetadata> {
   static base::Value Serialize(const gfx::HDRMetadata& value) {
     // TODO(tmathmeyer) serialize more fields here potentially.
     base::Value result(base::Value::Type::DICTIONARY);
-    FIELD_SERIALIZE("luminance range",
-                    base::StringPrintf("%.2f => %.2f",
-                                       value.mastering_metadata.luminance_min,
-                                       value.mastering_metadata.luminance_max));
+    FIELD_SERIALIZE(
+        "luminance range",
+        base::StringPrintf("%.2f => %.2f",
+                           value.color_volume_metadata.luminance_min,
+                           value.color_volume_metadata.luminance_max));
     FIELD_SERIALIZE("primaries",
                     base::StringPrintf(
                         "[r:%.4f,%.4f, g:%.4f,%.4f, b:%.4f,%.4f, wp:%.4f,%.4f]",
-                        value.mastering_metadata.primary_r.x(),
-                        value.mastering_metadata.primary_r.y(),
-                        value.mastering_metadata.primary_g.x(),
-                        value.mastering_metadata.primary_g.y(),
-                        value.mastering_metadata.primary_b.x(),
-                        value.mastering_metadata.primary_b.y(),
-                        value.mastering_metadata.white_point.x(),
-                        value.mastering_metadata.white_point.y()));
+                        value.color_volume_metadata.primary_r.x(),
+                        value.color_volume_metadata.primary_r.y(),
+                        value.color_volume_metadata.primary_g.x(),
+                        value.color_volume_metadata.primary_g.y(),
+                        value.color_volume_metadata.primary_b.x(),
+                        value.color_volume_metadata.primary_b.y(),
+                        value.color_volume_metadata.white_point.x(),
+                        value.color_volume_metadata.white_point.y()));
     return result;
   }
 };

@@ -18,7 +18,6 @@ extensions_api_schema_files_ = [
   "bluetooth_low_energy.idl",
   "bluetooth_private.idl",
   "bluetooth_socket.idl",
-  "cast_channel.idl",
   "cec_private.idl",
   "clipboard.idl",
   "declarative_net_request.idl",
@@ -62,8 +61,11 @@ extensions_api_schema_files_ = [
 
 extensions_manifest_only_schema_files_ = [
   "content_scripts.idl",
+  "cross_origin_isolation.idl",
   "extensions_manifest_types.json",
   "incognito.json",
+  "oauth2.idl",
+  "requirements.json",
   "shared_module.idl",
   "web_accessible_resources.idl",
   "web_accessible_resources_mv2.idl",
@@ -85,7 +87,6 @@ if (use_qt) {
     "bluetooth_low_energy.idl",
     "bluetooth_private.idl",
     "bluetooth_socket.idl",
-    "cast_channel.idl",
     "feedback_private.idl",
   ]
 }

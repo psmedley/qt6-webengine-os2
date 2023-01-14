@@ -9,7 +9,6 @@
 #include "base/files/file_util.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
@@ -20,6 +19,7 @@
 #include "content/shell/browser/shell.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace {
 
@@ -116,7 +116,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
       switches::kAutoplayPolicy,
       switches::autoplay::kNoUserGestureRequiredPolicy);
 
-  bool prev_io_allowed = base::ThreadRestrictions::SetIOAllowed(true);
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -176,8 +176,6 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
   // Verify that no other files exist and remove temp dir.
   EXPECT_TRUE(base::IsDirectoryEmpty(temp_dir_path));
   EXPECT_TRUE(base::DeleteFile(temp_dir_path));
-
-  base::ThreadRestrictions::SetIOAllowed(prev_io_allowed);
 }
 
 // TODO(grunell): Add test for multiple dumps when re-use of
@@ -202,7 +200,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     return;
   }
 
-  bool prev_io_allowed = base::ThreadRestrictions::SetIOAllowed(true);
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -229,8 +227,6 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
   // Verify that no files exist and remove temp dir.
   EXPECT_TRUE(base::IsDirectoryEmpty(temp_dir_path));
   EXPECT_TRUE(base::DeleteFile(temp_dir_path));
-
-  base::ThreadRestrictions::SetIOAllowed(prev_io_allowed);
 }
 
 // Same test as CallWithAudioDebugRecordings, but does two parallel calls.
@@ -251,7 +247,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
       switches::kAutoplayPolicy,
       switches::autoplay::kNoUserGestureRequiredPolicy);
 
-  bool prev_io_allowed = base::ThreadRestrictions::SetIOAllowed(true);
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -277,14 +273,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), url));
   EXPECT_TRUE(NavigateToURL(shell2, url));
   ExecuteJavascriptAndWaitForOk("call({video: true, audio: true});");
-  std::string result;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      shell2, "call({video: true, audio: true});", &result));
-  ASSERT_STREQ("OK", result.c_str());
+  EXPECT_EQ("OK", EvalJs(shell2, "call({video: true, audio: true});",
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   ExecuteJavascriptAndWaitForOk("hangup();");
-  EXPECT_TRUE(ExecuteScriptAndExtractString(shell2, "hangup();", &result));
-  ASSERT_STREQ("OK", result.c_str());
+  EXPECT_EQ("OK", EvalJs(shell2, "hangup();", EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   WebRTCInternals::GetInstance()->DisableAudioDebugRecordings();
 
@@ -334,8 +327,6 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
   // Verify that no other files exist and remove temp dir.
   EXPECT_TRUE(base::IsDirectoryEmpty(temp_dir_path));
   EXPECT_TRUE(base::DeleteFile(temp_dir_path));
-
-  base::ThreadRestrictions::SetIOAllowed(prev_io_allowed);
 }
 
 }  // namespace content

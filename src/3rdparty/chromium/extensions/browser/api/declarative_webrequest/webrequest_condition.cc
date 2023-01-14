@@ -5,7 +5,7 @@
 #include "extensions/browser/api/declarative_webrequest/webrequest_condition.h"
 
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/url_matcher/url_matcher_factory.h"
@@ -17,8 +17,6 @@
 using url_matcher::URLMatcherConditionFactory;
 using url_matcher::URLMatcherConditionSet;
 using url_matcher::URLMatcherFactory;
-
-namespace keys = extensions::declarative_webrequest_constants;
 
 namespace {
 static URLMatcherConditionSet::ID g_next_id = 0;
@@ -38,7 +36,7 @@ const char kConditionCannotBeFulfilled[] = "A condition can never be "
 
 namespace extensions {
 
-namespace keys = declarative_webrequest_constants;
+namespace keys_wrc = declarative_webrequest_constants;
 
 //
 // WebRequestData
@@ -123,18 +121,18 @@ std::unique_ptr<WebRequestCondition> WebRequestCondition::Create(
   const base::DictionaryValue* condition_dict = NULL;
   if (!condition.GetAsDictionary(&condition_dict)) {
     *error = kExpectedDictionary;
-    return std::unique_ptr<WebRequestCondition>();
+    return nullptr;
   }
 
   // Verify that we are dealing with a Condition whose type we understand.
   std::string instance_type;
-  if (!condition_dict->GetString(keys::kInstanceTypeKey, &instance_type)) {
+  if (!condition_dict->GetString(keys_wrc::kInstanceTypeKey, &instance_type)) {
     *error = kConditionWithoutInstanceType;
-    return std::unique_ptr<WebRequestCondition>();
+    return nullptr;
   }
-  if (instance_type != keys::kRequestMatcherType) {
+  if (instance_type != keys_wrc::kRequestMatcherType) {
     *error = kExpectedOtherConditionType;
-    return std::unique_ptr<WebRequestCondition>();
+    return nullptr;
   }
 
   WebRequestConditionAttributes attributes;
@@ -144,12 +142,12 @@ std::unique_ptr<WebRequestCondition> WebRequestCondition::Create(
        !iter.IsAtEnd(); iter.Advance()) {
     const std::string& condition_attribute_name = iter.key();
     const base::Value& condition_attribute_value = iter.value();
-    if (condition_attribute_name == keys::kInstanceTypeKey ||
+    if (condition_attribute_name == keys_wrc::kInstanceTypeKey ||
         condition_attribute_name ==
-            keys::kDeprecatedFirstPartyForCookiesUrlKey ||
-        condition_attribute_name == keys::kDeprecatedThirdPartyKey) {
+            keys_wrc::kDeprecatedFirstPartyForCookiesUrlKey ||
+        condition_attribute_name == keys_wrc::kDeprecatedThirdPartyKey) {
       // Skip this.
-    } else if (condition_attribute_name == keys::kUrlKey) {
+    } else if (condition_attribute_name == keys_wrc::kUrlKey) {
       const base::DictionaryValue* dict = NULL;
       if (!condition_attribute_value.GetAsDictionary(&dict)) {
         *error = base::StringPrintf(kInvalidTypeOfParamter,
@@ -169,7 +167,7 @@ std::unique_ptr<WebRequestCondition> WebRequestCondition::Create(
         attributes.push_back(attribute);
     }
     if (!error->empty())
-      return std::unique_ptr<WebRequestCondition>();
+      return nullptr;
   }
 
   auto result = std::make_unique<WebRequestCondition>(url_matcher_condition_set,
@@ -177,7 +175,7 @@ std::unique_ptr<WebRequestCondition> WebRequestCondition::Create(
 
   if (!result->stages()) {
     *error = kConditionCannotBeFulfilled;
-    return std::unique_ptr<WebRequestCondition>();
+    return nullptr;
   }
 
   return result;

@@ -5,6 +5,7 @@
 #include "ui/events/pointer_details.h"
 
 #include <cmath>
+#include <sstream>
 
 namespace ui {
 
@@ -43,7 +44,9 @@ PointerDetails::PointerDetails(EventPointerType pointer_type,
   }
 }
 
-PointerDetails::PointerDetails(const PointerDetails& other) = default;
+PointerDetails::PointerDetails(const PointerDetails&) = default;
+
+PointerDetails& PointerDetails::operator=(const PointerDetails&) = default;
 
 bool PointerDetails::operator==(const PointerDetails& other) const {
   return pointer_type == other.pointer_type && radius_x == other.radius_x &&
@@ -53,6 +56,15 @@ bool PointerDetails::operator==(const PointerDetails& other) const {
          tilt_x == other.tilt_x && tilt_y == other.tilt_y &&
          tangential_pressure == other.tangential_pressure &&
          twist == other.twist && id == other.id && offset == other.offset;
+}
+
+std::string PointerDetails::ToString() const {
+  std::ostringstream ss;
+
+  ss << "radius x/y: " << radius_x << "/" << radius_y << std::endl;
+  ss << "force/twist: " << force << "/" << twist << std::endl;
+  ss << "tilt x/y: " << tilt_x << "/" << tilt_y << std::endl;
+  return ss.str();
 }
 
 }  // namespace ui

@@ -22,6 +22,8 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/json/json_reader.h"
 #include "base/location.h"
@@ -32,7 +34,6 @@
 #include "base/scoped_observation.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -50,8 +51,6 @@
 #include "build/chromeos_buildflags.h"
 #include "cc/base/math_util.h"
 #include "cc/input/touch_action.h"
-#include "components/network_session_configurator/common/network_switches.h"
-#include "components/viz/common/features.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/agent_scheduling_group_host.h"
@@ -61,11 +60,11 @@
 #include "content/browser/renderer_host/input/input_router.h"
 #include "content/browser/renderer_host/input/synthetic_gesture.h"
 #include "content/browser/renderer_host/input/synthetic_gesture_target.h"
-#include "content/browser/renderer_host/input/synthetic_smooth_scroll_gesture.h"
 #include "content/browser/renderer_host/input/synthetic_tap_gesture.h"
 #include "content/browser/renderer_host/input/synthetic_touchscreen_pinch_gesture.h"
 #include "content/browser/renderer_host/navigation_controller_impl.h"
 #include "content/browser/renderer_host/navigation_entry_impl.h"
+#include "content/browser/renderer_host/navigation_entry_restore_context_impl.h"
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/navigator.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -78,8 +77,6 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/content_navigation_policy.h"
 #include "content/common/frame.mojom-test-utils.h"
-#include "content/common/frame_messages.h"
-#include "content/common/frame_proxy.mojom-test-utils.h"
 #include "content/common/input/actions_parser.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
 #include "content/common/renderer.mojom.h"
@@ -92,7 +89,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_widget_host_observer.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
@@ -103,12 +99,15 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/content_mock_cert_verifier.h"
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/navigation_handle_observer.h"
 #include "content/public/test/policy_container_utils.h"
 #include "content/public/test/render_frame_host_test_support.h"
 #include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "content/public/test/test_navigation_throttle.h"
+#include "content/public/test/test_navigation_throttle_inserter.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "content/shell/browser/shell.h"
@@ -116,6 +115,7 @@
 #include "content/test/content_browser_test_utils_internal.h"
 #include "content/test/did_commit_navigation_interceptor.h"
 #include "content/test/render_document_feature.h"
+#include "content/test/render_widget_host_visibility_observer.h"
 #include "content/test/test_content_browser_client.h"
 #include "ipc/constants.mojom.h"
 #include "ipc/ipc_security_test_util.h"
@@ -132,13 +132,14 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/common/feature_policy/policy_value.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
+#include "third_party/blink/public/common/permissions_policy/policy_value.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom-test-utils.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
+#include "third_party/blink/public/mojom/frame/frame_replication_state.mojom.h"
 #include "third_party/blink/public/mojom/leak_detector/leak_detector.mojom-test-utils.h"
 #include "third_party/blink/public/mojom/leak_detector/leak_detector.mojom.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-test-utils.h"
@@ -149,10 +150,8 @@
 #include "ui/events/blink/blink_features.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
-#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
@@ -340,54 +339,6 @@ void RedirectNotificationObserver::Observe(
   running_ = false;
 }
 
-// This observer keeps track of the number of created RenderFrameHosts.  Tests
-// can use this to ensure that a certain number of child frames has been
-// created after navigating.
-class RenderFrameHostCreatedObserver : public WebContentsObserver {
- public:
-  RenderFrameHostCreatedObserver(WebContents* web_contents,
-                                 int expected_frame_count)
-      : WebContentsObserver(web_contents),
-        expected_frame_count_(expected_frame_count),
-        frames_created_(0) {}
-
-  ~RenderFrameHostCreatedObserver() override;
-
-  // Runs a nested run loop and blocks until the expected number of
-  // RenderFrameHosts is created.
-  void Wait();
-
- private:
-  // WebContentsObserver
-  void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
-
-  // The number of RenderFrameHosts to wait for.
-  int expected_frame_count_;
-
-  // The number of RenderFrameHosts that have been created.
-  int frames_created_;
-
-  // The RunLoop used to spin the message loop.
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderFrameHostCreatedObserver);
-};
-
-RenderFrameHostCreatedObserver::~RenderFrameHostCreatedObserver() {
-}
-
-void RenderFrameHostCreatedObserver::Wait() {
-  run_loop_.Run();
-}
-
-void RenderFrameHostCreatedObserver::RenderFrameCreated(
-    RenderFrameHost* render_frame_host) {
-  frames_created_++;
-  if (frames_created_ == expected_frame_count_) {
-    run_loop_.Quit();
-  }
-}
-
 // This observer detects when WebContents receives notification of a user
 // gesture having occurred, following a user input event targeted to
 // a RenderWidgetHost under that WebContents.
@@ -467,58 +418,14 @@ void FocusFrame(FrameTreeNode* frame) {
   focus_observer.Wait();
 }
 
-class RenderWidgetHostVisibilityObserver : public RenderWidgetHostObserver {
- public:
-  explicit RenderWidgetHostVisibilityObserver(RenderWidgetHostImpl* rwhi,
-                                              bool expected_visibility_state)
-      : expected_visibility_state_(expected_visibility_state),
-        was_observed_(false),
-        did_fail_(false),
-        render_widget_(rwhi) {
-    observation_.Observe(render_widget_);
-    message_loop_runner_ = new MessageLoopRunner;
-  }
-
-  bool WaitUntilSatisfied() {
-    if (!was_observed_)
-      message_loop_runner_->Run();
-    observation_.Reset();
-    return !did_fail_;
-  }
-
- private:
-  void RenderWidgetHostVisibilityChanged(RenderWidgetHost* widget_host,
-                                         bool became_visible) override {
-    was_observed_ = true;
-    did_fail_ = expected_visibility_state_ != became_visible;
-    if (message_loop_runner_->loop_running())
-      message_loop_runner_->Quit();
-  }
-
-  void RenderWidgetHostDestroyed(RenderWidgetHost* widget_host) override {
-    DCHECK(observation_.IsObservingSource(widget_host));
-    observation_.Reset();
-  }
-
-  bool expected_visibility_state_;
-  scoped_refptr<MessageLoopRunner> message_loop_runner_;
-  base::ScopedObservation<RenderWidgetHost, RenderWidgetHostObserver>
-      observation_{this};
-  bool was_observed_;
-  bool did_fail_;
-  RenderWidgetHost* render_widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostVisibilityObserver);
-};
-
 bool ConvertJSONToPoint(const std::string& str, gfx::PointF* point) {
-  base::Optional<base::Value> value = base::JSONReader::Read(str);
+  absl::optional<base::Value> value = base::JSONReader::Read(str);
   if (!value.has_value())
     return false;
   if (!value->is_dict())
     return false;
-  base::Optional<double> x = value->FindDoubleKey("x");
-  base::Optional<double> y = value->FindDoubleKey("y");
+  absl::optional<double> x = value->FindDoubleKey("x");
+  absl::optional<double> y = value->FindDoubleKey("y");
   if (!x.has_value())
     return false;
   if (!y.has_value())
@@ -528,16 +435,16 @@ bool ConvertJSONToPoint(const std::string& str, gfx::PointF* point) {
   return true;
 }
 
-// Helper function to generate a feature policy for a single feature and a list
-// of origins.
-// (Equivalent to the declared policy "feature origin1 origin2 ...".)
-// If the origins list is empty, it's treated as matches all origins
+// Helper function to generate a permissions policy for a single feature and a
+// list of origins. (Equivalent to the declared policy "feature origin1 origin2
+// ...".) If the origins list is empty, it's treated as matches all origins
 // (Equivalent to the declared policy "feature *")
-blink::ParsedFeaturePolicyDeclaration CreateParsedFeaturePolicyDeclaration(
-    blink::mojom::FeaturePolicyFeature feature,
+blink::ParsedPermissionsPolicyDeclaration
+CreateParsedPermissionsPolicyDeclaration(
+    blink::mojom::PermissionsPolicyFeature feature,
     const std::vector<GURL>& origins,
     bool match_all_origins = false) {
-  blink::ParsedFeaturePolicyDeclaration declaration;
+  blink::ParsedPermissionsPolicyDeclaration declaration;
 
   declaration.feature = feature;
   declaration.matches_all_origins = match_all_origins;
@@ -552,26 +459,26 @@ blink::ParsedFeaturePolicyDeclaration CreateParsedFeaturePolicyDeclaration(
   return declaration;
 }
 
-blink::ParsedFeaturePolicy CreateParsedFeaturePolicy(
-    const std::vector<blink::mojom::FeaturePolicyFeature>& features,
+blink::ParsedPermissionsPolicy CreateParsedPermissionsPolicy(
+    const std::vector<blink::mojom::PermissionsPolicyFeature>& features,
     const std::vector<GURL>& origins,
     bool match_all_origins = false) {
-  blink::ParsedFeaturePolicy result;
+  blink::ParsedPermissionsPolicy result;
   result.reserve(features.size());
   for (const auto& feature : features)
-    result.push_back(CreateParsedFeaturePolicyDeclaration(feature, origins,
-                                                          match_all_origins));
+    result.push_back(CreateParsedPermissionsPolicyDeclaration(
+        feature, origins, match_all_origins));
   return result;
 }
 
-blink::ParsedFeaturePolicy CreateParsedFeaturePolicyMatchesAll(
-    const std::vector<blink::mojom::FeaturePolicyFeature>& features) {
-  return CreateParsedFeaturePolicy(features, {}, true);
+blink::ParsedPermissionsPolicy CreateParsedPermissionsPolicyMatchesAll(
+    const std::vector<blink::mojom::PermissionsPolicyFeature>& features) {
+  return CreateParsedPermissionsPolicy(features, {}, true);
 }
 
-blink::ParsedFeaturePolicy CreateParsedFeaturePolicyMatchesNone(
-    const std::vector<blink::mojom::FeaturePolicyFeature>& features) {
-  return CreateParsedFeaturePolicy(features, {});
+blink::ParsedPermissionsPolicy CreateParsedPermissionsPolicyMatchesNone(
+    const std::vector<blink::mojom::PermissionsPolicyFeature>& features) {
+  return CreateParsedPermissionsPolicy(features, {});
 }
 
 // Check frame depth on node, widget, and process all match expected depth.
@@ -598,7 +505,7 @@ bool CheckIntersectsViewport(bool expected, FrameTreeNode* node) {
 // testing viewport intersection. Note this does not recurse into child frames
 // and re-layout in the same way since children might be in a different origin.
 void LayoutNonRecursiveForTestingViewportIntersection(
-    WebContents* web_contents) {
+    const ToRenderFrameHost& execution_target) {
   static const char kRafScript[] = R"(
       let width = window.innerWidth;
       let height = window.innerHeight * 0.75;
@@ -608,8 +515,8 @@ void LayoutNonRecursiveForTestingViewportIntersection(
         child.height = height;
       }
   )";
-  ASSERT_TRUE(
-      EvalJsAfterLifecycleUpdate(web_contents, kRafScript, "").error.empty());
+  ASSERT_TRUE(EvalJsAfterLifecycleUpdate(execution_target, kRafScript, "")
+                  .error.empty());
 }
 
 void GenerateTapDownGesture(RenderWidgetHost* rwh) {
@@ -621,27 +528,6 @@ void GenerateTapDownGesture(RenderWidgetHost* rwh) {
   gesture_tap_down.is_source_touch_event_set_blocking = true;
   rwh->ForwardGestureEvent(gesture_tap_down);
 }
-
-// Helper class to wait for the next sad frame to be shown in a specific
-// FrameTreeNode.  This can be used to wait for sad frame visibility metrics to
-// be logged.
-class SadFrameShownObserver {
- public:
-  explicit SadFrameShownObserver(FrameTreeNode* ftn) {
-    RenderFrameProxyHost* proxy_to_parent =
-        ftn->render_manager()->GetProxyToParent();
-    proxy_to_parent->cross_process_frame_connector()
-        ->set_child_frame_crash_shown_closure_for_testing(
-            run_loop_.QuitClosure());
-  }
-
-  void Wait() { run_loop_.Run(); }
-
- private:
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(SadFrameShownObserver);
-};
 
 }  // namespace
 
@@ -668,7 +554,7 @@ class UpdateViewportIntersectionMessageFilter
 
   void UpdateViewportIntersection(
       blink::mojom::ViewportIntersectionStatePtr intersection_state,
-      const base::Optional<blink::FrameVisualProperties>& visual_properties)
+      const absl::optional<blink::FrameVisualProperties>& visual_properties)
       override {
     intersection_state_ = std::move(intersection_state);
     msg_received_ = true;
@@ -742,7 +628,13 @@ void SitePerProcessBrowserTestBase::ForceUpdateViewportIntersection(
   frame_tree_node->render_manager()
       ->GetProxyToParent()
       ->cross_process_frame_connector()
-      ->UpdateViewportIntersectionInternal(intersection_state);
+      ->UpdateViewportIntersectionInternal(intersection_state, false);
+}
+
+void SitePerProcessBrowserTestBase::RunPostedTasks() {
+  base::RunLoop loop;
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, loop.QuitClosure());
+  loop.Run();
 }
 
 //
@@ -786,10 +678,28 @@ class SitePerProcessIgnoreCertErrorsBrowserTest
   SitePerProcessIgnoreCertErrorsBrowserTest() {}
 
  protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SitePerProcessBrowserTestBase::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+  void SetUpOnMainThread() override {
+    SitePerProcessBrowserTest::SetUpOnMainThread();
+    mock_cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
   }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    SitePerProcessBrowserTest::SetUpCommandLine(command_line);
+    mock_cert_verifier_.SetUpCommandLine(command_line);
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    SitePerProcessBrowserTest::SetUpInProcessBrowserTestFixture();
+    mock_cert_verifier_.SetUpInProcessBrowserTestFixture();
+  }
+
+  void TearDownInProcessBrowserTestFixture() override {
+    SitePerProcessBrowserTest::TearDownInProcessBrowserTestFixture();
+    mock_cert_verifier_.TearDownInProcessBrowserTestFixture();
+  }
+
+ private:
+  content::ContentMockCertVerifier mock_cert_verifier_;
 };
 
 // SitePerProcessAutoplayBrowserTest
@@ -807,146 +717,25 @@ class SitePerProcessAutoplayBrowserTest : public SitePerProcessBrowserTest {
 
   bool AutoplayAllowed(const ToRenderFrameHost& adapter,
                        bool with_user_gesture) {
-    RenderFrameHost* rfh = adapter.render_frame_host();
-    const char* test_script = "attemptPlay();";
-    bool worked = false;
-    if (with_user_gesture) {
-      EXPECT_TRUE(ExecuteScriptAndExtractBool(rfh, test_script, &worked));
-    } else {
-      EXPECT_TRUE(ExecuteScriptWithoutUserGestureAndExtractBool(
-          rfh, test_script, &worked));
-    }
-    return worked;
+    return EvalJs(adapter, "attemptPlay();",
+                  with_user_gesture ? EXECUTE_SCRIPT_DEFAULT_OPTIONS |
+                                          EXECUTE_SCRIPT_USE_MANUAL_REPLY
+                                    : EXECUTE_SCRIPT_NO_USER_GESTURE |
+                                          EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+        .ExtractBool();
   }
-};
-
-class SitePerProcessScrollAnchorTest : public SitePerProcessBrowserTest {
- public:
-  SitePerProcessScrollAnchorTest() = default;
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SitePerProcessBrowserTestBase::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "ScrollAnchorSerialization");
-  }
-};
-
-// SitePerProcessProgrammaticScrollTest.
-
-class SitePerProcessProgrammaticScrollTest : public SitePerProcessBrowserTest {
- public:
-  SitePerProcessProgrammaticScrollTest()
-      : kInfinity(1000000U), kPositiveXYPlane(0, 0, kInfinity, kInfinity) {}
-
- protected:
-  const size_t kInfinity;
-  const std::string kIframeOutOfViewHTML = "/iframe_out_of_view.html";
-  const std::string kIframeClippedHTML = "/iframe_clipped.html";
-  const std::string kInputBoxHTML = "/input_box.html";
-  const std::string kIframeSelector = "iframe";
-  const std::string kInputSelector = "input";
-  const gfx::Rect kPositiveXYPlane;
-
-  // Waits until the |load| handle is called inside the frame.
-  void WaitForOnLoad(FrameTreeNode* node) {
-    RunCommandAndWaitForResponse(node, "notifyWhenLoaded();", "LOADED");
-  }
-
-  void WaitForElementVisible(FrameTreeNode* node, const std::string& sel) {
-    RunCommandAndWaitForResponse(
-        node,
-        base::StringPrintf("notifyWhenVisible(document.querySelector('%s'));",
-                           sel.c_str()),
-        "VISIBLE");
-  }
-
-  void WaitForViewportToStabilize(FrameTreeNode* node) {
-    RunCommandAndWaitForResponse(node, "notifyWhenViewportStable(0);",
-                                 "VIEWPORT_STABLE");
-  }
-
-  void AddFocusedInputField(FrameTreeNode* node) {
-    ASSERT_TRUE(ExecuteScript(node, "addFocusedInputField();"));
-  }
-
-  void SetWindowScroll(FrameTreeNode* node, int x, int y) {
-    ASSERT_TRUE(ExecuteScript(
-        node, base::StringPrintf("window.scrollTo(%d, %d);", x, y)));
-  }
-
-  // Helper function to retrieve the bounding client rect of the element
-  // identified by |sel| inside |rfh|.
-  gfx::Rect GetBoundingClientRect(FrameTreeNode* node, const std::string& sel) {
-    std::string result;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        node,
-        base::StringPrintf(
-            "window.domAutomationController.send(rectAsString("
-            "    document.querySelector('%s').getBoundingClientRect()));",
-            sel.c_str()),
-        &result));
-    return GetRectFromString(result);
-  }
-
-  // Returns a rect representing the current |visualViewport| in the main frame
-  // of |contents|.
-  gfx::Rect GetVisualViewport(FrameTreeNode* node) {
-    std::string result;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        node,
-        "window.domAutomationController.send("
-        "    rectAsString(visualViewportAsRect()));",
-        &result));
-    return GetRectFromString(result);
-  }
-
-  float GetVisualViewportScale(FrameTreeNode* node) {
-    double scale;
-    EXPECT_TRUE(ExecuteScriptAndExtractDouble(
-        node, "window.domAutomationController.send(visualViewport.scale);",
-        &scale));
-    return static_cast<float>(scale);
-  }
-
- private:
-  void RunCommandAndWaitForResponse(FrameTreeNode* node,
-                                    const std::string& command,
-                                    const std::string& response) {
-    std::string msg_from_renderer;
-    ASSERT_TRUE(
-        ExecuteScriptAndExtractString(node, command, &msg_from_renderer));
-    ASSERT_EQ(response, msg_from_renderer);
-  }
-
-  gfx::Rect GetRectFromString(const std::string& str) {
-    std::vector<std::string> tokens = base::SplitString(
-        str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-    EXPECT_EQ(4U, tokens.size());
-    double x = 0.0, y = 0.0, width = 0.0, height = 0.0;
-    EXPECT_TRUE(base::StringToDouble(tokens[0], &x));
-    EXPECT_TRUE(base::StringToDouble(tokens[1], &y));
-    EXPECT_TRUE(base::StringToDouble(tokens[2], &width));
-    EXPECT_TRUE(base::StringToDouble(tokens[3], &height));
-    return {static_cast<int>(x), static_cast<int>(y), static_cast<int>(width),
-            static_cast<int>(height)};
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessProgrammaticScrollTest);
 };
 
 // SitePerProcessWebBundleBrowserTest.
 
-class SitePerProcessWebBundleBrowserTest : public SitePerProcessBrowserTest {
+class SitePerProcessWebBundleBrowserTest
+    : public SitePerProcessIgnoreCertErrorsBrowserTest {
  public:
   SitePerProcessWebBundleBrowserTest() {
     feature_list_.InitAndEnableFeature(features::kSubresourceWebBundles);
   }
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SitePerProcessBrowserTestBase::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
-  }
   void SetUpOnMainThread() override {
-    SitePerProcessBrowserTestBase::SetUpOnMainThread();
+    SitePerProcessIgnoreCertErrorsBrowserTest::SetUpOnMainThread();
     https_server_.ServeFilesFromSourceDirectory(GetTestDataFilePath());
     ASSERT_TRUE(https_server_.Start());
   }
@@ -1013,7 +802,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   aura::WindowTreeHost* window_tree_host = shell()->window()->GetHost();
   window_tree_host->SetBoundsInPixels(window_tree_host->GetBoundsInPixels());
 
-  double device_scale_factor = 0;
   // Wait until dppx becomes 2 if the frame's dpr hasn't beeen updated
   // to 2 yet.
   const char kScript[] =
@@ -1024,14 +812,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "(min-resolution: 2dppx)').addListener(function(e) { if (e.matches) { "
       "sendDpr();}})";
   // Make sure that both main frame and iframe are updated to 2x.
-  EXPECT_TRUE(
-      ExecuteScriptAndExtractDouble(child, kScript, &device_scale_factor));
-  EXPECT_EQ(expected_dip_scale, device_scale_factor);
+  EXPECT_EQ(expected_dip_scale,
+            EvalJs(child, kScript, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+                .ExtractDouble());
 
-  device_scale_factor = 0;
-  EXPECT_TRUE(ExecuteScriptAndExtractDouble(web_contents(), kScript,
-                                            &device_scale_factor));
-  EXPECT_EQ(expected_dip_scale, device_scale_factor);
+  EXPECT_EQ(expected_dip_scale, EvalJs(web_contents(), kScript,
+                                       content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+                                    .ExtractDouble());
 }
 
 #endif
@@ -1052,8 +839,8 @@ class TextAutosizerPageInfoInterceptor
     return render_frame_host_;
   }
 
-  void WaitForPageInfo(base::Optional<int> target_main_frame_width,
-                       base::Optional<float> target_device_scale_adjustment) {
+  void WaitForPageInfo(absl::optional<int> target_main_frame_width,
+                       absl::optional<float> target_device_scale_adjustment) {
     if (remote_page_info_seen_)
       return;
     target_main_frame_width_ = target_main_frame_width;
@@ -1092,8 +879,8 @@ class TextAutosizerPageInfoInterceptor
                                                /*main_frame_layout_width=*/0,
                                                /*device_scale_adjustment=*/1.f);
   std::unique_ptr<base::RunLoop> run_loop_;
-  base::Optional<int> target_main_frame_width_;
-  base::Optional<float> target_device_scale_adjustment_;
+  absl::optional<int> target_main_frame_width_;
+  absl::optional<float> target_device_scale_adjustment_;
 };
 
 // TODO(tonikitoo): Move to fake_remote_frame.h|cc in case it is useful
@@ -1103,11 +890,9 @@ class FakeRemoteMainFrame : public blink::mojom::RemoteMainFrame {
   FakeRemoteMainFrame() = default;
   ~FakeRemoteMainFrame() override = default;
 
-  void Init(blink::AssociatedInterfaceProvider* provider) {
-    provider->OverrideBinderForTesting(
-        blink::mojom::RemoteMainFrame::Name_,
-        base::BindRepeating(&FakeRemoteMainFrame::BindFrameHostReceiver,
-                            base::Unretained(this)));
+  void Init(
+      mojo::PendingAssociatedReceiver<blink::mojom::RemoteMainFrame> receiver) {
+    receiver_.Bind(std::move(receiver));
   }
 
   // blink::mojom::RemoteMainFrame overrides:
@@ -1115,29 +900,20 @@ class FakeRemoteMainFrame : public blink::mojom::RemoteMainFrame {
       blink::mojom::TextAutosizerPageInfoPtr page_info) override {}
 
  private:
-  void BindFrameHostReceiver(mojo::ScopedInterfaceEndpointHandle handle) {
-    receiver_.Bind(
-        mojo::PendingAssociatedReceiver<blink::mojom::RemoteMainFrame>(
-            std::move(handle)));
-  }
-
   mojo::AssociatedReceiver<blink::mojom::RemoteMainFrame> receiver_{this};
 };
 
 // This class intercepts RenderFrameProxyHost creations, and overrides their
 // respective blink::mojom::RemoteMainFrame instances, so that it can watch for
 // text autosizer page info updates.
-class UpdateTextAutosizerInfoProxyObserver {
+class UpdateTextAutosizerInfoProxyObserver
+    : public RenderFrameProxyHost::TestObserver {
  public:
   UpdateTextAutosizerInfoProxyObserver() {
-    RenderFrameProxyHost::SetCreatedCallbackForTesting(
-        base::BindRepeating(&UpdateTextAutosizerInfoProxyObserver::
-                                RenderFrameProxyHostCreatedCallback,
-                            base::Unretained(this)));
+    RenderFrameProxyHost::SetObserverForTesting(this);
   }
-  ~UpdateTextAutosizerInfoProxyObserver() {
-    RenderFrameProxyHost::SetCreatedCallbackForTesting(
-        RenderFrameProxyHost::CreatedCallback());
+  ~UpdateTextAutosizerInfoProxyObserver() override {
+    RenderFrameProxyHost::SetObserverForTesting(nullptr);
   }
 
   const blink::mojom::TextAutosizerPageInfo& TextAutosizerPageInfo(
@@ -1149,7 +925,7 @@ class UpdateTextAutosizerInfoProxyObserver {
   class Remote : public FakeRemoteMainFrame {
    public:
     explicit Remote(RenderFrameProxyHost* proxy) {
-      Init(proxy->GetRemoteAssociatedInterfacesTesting());
+      Init(proxy->BindRemoteMainFrameReceiverForTesting());
     }
     void UpdateTextAutosizerPageInfo(
         blink::mojom::TextAutosizerPageInfoPtr page_info) override {
@@ -1163,59 +939,11 @@ class UpdateTextAutosizerInfoProxyObserver {
     blink::mojom::TextAutosizerPageInfo page_info_;
   };
 
-  void RenderFrameProxyHostCreatedCallback(RenderFrameProxyHost* proxy_host) {
+  void OnRemoteMainFrameBound(RenderFrameProxyHost* proxy_host) override {
     remote_frames_[proxy_host] = std::make_unique<Remote>(proxy_host);
   }
 
   std::map<RenderFrameProxyHost*, std::unique_ptr<Remote>> remote_frames_;
-};
-
-// This class intercepts RenderFrameProxyHost creations, and creates an
-// SynchronizeVisualPropertiesInterceptor to intercept the message of
-// SynchronizeVisualProperties. We may not use them all but we need to create
-// the interceptors as soon as the RenderFrameProxyHost is created so we don't
-// miss any messages.
-class ScrollBubblingProxyObserver {
- public:
-  ScrollBubblingProxyObserver() {
-    RenderFrameProxyHost::SetCreatedCallbackForTesting(base::BindRepeating(
-        &ScrollBubblingProxyObserver::RenderFrameProxyHostCreatedCallback,
-        weak_factory_.GetWeakPtr()));
-
-    // RenderFrameProxyHost can be deleted before the test is finished. In such
-    // case, |interceptors_| should remove the mapped interceptor to avoid a
-    // dangling pointer issue when it's destroyed.
-    RenderFrameProxyHost::SetDeletedCallbackForTesting(base::BindRepeating(
-        &ScrollBubblingProxyObserver::RenderFrameProxyHostDeletedCallback,
-        weak_factory_.GetWeakPtr()));
-  }
-
-  // We don't need to set an empty callback to
-  // RenderFrameProxyHost::Set[Created|Deleted]CallbackForTesting because we
-  // already bound callbacks using a weak ptr.
-  ~ScrollBubblingProxyObserver() = default;
-
-  SynchronizeVisualPropertiesInterceptor* interceptor(
-      RenderFrameProxyHost* proxy) {
-    return interceptors_.find(proxy)->second.get();
-  }
-
- private:
-  void RenderFrameProxyHostCreatedCallback(RenderFrameProxyHost* proxy_host) {
-    interceptors_.emplace(
-        proxy_host,
-        std::make_unique<SynchronizeVisualPropertiesInterceptor>(proxy_host));
-  }
-
-  void RenderFrameProxyHostDeletedCallback(RenderFrameProxyHost* proxy_host) {
-    interceptors_.erase(proxy_host);
-  }
-
-  std::map<RenderFrameProxyHost*,
-           std::unique_ptr<SynchronizeVisualPropertiesInterceptor>>
-      interceptors_;
-
-  base::WeakPtrFactory<ScrollBubblingProxyObserver> weak_factory_{this};
 };
 
 // Make sure that when a relevant feature of the main frame changes, e.g. the
@@ -1244,7 +972,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TextAutosizerPageInfo) {
   // Change the device scale adjustment to trigger a RemotePageInfo update.
   web_contents()->SetWebPreferences(prefs);
   // Make sure we receive a ViewHostMsg from the main frame's renderer.
-  interceptor->WaitForPageInfo(base::Optional<int>(),
+  interceptor->WaitForPageInfo(absl::optional<int>(),
                                prefs.device_scale_adjustment);
   // Make sure the correct page message is sent to the child.
   base::RunLoop().RunUntilIdle();
@@ -1262,7 +990,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TextAutosizerPageInfo) {
 
   view->SetBounds(new_bounds);
   // Make sure we receive a ViewHostMsg from the main frame's renderer.
-  interceptor->WaitForPageInfo(new_bounds.width(), base::Optional<float>());
+  interceptor->WaitForPageInfo(new_bounds.width(), absl::optional<float>());
   // Make sure the correct page message is sent to the child.
   base::RunLoop().RunUntilIdle();
   received_page_info = interceptor->GetTextAutosizerPageInfo();
@@ -1291,7 +1019,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TextAutosizerPageInfo) {
       "new_iframe.src = '%s';"
       "document.body.appendChild(new_iframe);",
       c_url.spec().c_str());
-  EXPECT_TRUE(ExecuteScript(root, create_frame_script));
+  EXPECT_TRUE(ExecJs(root, create_frame_script));
   ASSERT_EQ(2U, root->child_count());
 
   // Ensure IPC is sent.
@@ -1333,8 +1061,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
   {
     // There should be only one RenderWidgetHost when there are no
     // cross-process iframes.
-    std::set<RenderWidgetHostView*> views_set =
-        web_contents()->GetRenderWidgetHostViewsInTree();
+    std::set<RenderWidgetHostViewBase*> views_set =
+        web_contents()->GetRenderWidgetHostViewsInWebContentsTree();
     EXPECT_EQ(1U, views_set.size());
   }
 
@@ -1370,8 +1098,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
   {
     // There should be now two RenderWidgetHosts, one for each process
     // rendering a frame.
-    std::set<RenderWidgetHostView*> views_set =
-        web_contents()->GetRenderWidgetHostViewsInTree();
+    std::set<RenderWidgetHostViewBase*> views_set =
+        web_contents()->GetRenderWidgetHostViewsInWebContentsTree();
     EXPECT_EQ(2U, views_set.size());
   }
   RenderFrameProxyHost* proxy_to_parent =
@@ -1421,8 +1149,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
             child->current_frame_host()->GetProcess());
   EXPECT_NE(rph, child->current_frame_host()->GetProcess());
   {
-    std::set<RenderWidgetHostView*> views_set =
-        web_contents()->GetRenderWidgetHostViewsInTree();
+    std::set<RenderWidgetHostViewBase*> views_set =
+        web_contents()->GetRenderWidgetHostViewsInWebContentsTree();
     EXPECT_EQ(2U, views_set.size());
   }
   EXPECT_EQ(proxy_to_parent, child->render_manager()->GetProxyToParent());
@@ -1459,19 +1187,19 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TitleAfterCrossSiteIframe) {
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Make the main frame update its title after the subframe loads.
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
-                            "document.querySelector('iframe').onload = "
-                            "    function() { document.title = 'loaded'; };"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "document.querySelector('iframe').onload = "
+                     "    function() { document.title = 'loaded'; };"));
   EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(), "document.title = 'not loaded';"));
-  base::string16 expected_title(base::UTF8ToUTF16("loaded"));
+      ExecJs(shell()->web_contents(), "document.title = 'not loaded';"));
+  std::u16string expected_title(u"loaded");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
 
   // Navigate the iframe cross-site.
   TestNavigationObserver load_observer(shell()->web_contents());
   GURL frame_url = embedded_test_server()->GetURL("b.com", "/title2.html");
-  EXPECT_TRUE(ExecuteScript(root->child_at(0)->current_frame_host(),
-                            JsReplace("window.location.href = $1", frame_url)));
+  EXPECT_TRUE(ExecJs(root->child_at(0)->current_frame_host(),
+                     JsReplace("window.location.href = $1", frame_url)));
   load_observer.Wait();
 
   // Wait for the title to update and ensure it affects the right NavEntry.
@@ -1549,13 +1277,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, NoResizeAfterIframeLoad) {
   EXPECT_TRUE(NavigateToURLFromRenderer(iframe, site_url));
   base::RunLoop().RunUntilIdle();
 
-  int resizes = -1;
-  EXPECT_TRUE(ExecuteScriptAndExtractInt(
-      iframe->current_frame_host(),
-      "window.domAutomationController.send(resize_count);", &resizes));
-
   // Should be zero because the iframe only has its initial size from parent.
-  EXPECT_EQ(resizes, 0);
+  EXPECT_EQ(0, EvalJs(iframe->current_frame_host(), "resize_count;"));
 }
 
 // Test that the view bounds for an out-of-process iframe are set and updated
@@ -1703,313 +1426,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   gesture_fling_start_ack_observer.Wait();
 }
 
-// Test that scrolling a nested out-of-process iframe bubbles unused scroll
-// delta to a parent frame.
-// Flaky on all platforms: https://crbug.com/1148741
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       DISABLED_ScrollBubblingFromOOPIFTest) {
-  ScrollBubblingProxyObserver scroll_bubbling_proxy_observer;
-
-  ui::GestureConfiguration::GetInstance()->set_scroll_debounce_interval_in_ms(
-      0);
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
-  ASSERT_EQ(1U, root->child_count());
-
-  FrameTreeNode* parent_iframe_node = root->child_at(0);
-
-  GURL site_url(embedded_test_server()->GetURL(
-      "b.com", "/frame_tree/page_with_positioned_frame.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(parent_iframe_node, site_url));
-
-  InputEventAckWaiter ack_observer(
-      parent_iframe_node->current_frame_host()->GetRenderWidgetHost(),
-      blink::WebInputEvent::Type::kGestureScrollEnd);
-
-  // Navigate the nested frame to a page large enough to have scrollbars.
-  FrameTreeNode* nested_iframe_node = parent_iframe_node->child_at(0);
-  GURL nested_site_url(embedded_test_server()->GetURL(
-      "baz.com", "/tall_page.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(nested_iframe_node, nested_site_url));
-
-  // This test uses the position of the nested iframe within the parent iframe
-  // to infer the scroll position of the parent.
-  // SynchronizeVisualPropertiesInterceptor catches updates to the position in
-  // order to avoid busy waiting. It gets created early to catch the initial
-  // rects from the navigation.
-  RenderFrameProxyHost* parent_iframe_proxy =
-      nested_iframe_node->render_manager()->GetProxyToParent();
-
-  NavigateFrameToURL(nested_iframe_node, nested_site_url);
-
-  EXPECT_EQ(
-      " Site A ------------ proxies for B C\n"
-      "   +--Site B ------- proxies for A C\n"
-      "        +--Site C -- proxies for A B\n"
-      "Where A = http://a.com/\n"
-      "      B = http://b.com/\n"
-      "      C = http://baz.com/",
-      DepictFrameTree(root));
-
-  RenderWidgetHostViewBase* rwhv_parent =
-      static_cast<RenderWidgetHostViewBase*>(
-          parent_iframe_node->current_frame_host()
-              ->GetRenderWidgetHost()
-              ->GetView());
-
-  RenderWidgetHostViewBase* rwhv_nested =
-      static_cast<RenderWidgetHostViewBase*>(
-          nested_iframe_node->current_frame_host()
-              ->GetRenderWidgetHost()
-              ->GetView());
-
-  WaitForHitTestData(parent_iframe_node->current_frame_host());
-
-  auto* interceptor =
-      scroll_bubbling_proxy_observer.interceptor(parent_iframe_proxy);
-
-  // Save the original offset as a point of reference.
-  interceptor->WaitForRect();
-  gfx::Rect update_rect = interceptor->last_rect();
-  int initial_y = update_rect.y();
-  interceptor->ResetRectRunLoop();
-
-  // Scroll the parent frame downward.
-  blink::WebMouseWheelEvent scroll_event(
-      blink::WebInputEvent::Type::kMouseWheel,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests());
-  scroll_event.SetPositionInWidget(1, 1);
-  // Use precise pixels to keep these events off the animated scroll pathways,
-  // which currently break this test.
-  // https://bugs.chromium.org/p/chromium/issues/detail?id=710513
-  scroll_event.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
-  scroll_event.delta_x = 0.0f;
-  scroll_event.delta_y = -5.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_parent->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // The event router sends wheel events of a single scroll sequence to the
-  // target under the first wheel event. Send a wheel end event to the current
-  // target view before sending a wheel event to a different one.
-  scroll_event.delta_y = 0.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
-  scroll_event.dispatch_type =
-      blink::WebInputEvent::DispatchType::kEventNonBlocking;
-  rwhv_parent->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // Ensure that the view position is propagated to the child properly.
-  interceptor->WaitForRect();
-  update_rect = interceptor->last_rect();
-  EXPECT_LT(update_rect.y(), initial_y);
-  interceptor->ResetRectRunLoop();
-  ack_observer.Reset();
-
-  // Now scroll the nested frame upward, which should bubble to the parent.
-  // The upscroll exceeds the amount that the frame was initially scrolled
-  // down to account for rounding.
-  scroll_event.delta_y = 6.0f;
-  scroll_event.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  interceptor->WaitForRect();
-  // This loop isn't great, but it accounts for the possibility of multiple
-  // incremental updates happening as a result of the scroll animation.
-  // A failure condition of this test is that the loop might not terminate
-  // due to bubbling not working properly. If the overscroll bubbles to the
-  // parent iframe then the nested frame's y coord will return to its
-  // initial position.
-  update_rect = interceptor->last_rect();
-  while (update_rect.y() > initial_y) {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
-    run_loop.Run();
-    update_rect = interceptor->last_rect();
-  }
-
-  // The event router sends wheel events of a single scroll sequence to the
-  // target under the first wheel event. Send a wheel end event to the current
-  // target view before sending a wheel event to a different one.
-  scroll_event.delta_y = 0.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
-  scroll_event.dispatch_type =
-      blink::WebInputEvent::DispatchType::kEventNonBlocking;
-  rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  interceptor->ResetRectRunLoop();
-  // Once we've sent a wheel to the nested iframe that we expect to turn into
-  // a bubbling scroll, we need to delay to make sure the GestureScrollBegin
-  // from this new scroll doesn't hit the RenderWidgetHostImpl before the
-  // GestureScrollEnd bubbled from the child.
-  // This timing only seems to be needed for CrOS, but we'll enable it on
-  // all platforms just to lessen the possibility of tests being flakey
-  // on non-CrOS platforms.
-  ack_observer.Wait();
-
-  // Scroll the parent down again in order to test scroll bubbling from
-  // gestures.
-  scroll_event.delta_y = -5.0f;
-  scroll_event.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_parent->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // The event router sends wheel events of a single scroll sequence to the
-  // target under the first wheel event. Send a wheel end event to the current
-  // target view before sending a wheel event to a different one.
-  scroll_event.delta_y = 0.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
-  scroll_event.dispatch_type =
-      blink::WebInputEvent::DispatchType::kEventNonBlocking;
-  rwhv_parent->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // Ensure ensuing offset change is received, and then reset the interceptor.
-  interceptor->WaitForRect();
-  interceptor->ResetRectRunLoop();
-
-  // Scroll down the nested iframe via gesture. This requires 3 separate input
-  // events.
-  blink::WebGestureEvent gesture_event(
-      blink::WebGestureEvent::Type::kGestureScrollBegin,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests(),
-      blink::WebGestureDevice::kTouchpad);
-  gesture_event.SetPositionInWidget(gfx::PointF(1, 1));
-  gesture_event.data.scroll_begin.delta_x_hint = 0.0f;
-  gesture_event.data.scroll_begin.delta_y_hint = 6.0f;
-  rwhv_nested->GetRenderWidgetHost()->ForwardGestureEvent(gesture_event);
-
-  gesture_event =
-      blink::WebGestureEvent(blink::WebGestureEvent::Type::kGestureScrollUpdate,
-                             blink::WebInputEvent::kNoModifiers,
-                             blink::WebInputEvent::GetStaticTimeStampForTests(),
-                             blink::WebGestureDevice::kTouchpad);
-  gesture_event.SetPositionInWidget(gfx::PointF(1, 1));
-  gesture_event.data.scroll_update.delta_x = 0.0f;
-  gesture_event.data.scroll_update.delta_y = 6.0f;
-  gesture_event.data.scroll_update.velocity_x = 0;
-  gesture_event.data.scroll_update.velocity_y = 0;
-  rwhv_nested->GetRenderWidgetHost()->ForwardGestureEvent(gesture_event);
-
-  gesture_event =
-      blink::WebGestureEvent(blink::WebGestureEvent::Type::kGestureScrollEnd,
-                             blink::WebInputEvent::kNoModifiers,
-                             blink::WebInputEvent::GetStaticTimeStampForTests(),
-                             blink::WebGestureDevice::kTouchpad);
-  gesture_event.SetPositionInWidget(gfx::PointF(1, 1));
-  rwhv_nested->GetRenderWidgetHost()->ForwardGestureEvent(gesture_event);
-
-  interceptor->WaitForRect();
-  update_rect = interceptor->last_rect();
-  // As above, if this loop does not terminate then it indicates an issue
-  // with scroll bubbling.
-  while (update_rect.y() > initial_y) {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
-    run_loop.Run();
-    update_rect = interceptor->last_rect();
-  }
-
-  // Test that when the child frame absorbs all of the scroll delta, it does
-  // not propagate to the parent (see https://crbug.com/621624).
-  interceptor->ResetRectRunLoop();
-  scroll_event.delta_y = -5.0f;
-  scroll_event.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-  // It isn't possible to busy loop waiting on the renderer here because we
-  // are explicitly testing that something does *not* happen. This creates a
-  // small chance of false positives but shouldn't result in false negatives,
-  // so flakiness implies this test is failing.
-  {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
-    run_loop.Run();
-  }
-  DCHECK_EQ(interceptor->last_rect().x(), 0);
-  DCHECK_EQ(interceptor->last_rect().y(), 0);
-}
-
-// Tests that scrolling with the keyboard will bubble unused scroll to the
-// OOPIF's parent.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       KeyboardScrollBubblingFromOOPIF) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/frame_tree/page_with_iframe_in_scrollable_div.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
-  ASSERT_EQ(1U, root->child_count());
-
-  FrameTreeNode* iframe_node = root->child_at(0);
-
-  EXPECT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
-      "Where A = http://a.com/\n"
-      "      B = http://b.com/",
-      DepictFrameTree(root));
-
-  RenderWidgetHostViewBase* rwhv_child = static_cast<RenderWidgetHostViewBase*>(
-      iframe_node->current_frame_host()->GetRenderWidgetHost()->GetView());
-
-  // This test does not involve hit testing, but input events could be dropped
-  // by the renderer before the first compositor commit, so we wait here anyway
-  // to avoid that.
-  WaitForHitTestData(iframe_node->current_frame_host());
-
-  double initial_y = 0.0;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractDouble(
-      root,
-      "var wrapperDiv = document.getElementById('wrapper-div');"
-      "var initial_y = wrapperDiv.scrollTop;"
-      "var waitForScrollDownPromise = new Promise(function(resolve) {"
-      "  wrapperDiv.addEventListener('scroll', () => {"
-      "    if (wrapperDiv.scrollTop > initial_y)"
-      "      resolve(wrapperDiv.scrollTop);"
-      "  });"
-      "});"
-      "window.domAutomationController.send(initial_y);",
-      &initial_y));
-  EXPECT_DOUBLE_EQ(0.0, initial_y);
-
-  NativeWebKeyboardEvent key_event(
-      blink::WebKeyboardEvent::Type::kRawKeyDown,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests());
-  key_event.windows_key_code = ui::VKEY_DOWN;
-  key_event.native_key_code =
-      ui::KeycodeConverter::DomCodeToNativeKeycode(ui::DomCode::ARROW_DOWN);
-  key_event.dom_code = static_cast<int>(ui::DomCode::ARROW_DOWN);
-  key_event.dom_key = ui::DomKey::ARROW_DOWN;
-
-  rwhv_child->GetRenderWidgetHost()->ForwardKeyboardEvent(key_event);
-
-  key_event.SetType(blink::WebKeyboardEvent::Type::kKeyUp);
-  rwhv_child->GetRenderWidgetHost()->ForwardKeyboardEvent(key_event);
-
-  double scrolled_y = 0.0;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractDouble(
-      root,
-      "waitForScrollDownPromise.then((scrolled_y) => {"
-      "  window.domAutomationController.send(scrolled_y);"
-      "});",
-      &scrolled_y));
-  EXPECT_GT(scrolled_y, 0.0);
-}
-
 // Test that fling on an out-of-process iframe progresses properly.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        TouchscreenGestureFlingStart) {
@@ -2105,616 +1521,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TouchpadGestureFlingStart) {
   gesture_scroll_update_ack_observer.Wait();
 }
 
-class ScrollObserver : public RenderWidgetHost::InputEventObserver {
- public:
-  ScrollObserver(double delta_x, double delta_y) { Reset(delta_x, delta_y); }
-  ~ScrollObserver() override {}
-
-  void OnInputEvent(const blink::WebInputEvent& event) override {
-    if (event.GetType() == blink::WebInputEvent::Type::kGestureScrollUpdate) {
-      blink::WebGestureEvent received_update =
-          *static_cast<const blink::WebGestureEvent*>(&event);
-      remaining_delta_x_ -= received_update.data.scroll_update.delta_x;
-      remaining_delta_y_ -= received_update.data.scroll_update.delta_y;
-    } else if (event.GetType() ==
-               blink::WebInputEvent::Type::kGestureScrollEnd) {
-      if (message_loop_runner_->loop_running())
-        message_loop_runner_->Quit();
-      DCHECK_EQ(0, remaining_delta_x_);
-      DCHECK_EQ(0, remaining_delta_y_);
-      scroll_end_received_ = true;
-    }
-  }
-
-  void Wait() {
-    if (!scroll_end_received_) {
-      message_loop_runner_->Run();
-    }
-  }
-
-  void Reset(double delta_x, double delta_y) {
-    message_loop_runner_ = new content::MessageLoopRunner;
-    remaining_delta_x_ = delta_x;
-    remaining_delta_y_ = delta_y;
-    scroll_end_received_ = false;
-  }
-
- private:
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-  double remaining_delta_x_;
-  double remaining_delta_y_;
-  bool scroll_end_received_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScrollObserver);
-};
-
-// Android: crbug.com/825629
-// NDEBUG: crbug.com/1063045
-#if defined(OS_ANDROID) || defined(NDEBUG)
-#define MAYBE_ScrollBubblingFromNestedOOPIFTest \
-  DISABLED_ScrollBubblingFromNestedOOPIFTest
-#else
-#define MAYBE_ScrollBubblingFromNestedOOPIFTest \
-  ScrollBubblingFromNestedOOPIFTest
-#endif
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       MAYBE_ScrollBubblingFromNestedOOPIFTest) {
-  ui::GestureConfiguration::GetInstance()->set_scroll_debounce_interval_in_ms(
-      0);
-  GURL main_url(embedded_test_server()->GetURL(
-      "/frame_tree/page_with_positioned_nested_frames.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
-
-  // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  ASSERT_EQ(1U, root->child_count());
-
-  FrameTreeNode* parent_iframe_node = root->child_at(0);
-  GURL site_url(embedded_test_server()->GetURL(
-      "a.com", "/frame_tree/page_with_positioned_frame.html"));
-  EXPECT_EQ(site_url, parent_iframe_node->current_url());
-
-  FrameTreeNode* nested_iframe_node = parent_iframe_node->child_at(0);
-  GURL nested_site_url(
-      embedded_test_server()->GetURL("baz.com", "/title1.html"));
-  EXPECT_EQ(nested_site_url, nested_iframe_node->current_url());
-
-  RenderWidgetHostViewBase* root_view = static_cast<RenderWidgetHostViewBase*>(
-      root->current_frame_host()->GetRenderWidgetHost()->GetView());
-
-  RenderWidgetHostViewBase* rwhv_nested =
-      static_cast<RenderWidgetHostViewBase*>(
-          nested_iframe_node->current_frame_host()
-              ->GetRenderWidgetHost()
-              ->GetView());
-
-  WaitForHitTestData(nested_iframe_node->current_frame_host());
-
-  InputEventAckWaiter ack_observer(
-      root->current_frame_host()->GetRenderWidgetHost(),
-      blink::WebInputEvent::Type::kGestureScrollBegin);
-
-  std::unique_ptr<ScrollObserver> scroll_observer;
-
-  // All GSU events will be wrapped between a single GSB-GSE pair. The expected
-  // delta value is equal to summation of all scroll update deltas.
-  scroll_observer = std::make_unique<ScrollObserver>(0, 15);
-
-  root->current_frame_host()->GetRenderWidgetHost()->AddInputEventObserver(
-      scroll_observer.get());
-
-  // Now scroll the nested frame upward, this must bubble all the way up to the
-  // root.
-  blink::WebMouseWheelEvent scroll_event(
-      blink::WebInputEvent::Type::kMouseWheel,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests());
-  gfx::Rect bounds = rwhv_nested->GetViewBounds();
-  float scale_factor =
-      frame_observer.LastRenderFrameMetadata().page_scale_factor;
-  scroll_event.SetPositionInWidget(
-      std::ceil((bounds.x() - root_view->GetViewBounds().x() + 10) *
-                scale_factor),
-      std::ceil((bounds.y() - root_view->GetViewBounds().y() + 10) *
-                scale_factor));
-  scroll_event.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
-  scroll_event.delta_x = 0.0f;
-  scroll_event.delta_y = 5.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-  ack_observer.Wait();
-
-  // Send 10 wheel events with delta_y = 1 to the nested oopif.
-  scroll_event.delta_y = 1.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseChanged;
-  for (int i = 0; i < 10; i++)
-    rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // Send a wheel end event to complete the scrolling sequence.
-  scroll_event.delta_y = 0.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
-  rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-  scroll_observer->Wait();
-}
-
-// Tests that scrolling bubbles from an oopif if its source body has
-// "overflow:hidden" style.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       ScrollBubblingFromOOPIFWithBodyOverflowHidden) {
-  GURL url_domain_a(embedded_test_server()->GetURL(
-      "a.com", "/scrollable_page_with_iframe.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), url_domain_a));
-  RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-
-  FrameTreeNode* iframe_node = root->child_at(0);
-  GURL url_domain_b(
-      embedded_test_server()->GetURL("b.com", "/body_overflow_hidden.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(iframe_node, url_domain_b));
-  WaitForHitTestData(iframe_node->current_frame_host());
-
-  RenderWidgetHostViewBase* root_view = static_cast<RenderWidgetHostViewBase*>(
-      root->current_frame_host()->GetRenderWidgetHost()->GetView());
-
-  RenderWidgetHostViewBase* child_view = static_cast<RenderWidgetHostViewBase*>(
-      iframe_node->current_frame_host()->GetRenderWidgetHost()->GetView());
-
-  ScrollObserver scroll_observer(0, -5);
-  root->current_frame_host()->GetRenderWidgetHost()->AddInputEventObserver(
-      &scroll_observer);
-
-  // Now scroll the nested frame downward, this must bubble to the root since
-  // the iframe source body is not scrollable.
-  blink::WebMouseWheelEvent scroll_event(
-      blink::WebInputEvent::Type::kMouseWheel,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests());
-  gfx::Rect bounds = child_view->GetViewBounds();
-  float scale_factor =
-      frame_observer.LastRenderFrameMetadata().page_scale_factor;
-  scroll_event.SetPositionInWidget(
-      std::ceil((bounds.x() - root_view->GetViewBounds().x() + 10) *
-                scale_factor),
-      std::ceil((bounds.y() - root_view->GetViewBounds().y() + 10) *
-                scale_factor));
-  scroll_event.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
-  scroll_event.delta_x = 0.0f;
-  scroll_event.delta_y = -5.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  child_view->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  // Send a wheel end event to complete the scrolling sequence.
-  scroll_event.delta_y = 0.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
-  child_view->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-
-  scroll_observer.Wait();
-}
-
-// Ensure that the scrollability of a local subframe in an OOPIF is considered
-// when acknowledging GestureScrollBegin events sent to OOPIFs.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ScrollLocalSubframeInOOPIF) {
-  ui::GestureConfiguration::GetInstance()->set_scroll_debounce_interval_in_ms(
-      0);
-
-  // This must be tall enough such that the outer iframe is not scrollable.
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/frame_tree/page_with_tall_positioned_frame.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  ASSERT_EQ(1U, root->child_count());
-
-  FrameTreeNode* parent_iframe_node = root->child_at(0);
-  GURL outer_frame_url(embedded_test_server()->GetURL(
-      "baz.com", "/frame_tree/page_with_positioned_frame.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(parent_iframe_node, outer_frame_url));
-
-  // This must be tall enough such that the inner iframe is scrollable.
-  FrameTreeNode* nested_iframe_node = parent_iframe_node->child_at(0);
-  GURL inner_frame_url(
-      embedded_test_server()->GetURL("baz.com", "/tall_page.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(nested_iframe_node, inner_frame_url));
-
-  ASSERT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
-      "        +--Site B -- proxies for A\n"
-      "Where A = http://a.com/\n"
-      "      B = http://baz.com/",
-      DepictFrameTree(root));
-
-  RenderWidgetHostViewBase* rwhv_child = static_cast<RenderWidgetHostViewBase*>(
-      nested_iframe_node->current_frame_host()
-          ->GetRenderWidgetHost()
-          ->GetView());
-
-  WaitForHitTestData(parent_iframe_node->current_frame_host());
-
-  // When we scroll the inner frame, we should have the GSB be consumed.
-  // The outer iframe not being scrollable should not cause the GSB to go
-  // unconsumed.
-  InputEventAckWaiter ack_observer(
-      parent_iframe_node->current_frame_host()->GetRenderWidgetHost(),
-      base::BindRepeating([](blink::mojom::InputEventResultSource,
-                             blink::mojom::InputEventResultState state,
-                             const blink::WebInputEvent& event) {
-        return event.GetType() ==
-                   blink::WebGestureEvent::Type::kGestureScrollBegin &&
-               state == blink::mojom::InputEventResultState::kConsumed;
-      }));
-
-  // Wait until renderer's compositor thread is synced. Otherwise the non fast
-  // scrollable regions won't be set when the event arrives.
-  MainThreadFrameObserver observer(rwhv_child->GetRenderWidgetHost());
-  observer.Wait();
-
-  // Now scroll the inner frame downward.
-  blink::WebMouseWheelEvent scroll_event(
-      blink::WebInputEvent::Type::kMouseWheel,
-      blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::GetStaticTimeStampForTests());
-  scroll_event.SetPositionInWidget(90, 110);
-  scroll_event.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
-  scroll_event.delta_x = 0.0f;
-  scroll_event.delta_y = -50.0f;
-  scroll_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
-  rwhv_child->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
-  ack_observer.Wait();
-}
-
-// This test verifies that scrolling an element to view works across OOPIFs. The
-// testing methodology is based on measuring bounding client rect position of
-// nested <iframe>'s after the inner-most frame scrolls into view. The
-// measurements are for two identical pages where one page does not have any
-// OOPIFs while the other has some nested OOPIFs.
-// TODO(crbug.com/827431): This test is flaking on all platforms.
-IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
-                       DISABLED_ScrollElementIntoView) {
-  const GURL url_a(
-      embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
-  const GURL url_b(
-      embedded_test_server()->GetURL("b.com", kIframeOutOfViewHTML));
-  const GURL url_c(
-      embedded_test_server()->GetURL("c.com", kIframeOutOfViewHTML));
-
-  // Number of <iframe>'s which will not be empty. The actual frame tree has two
-  // more nodes one for root and one for the inner-most empty <iframe>.
-  const size_t kNonEmptyIframesCount = 5;
-  const std::string kScrollIntoViewScript =
-      "document.body.scrollIntoView({'behavior' : 'instant'});";
-  const int kRectDimensionErrorTolerance = 0;
-
-  // First, recursively set the |scrollTop| and |scrollLeft| of |document.body|
-  // to its maximum and then navigate the <iframe> to |url_a|. The page will be
-  // structured as a(a(a(a(a(a(a)))))) where the inner-most <iframe> is empty.
-  ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* node = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(node);
-  std::vector<gfx::Rect> reference_page_bounds_before_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
-  node = node->child_at(0);
-  for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
-    EXPECT_TRUE(NavigateToURLFromRenderer(node, url_a));
-    WaitForOnLoad(node);
-    // Store |document.querySelector('iframe').getBoundingClientRect()|.
-    reference_page_bounds_before_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
-    node = node->child_at(0);
-  }
-  // Sanity-check: If the page is setup properly then all the <iframe>s should
-  // be out of view and their bounding rect should not intersect with the
-  // positive XY plane.
-  for (const auto& rect : reference_page_bounds_before_scroll)
-    ASSERT_FALSE(rect.Intersects(kPositiveXYPlane));
-  // Now scroll the inner-most frame into view.
-  ASSERT_TRUE(ExecuteScript(node, kScrollIntoViewScript));
-  // Store current client bounds origins to later compare against those from the
-  // page which contains OOPIFs.
-  node = web_contents()->GetFrameTree()->root();
-  std::vector<gfx::Rect> reference_page_bounds_after_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
-  node = node->child_at(0);
-  for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
-    reference_page_bounds_after_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
-    node = node->child_at(0);
-  }
-
-  // Repeat the same process for the page containing OOPIFs. The page is
-  // structured as b(b(a(c(a(a(a)))))) where the inner-most <iframe> is empty.
-  ASSERT_TRUE(NavigateToURL(shell(), url_b));
-  node = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(node);
-  std::vector<gfx::Rect> test_page_bounds_before_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
-  const GURL iframe_urls[] = {url_b, url_a, url_c, url_a, url_a};
-  node = node->child_at(0);
-  for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
-    EXPECT_TRUE(NavigateToURLFromRenderer(node, iframe_urls[index]));
-    WaitForOnLoad(node);
-    test_page_bounds_before_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
-    node = node->child_at(0);
-  }
-  // Sanity-check: The bounds should match those from non-OOPIF page.
-  for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
-    ASSERT_TRUE(test_page_bounds_before_scroll[index].ApproximatelyEqual(
-        reference_page_bounds_before_scroll[index],
-        kRectDimensionErrorTolerance));
-  }
-  // Scroll the inner most OOPIF.
-  ASSERT_TRUE(ExecuteScript(node, kScrollIntoViewScript));
-  // Now traverse the chain bottom to top and verify the bounds match for each
-  // <iframe>.
-  int index = kNonEmptyIframesCount;
-  RenderFrameHostImpl* current_rfh = node->current_frame_host()->GetParent();
-  while (current_rfh) {
-    gfx::Rect current_bounds =
-        GetBoundingClientRect(current_rfh->frame_tree_node(), kIframeSelector);
-    gfx::Rect reference_bounds = reference_page_bounds_after_scroll[index];
-    if (current_bounds.ApproximatelyEqual(reference_bounds,
-                                          kRectDimensionErrorTolerance)) {
-      current_rfh = current_rfh->GetParent();
-      --index;
-    } else {
-      base::RunLoop run_loop;
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
-      run_loop.Run();
-    }
-  }
-}
-
-// This test verifies that ScrollFocusedEditableElementIntoView works correctly
-// for OOPIFs. Essentially, the test verifies that in a similar setup, the
-// resultant page scale factor is the same for OOPIF and non-OOPIF cases. This
-// also verifies that in response to the scroll command, the root-layer scrolls
-// correctly and the <input> is visible in visual viewport.
-#if defined(OS_ANDROID)
-// crbug.com/793616
-#define MAYBE_ScrollFocusedEditableElementIntoView \
-  DISABLED_ScrollFocusedEditableElementIntoView
-#else
-#define MAYBE_ScrollFocusedEditableElementIntoView \
-  ScrollFocusedEditableElementIntoView
-#endif
-IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
-                       MAYBE_ScrollFocusedEditableElementIntoView) {
-  GURL url_a(embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
-  GURL url_b(embedded_test_server()->GetURL("b.com", kIframeOutOfViewHTML));
-
-#if defined(OS_ANDROID)
-  // The reason for Android specific code is that
-  // AutoZoomFocusedNodeToLegibleScale is in blink's WebSettings and difficult
-  // to access from here. It so happens that the setting is on for Android.
-
-  // A lower bound on the ratio of page scale factor after scroll. The actual
-  // value depends on minReadableCaretHeight / caret_bounds.Height(). The page
-  // is setup so caret height is quite small so the expected scale should be
-  // larger than 2.0.
-  float kLowerBoundOnScaleAfterScroll = 2.0;
-  float kEpsilon = 0.1;
-#endif
-
-  ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(root);
-  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), url_a));
-  WaitForOnLoad(root->child_at(0));
-#if defined(OS_ANDROID)
-  float scale_before_scroll_nonoopif = GetVisualViewportScale(root);
-#endif
-  AddFocusedInputField(root->child_at(0));
-  // Focusing <input> causes scrollIntoView(). The following line makes sure
-  // that the <iframe> is out of view again.
-  SetWindowScroll(root, 0, 0);
-  ASSERT_FALSE(GetVisualViewport(root).Intersects(
-      GetBoundingClientRect(root, kIframeSelector)));
-  root->child_at(0)
-      ->current_frame_host()
-      ->GetRenderWidgetHost()
-      ->GetFrameWidgetInputHandler()
-      ->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
-  WaitForElementVisible(root, kIframeSelector);
-#if defined(OS_ANDROID)
-  float scale_after_scroll_nonoopif = GetVisualViewportScale(root);
-  // Increased scale means zoom triggered correctly.
-  EXPECT_GT(scale_after_scroll_nonoopif - scale_before_scroll_nonoopif,
-            kEpsilon);
-  EXPECT_GT(scale_after_scroll_nonoopif, kLowerBoundOnScaleAfterScroll);
-#endif
-
-  // Retry the test on an OOPIF page.
-  Shell* new_shell = CreateBrowser();
-  ASSERT_TRUE(NavigateToURL(new_shell, url_b));
-  root = static_cast<WebContentsImpl*>(new_shell->web_contents())
-             ->GetFrameTree()
-             ->root();
-  WaitForOnLoad(root);
-#if defined(OS_ANDROID)
-  float scale_before_scroll_oopif = GetVisualViewportScale(root);
-  // Sanity-check:
-  ASSERT_NEAR(scale_before_scroll_oopif, scale_before_scroll_nonoopif,
-              kEpsilon);
-#endif
-  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), url_a));
-  WaitForOnLoad(root->child_at(0));
-  AddFocusedInputField(root->child_at(0));
-  SetWindowScroll(root, 0, 0);
-  ASSERT_FALSE(GetVisualViewport(root).Intersects(
-      GetBoundingClientRect(root, kIframeSelector)));
-  root->child_at(0)
-      ->current_frame_host()
-      ->GetRenderWidgetHost()
-      ->GetFrameWidgetInputHandler()
-      ->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
-  WaitForElementVisible(root, kIframeSelector);
-#if defined(OS_ANDROID)
-  float scale_after_scroll_oopif = GetVisualViewportScale(root);
-  EXPECT_GT(scale_after_scroll_oopif - scale_before_scroll_oopif, kEpsilon);
-  EXPECT_GT(scale_after_scroll_oopif, kLowerBoundOnScaleAfterScroll);
-  // The scale is based on the caret height and it should be the same in both
-  // OOPIF and non-OOPIF pages.
-  EXPECT_NEAR(scale_after_scroll_oopif, scale_after_scroll_nonoopif, kEpsilon);
-#endif
-  // Make sure the <input> is at least partly visible in the |visualViewport|.
-  gfx::Rect final_visual_viewport_oopif = GetVisualViewport(root);
-  gfx::Rect iframe_bounds_after_scroll_oopif =
-      GetBoundingClientRect(root, kIframeSelector);
-  gfx::Rect input_bounds_after_scroll_oopif =
-      GetBoundingClientRect(root->child_at(0), kInputSelector);
-  input_bounds_after_scroll_oopif +=
-      iframe_bounds_after_scroll_oopif.OffsetFromOrigin();
-  ASSERT_TRUE(
-      final_visual_viewport_oopif.Intersects(input_bounds_after_scroll_oopif));
-}
-
-// Flaky on Mac, see crbug.com/1156657
-#if defined(OS_MAC)
-#define MAYBE_ScrollClippedFocusedEditableElementIntoView \
-  DISABLED_ScrollClippedFocusedEditableElementIntoView
-#else
-#define MAYBE_ScrollClippedFocusedEditableElementIntoView \
-  ScrollClippedFocusedEditableElementIntoView
-#endif
-IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
-                       MAYBE_ScrollClippedFocusedEditableElementIntoView) {
-  GURL url_a(embedded_test_server()->GetURL("a.com", kIframeClippedHTML));
-  GURL child_url_b(embedded_test_server()->GetURL("b.com", kInputBoxHTML));
-
-  ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(root);
-  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
-  WaitForOnLoad(root->child_at(0));
-
-  SetWindowScroll(root, 0, 0);
-  SetWindowScroll(root->child_at(0), 1000, 2000);
-
-  float scale_before = GetVisualViewportScale(root);
-
-  // The input_box page focuses the input box on load. This call should
-  // simulate the scroll into view we do when an input box is tapped.
-  root->child_at(0)
-      ->current_frame_host()
-      ->GetRenderWidgetHost()
-      ->GetFrameWidgetInputHandler()
-      ->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
-
-  // The scroll into view is animated on the compositor. Make sure we wait
-  // until that's completed before testing the rects.
-  WaitForElementVisible(root, kIframeSelector);
-  WaitForViewportToStabilize(root);
-
-  // These rects are in the coordinate space of the root frame.
-  gfx::Rect visual_viewport_rect = GetVisualViewport(root);
-  gfx::Rect window_rect = GetBoundingClientRect(root, ":root");
-  gfx::Rect iframe_rect = GetBoundingClientRect(root, "iframe");
-  gfx::Rect clip_rect = GetBoundingClientRect(root, "#clip");
-
-  // This is in the coordinate space of the iframe, we'll add the iframe offset
-  // after to put it into the root frame's coordinate space.
-  gfx::Rect input_rect = GetBoundingClientRect(root->child_at(0), "input");
-
-  // Make sure the input rect is visible in the iframe.
-  EXPECT_TRUE(gfx::Rect(iframe_rect.size()).Intersects(input_rect))
-      << "Input box [" << input_rect.ToString() << "] isn't visible in iframe ["
-      << gfx::Rect(iframe_rect.size()).ToString() << "]";
-
-  input_rect += iframe_rect.OffsetFromOrigin();
-
-  // Make sure the input rect is visible through the clipping layer.
-  EXPECT_TRUE(clip_rect.Intersects(input_rect))
-      << "Input box [" << input_rect.ToString() << "] isn't scrolled into view "
-      << "of the clipping layer [" << clip_rect.ToString() << "]";
-
-  // And finally, it should be visible in the layout and visual viewports.
-  EXPECT_TRUE(window_rect.Intersects(input_rect))
-      << "Input box [" << input_rect.ToString() << "] isn't visible in the "
-      << "layout viewport [" << window_rect.ToString() << "]";
-  EXPECT_TRUE(visual_viewport_rect.Intersects(input_rect))
-      << "Input box [" << input_rect.ToString() << "] isn't visible in the "
-      << "visual viewport [" << visual_viewport_rect.ToString() << "]";
-
-  float scale_after = GetVisualViewportScale(root);
-
-// Make sure we still zoom in on the input box on platforms that zoom into the
-// focused editable.
-#if defined(OS_ANDROID)
-  EXPECT_GT(scale_after, scale_before);
-#else
-  EXPECT_FLOAT_EQ(scale_after, scale_before);
-#endif
-}
-
-IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
-                       ScrolledOutOfView) {
-  GURL main_frame(
-      embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
-  GURL child_url_b(
-      embedded_test_server()->GetURL("b.com", kIframeOutOfViewHTML));
-
-  // This will set up the page frame tree as A(B()).
-  ASSERT_TRUE(NavigateToURL(shell(), main_frame));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(root);
-  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
-  WaitForOnLoad(root->child_at(0));
-
-  FrameTreeNode* nested_iframe_node = root->child_at(0);
-  RenderFrameProxyHost* proxy_to_parent =
-      nested_iframe_node->render_manager()->GetProxyToParent();
-  CrossProcessFrameConnector* connector =
-      proxy_to_parent->cross_process_frame_connector();
-
-  while (blink::mojom::FrameVisibility::kRenderedOutOfViewport !=
-         connector->visibility()) {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
-    run_loop.Run();
-  }
-}
-
-// This test verifies that smooth scrolling works correctly inside nested OOPIFs
-// which are same origin with the parent. Note that since the frame tree has
-// a A(B(A1())) structure, if and A1 and A2 shared the same
-// SmoothScrollSequencer, then this test would time out or at best be flaky with
-// random time outs. See https://crbug.com/865446 for more context.
-IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
-                       SmoothScrollInNestedSameProcessOOPIF) {
-  GURL main_frame(
-      embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
-  GURL child_url_b(
-      embedded_test_server()->GetURL("b.com", kIframeOutOfViewHTML));
-  GURL same_origin(
-      embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
-
-  // This will set up the page frame tree as A(B(A1(A2()))) where A1 is later
-  // asked to scroll the <iframe> element of A2 into view. The important bit
-  // here is that the inner frame A1 is recursively scrolling (smoothly) an
-  // element inside its document into view (A2's origin is irrelevant here).
-  ASSERT_TRUE(NavigateToURL(shell(), main_frame));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  WaitForOnLoad(root);
-  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
-  WaitForOnLoad(root->child_at(0));
-  auto* nested_ftn = root->child_at(0)->child_at(0);
-  EXPECT_TRUE(NavigateToURLFromRenderer(nested_ftn, same_origin));
-  WaitForOnLoad(nested_ftn);
-
-  // *Smoothly* scroll the inner most frame into view.
-  ASSERT_TRUE(ExecuteScript(
-      nested_ftn,
-      "document.querySelector('iframe').scrollIntoView({behavior: 'smooth'})"));
-  WaitForElementVisible(root, kIframeSelector);
-  WaitForElementVisible(root->child_at(0), kIframeSelector);
-  WaitForElementVisible(nested_ftn, kIframeSelector);
-}
-
 // Tests OOPIF rendering by checking that the RWH of the iframe generates
 // OnSwapCompositorFrame message.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CompositorFrameSwapped) {
@@ -2742,6 +1548,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CompositorFrameSwapped) {
 
 // Ensure that OOPIFs are deleted after navigating to a new main frame.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CleanupCrossSiteIframe) {
+  // The test assumes the previous page gets deleted after navigation. Disable
+  // back-forward cache to ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(
+      web_contents(), content::BackForwardCache::TEST_ASSUMES_NO_CACHING);
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(a,a(a,a(a)))"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -2782,9 +1592,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CleanupCrossSiteIframe) {
 
   // Use Javascript in the parent to remove one of the frames and ensure that
   // the subframe goes away.
-  EXPECT_TRUE(ExecuteScript(shell(),
-                            "document.body.removeChild("
-                            "document.querySelectorAll('iframe')[0])"));
+  EXPECT_TRUE(ExecJs(shell(),
+                     "document.body.removeChild("
+                     "document.querySelectorAll('iframe')[0])"));
   ASSERT_EQ(1U, root->child_count());
 
   // Load a new same-site page in the top-level frame and ensure the other
@@ -2990,7 +1800,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // own context. It should stay in the same SiteInstance as before, not the
   // parent one.
   TestFrameNavigationObserver frame_observer(child);
-  ExecuteScriptAsync(child, "window.location.href = 'about:blank#foo';");
+  EXPECT_TRUE(ExecJs(child, "window.location.href = 'about:blank#foo';"));
   frame_observer.Wait();
   EXPECT_EQ(about_blank_url, child->current_url());
 
@@ -3266,8 +2076,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ProcessTransferAfterError) {
   // Disable host resolution in the test server and try to navigate the subframe
   // cross-site, which will lead to a committed net error.
   GURL url_b = embedded_test_server()->GetURL("b.com", "/title3.html");
-  std::unique_ptr<URLLoaderInterceptor> url_loader_interceptor;
-  url_loader_interceptor = std::make_unique<URLLoaderInterceptor>(
+  auto url_loader_interceptor = std::make_unique<URLLoaderInterceptor>(
       base::BindRepeating([](URLLoaderInterceptor::RequestParams* params) {
         network::URLLoaderCompletionStatus status;
         status.error_code = net::ERR_NOT_IMPLEMENTED;
@@ -3304,7 +2113,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ProcessTransferAfterError) {
   //
   // TODO(mustaq): Why does the |back_load_observer.Wait()| below time out
   // without the user activation?
-  EXPECT_TRUE(ExecuteScript(root, "// No-op script"));
+  EXPECT_TRUE(ExecJs(root, "// No-op script"));
   NavigateIframeToURL(shell()->web_contents(), "child-0", url_b);
   EXPECT_TRUE(observer.last_navigation_succeeded());
   EXPECT_EQ(url_b, observer.last_navigation_url());
@@ -3454,9 +2263,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add a new child frame to the third subframe.
   RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(
-      root->child_at(2),
-      "document.body.appendChild(document.createElement('iframe'));"));
+  EXPECT_TRUE(
+      ExecJs(root->child_at(2),
+             "document.body.appendChild(document.createElement('iframe'));"));
   frame_observer.Wait();
 
   // The new frame should have a RenderFrameProxyHost for B, but it should not
@@ -3511,7 +2320,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Open a popup and navigate it cross-process to b.com.
   ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecuteScript(root, "popup = window.open('about:blank');"));
+  EXPECT_TRUE(ExecJs(root, "popup = window.open('about:blank');"));
   Shell* popup = new_shell_observer.GetShell();
   GURL popup_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   EXPECT_TRUE(NavigateToURLFromRenderer(popup, popup_url));
@@ -3556,7 +2365,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add a new child frame on the popup.
   RenderFrameHostCreatedObserver frame_observer(popup->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       popup, "document.body.appendChild(document.createElement('iframe'));"));
   frame_observer.Wait();
 
@@ -3736,7 +2545,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CreateProxiesForNewFrames) {
 
   // Add a new child frame to the top-level frame.
   RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(shell(), "addFrame('data:text/html,foo');"));
+  EXPECT_TRUE(ExecJs(shell(), "addFrame('data:text/html,foo');"));
   frame_observer.Wait();
 
   // The new frame should have a proxy in Site B, for use by the old frame.
@@ -4228,36 +3037,42 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       EvalJs(root, "document.getElementById('child-1').getAttribute('csp');"));
 
   // Run the test over variety of parent/child cases.
-  GURL urls[] = {// Remote to remote.
-                 embedded_test_server()->GetURL("c.com", "/title2.html"),
-                 // Remote to local.
-                 embedded_test_server()->GetURL("a.com", "/title1.html"),
-                 // Local to remote.
-                 embedded_test_server()->GetURL("b.com", "/title2.html")};
-
-  std::vector<std::string> csp_values = {"default-src a.com",
-                                         "default-src b.com", "img-src c.com"};
+  struct {
+    std::string csp_value;
+    GURL url;
+    bool should_block;
+  } testCases[]{
+      // Remote to remote.
+      {"default-src a.com",
+       embedded_test_server()->GetURL("c.com", "/title2.html"), true},
+      // Remote to local.
+      {"default-src b.com",
+       embedded_test_server()->GetURL("a.com", "/title1.html"), false},
+      // Local to remote.
+      {"img-src c.com", embedded_test_server()->GetURL("b.com", "/title2.html"),
+       true},
+  };
 
   // Before each navigation, we change the csp property of the frame.
   // We then check whether that property is applied
   // correctly after the navigation has completed.
-  for (size_t i = 0; i < base::size(urls); ++i) {
+  for (const auto& testCase : testCases) {
     // Change csp before navigating.
-    EXPECT_TRUE(ExecuteScript(
+    EXPECT_TRUE(ExecJs(
         root,
         base::StringPrintf("document.getElementById('child-1').setAttribute("
                            "    'csp', '%s');",
-                           csp_values[i].c_str())));
+                           testCase.csp_value.c_str())));
 
-    NavigateFrameToURL(child, urls[i]);
-    EXPECT_EQ(csp_values[i], child->csp_attribute()->header->header_value);
+    NavigateFrameToURL(child, testCase.url);
+    EXPECT_EQ(testCase.csp_value, child->csp_attribute()->header->header_value);
     // TODO(amalika): add checks that the CSP replication takes effect
 
     const url::Origin child_origin =
         child->current_frame_host()->GetLastCommittedOrigin();
-    // TODO(https://crbug.com/1000804): Enable check once bug is fixed.
-    // EXPECT_TRUE(child_origin.opaque());
-    EXPECT_EQ(url::Origin::Create(urls[i].GetOrigin())
+
+    EXPECT_EQ(testCase.should_block, child_origin.opaque());
+    EXPECT_EQ(url::Origin::Create(testCase.url.GetOrigin())
                   .GetTupleOrPrecursorTupleIfOpaque(),
               child_origin.GetTupleOrPrecursorTupleIfOpaque());
   }
@@ -4375,29 +3190,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessAutoplayBrowserTest,
   EXPECT_FALSE(AutoplayAllowed(shell(), false));
 }
 
-IN_PROC_BROWSER_TEST_P(SitePerProcessScrollAnchorTest,
-                       RemoteToLocalScrollAnchorRestore) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/page_with_samesite_iframe.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  FrameTreeNode* child = root->child_at(0);
-
-  GURL frame_url(embedded_test_server()->GetURL("b.com", "/title1.html"));
-  EXPECT_TRUE(NavigateToURLFromRenderer(child, frame_url));
-
-  EXPECT_NE(child->current_frame_host()->GetSiteInstance(),
-            root->current_frame_host()->GetSiteInstance());
-
-  TestFrameNavigationObserver frame_observer2(child);
-  EXPECT_TRUE(ExecuteScript(root, "window.history.back()"));
-  frame_observer2.Wait();
-
-  EXPECT_EQ(child->current_frame_host()->GetSiteInstance(),
-            root->current_frame_host()->GetSiteInstance());
-}
-
 // Check that iframe sandbox flags are replicated correctly.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SandboxFlagsReplication) {
   GURL main_url(embedded_test_server()->GetURL("/sandboxed_frames.html"));
@@ -4492,7 +3284,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, DynamicSandboxFlags) {
             root->child_at(1)->effective_frame_policy().sandbox_flags);
 
   // Dynamically update sandbox flags for the first frame.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       shell(), "document.querySelector('iframe').sandbox='allow-scripts';"));
 
   // Check that updated sandbox flags are propagated to browser process.
@@ -4594,9 +3386,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
             root->child_at(1)->current_url());
 
   // Update the second frame's sandbox flags.
-  EXPECT_TRUE(ExecuteScript(
-      shell(),
-      "document.querySelectorAll('iframe')[1].sandbox='allow-scripts'"));
+  EXPECT_TRUE(
+      ExecJs(shell(),
+             "document.querySelectorAll('iframe')[1].sandbox='allow-scripts'"));
 
   // Check that the current sandbox flags are updated but the effective
   // sandbox flags are not.
@@ -4659,7 +3451,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
             root->child_at(0)->effective_frame_policy().sandbox_flags);
 
   // Dynamically update the frame's sandbox flags.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       shell(), "document.querySelector('iframe').sandbox='allow-scripts';"));
 
   // Check that updated sandbox flags are propagated to browser process.
@@ -4680,8 +3472,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Perform a renderer-initiated same-site navigation in the first frame. The
   // new sandbox flags should take effect.
   TestFrameNavigationObserver frame_observer(root->child_at(0));
-  ASSERT_TRUE(
-      ExecuteScript(root->child_at(0), "window.location.href='/title2.html'"));
+  ASSERT_TRUE(ExecJs(root->child_at(0), "window.location.href='/title2.html'"));
   frame_observer.Wait();
   EXPECT_EQ(embedded_test_server()->GetURL("baz.com", "/title2.html"),
             root->child_at(0)->current_url());
@@ -4733,9 +3524,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // the new sandboxed local frame, its child (while it's still local), and a
   // speculative RFH when starting the cross-site navigation to baz.com.
   RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 3);
-  EXPECT_TRUE(ExecuteScript(root,
-                            "addFrame('/frame_tree/page_with_one_frame.html',"
-                            "         'allow-scripts allow-same-origin')"));
+  EXPECT_TRUE(ExecJs(root,
+                     "addFrame('/frame_tree/page_with_one_frame.html',"
+                     "         'allow-scripts allow-same-origin')"));
   frame_observer.Wait();
 
   // Wait for the cross-site navigation to baz.com in the grandchild to finish.
@@ -4830,8 +3621,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, DynamicWindowName) {
   EXPECT_EQ(root->child_at(0)->frame_name(), "3-1-name");
 
   // Update the child frame's window.name.
-  EXPECT_TRUE(
-      ExecuteScript(root->child_at(0), "window.name = 'updated-name';"));
+  EXPECT_TRUE(ExecJs(root->child_at(0), "window.name = 'updated-name';"));
 
   // The change should propagate to the browser process.
   EXPECT_EQ(root->child_at(0)->frame_name(), "updated-name");
@@ -4839,14 +3629,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, DynamicWindowName) {
   // The proxy in the parent process should also receive the updated name.
   // Now iframe's name and the content window's name differ, so it shouldn't
   // be possible to access to the content window with the updated name.
-  //
-  // TODO(yukishiino): The following expectation should be |true|, but we're
-  // intentionally disabling the name and origin check of the named access on
-  // window.  See also crbug.com/538562 and crbug.com/701489.
-  EXPECT_EQ(false, EvalJs(shell(), "frames['updated-name'] === undefined;"));
+  EXPECT_EQ(true, EvalJs(shell(), "frames['updated-name'] === undefined;"));
   // Change iframe's name to match the content window's name so that it can
   // reference the child frame by its new name in case of cross origin.
-  EXPECT_TRUE(ExecuteScript(root, "window['3-1-id'].name = 'updated-name';"));
+  EXPECT_TRUE(ExecJs(root, "window['3-1-id'].name = 'updated-name';"));
   EXPECT_EQ(true, EvalJs(shell(), "frames['updated-name'] == frames[0];"));
 
   // Issue a renderer-initiated navigation from the root frame to the child
@@ -4857,9 +3643,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, DynamicWindowName) {
   // and a more complicated frame hierarchy (https://crbug.com/463742)
   TestFrameNavigationObserver frame_observer(root->child_at(0));
   GURL foo_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
-  EXPECT_TRUE(ExecuteScript(
-      shell(),
-      JsReplace("frames['updated-name'].location.href = $1", foo_url)));
+  EXPECT_TRUE(
+      ExecJs(shell(),
+             JsReplace("frames['updated-name'].location.href = $1", foo_url)));
   frame_observer.Wait();
   EXPECT_EQ(foo_url, root->child_at(0)->current_url());
 }
@@ -4899,9 +3685,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, OriginUpdatesReachProxies) {
 
   // frames[1] can't be used due to a bug where RemoteFrames are created out of
   // order (https://crbug.com/478792).  Instead, target second frame by name.
-  EXPECT_TRUE(ExecuteScript(root->child_at(0),
-                            "try { parent.frames['frame2'].location.href = "
-                            "'data:text/html,foo'; } catch (e) {}"));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     "try { parent.frames['frame2'].location.href = "
+                     "'data:text/html,foo'; } catch (e) {}"));
   console_observer.Wait();
 
   std::string frame_origin = root->child_at(1)->current_origin().Serialize();
@@ -5025,7 +3811,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, LoadEventForwarding) {
   {
     GURL main_url(
         embedded_test_server()->GetURL("/frame_with_load_event.html"));
-    base::string16 expected_title(base::UTF8ToUTF16("LOADED"));
+    std::u16string expected_title(u"LOADED");
     TitleWatcher title_watcher(shell()->web_contents(), expected_title);
     EXPECT_TRUE(NavigateToURL(shell(), main_url));
     EXPECT_EQ(title_watcher.WaitAndGetTitle(), expected_title);
@@ -5038,7 +3824,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, LoadEventForwarding) {
   // is fired.
   {
     GURL foo_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
-    base::string16 expected_title(base::UTF8ToUTF16("LOADEDLOADED"));
+    std::u16string expected_title(u"LOADEDLOADED");
     TitleWatcher title_watcher(shell()->web_contents(), expected_title);
     TestNavigationObserver observer(shell()->web_contents());
     EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), foo_url));
@@ -5076,7 +3862,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SubframePostMessage) {
 
   // Send a postMessage from second, cross-site frame to its parent.  Expect
   // parent to send a reply to the frame.
-  base::string16 expected_title(base::ASCIIToUTF16("subframe-msg"));
+  std::u16string expected_title(u"subframe-msg");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   PostMessageAndWaitForReply(root->child_at(1), "postToParent('subframe-msg')",
                              "\"done-subframe2\"");
@@ -5117,7 +3903,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Open a popup from the first subframe (so that popup's window.opener points
   // to the subframe) and navigate it to bar.com.
   ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecuteScript(root->child_at(0), "openPopup('about:blank');"));
+  EXPECT_TRUE(ExecJs(root->child_at(0), "openPopup('about:blank');"));
   Shell* popup = new_shell_observer.GetShell();
   GURL popup_url(
       embedded_test_server()->GetURL("bar.com", "/post_message.html"));
@@ -5127,7 +3913,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // check that the whole opener chain is processed when creating proxies and
   // not just an immediate opener.
   ShellAddedObserver new_shell_observer2;
-  EXPECT_TRUE(ExecuteScript(popup, "openPopup('about:blank');"));
+  EXPECT_TRUE(ExecJs(popup, "openPopup('about:blank');"));
   Shell* popup2 = new_shell_observer2.GetShell();
   GURL popup2_url(
       embedded_test_server()->GetURL("baz.com", "/post_message.html"));
@@ -5170,7 +3956,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // reaches subframe1.  This verifies that the subframe opener information
   // propagated to the popup's RenderFrame.  Wait for subframe1 to send a reply
   // message to the popup.
-  EXPECT_TRUE(ExecuteScript(popup, "window.name = 'popup';"));
+  EXPECT_TRUE(ExecJs(popup, "window.name = 'popup';"));
   PostMessageAndWaitForReply(popup_root, "postToOpener('subframe-msg', '*')",
                              "\"done-popup\"");
 
@@ -5181,7 +3967,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       static_cast<WebContentsImpl*>(popup2->web_contents())
           ->GetFrameTree()
           ->root();
-  EXPECT_TRUE(ExecuteScript(popup2, "window.name = 'popup2';"));
+  EXPECT_TRUE(ExecJs(popup2, "window.name = 'popup2';"));
   PostMessageAndWaitForReply(popup2_root,
                              "postToOpenerOfOpener('subframe-msg', '*')",
                              "\"done-popup2\"");
@@ -5505,7 +4291,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       foo_root->render_manager()->GetRenderFrameProxyHost(site_instance_a));
 
   // Set window.name in the popup's frame.
-  EXPECT_TRUE(ExecuteScript(foo_shell, "window.name = 'foo'"));
+  EXPECT_TRUE(ExecJs(foo_shell, "window.name = 'foo'"));
 
   // A proxy for the popup should now exist in a.com.
   EXPECT_TRUE(
@@ -5613,7 +4399,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // parent by sending a postMessage to subframe's parent.opener.
   EXPECT_EQ(true, EvalJs(popup_root->child_at(0), "!!parent.opener;"));
 
-  base::string16 expected_title = base::ASCIIToUTF16("msg");
+  std::u16string expected_title = u"msg";
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   EXPECT_EQ(true, EvalJs(popup_root->child_at(0),
                          "postToOpenerOfParent('msg','*');"));
@@ -5718,7 +4504,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                    "parent.frames['subframe2'].opener && "
                    "    parent.frames['subframe2'].opener === parent.opener;"));
 
-  base::string16 expected_title = base::ASCIIToUTF16("msg");
+  std::u16string expected_title = u"msg";
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   EXPECT_EQ(true, EvalJs(popup_root->child_at(0),
                          "postToOpenerOfSibling('subframe2', 'msg', '*');"));
@@ -5763,7 +4549,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // destroy |rfh| and |rvh| before they are checked in the test.
   GURL b_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestFrameNavigationObserver commit_observer(root);
-  EXPECT_TRUE(ExecuteScript(shell(), JsReplace("location = $1", b_url)));
+  EXPECT_TRUE(ExecJs(shell(), JsReplace("location = $1", b_url)));
   commit_observer.WaitForCommit();
   EXPECT_FALSE(deleted_observer.deleted());
 
@@ -5775,9 +4561,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       rfh->lifecycle_state(),
       testing::AnyOf(
           testing::Eq(
-              RenderFrameHostImpl::LifecycleState::kRunningUnloadHandlers),
+              RenderFrameHostImpl::LifecycleStateImpl::kRunningUnloadHandlers),
           testing::Eq(
-              RenderFrameHostImpl::LifecycleState::kInBackForwardCache)));
+              RenderFrameHostImpl::LifecycleStateImpl::kInBackForwardCache)));
 
   // Without the mojo::AgentSchedulingGroupHost::DidUnloadRenderFrame and timer,
   // the process A will never shutdown. Simulate the process being killed now.
@@ -5827,7 +4613,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "  var start = Date.now();"
       "  while (Date.now() - start < 1000);"
       "}";
-  EXPECT_TRUE(ExecuteScript(shell(), script));
+  EXPECT_TRUE(ExecJs(shell(), script));
 
   // Navigating cross-site with an iframe to the original site shouldn't crash.
   GURL second_url(embedded_test_server()->GetURL(
@@ -5865,10 +4651,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Focus the main frame's text field.  The return value "input-focus"
   // indicates that the focus event was fired correctly.
-  std::string result;
-  EXPECT_TRUE(
-      ExecuteScriptAndExtractString(shell(), "focusInputField()", &result));
-  EXPECT_EQ(result, "input-focus");
+  EXPECT_EQ("input-focus", EvalJs(shell(), "focusInputField()",
+                                  EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // The main frame should be focused.
   EXPECT_EQ(root, root->frame_tree()->GetFocusedFrame());
@@ -6126,11 +4910,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(child1, root->frame_tree()->GetFocusedFrame());
 
   // The <input> in first subframe should still be the activeElement.
-  std::string activeTag;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      child1, "domAutomationController.send(document.activeElement.tagName)",
-      &activeTag));
-  EXPECT_EQ("input", base::ToLowerASCII(activeTag));
+  EXPECT_EQ(
+      "input",
+      base::ToLowerASCII(
+          EvalJs(child1, "document.activeElement.tagName").ExtractString()));
 }
 
 // Tests that we are using the correct RenderFrameProxy when navigating an
@@ -6147,8 +4930,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, OpenerSetLocation) {
   EXPECT_EQ(popup->web_contents()->GetLastCommittedURL(), cross_url);
 
   // Use new window to navigate main window.
-  EXPECT_TRUE(ExecuteScript(
-      popup, JsReplace("window.opener.location.href = $1", cross_url)));
+  EXPECT_TRUE(
+      ExecJs(popup, JsReplace("window.opener.location.href = $1", cross_url)));
   EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
   EXPECT_EQ(shell()->web_contents()->GetLastCommittedURL(), cross_url);
 }
@@ -6175,7 +4958,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "var f = document.querySelector('iframe');"
       "f.contentWindow.location.href = 'about:blank';"
       "setTimeout(function() { document.body.removeChild(f); }, 0);";
-  EXPECT_TRUE(ExecuteScript(root, script));
+  EXPECT_TRUE(ExecJs(root, script));
   observer.Wait();
   EXPECT_EQ(1U, root->child_count());
 
@@ -6211,7 +4994,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Tell parent to remove the first child.  This should happen after the
   // previous navigation starts but before it commits.
   FrameDeletedObserver observer(child->current_frame_host());
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.body.removeChild(document.querySelector('iframe'));"));
   observer.Wait();
   EXPECT_EQ(1U, root->child_count());
@@ -6239,8 +5022,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, NavigateAboutBlankAndDetach) {
   // Navigate the child frame to "about:blank" from the parent document and
   // wait for it to be removed.
   FrameDeletedObserver observer(child->current_frame_host());
-  EXPECT_TRUE(ExecuteScript(
-      root, base::StringPrintf("f.src = '%s'", url::kAboutBlankURL)));
+  EXPECT_TRUE(
+      ExecJs(root, base::StringPrintf("f.src = '%s'", url::kAboutBlankURL)));
   observer.Wait();
 
   // Make sure the a.com renderer does not crash and the frame is removed.
@@ -6282,16 +5065,27 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Tell main frame A to delete its subframe B.
   FrameDeletedObserver observer(root->child_at(0)->current_frame_host());
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.body.removeChild(document.querySelector('iframe'));"));
+
+  auto remote_main_frame_interfaces = mojom::RemoteMainFrameInterfaces::New();
+  mojo::AssociatedRemote<blink::mojom::RemoteMainFrame> main_frame;
+  remote_main_frame_interfaces->main_frame =
+      main_frame.BindNewEndpointAndPassReceiver();
+
+  mojo::AssociatedRemote<blink::mojom::RemoteMainFrameHost> main_frame_host;
+  ignore_result(main_frame_host.BindNewEndpointAndPassReceiver());
+  remote_main_frame_interfaces->main_frame_host = main_frame_host.Unbind();
 
   // Send the message to create a proxy for B's new child frame in A.  This
   // used to crash, as parent_routing_id refers to a proxy that doesn't exist
   // anymore.
   agent_scheduling_group_a->CreateFrameProxy(
-      blink::RemoteFrameToken(), new_routing_id, base::nullopt, view_routing_id,
-      parent_routing_id, mojom::FrameReplicationState::New(),
-      base::UnguessableToken::Create());
+      blink::RemoteFrameToken(), new_routing_id, absl::nullopt, view_routing_id,
+      parent_routing_id, blink::mojom::TreeScopeType::kDocument,
+      blink::mojom::FrameReplicationState::New(),
+      base::UnguessableToken::Create(),
+      std::move(remote_main_frame_interfaces));
 
   // Ensure the subframe is detached in the browser process.
   observer.Wait();
@@ -6359,7 +5153,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     params->frame = pending_frame.InitWithNewEndpointAndPassReceiver();
     ignore_result(params->interface_broker.InitWithNewPipeAndPassReceiver());
     params->previous_routing_id = previous_routing_id;
-    params->opener_frame_token = base::nullopt;
+    params->opener_frame_token = absl::nullopt;
     params->parent_routing_id =
         shell()->web_contents()->GetMainFrame()->GetRoutingID();
     params->previous_sibling_routing_id = IPC::mojom::kRoutingIdNone;
@@ -6367,7 +5161,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     params->token = frame_token;
     params->devtools_frame_token = base::UnguessableToken::Create();
     params->policy_container = CreateStubPolicyContainer();
-    params->replication_state = mojom::FrameReplicationState::New();
+    params->replication_state = blink::mojom::FrameReplicationState::New();
     agent_scheduling_group->CreateFrame(std::move(params));
   }
 
@@ -6427,9 +5221,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
 
   // Have the parent frame remove the child frame from its DOM. This should
   // result in the child RenderFrame being deleted in the remote process.
-  EXPECT_TRUE(ExecuteScript(contents,
-                            "document.body.removeChild("
-                            "document.querySelectorAll('iframe')[0])"));
+  EXPECT_TRUE(ExecJs(contents,
+                     "document.body.removeChild("
+                     "document.querySelectorAll('iframe')[0])"));
   EXPECT_EQ(1U, contents->GetFrameTree()->root()->child_count());
 
   {
@@ -6442,7 +5236,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
     params->frame = pending_frame.InitWithNewEndpointAndPassReceiver();
     ignore_result(params->interface_broker.InitWithNewPipeAndPassReceiver());
     params->previous_routing_id = IPC::mojom::kRoutingIdNone;
-    params->opener_frame_token = base::nullopt;
+    params->opener_frame_token = absl::nullopt;
     params->parent_routing_id = parent_routing_id;
     params->previous_sibling_routing_id = IPC::mojom::kRoutingIdNone;
     params->frame_owner_properties = blink::mojom::FrameOwnerProperties::New();
@@ -6456,7 +5250,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
                       .InitWithNewEndpointAndPassReceiver());
     ignore_result(params->widget_params->widget_host
                       .InitWithNewEndpointAndPassReceiver());
-    params->replication_state = mojom::FrameReplicationState::New();
+    params->widget_params->visual_properties.screen_infos =
+        display::ScreenInfos(display::ScreenInfo());
+    params->replication_state = blink::mojom::FrameReplicationState::New();
     params->replication_state->name = "name";
     params->replication_state->unique_name = "name";
     params->token = frame_token;
@@ -6474,63 +5270,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
       embedded_test_server()->GetURL("d.com", "/title3.html")));
   watcher.Wait();
   EXPECT_TRUE(watcher.did_exit_normally());
-}
-
-// TODO(ekaramad): Move this test out of this file when addressing
-// https://crbug.com/754726.
-// This test verifies that RFHImpl::ForEachImmediateLocalRoot works as expected.
-// The frame tree used in the test is:
-//                                A0
-//                            /    |    \
-//                          A1     B1    A2
-//                         /  \    |    /  \
-//                        B2   A3  B3  A4   C2
-//                       /    /   / \    \
-//                      D1   D2  C3  C4  C5
-//
-// As an example, the expected set of immediate local roots for the root node A0
-// should be {B1, B2, C2, D2, C5}. Note that the order is compatible with that
-// of a BFS traversal from root node A0.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FindImmediateLocalRoots) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com",
-      "/cross_site_iframe_factory.html?a(a(b(d),a(d)),b(b(c,c)),a(a(c),c))"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  // Each entry is of the frame "LABEL:ILR1ILR2..." where ILR stands for
-  // immediate local root.
-  std::string immediate_local_roots[] = {
-      "A0:B1B2C2D2C5", "A1:B2D2", "B1:C3C4", "A2:C2C5", "B2:D1",
-      "A3:D2",         "B3:C3C4", "A4:C5",   "C2:",     "D1:",
-      "D2:",           "C3:",     "C4:",     "C5:"};
-
-  std::map<RenderFrameHostImpl*, std::string>
-      frame_to_immediate_local_roots_map;
-  std::map<RenderFrameHostImpl*, std::string> frame_to_label_map;
-  size_t index = 0;
-  // Map each RenderFrameHostImpl to its label and set of immediate local roots.
-  for (auto* ftn : web_contents()->GetFrameTree()->Nodes()) {
-    std::string roots = immediate_local_roots[index++];
-    frame_to_immediate_local_roots_map[ftn->current_frame_host()] = roots;
-    frame_to_label_map[ftn->current_frame_host()] = roots.substr(0, 2);
-  }
-
-  // For each frame in the tree, verify that ForEachImmediateLocalRoot properly
-  // visits each and only each immediate local root in a BFS traversal order.
-  for (auto* ftn : web_contents()->GetFrameTree()->Nodes()) {
-    RenderFrameHostImpl* current_frame_host = ftn->current_frame_host();
-    std::list<RenderFrameHostImpl*> frame_list;
-    current_frame_host->ForEachImmediateLocalRoot(base::BindRepeating(
-        [](std::list<RenderFrameHostImpl*>* ilr_list,
-           RenderFrameHostImpl* rfh) { ilr_list->push_back(rfh); },
-        &frame_list));
-
-    std::string result = frame_to_label_map[current_frame_host];
-    result.append(":");
-    for (auto* ilr_ptr : frame_list)
-      result.append(frame_to_label_map[ilr_ptr]);
-    EXPECT_EQ(frame_to_immediate_local_roots_map[current_frame_host], result);
-  }
 }
 
 // This test verifies that changing the CSS visibility of a cross-origin
@@ -6574,12 +5313,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CSSVisibilityChanged) {
   std::vector<std::unique_ptr<RenderWidgetHostVisibilityObserver>>
       hide_widget_host_observers(child_widget_hosts.size());
   for (size_t index = 0U; index < child_widget_hosts.size(); ++index) {
-    hide_widget_host_observers[index].reset(
-        new RenderWidgetHostVisibilityObserver(child_widget_hosts[index],
-                                               false));
+    hide_widget_host_observers[index] =
+        std::make_unique<RenderWidgetHostVisibilityObserver>(
+            child_widget_hosts[index], false);
   }
 
-  EXPECT_TRUE(ExecuteScript(shell(), hide_script));
+  EXPECT_TRUE(ExecJs(shell(), hide_script));
   for (size_t index = 0U; index < child_widget_hosts.size(); ++index) {
     EXPECT_TRUE(hide_widget_host_observers[index]->WaitUntilSatisfied())
         << "Expected RenderWidgetHost at distance " << index + 1U
@@ -6590,12 +5329,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CSSVisibilityChanged) {
   std::vector<std::unique_ptr<RenderWidgetHostVisibilityObserver>>
       show_widget_host_observers(child_widget_hosts.size());
   for (size_t index = 0U; index < child_widget_hosts.size(); ++index) {
-    show_widget_host_observers[index].reset(
-        new RenderWidgetHostVisibilityObserver(child_widget_hosts[index],
-                                               true));
+    show_widget_host_observers[index] =
+        std::make_unique<RenderWidgetHostVisibilityObserver>(
+            child_widget_hosts[index], true);
   }
 
-  EXPECT_TRUE(ExecuteScript(shell(), show_script));
+  EXPECT_TRUE(ExecJs(shell(), show_script));
   for (size_t index = 0U; index < child_widget_hosts.size(); ++index) {
     EXPECT_TRUE(show_widget_host_observers[index]->WaitUntilSatisfied())
         << "Expected RenderWidgetHost at distance " << index + 1U
@@ -6625,9 +5364,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Now inject code in the first frame to create a nested OOPIF.
   RenderFrameHostCreatedObserver new_frame_created_observer(
       shell()->web_contents(), 1);
-  ASSERT_TRUE(ExecuteScript(
-      root->child_at(0)->current_frame_host(),
-      "document.body.appendChild(document.createElement('iframe'));"));
+  ASSERT_TRUE(
+      ExecJs(root->child_at(0)->current_frame_host(),
+             "document.body.appendChild(document.createElement('iframe'));"));
   new_frame_created_observer.Wait();
 
   GURL cross_site_url_a =
@@ -6635,10 +5374,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Navigate the nested frame.
   TestFrameNavigationObserver observer(root->child_at(0)->child_at(0));
-  ASSERT_TRUE(
-      ExecuteScript(root->child_at(0)->current_frame_host(),
-                    JsReplace("document.querySelector('iframe').src = $1",
-                              cross_site_url_a)));
+  ASSERT_TRUE(ExecJs(root->child_at(0)->current_frame_host(),
+                     JsReplace("document.querySelector('iframe').src = $1",
+                               cross_site_url_a)));
   observer.Wait();
 
   RenderWidgetHostViewChildFrame* first_child_view =
@@ -6686,7 +5424,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       root->child_at(0)->current_frame_host()->GetRenderWidgetHost(), false);
 
   // Hide the first frame.
-  ASSERT_TRUE(ExecuteScript(
+  ASSERT_TRUE(ExecJs(
       shell(),
       "document.getElementsByName('frame1')[0].style.visibility = 'hidden'"));
   ASSERT_TRUE(hide_observer.WaitUntilSatisfied());
@@ -6745,7 +5483,7 @@ IN_PROC_BROWSER_TEST_P(
       root->child_at(0)->current_frame_host()->GetRenderWidgetHost(), false);
 
   // Hide the first frame.
-  ASSERT_TRUE(ExecuteScript(
+  ASSERT_TRUE(ExecJs(
       shell(),
       "document.getElementsByName('frame1')[0].style.visibility = 'hidden'"));
   ASSERT_TRUE(hide_observer.WaitUntilSatisfied());
@@ -6755,10 +5493,10 @@ IN_PROC_BROWSER_TEST_P(
       root->child_at(0)->current_frame_host());
   GURL cross_site_url_c =
       embedded_test_server()->GetURL("c.com", "/counter.html");
-  ASSERT_TRUE(ExecuteScript(
-      web_contents(),
-      JsReplace("document.getElementsByName('frame1')[0].src = $1",
-                cross_site_url_c)));
+  ASSERT_TRUE(
+      ExecJs(web_contents(),
+             JsReplace("document.getElementsByName('frame1')[0].src = $1",
+                       cross_site_url_c)));
   navigation_observer.Wait();
 
   // Now investigate compositor frame creation.
@@ -6802,7 +5540,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SandboxFlagsInheritance) {
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Set sandbox flags for child frame.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.querySelector('iframe').sandbox = 'allow-scripts';"));
 
   // Calculate expected flags.  Note that "allow-scripts" resets both
@@ -6857,7 +5595,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Set sandbox flags for child frame.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.querySelector('iframe').sandbox = 'allow-scripts';"));
 
   // These flags should be pending but not take effect, since there's been no
@@ -6873,7 +5611,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add a new grandchild frame and navigate it cross-site.
   RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       child, "document.body.appendChild(document.createElement('iframe'));"));
   frame_observer.Wait();
 
@@ -7018,7 +5756,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Set sandbox flags for child frame, specifying that popups opened from it
   // should not be sandboxed.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root,
       "document.querySelector('iframe').sandbox = "
       "    'allow-scripts allow-popups allow-popups-to-escape-sandbox';"));
@@ -7291,7 +6029,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframeDisplayNone) {
       root->current_frame_host()->GetRenderWidgetHost();
 
   // Set the iframe to display: none.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       shell(), "document.querySelector('iframe').style.display = 'none'"));
 
   // Waits until pending frames are done.
@@ -7300,8 +6038,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframeDisplayNone) {
   observer->Wait();
 
   // Force the renderer to generate a new frame.
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.background = 'black'"));
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.background = 'black'"));
 
   // Waits for the next frame.
   observer->Wait();
@@ -7318,9 +6055,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Add a load event handler for the iframe element.
-  EXPECT_TRUE(ExecuteScript(shell(),
-                            "document.querySelector('iframe').onload = "
-                            "    function() { document.title = 'loaded'; };"));
+  EXPECT_TRUE(ExecJs(shell(),
+                     "document.querySelector('iframe').onload = "
+                     "    function() { document.title = 'loaded'; };"));
 
   // The blocked url reported in the console message should only contain the
   // origin, in order to avoid sensitive data being leaked to the parent frame.
@@ -7346,8 +6083,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   for (const auto& test : kTestCases) {
     GURL blocked_url = embedded_test_server()->GetURL("b.com", test.url);
-    EXPECT_TRUE(ExecuteScript(shell(), "document.title = 'not loaded';"));
-    base::string16 expected_title(base::UTF8ToUTF16("loaded"));
+    EXPECT_TRUE(ExecJs(shell(), "document.title = 'not loaded';"));
+    std::u16string expected_title(u"loaded");
     TitleWatcher title_watcher(shell()->web_contents(), expected_title);
 
     WebContentsConsoleObserver console_observer(shell()->web_contents());
@@ -7355,8 +6092,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
     // Navigate the subframe to a blocked URL.
     TestNavigationObserver load_observer(shell()->web_contents());
-    EXPECT_TRUE(ExecuteScript(
-        shell(), JsReplace("frames[0].location.href = $1", blocked_url)));
+    EXPECT_TRUE(ExecJs(shell(),
+                       JsReplace("frames[0].location.href = $1", blocked_url)));
     load_observer.Wait();
 
     // The blocked frame's origin should become unique.
@@ -7420,24 +6157,27 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_FALSE(root->child_at(0)->HasSameOrigin(*root));
   EXPECT_EQ(old_subframe_url, root->child_at(0)->current_url());
   const std::vector<network::mojom::ContentSecurityPolicyPtr>& root_csp =
-      root->current_replication_state().accumulated_csps;
+      root->current_frame_host()
+          ->policy_container_host()
+          ->policies()
+          .content_security_policies;
   EXPECT_EQ(1u, root_csp.size());
   EXPECT_EQ("frame-src 'self' http://b.com:*",
             root_csp[0]->header->header_value);
 
   // Monitor subframe's load events via main frame's title.
-  EXPECT_TRUE(ExecuteScript(shell(),
-                            "document.querySelector('iframe').onload = "
-                            "    function() { document.title = 'loaded'; };"));
-  EXPECT_TRUE(ExecuteScript(shell(), "document.title = 'not loaded';"));
-  base::string16 expected_title(base::UTF8ToUTF16("loaded"));
+  EXPECT_TRUE(ExecJs(shell(),
+                     "document.querySelector('iframe').onload = "
+                     "    function() { document.title = 'loaded'; };"));
+  EXPECT_TRUE(ExecJs(shell(), "document.title = 'not loaded';"));
+  std::u16string expected_title(u"loaded");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
 
   // Try to navigate the subframe to a blocked URL.
   TestNavigationObserver load_observer(shell()->web_contents());
   GURL blocked_url = embedded_test_server()->GetURL("c.com", "/title3.html");
-  EXPECT_TRUE(ExecuteScript(
-      root->child_at(0), JsReplace("window.location.href = $1", blocked_url)));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     JsReplace("window.location.href = $1", blocked_url)));
 
   // The blocked frame should still fire a load event in its parent's process.
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -7492,7 +6232,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_FALSE(root->child_at(0)->HasSameOrigin(*root));
   EXPECT_EQ(old_subframe_url, root->child_at(0)->current_url());
   const std::vector<network::mojom::ContentSecurityPolicyPtr>& root_csp =
-      root->current_replication_state().accumulated_csps;
+      root->current_frame_host()
+          ->policy_container_host()
+          ->policies()
+          .content_security_policies;
   EXPECT_EQ(1u, root_csp.size());
   EXPECT_EQ("frame-src https://a.com:*", root_csp[0]->header->header_value);
 
@@ -7501,7 +6244,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                      "document.querySelector('iframe').onload = "
                      "    function() { document.title = 'loaded'; };"));
   EXPECT_TRUE(ExecJs(shell(), "document.title = 'not loaded';"));
-  base::string16 expected_title(base::UTF8ToUTF16("loaded"));
+  std::u16string expected_title(u"loaded");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
 
   // Try to navigate the subframe to a blocked URL.
@@ -7554,7 +6297,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_FALSE(srcdoc_frame->HasSameOrigin(*navigating_frame));
   EXPECT_EQ(old_subframe_url, navigating_frame->current_url());
   const std::vector<network::mojom::ContentSecurityPolicyPtr>& srcdoc_csp =
-      srcdoc_frame->current_replication_state().accumulated_csps;
+      srcdoc_frame->current_frame_host()
+          ->policy_container_host()
+          ->policies()
+          .content_security_policies;
   EXPECT_EQ(1u, srcdoc_csp.size());
   EXPECT_EQ("frame-src 'self' http://b.com:*",
             srcdoc_csp[0]->header->header_value);
@@ -7570,7 +6316,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
              "document.querySelector('iframe').onload = "
              "    function() { window.top.postMessage('loaded', '*'); };"));
   EXPECT_TRUE(ExecJs(shell(), "document.title = 'not loaded';"));
-  base::string16 expected_title(base::UTF8ToUTF16("loaded"));
+  std::u16string expected_title(u"loaded");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
 
   // Try to navigate the subframe to a blocked URL.
@@ -7603,8 +6349,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       srcdoc_frame, embedded_test_server()->GetURL("a.com", "/title1.html")));
 
   // Verify that the frame's CSP got correctly reset to an empty set.
-  EXPECT_EQ(0u,
-            srcdoc_frame->current_replication_state().accumulated_csps.size());
+  EXPECT_EQ(0u, srcdoc_frame->current_frame_host()
+                    ->policy_container_host()
+                    ->policies()
+                    .content_security_policies.size());
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ScreenCoordinates) {
@@ -7664,7 +6412,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   SimulateMouseClick(
       root->child_at(0)->current_frame_host()->GetRenderWidgetHost(), 1, 1);
   TestFrameNavigationObserver frame_observer(root);
-  EXPECT_TRUE(ExecuteScript(root->child_at(0), script));
+  EXPECT_TRUE(ExecJs(root->child_at(0), script));
   frame_observer.Wait();
   EXPECT_EQ(b_url, root->current_url());
 
@@ -7839,8 +6587,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL data_url_0("data:text/html,dataurl_0");
   {
     TestFrameNavigationObserver commit_observer(child_0);
-    EXPECT_TRUE(
-        ExecuteScript(child_0, JsReplace("location.href = $1", data_url_0)));
+    EXPECT_TRUE(ExecJs(child_0, JsReplace("location.href = $1", data_url_0)));
     commit_observer.WaitForCommit();
   }
   EXPECT_TRUE(observer.last_navigation_succeeded());
@@ -7851,8 +6598,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL data_url_1("data:text/html,dataurl_1");
   {
     TestFrameNavigationObserver commit_observer(child_1);
-    EXPECT_TRUE(
-        ExecuteScript(child_1, JsReplace("location.href = $1", data_url_1)));
+    EXPECT_TRUE(ExecJs(child_1, JsReplace("location.href = $1", data_url_1)));
     commit_observer.WaitForCommit();
   }
   EXPECT_TRUE(observer.last_navigation_succeeded());
@@ -7868,11 +6614,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   std::unique_ptr<NavigationEntryImpl> restored_entry =
       NavigationEntryImpl::FromNavigationEntry(
           NavigationController::CreateNavigationEntry(
-              main_url, Referrer(), base::nullopt, ui::PAGE_TRANSITION_RELOAD,
+              main_url, Referrer(), absl::nullopt, ui::PAGE_TRANSITION_RELOAD,
               false, std::string(), controller.GetBrowserContext(),
               nullptr /* blob_url_loader_factory */));
   EXPECT_EQ(0U, restored_entry->root_node()->children.size());
-  restored_entry->SetPageState(entry->GetPageState());
+  std::unique_ptr<NavigationEntryRestoreContextImpl> context =
+      std::make_unique<NavigationEntryRestoreContextImpl>();
+  restored_entry->SetPageState(entry->GetPageState(), context.get());
   ASSERT_EQ(2U, restored_entry->root_node()->children.size());
 
   // Restore the NavigationEntry into a new tab and check that the data URLs are
@@ -7945,8 +6693,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL blank_url("about:blank");
   {
     TestFrameNavigationObserver commit_observer(child_0);
-    EXPECT_TRUE(
-        ExecuteScript(child_0, JsReplace("location.href = $1", blank_url)));
+    EXPECT_TRUE(ExecJs(child_0, JsReplace("location.href = $1", blank_url)));
     commit_observer.WaitForCommit();
   }
   EXPECT_TRUE(observer.last_navigation_succeeded());
@@ -7958,7 +6705,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   {
     TestFrameNavigationObserver commit_observer(child_1);
     EXPECT_TRUE(
-        ExecuteScript(child_1, JsReplace("location.href = $1", blank_url_ref)));
+        ExecJs(child_1, JsReplace("location.href = $1", blank_url_ref)));
     commit_observer.WaitForCommit();
   }
   EXPECT_TRUE(observer.last_navigation_succeeded());
@@ -7974,11 +6721,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   std::unique_ptr<NavigationEntryImpl> restored_entry =
       NavigationEntryImpl::FromNavigationEntry(
           NavigationController::CreateNavigationEntry(
-              main_url, Referrer(), base::nullopt, ui::PAGE_TRANSITION_RELOAD,
+              main_url, Referrer(), absl::nullopt, ui::PAGE_TRANSITION_RELOAD,
               false, std::string(), controller.GetBrowserContext(),
               nullptr /* blob_url_loader_factory */));
   EXPECT_EQ(0U, restored_entry->root_node()->children.size());
-  restored_entry->SetPageState(entry->GetPageState());
+  std::unique_ptr<NavigationEntryRestoreContextImpl> context =
+      std::make_unique<NavigationEntryRestoreContextImpl>();
+  restored_entry->SetPageState(entry->GetPageState(), context.get());
   ASSERT_EQ(2U, restored_entry->root_node()->children.size());
 
   // Restore the NavigationEntry into a new tab and check that the about:blank
@@ -8072,11 +6821,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   std::unique_ptr<NavigationEntryImpl> restored_entry =
       NavigationEntryImpl::FromNavigationEntry(
           NavigationController::CreateNavigationEntry(
-              main_url, Referrer(), base::nullopt, ui::PAGE_TRANSITION_RELOAD,
+              main_url, Referrer(), absl::nullopt, ui::PAGE_TRANSITION_RELOAD,
               false, std::string(), controller.GetBrowserContext(),
               nullptr /* blob_url_loader_factory */));
   EXPECT_EQ(0U, restored_entry->root_node()->children.size());
-  restored_entry->SetPageState(entry->GetPageState());
+  std::unique_ptr<NavigationEntryRestoreContextImpl> context =
+      std::make_unique<NavigationEntryRestoreContextImpl>();
+  restored_entry->SetPageState(entry->GetPageState(), context.get());
   ASSERT_EQ(1U, restored_entry->root_node()->children.size());
 
   // Restore the NavigationEntry into a new tab and check that the srcdoc URLs
@@ -8276,7 +7027,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
         routing_id1 = pending_widget_routing_id;
         run_loop1.Quit();
       }));
-  EXPECT_TRUE(ExecuteScript(child1, "window.open();"));
+  EXPECT_TRUE(ExecJs(child1, "window.open();"));
   run_loop1.Run();
 
   base::RunLoop run_loop2;
@@ -8288,7 +7039,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
         run_loop2.Quit();
       }));
 
-  EXPECT_TRUE(ExecuteScript(child2, "window.open();"));
+  EXPECT_TRUE(ExecJs(child2, "window.open();"));
   run_loop2.Run();
 
   // At this point, we should have two pending WebContents.
@@ -8462,7 +7213,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
         routing_id1 = pending_widget_routing_id;
         run_loop1.Quit();
       }));
-  EXPECT_TRUE(ExecuteScript(child1, "focusSelectMenu();"));
+  EXPECT_TRUE(ExecJs(child1, "focusSelectMenu();"));
   child1->current_frame_host()->GetRenderWidgetHost()->ForwardKeyboardEvent(
       event);
   run_loop1.Run();
@@ -8485,7 +7236,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
         routing_id2 = pending_widget_routing_id;
         run_loop2.Quit();
       }));
-  EXPECT_TRUE(ExecuteScript(child2, "focusSelectMenu();"));
+  EXPECT_TRUE(ExecJs(child2, "focusSelectMenu();"));
   child2->current_frame_host()->GetRenderWidgetHost()->ForwardKeyboardEvent(
       event);
   run_loop2.Run();
@@ -8508,6 +7259,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                               GlobalRoutingID(process1->GetID(), routing_id1)));
   EXPECT_FALSE(base::Contains(web_contents()->pending_widgets_,
                               GlobalRoutingID(process2->GetID(), routing_id2)));
+
+  // There are posted tasks that must be run before the test shuts down, lest
+  // they access deleted state.
+  RunPostedTasks();
 }
 #endif
 
@@ -8530,8 +7285,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FileChooserInSubframe) {
   std::unique_ptr<FileChooserDelegate> delegate(
       new FileChooserDelegate(file, run_loop.QuitClosure()));
   shell()->web_contents()->SetDelegate(delegate.get());
-  EXPECT_TRUE(ExecuteScript(root->child_at(0),
-                            "document.getElementById('fileinput').click();"));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     "document.getElementById('fileinput').click();"));
   run_loop.Run();
 
   // Also, extract the file from the renderer process to ensure that the
@@ -8598,7 +7353,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Navigate main tab to a b.com URL that will not commit.
   GURL stall_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestNavigationManager delayer(shell()->web_contents(), stall_url);
-  EXPECT_TRUE(ExecuteScript(shell(), JsReplace("location = $1", stall_url)));
+  EXPECT_TRUE(ExecJs(shell(), JsReplace("location = $1", stall_url)));
   EXPECT_TRUE(delayer.WaitForRequestStart());
 
   // The pending RFH should be in the same process as the popup.
@@ -8657,7 +7412,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL stall_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   NavigationHandleObserver handle_observer(shell()->web_contents(), stall_url);
   TestNavigationManager delayer(shell()->web_contents(), stall_url);
-  EXPECT_TRUE(ExecuteScript(shell(), JsReplace("location = $1", stall_url)));
+  EXPECT_TRUE(ExecJs(shell(), JsReplace("location = $1", stall_url)));
   EXPECT_TRUE(delayer.WaitForRequestStart());
 
   // Kill the b.com process, currently in use by the pending RenderFrameHost
@@ -8696,7 +7451,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* child = root->child_at(0);
 
   // Set up a postMessage handler in the main frame for later use.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root->current_frame_host(),
       "window.addEventListener('message',"
       "                        function(e) { document.title = e.data; });"));
@@ -8738,10 +7493,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Send a postMessage from the child to its parent.  This verifies that the
   // parent's proxy in the child's SiteInstance was also restored.
-  base::string16 expected_title(base::UTF8ToUTF16("I am alive!"));
+  std::u16string expected_title(u"I am alive!");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
-  EXPECT_TRUE(ExecuteScript(child->current_frame_host(),
-                            "parent.postMessage('I am alive!', '*');"));
+  EXPECT_TRUE(ExecJs(child->current_frame_host(),
+                     "parent.postMessage('I am alive!', '*');"));
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
@@ -8793,7 +7548,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SessionHistoryReplication) {
   // Go back three entries using the history API from the main frame. This
   // checks that both history length and offset are not stale in a.com, as
   // otherwise this navigation might be dropped by Blink.
-  EXPECT_TRUE(ExecuteScript(root, "history.go(-3);"));
+  EXPECT_TRUE(ExecJs(root, "history.go(-3);"));
   EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ(child_first_url, child1->current_url());
@@ -8801,7 +7556,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SessionHistoryReplication) {
 
   // Now go forward three entries from the child1 frame and check that the
   // history length and offset are not stale in b.com.
-  EXPECT_TRUE(ExecuteScript(child1, "history.go(3);"));
+  EXPECT_TRUE(ExecJs(child1, "history.go(3);"));
   EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ(child1_last_url, child1->current_url());
@@ -8850,7 +7605,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL b_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   {
     TestFrameNavigationObserver commit_observer(child);
-    EXPECT_TRUE(ExecuteScript(child, JsReplace("location.href = $1", b_url)));
+    EXPECT_TRUE(ExecJs(child, JsReplace("location.href = $1", b_url)));
     commit_observer.WaitForCommit();
   }
   RenderFrameHostImpl* child_rfh = child->current_frame_host();
@@ -8883,7 +7638,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // not the case. Note that the process kill doesn't happen immediately, so
   // IsRenderFrameLive() can't be checked here (yet).  Instead, check that
   // JavaScript can still execute in b.com using the popup.
-  EXPECT_TRUE(ExecuteScript(popup_shell->web_contents(), "true"));
+  EXPECT_TRUE(ExecJs(popup_shell->web_contents(), "true"));
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
@@ -8910,8 +7665,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       embedded_test_server()->GetURL("c.com", "/title1.html");
   TestNavigationManager transfer_manager(shell()->web_contents(),
                                          cross_site_url_2);
-  EXPECT_TRUE(
-      ExecuteScript(root, JsReplace("location.href = $1", cross_site_url_2)));
+  EXPECT_TRUE(ExecJs(root, JsReplace("location.href = $1", cross_site_url_2)));
   EXPECT_TRUE(transfer_manager.WaitForResponse());
 
   // Now have the cross-process navigation commit and mark the current RFH as
@@ -8946,9 +7700,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   NavigationHandleWatcher watcher(shell()->web_contents());
   TestNavigationObserver load_observer(shell()->web_contents());
   GURL frame_url = embedded_test_server()->GetURL("c.com", "/title1.html");
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    JsReplace("window.frames[0].location = $1", frame_url)));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     JsReplace("window.frames[0].location = $1", frame_url)));
   load_observer.Wait();
 }
 
@@ -9077,11 +7830,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(proxy->is_render_frame_proxy_live());
 
   // Add a postMessage listener in |popup2| (currently at a c.com URL).
-  EXPECT_TRUE(
-      ExecuteScript(popup2,
-                    "window.addEventListener('message', function(event) {\n"
-                    "  document.title=event.data;\n"
-                    "});"));
+  EXPECT_TRUE(ExecJs(popup2,
+                     "window.addEventListener('message', function(event) {\n"
+                     "  document.title=event.data;\n"
+                     "});"));
 
   // Check that a postMessage can be sent via |proxy| above.  This needs to be
   // done from the b.com process.  |popup| is currently in b.com, but it can't
@@ -9090,10 +7842,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // |popup2|. This is allowed since the main tab is |popup2|'s opener.
   EXPECT_TRUE(NavigateToURLFromRenderer(shell(), b_url));
 
-  base::string16 expected_title(base::UTF8ToUTF16("foo"));
+  std::u16string expected_title(u"foo");
   TitleWatcher title_watcher(popup2->web_contents(), expected_title);
-  EXPECT_TRUE(ExecuteScript(
-      shell(), "window.open('','popup2').postMessage('foo', '*');"));
+  EXPECT_TRUE(
+      ExecJs(shell(), "window.open('','popup2').postMessage('foo', '*');"));
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
@@ -9104,152 +7856,155 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(CreateParsedFeaturePolicy(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation},
+  EXPECT_EQ(CreateParsedPermissionsPolicy(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation},
                 {url.GetOrigin()}),
-            root->current_replication_state().feature_policy_header);
+            root->current_replication_state().permissions_policy_header);
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        TestPolicyReplicationOnSameOriginNavigation) {
   GURL start_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy1.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy1.html"));
   GURL first_nav_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy2.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy2.html"));
   GURL second_nav_url(embedded_test_server()->GetURL("a.com", "/title2.html"));
 
   EXPECT_TRUE(NavigateToURL(shell(), start_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(CreateParsedFeaturePolicy(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation,
-                 blink::mojom::FeaturePolicyFeature::kPayment},
+  EXPECT_EQ(CreateParsedPermissionsPolicy(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+                 blink::mojom::PermissionsPolicyFeature::kPayment},
                 {start_url.GetOrigin()}),
-            root->current_replication_state().feature_policy_header);
+            root->current_replication_state().permissions_policy_header);
 
   // When the main frame navigates to a page with a new policy, it should
   // overwrite the old one.
   EXPECT_TRUE(NavigateToURL(shell(), first_nav_url));
-  EXPECT_EQ(CreateParsedFeaturePolicyMatchesAll(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation,
-                 blink::mojom::FeaturePolicyFeature::kPayment}),
-            root->current_replication_state().feature_policy_header);
+  EXPECT_EQ(CreateParsedPermissionsPolicyMatchesAll(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+                 blink::mojom::PermissionsPolicyFeature::kPayment}),
+            root->current_replication_state().permissions_policy_header);
 
   // When the main frame navigates to a page without a policy, the replicated
   // policy header should be cleared.
   EXPECT_TRUE(NavigateToURL(shell(), second_nav_url));
-  EXPECT_TRUE(root->current_replication_state().feature_policy_header.empty());
+  EXPECT_TRUE(
+      root->current_replication_state().permissions_policy_header.empty());
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        TestPolicyReplicationOnCrossOriginNavigation) {
   GURL start_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy1.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy1.html"));
   GURL first_nav_url(
-      embedded_test_server()->GetURL("b.com", "/feature-policy2.html"));
+      embedded_test_server()->GetURL("b.com", "/permissions-policy2.html"));
   GURL second_nav_url(embedded_test_server()->GetURL("c.com", "/title2.html"));
 
   EXPECT_TRUE(NavigateToURL(shell(), start_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(CreateParsedFeaturePolicy(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation,
-                 blink::mojom::FeaturePolicyFeature::kPayment},
+  EXPECT_EQ(CreateParsedPermissionsPolicy(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+                 blink::mojom::PermissionsPolicyFeature::kPayment},
                 {start_url.GetOrigin()}),
-            root->current_replication_state().feature_policy_header);
+            root->current_replication_state().permissions_policy_header);
 
   // When the main frame navigates to a page with a new policy, it should
   // overwrite the old one.
   EXPECT_TRUE(NavigateToURL(shell(), first_nav_url));
-  EXPECT_EQ(CreateParsedFeaturePolicyMatchesAll(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation,
-                 blink::mojom::FeaturePolicyFeature::kPayment}),
-            root->current_replication_state().feature_policy_header);
+  EXPECT_EQ(CreateParsedPermissionsPolicyMatchesAll(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+                 blink::mojom::PermissionsPolicyFeature::kPayment}),
+            root->current_replication_state().permissions_policy_header);
 
   // When the main frame navigates to a page without a policy, the replicated
   // policy header should be cleared.
   EXPECT_TRUE(NavigateToURL(shell(), second_nav_url));
-  EXPECT_TRUE(root->current_replication_state().feature_policy_header.empty());
+  EXPECT_TRUE(
+      root->current_replication_state().permissions_policy_header.empty());
 }
 
-// Test that the replicated feature policy header is correct in subframes as
+// Test that the replicated permissions policy header is correct in subframes as
 // they navigate.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        TestPolicyReplicationFromRemoteFrames) {
   GURL main_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy-main.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy-main.html"));
   GURL first_nav_url(
-      embedded_test_server()->GetURL("b.com", "/feature-policy2.html"));
+      embedded_test_server()->GetURL("b.com", "/permissions-policy2.html"));
   GURL second_nav_url(embedded_test_server()->GetURL("c.com", "/title2.html"));
 
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(CreateParsedFeaturePolicy(
-                {blink::mojom::FeaturePolicyFeature::kGeolocation,
-                 blink::mojom::FeaturePolicyFeature::kPayment},
+  EXPECT_EQ(CreateParsedPermissionsPolicy(
+                {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+                 blink::mojom::PermissionsPolicyFeature::kPayment},
                 {main_url.GetOrigin(), GURL("http://example.com/")}),
-            root->current_replication_state().feature_policy_header);
+            root->current_replication_state().permissions_policy_header);
   EXPECT_EQ(1UL, root->child_count());
   EXPECT_EQ(
-      CreateParsedFeaturePolicy(
-          {blink::mojom::FeaturePolicyFeature::kGeolocation,
-           blink::mojom::FeaturePolicyFeature::kPayment},
+      CreateParsedPermissionsPolicy(
+          {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+           blink::mojom::PermissionsPolicyFeature::kPayment},
           {main_url.GetOrigin()}),
-      root->child_at(0)->current_replication_state().feature_policy_header);
+      root->child_at(0)->current_replication_state().permissions_policy_header);
 
   // Navigate the iframe cross-site.
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), first_nav_url));
   EXPECT_EQ(
-      CreateParsedFeaturePolicyMatchesAll(
-          {blink::mojom::FeaturePolicyFeature::kGeolocation,
-           blink::mojom::FeaturePolicyFeature::kPayment}),
-      root->child_at(0)->current_replication_state().feature_policy_header);
+      CreateParsedPermissionsPolicyMatchesAll(
+          {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+           blink::mojom::PermissionsPolicyFeature::kPayment}),
+      root->child_at(0)->current_replication_state().permissions_policy_header);
 
   // Navigate the iframe to another location, this one with no policy header
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), second_nav_url));
   EXPECT_TRUE(root->child_at(0)
                   ->current_replication_state()
-                  .feature_policy_header.empty());
+                  .permissions_policy_header.empty());
 
   // Navigate the iframe back to a page with a policy
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), first_nav_url));
   EXPECT_EQ(
-      CreateParsedFeaturePolicyMatchesAll(
-          {blink::mojom::FeaturePolicyFeature::kGeolocation,
-           blink::mojom::FeaturePolicyFeature::kPayment}),
-      root->child_at(0)->current_replication_state().feature_policy_header);
+      CreateParsedPermissionsPolicyMatchesAll(
+          {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+           blink::mojom::PermissionsPolicyFeature::kPayment}),
+      root->child_at(0)->current_replication_state().permissions_policy_header);
 }
 
-// Test that the replicated feature policy header is correct in remote proxies
-// after the local frame has navigated.
+// Test that the replicated permissions policy header is correct in remote
+// proxies after the local frame has navigated.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       TestFeaturePolicyReplicationToProxyOnNavigation) {
+                       TestPermissionsPolicyReplicationToProxyOnNavigation) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/frame_tree/page_with_two_frames.html"));
   GURL first_nav_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy3.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy3.html"));
   GURL second_nav_url(
-      embedded_test_server()->GetURL("a.com", "/feature-policy4.html"));
+      embedded_test_server()->GetURL("a.com", "/permissions-policy4.html"));
 
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_TRUE(root->current_replication_state().feature_policy_header.empty());
+  EXPECT_TRUE(
+      root->current_replication_state().permissions_policy_header.empty());
   EXPECT_EQ(2UL, root->child_count());
   EXPECT_TRUE(root->child_at(1)
                   ->current_replication_state()
-                  .feature_policy_header.empty());
+                  .permissions_policy_header.empty());
 
   // Navigate the iframe to a page with a policy, and a nested cross-site iframe
   // (to the same site as a root->child_at(1) so that the render process already
   // exists.)
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(1), first_nav_url));
   EXPECT_EQ(
-      CreateParsedFeaturePolicyMatchesNone(
-          {blink::mojom::FeaturePolicyFeature::kGeolocation,
-           blink::mojom::FeaturePolicyFeature::kPayment}),
-      root->child_at(1)->current_replication_state().feature_policy_header);
+      CreateParsedPermissionsPolicyMatchesNone(
+          {blink::mojom::PermissionsPolicyFeature::kGeolocation,
+           blink::mojom::PermissionsPolicyFeature::kPayment}),
+      root->child_at(1)->current_replication_state().permissions_policy_header);
 
   EXPECT_EQ(1UL, root->child_at(1)->child_count());
 
@@ -9268,7 +8023,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(1), second_nav_url));
   EXPECT_TRUE(root->child_at(1)
                   ->current_replication_state()
-                  .feature_policy_header.empty());
+                  .permissions_policy_header.empty());
   EXPECT_EQ(1UL, root->child_at(1)->child_count());
 
   // Ask the deepest iframe to report the enabled state of the geolocation
@@ -9279,7 +8034,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                    "document.featurePolicy.allowsFeature('geolocation')"));
 }
 
-// Test that the constructed feature policy is correct in sandboxed
+// Test that the constructed permissions policy is correct in sandboxed
 // frames. Sandboxed frames have an opaque origin, and if the frame policy,
 // which is constructed in the parent frame, cannot send that origin through
 // the browser process to the sandboxed frame, then the sandboxed frame's
@@ -9297,7 +8052,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_TRUE(root->current_replication_state().feature_policy_header.empty());
+  EXPECT_TRUE(
+      root->current_replication_state().permissions_policy_header.empty());
   EXPECT_EQ(1UL, root->child_count());
   // Verify that the child frame is sandboxed with an opaque origin.
   EXPECT_TRUE(root->child_at(0)
@@ -9313,17 +8069,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // constructed correctly, and geolocation will be enabled in the sandbox.
   // Otherwise, it will be disabled, as geolocation is disabled by default in
   // cross-origin frames.
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0),
-      "window.domAutomationController.send("
-      "document.featurePolicy.allowsFeature('geolocation'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true,
+            EvalJs(root->child_at(0),
+                   "document.featurePolicy.allowsFeature('geolocation');"));
 
   TestNavigationObserver load_observer(shell()->web_contents());
-  EXPECT_TRUE(ExecuteScript(root->child_at(0),
-                            JsReplace("document.location.href=$1", nav_url)));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     JsReplace("document.location.href=$1", nav_url)));
   load_observer.Wait();
 
   // Verify that the child frame is sandboxed with an opaque origin.
@@ -9334,15 +8086,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // And verify that the origin in the replication state is also opaque.
   EXPECT_TRUE(root->child_at(0)->current_origin().opaque());
 
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0),
-      "window.domAutomationController.send("
-      "document.featurePolicy.allowsFeature('geolocation'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true,
+            EvalJs(root->child_at(0),
+                   "document.featurePolicy.allowsFeature('geolocation');"));
 }
 
-// Test that the constructed feature policy is correct in sandboxed
+// Test that the constructed permissions policy is correct in sandboxed
 // frames. Sandboxed frames have an opaque origin, and if the frame policy,
 // which is constructed in the parent frame, cannot send that origin through
 // the browser process to the sandboxed frame, then the sandboxed frame's
@@ -9358,7 +8107,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_TRUE(root->current_replication_state().feature_policy_header.empty());
+  EXPECT_TRUE(
+      root->current_replication_state().permissions_policy_header.empty());
   EXPECT_EQ(1UL, root->child_count());
   // Verify that the child frame has an opaque origin.
   EXPECT_TRUE(root->child_at(0)
@@ -9369,17 +8119,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(root->child_at(0)->current_origin().opaque());
 
   // Verify that geolocation is enabled in the document.
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0),
-      "window.domAutomationController.send("
-      "document.featurePolicy.allowsFeature('geolocation'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true,
+            EvalJs(root->child_at(0),
+                   "document.featurePolicy.allowsFeature('geolocation');"));
 
   TestNavigationObserver load_observer(shell()->web_contents());
-  EXPECT_TRUE(ExecuteScript(root->child_at(0),
-                            JsReplace("document.location.href=$1", nav_url)));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     JsReplace("document.location.href=$1", nav_url)));
   load_observer.Wait();
 
   // Verify that the child frame no longer has an opaque origin.
@@ -9391,12 +8137,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_FALSE(root->child_at(0)->current_origin().opaque());
 
   // Verify that the new document does not have geolocation enabled.
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0),
-      "window.domAutomationController.send("
-      "document.featurePolicy.allowsFeature('geolocation'));",
-      &success));
-  EXPECT_FALSE(success);
+  EXPECT_EQ(false,
+            EvalJs(root->child_at(0),
+                   "document.featurePolicy.allowsFeature('geolocation');"));
 }
 
 // Ensure that an iframe that navigates cross-site doesn't use the same process
@@ -9425,7 +8168,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // #2 Navigate the iframe to its srcdoc attribute.
   TestNavigationObserver load_observer(shell()->web_contents());
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.getElementById('child-0').srcdoc = 'srcdoc content';"));
   load_observer.Wait();
 
@@ -9461,7 +8204,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Do a remote-to-local navigation of the child frame from the parent frame.
   TestFrameNavigationObserver frame_observer(child);
   GURL frame_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, JsReplace("document.querySelector('iframe').src = $1", frame_url)));
   frame_observer.Wait();
 
@@ -9529,7 +8272,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ContainerPolicy) {
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ContainerPolicyDynamic) {
   GURL main_url(embedded_test_server()->GetURL("/allowed_frames.html"));
   GURL nav_url(
-      embedded_test_server()->GetURL("b.com", "/feature-policy2.html"));
+      embedded_test_server()->GetURL("b.com", "/permissions-policy2.html"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
@@ -9539,7 +8282,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ContainerPolicyDynamic) {
 
   // Removing the "allow" attribute; pending policy should update, but effective
   // policy remains unchanged.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.getElementById('child-2').setAttribute('allow','')"));
   EXPECT_EQ(
       2UL, root->child_at(2)->effective_frame_policy().container_policy.size());
@@ -9581,7 +8324,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Dynamically enable fullscreen for the subframe and check that the
   // fullscreen property was updated on the FrameTreeNode.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.getElementById('child-0').allowFullscreen='true'"));
 
   // No change is expected to the container policy for dynamic modification of
@@ -9602,14 +8345,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        ContainerPolicySandboxDynamic) {
   GURL main_url(embedded_test_server()->GetURL("/allowed_frames.html"));
   GURL nav_url(
-      embedded_test_server()->GetURL("b.com", "/feature-policy2.html"));
+      embedded_test_server()->GetURL("b.com", "/permissions-policy2.html"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Validate that the effective container policy contains a single non-unique
   // origin.
-  const blink::ParsedFeaturePolicy initial_effective_policy =
+  const blink::ParsedPermissionsPolicy initial_effective_policy =
       root->child_at(2)->effective_frame_policy().container_policy;
   EXPECT_EQ(1UL, initial_effective_policy[0].allowed_origins.size());
   EXPECT_FALSE(initial_effective_policy[0].allowed_origins.begin()->opaque());
@@ -9618,11 +8361,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // be flagged as matching the opaque origin of the frame (without containing
   // an actual opaque origin, since the parent frame doesn't actually have that
   // origin yet) but the effective policy should remain unchanged.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.getElementById('child-2').setAttribute('sandbox','')"));
-  const blink::ParsedFeaturePolicy updated_effective_policy =
+  const blink::ParsedPermissionsPolicy updated_effective_policy =
       root->child_at(2)->effective_frame_policy().container_policy;
-  const blink::ParsedFeaturePolicy updated_pending_policy =
+  const blink::ParsedPermissionsPolicy updated_pending_policy =
       root->child_at(2)->pending_frame_policy().container_policy;
   EXPECT_EQ(1UL, updated_effective_policy[0].allowed_origins.size());
   EXPECT_FALSE(updated_effective_policy[0].allowed_origins.begin()->opaque());
@@ -9631,17 +8374,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Navigate the frame; pending policy should now be committed.
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(2), nav_url));
-  const blink::ParsedFeaturePolicy final_effective_policy =
+  const blink::ParsedPermissionsPolicy final_effective_policy =
       root->child_at(2)->effective_frame_policy().container_policy;
   EXPECT_TRUE(final_effective_policy[0].matches_opaque_src);
   EXPECT_EQ(0UL, final_effective_policy[0].allowed_origins.size());
 }
 
 // Test that creating a new remote frame at the same origin as its parent
-// results in the correct feature policy in the RemoteSecurityContext.
+// results in the correct permissions policy in the RemoteSecurityContext.
 // https://crbug.com/852102
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       FeaturePolicyConstructionInExistingProxy) {
+                       PermissionsPolicyConstructionInExistingProxy) {
   WebContentsImpl* contents = web_contents();
   FrameTreeNode* root = contents->GetFrameTree()->root();
 
@@ -9670,7 +8413,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "document.body.appendChild(f);",
       embedded_test_server()->GetURL(
           "a.com", "/cross_site_iframe_factory.html?a(b{allow-autoplay})"));
-  EXPECT_TRUE(ExecuteScript(root, create_subframe_script));
+  EXPECT_TRUE(ExecJs(root, create_subframe_script));
   EXPECT_TRUE(WaitForLoadStop(contents));
 
   // Verify the shape of the frame tree
@@ -9684,13 +8427,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // This indirectly tests the replicated policy in frame 3: Because frame 4 is
   // cross-origin to frame 3, it will use the proxy's replicated policy as the
   // parent policy; otherwise we would just ask frame 3 to report its own state.
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(1)->child_at(0),
-      "window.domAutomationController.send("
-      "document.featurePolicy.allowsFeature('autoplay'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(1)->child_at(0),
+                         "document.featurePolicy.allowsFeature('autoplay');"));
 }
 
 // Test harness that allows for "barrier" style delaying of requests matching
@@ -9752,7 +8490,7 @@ class RequestDelayingSitePerProcessBrowserTest
       return std::make_unique<DelayedResponse>(this);
     }
     MaybeStartRequests();
-    return std::unique_ptr<net::test_server::BasicHttpResponse>();
+    return nullptr;
   }
 
   // If there are no more requests to delay, post a series of tasks finishing
@@ -9819,9 +8557,8 @@ IN_PROC_BROWSER_TEST_P(RequestDelayingSitePerProcessBrowserTest,
                                   "numSubresources=3",
                                   path.c_str())));
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  bool result;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(shell(), "createFrames()", &result));
-  EXPECT_TRUE(result);
+  EXPECT_EQ(true,
+            EvalJs(shell(), "createFrames()", EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 IN_PROC_BROWSER_TEST_P(RequestDelayingSitePerProcessBrowserTest,
@@ -9837,9 +8574,8 @@ IN_PROC_BROWSER_TEST_P(RequestDelayingSitePerProcessBrowserTest,
                                   "numSubresources=3",
                                   path0.c_str(), path1.c_str())));
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  bool result;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(shell(), "createFrames()", &result));
-  EXPECT_TRUE(result);
+  EXPECT_EQ(true,
+            EvalJs(shell(), "createFrames()", EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 #if defined(OS_ANDROID)
@@ -9890,7 +8626,7 @@ class SitePerProcessAndroidImeTest : public SitePerProcessBrowserTest {
   }
 
   void FocusInputInFrame(RenderFrameHostImpl* frame) {
-    ASSERT_TRUE(ExecuteScript(frame, "window.focus(); input.focus();"));
+    ASSERT_TRUE(ExecJs(frame, "window.focus(); input.focus();"));
   }
 
   // Creates a page with multiple (nested) OOPIFs and populates all of them
@@ -9920,7 +8656,7 @@ class SitePerProcessAndroidImeTest : public SitePerProcessBrowserTest {
         "};";
 
     for (auto* frame : frames_)
-      ASSERT_TRUE(ExecuteScript(frame, add_input_script));
+      ASSERT_TRUE(ExecJs(frame, add_input_script));
   }
 
   // This methods tries to commit |text| by simulating a native call from Java.
@@ -10060,7 +8796,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, PostTargetSubFrame) {
   // Make a form submission from the main frame and target the OOPIF.
   GURL form_url(embedded_test_server()->GetURL("/echoall"));
   TestNavigationObserver form_post_observer(shell()->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), JsReplace(R"(
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
     var form = document.createElement('form');
 
     // POST form submission to /echoall.
@@ -10081,7 +8817,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, PostTargetSubFrame) {
     document.body.appendChild(form);
     form.submit();
   )",
-                                                               form_url)));
+                                                        form_url)));
   form_post_observer.Wait();
 
   NavigationEntryImpl* entry = static_cast<NavigationEntryImpl*>(
@@ -10115,8 +8851,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Make a form submission from the subframe and target its parent frame.
   GURL form_url(embedded_test_server()->GetURL("/echoall"));
   TestNavigationObserver form_post_observer(web_contents());
-  EXPECT_TRUE(ExecuteScript(root->child_at(0)->current_frame_host(),
-                            JsReplace(R"(
+  EXPECT_TRUE(
+      ExecJs(root->child_at(0)->current_frame_host(), JsReplace(R"(
     var form = document.createElement('form');
 
     // POST form submission to /echoall.
@@ -10137,7 +8873,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     document.body.appendChild(form);
     form.submit();
   )",
-                                      form_url)));
+                                                                form_url)));
   form_post_observer.Wait();
 
   // Verify that the FrameNavigationEntry's method is POST.
@@ -10147,22 +8883,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Verify that POST body was correctly passed to the server and ended up in
   // the body of the page.
-  std::string body;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(root, R"(
-    var body = document.getElementsByTagName('pre')[0].innerText;
-    window.domAutomationController.send(body);)", &body));
-  EXPECT_EQ("my_token=my_value\n", body);
+  EXPECT_EQ("my_token=my_value\n",
+            EvalJs(root, "document.getElementsByTagName('pre')[0].innerText"));
 
   // Reload the main frame and ensure the POST body is preserved.  This checks
   // that the POST body was saved in the FrameNavigationEntry.
   web_contents()->GetController().Reload(ReloadType::NORMAL,
                                          false /* check_for_repost */);
   EXPECT_TRUE(WaitForLoadStop(web_contents()));
-  body = "";
-  EXPECT_TRUE(ExecuteScriptAndExtractString(root, R"(
-    var body = document.getElementsByTagName('pre')[0].innerText;
-    window.domAutomationController.send(body);)", &body));
-  EXPECT_EQ("my_token=my_value\n", body);
+  EXPECT_EQ("my_token=my_value\n",
+            EvalJs(root, "document.getElementsByTagName('pre')[0].innerText"));
 }
 
 // Verify that a remote-to-local main frame navigation doesn't overwrite
@@ -10202,8 +8932,8 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_EQ(foo_url, web_contents()->GetMainFrame()->GetLastCommittedURL());
 }
 
-// The test is flaky on lacros, cf https://crbug.com/1170583.
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
+// The test is flaky on Linux, Chrome OS, etc; cf https://crbug.com/1170583.
+#if defined(OS_POSIX)
 #define MAYBE_CrossProcessInertSubframe DISABLED_CrossProcessInertSubframe
 #else
 #define MAYBE_CrossProcessInertSubframe CrossProcessInertSubframe
@@ -10225,19 +8955,19 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   FrameTreeNode* iframe_node = root->child_at(0);
 
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       iframe_node,
       "document.head.innerHTML = '';"
       "document.body.innerHTML = '<input id=\"text1\"> <input id=\"text2\">';"
       "text1.focus();"));
 
   // Add a <dialog> to the root frame and call showModal on it.
-  EXPECT_TRUE(ExecuteScript(root,
-                            "let dialog = "
-                            "document.body.appendChild(document.createElement('"
-                            "dialog'));"
-                            "dialog.innerHTML = 'Modal dialog <input>';"
-                            "dialog.showModal();"));
+  EXPECT_TRUE(ExecJs(root,
+                     "let dialog = "
+                     "document.body.appendChild(document.createElement('"
+                     "dialog'));"
+                     "dialog.innerHTML = 'Modal dialog <input>';"
+                     "dialog.showModal();"));
 
   // Yield the UI thread to ensure that the real SetIsInert message
   // handler runs, in order to guarantee that the update arrives at the
@@ -10253,12 +8983,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Attempt to change focus in the inert subframe. This should fail.
   // The setTimeout ensures that the inert bit can propagate before the
   // test JS code runs.
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      iframe_node,
-      "window.setTimeout(() => {text2.focus();"
-      "domAutomationController.send(document.activeElement.id);}, 0)",
-      &focused_element));
-  EXPECT_EQ("", focused_element);
+  EXPECT_EQ(
+      "",
+      EvalJs(iframe_node,
+             "window.setTimeout(() => {text2.focus();"
+             "domAutomationController.send(document.activeElement.id);}, 0)",
+             EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Navigate the child frame to another site, so that it moves into a new
   // process.
@@ -10270,38 +9000,36 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // prevent races with the inertness update.
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       iframe_node,
       "document.head.innerHTML = '';"
       "document.body.innerHTML = '<input id=\"text1\"> <input id=\"text2\">';"
       "text1.focus();"));
 
   // Verify that inertness was preserved across the navigation.
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      iframe_node,
-      "text2.focus();"
-      "domAutomationController.send(document.activeElement.id);",
-      &focused_element));
-  EXPECT_EQ("", focused_element);
+  EXPECT_EQ("",
+            EvalJs(iframe_node,
+                   "text2.focus();"
+                   "domAutomationController.send(document.activeElement.id);",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Navigate the subframe back into its parent process to verify that the
   // new local frame remains inert.
   GURL same_site_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
   EXPECT_TRUE(NavigateToURLFromRenderer(iframe_node, same_site_url));
 
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       iframe_node,
       "document.head.innerHTML = '';"
       "document.body.innerHTML = '<input id=\"text1\"> <input id=\"text2\">';"
       "text1.focus();"));
 
   // Verify that inertness was preserved across the navigation.
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      iframe_node,
-      "text2.focus();"
-      "domAutomationController.send(document.activeElement.id);",
-      &focused_element));
-  EXPECT_EQ("", focused_element);
+  EXPECT_EQ("",
+            EvalJs(iframe_node,
+                   "text2.focus();"
+                   "domAutomationController.send(document.activeElement.id);",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 // Check that main frames for the same site rendering in unrelated tabs start
@@ -10428,7 +9156,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   TestNavigationManager manager2(web_contents(), new_url_2);
   auto script = JsReplace("location = $1; frames[0].location = $2;", new_url_1,
                           new_url_2);
-  EXPECT_TRUE(ExecuteScript(web_contents(), script));
+  EXPECT_TRUE(ExecJs(web_contents(), script));
 
   // Wait for main frame request, but don't commit it yet.  This should create
   // a speculative RenderFrameHost.
@@ -10478,10 +9206,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // The new commit should have detached the old child frame.
   EXPECT_EQ(0U, root->child_count());
-  int length = -1;
-  EXPECT_TRUE(ExecuteScriptAndExtractInt(
-      web_contents(), "domAutomationController.send(frames.length);", &length));
-  EXPECT_EQ(0, length);
+  EXPECT_EQ(0, EvalJs(web_contents(), "frames.length;"));
 
   // The root proxy should be gone.
   EXPECT_FALSE(root->render_manager()->GetRenderFrameProxyHost(
@@ -10502,12 +9227,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Install postMessage handlers in main frame and second subframe for later
   // use.
-  EXPECT_TRUE(
-      ExecuteScript(root->current_frame_host(),
-                    "window.addEventListener('message', function(event) {\n"
-                    "  event.source.postMessage(event.data + '-reply', '*');\n"
-                    "});"));
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(root->current_frame_host(),
+                     "window.addEventListener('message', function(event) {\n"
+                     "  event.source.postMessage(event.data + '-reply', '*');\n"
+                     "});"));
+  EXPECT_TRUE(ExecJs(
       child2->current_frame_host(),
       "window.addEventListener('message', function(event) {\n"
       "  event.source.postMessage(event.data + '-subframe-reply', '*');\n"
@@ -10516,8 +9240,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Start a main frame navigation to b.com.
   GURL new_url_1(embedded_test_server()->GetURL("b.com", "/title1.html"));
   TestNavigationManager manager1(web_contents(), new_url_1);
-  EXPECT_TRUE(
-      ExecuteScript(web_contents(), JsReplace("location = $1", new_url_1)));
+  EXPECT_TRUE(ExecJs(web_contents(), JsReplace("location = $1", new_url_1)));
 
   // Wait for main frame request and check the frame tree.  There should be a
   // proxy for b.com at the root, but nowhere else at this point.
@@ -10533,8 +9256,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Now start navigating the first subframe to b.com.
   GURL new_url_2(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestNavigationManager manager2(web_contents(), new_url_2);
-  EXPECT_TRUE(ExecuteScript(web_contents(),
-                            JsReplace("frames[0].location = $1", new_url_2)));
+  EXPECT_TRUE(
+      ExecJs(web_contents(), JsReplace("frames[0].location = $1", new_url_2)));
 
   // Wait for subframe request.
   ASSERT_TRUE(manager2.WaitForRequestStart());
@@ -10602,28 +9325,26 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Make sure the subframe can communicate to both the root remote frame
   // (where the postMessage should go to the current RenderFrameHost rather
   // than the pending one) and its sibling remote frame in the a.com process.
-  EXPECT_TRUE(
-      ExecuteScript(child->current_frame_host(),
-                    "window.addEventListener('message', function(event) {\n"
-                    "  domAutomationController.send(event.data);\n"
-                    "});"));
-  std::string response;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      child, "parent.postMessage('root-ping', '*')", &response));
-  EXPECT_EQ("root-ping-reply", response);
+  EXPECT_TRUE(ExecJs(child->current_frame_host(),
+                     "window.addEventListener('message', function(event) {\n"
+                     "  domAutomationController.send(event.data);\n"
+                     "});"));
+  EXPECT_EQ("root-ping-reply",
+            EvalJs(child, "parent.postMessage('root-ping', '*')",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      child, "parent.frames[1].postMessage('sibling-ping', '*')", &response));
-  EXPECT_EQ("sibling-ping-subframe-reply", response);
+  EXPECT_EQ("sibling-ping-subframe-reply",
+            EvalJs(child, "parent.frames[1].postMessage('sibling-ping', '*')",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Cancel the pending main frame navigation, and verify that the subframe can
   // still communicate with the (old) main frame.
   root->navigator().CancelNavigation(root);
   EXPECT_FALSE(root->render_manager()->speculative_frame_host());
-  response = "";
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      child, "parent.postMessage('root-ping', '*')", &response));
-  EXPECT_EQ("root-ping-reply", response);
+
+  EXPECT_EQ("root-ping-reply",
+            EvalJs(child, "parent.postMessage('root-ping', '*')",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 // Similar to TwoCrossSitePendingNavigations* tests above, but checks the case
@@ -10636,11 +9357,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Install a postMessage handler in main frame for later use.
-  EXPECT_TRUE(
-      ExecuteScript(web_contents(),
-                    "window.addEventListener('message', function(event) {\n"
-                    "  event.source.postMessage(event.data + '-reply', '*');\n"
-                    "});"));
+  EXPECT_TRUE(ExecJs(web_contents(),
+                     "window.addEventListener('message', function(event) {\n"
+                     "  event.source.postMessage(event.data + '-reply', '*');\n"
+                     "});"));
 
   Shell* popup_shell =
       OpenPopup(shell()->web_contents(), GURL(url::kAboutBlankURL), "popup");
@@ -10648,8 +9368,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Start a navigation to b.com in the first (opener) tab.
   GURL new_url_1(embedded_test_server()->GetURL("b.com", "/title1.html"));
   TestNavigationManager manager(web_contents(), new_url_1);
-  EXPECT_TRUE(
-      ExecuteScript(web_contents(), JsReplace("location = $1", new_url_1)));
+  EXPECT_TRUE(ExecJs(web_contents(), JsReplace("location = $1", new_url_1)));
   ASSERT_TRUE(manager.WaitForRequestStart());
 
   // Before it commits, start and commit a navigation to b.com in the second
@@ -10672,27 +9391,25 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Make sure the second tab can communicate to its (old) opener remote frame.
   // The postMessage should go to the current RenderFrameHost rather than the
   // pending one in the first tab's main frame.
-  EXPECT_TRUE(
-      ExecuteScript(popup_shell->web_contents(),
-                    "window.addEventListener('message', function(event) {\n"
-                    "  domAutomationController.send(event.data);\n"
-                    "});"));
+  EXPECT_TRUE(ExecJs(popup_shell->web_contents(),
+                     "window.addEventListener('message', function(event) {\n"
+                     "  domAutomationController.send(event.data);\n"
+                     "});"));
 
-  std::string response;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      popup_shell->web_contents(), "opener.postMessage('opener-ping', '*');",
-      &response));
-  EXPECT_EQ("opener-ping-reply", response);
+  EXPECT_EQ("opener-ping-reply",
+            EvalJs(popup_shell->web_contents(),
+                   "opener.postMessage('opener-ping', '*');",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Cancel the pending main frame navigation, and verify that the subframe can
   // still communicate with the (old) main frame.
   root->navigator().CancelNavigation(root);
   EXPECT_FALSE(root->render_manager()->speculative_frame_host());
-  response = "";
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      popup_shell->web_contents(), "opener.postMessage('opener-ping', '*')",
-      &response));
-  EXPECT_EQ("opener-ping-reply", response);
+
+  EXPECT_EQ("opener-ping-reply",
+            EvalJs(popup_shell->web_contents(),
+                   "opener.postMessage('opener-ping', '*')",
+                   EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
@@ -10780,16 +9497,30 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(using_speculative_rfh, nav_manager.was_committed());
 }
 
-// Test that triggering fallback handling for <object> with an HTTP error does
-// not result in the renderer ignoring a `CommitNavigation()` IPC.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       CommitNavigationWithHTTPErrorInObjectTag) {
-  // TODO(https://crbug.com/1151424): This triggers a DCHECK() since the
-  // fallback path expects the frame (which is still provisional) to already be
-  // swapped in.
-  if (GetRenderDocumentLevel() == RenderDocumentLevel::kSubframe)
-    return;
+namespace {
 
+// Helper for various <object> navigation test cases that trigger fallback
+// handling. Fallback handling should never reach ready-to-commit navigation, so
+// this helper forces test failure if a ReadyToCommitNavigation() is received.
+class AssertNoReadyToCommitNavigationCalls : public WebContentsObserver {
+ public:
+  explicit AssertNoReadyToCommitNavigationCalls(WebContents* contents)
+      : WebContentsObserver(contents) {}
+
+ private:
+  // WebContentsObserver overrides:
+  void ReadyToCommitNavigation(NavigationHandle* handle) override {
+    ASSERT_TRUE(false);
+  }
+};
+
+}  // namespace
+
+// Test that a same-site navigation in <object> that fails with an HTTP error
+// directly triggers fallback handling, rather than triggering fallback handling
+// in the renderer after it receives a `CommitNavigation()` IPC.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
+                       ObjectTagSameSiteNavigationWithHTTPError) {
   // Set up a test page with a same-site child frame hosted in an <object> tag.
   // TODO(dcheng): In the future, it might be useful to also have a test where
   // the child frame is same-site but cross-origin, and have the parent
@@ -10802,9 +9533,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // And there should be no fallback content displayed.
   EXPECT_EQ("", EvalJs(web_contents(), "document.body.innerText"));
 
-  // Now navigate the first child to another same-site page that will result in
-  // a 404. Note that with subframe RenderDocument, this will create a
-  // speculative RFH.
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a same-site page that will result in a 404.
+  // Note that with subframe RenderDocument, this will create a speculative RFH.
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
   GURL url2(embedded_test_server()->GetURL("a.com", "/page404.html"));
   TestNavigationManager nav_manager(web_contents(), url2);
@@ -10812,31 +9545,252 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(BeginNavigateToURLFromRenderer(
       first_child->render_manager()->current_frame_host(), url2));
 
-  nav_manager.WaitForNavigationFinished();
-  // Though this test triggers fallback handling, the navigation itself should
-  // still be committed.
-  EXPECT_TRUE(nav_manager.was_committed());
-  // Despite the fact that this is an HTTP error, it still commits as a regular
-  // navigation and will be considered successful.
-  EXPECT_TRUE(nav_manager.was_successful());
+  const bool using_speculative_rfh =
+      !!first_child->render_manager()->speculative_frame_host();
+  EXPECT_EQ(using_speculative_rfh,
+            GetRenderDocumentLevel() == RenderDocumentLevel::kSubframe);
 
-  // Note: Chrome is not compliant with the spec. An HTTP error triggers
+  nav_manager.WaitForNavigationFinished();
+  // There should be no commit...
+  EXPECT_FALSE(nav_manager.was_committed());
+  // .. and the navigation should have been aborted.
+  EXPECT_FALSE(nav_manager.was_successful());
+  // Fallback handling should discard the child browsing context and render the
+  // fallback contents.
+  // TODO(dcheng): Chrome is not compliant with the spec. An HTTP error triggers
   // fallback content, which is supposed to discard the nested browsing
   // context...
   EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
   EXPECT_EQ("fallback", EvalJs(web_contents(), "document.body.innerText"));
 }
 
-// Test that triggering fallback handling for <object> with a network error that
-// is routed via a `CommitFailedNavigation()` IPC ends up being ignored.
+// Test that a cross-site navigation in <object> that fails with an HTTP error
+// directly triggers fallback handling, rather than triggering fallback handling
+// in the renderer after it receives a `CommitNavigation()` IPC.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       CommitFailedNavigationInObjectTag) {
+                       ObjectTagCrossSiteNavigationWithHTTPError) {
+  // Set up a test page with a same-site child frame hosted in an <object> tag.
+  // TODO(dcheng): In the future, it might be useful to also have a test where
+  // the child frame is same-site but cross-origin, and have the parent
+  // initiate the navigation in the child frame.
+  GURL url1(embedded_test_server()->GetURL("a.com", "/object-frame.html"));
+  EXPECT_TRUE(NavigateToURL(web_contents(), url1));
+
+  // There should be one nested browsing context.
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  // And there should be no fallback content displayed.
+  EXPECT_EQ("", EvalJs(web_contents(), "document.body.innerText"));
+
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a cross-site page that will result in a
+  // 404.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  GURL url2(embedded_test_server()->GetURL("b.com", "/page404.html"));
+  TestNavigationManager nav_manager(web_contents(), url2);
+  FrameTreeNode* first_child = root->child_at(0);
+  EXPECT_TRUE(BeginNavigateToURLFromRenderer(
+      first_child->render_manager()->current_frame_host(), url2));
+
+  // Cross-site navigations always force a speculative RFH to be created.
+  EXPECT_TRUE(first_child->render_manager()->speculative_frame_host());
+
+  nav_manager.WaitForNavigationFinished();
+  // There should be no commit...
+  EXPECT_FALSE(nav_manager.was_committed());
+  // .. and the navigation should have been aborted.
+  EXPECT_FALSE(nav_manager.was_successful());
+  // Fallback handling should discard the child browsing context and render the
+  // fallback contents.
+  // TODO(dcheng): Chrome is not compliant with the spec. An HTTP error triggers
+  // fallback content, which is supposed to discard the nested browsing
+  // context...
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  EXPECT_EQ("fallback", EvalJs(web_contents(), "document.body.innerText"));
+}
+
+// Test that a same-site navigation in <object> that fails with an HTTP error
+// and also subsequently fails to load the body still directly triggers fallback
+// handling, rather than triggering fallback handling in the renderer after it
+// receives a `CommitNavigation()` IPC.
+IN_PROC_BROWSER_TEST_P(
+    SitePerProcessBrowserTest,
+    ObjectTagSameSiteNavigationWithHTTPErrorAndFailedBodyLoad) {
+  // Set up a test page with a same-site child frame hosted in an <object> tag.
+  // TODO(dcheng): In the future, it might be useful to also have a test where
+  // the child frame is same-site but cross-origin, and have the parent
+  // initiate the navigation in the child frame.
+  GURL url1(embedded_test_server()->GetURL("a.com", "/object-frame.html"));
+  EXPECT_TRUE(NavigateToURL(web_contents(), url1));
+
+  // There should be one nested browsing context.
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  // And there should be no fallback content displayed.
+  EXPECT_EQ("", EvalJs(web_contents(), "document.body.innerText"));
+
+  // This test differs from CommitNavigationWithHTTPErrorInObjectTag by
+  // triggering a body load failure. `ObjectNavigationFallbackBodyLoader`
+  // detects this by setting a disconnect handler on the `mojo::Receiver` for
+  // `network:;mojom::URLLoaderClient`. Exercise this code path by:
+  // 1. inserting a test `NavigationThrottle`
+  // 2. replacing the `network::mojom::URLLoaderClient` endpoint with one where
+  //    the corresponding `mojo::Remote` is simply closed at
+  //    `WILL_PROCESS_RESPONSE` time.
+  TestNavigationThrottleInserter navigation_throttle_inserter(
+      web_contents(),
+      base::BindRepeating(
+          [](NavigationHandle* handle) -> std::unique_ptr<NavigationThrottle> {
+            auto throttle = std::make_unique<TestNavigationThrottle>(handle);
+            throttle->SetCallback(
+                TestNavigationThrottle::WILL_PROCESS_RESPONSE,
+                base::BindLambdaForTesting([handle]() {
+                  // Swap out the URL loader client endpoint and just drop the
+                  // mojo::Remote. This will trigger the mojo::Receiver to be
+                  // disconnected, which should still trigger fallback handling
+                  // despite body loading failing.
+                  mojo::Remote<network::mojom::URLLoaderClient>
+                      remote_to_be_dropped;
+                  auto* request = static_cast<NavigationRequest*>(handle);
+                  request->mutable_url_loader_client_endpoints_for_testing()
+                      ->url_loader_client =
+                      remote_to_be_dropped.BindNewPipeAndPassReceiver();
+                }));
+            return throttle;
+          }));
+
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a same-site page that will result in a 404,
+  // though the body loading will fail. Note that with subframe RenderDocument,
+  // this will create a speculative RFH.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  GURL url2(embedded_test_server()->GetURL("a.com", "/page404.html"));
+  TestNavigationManager nav_manager(web_contents(), url2);
+  FrameTreeNode* first_child = root->child_at(0);
+  EXPECT_TRUE(BeginNavigateToURLFromRenderer(
+      first_child->render_manager()->current_frame_host(), url2));
+
+  const bool using_speculative_rfh =
+      !!first_child->render_manager()->speculative_frame_host();
+  EXPECT_EQ(using_speculative_rfh,
+            GetRenderDocumentLevel() == RenderDocumentLevel::kSubframe);
+
+  nav_manager.WaitForNavigationFinished();
+  // There should be no commit...
+  EXPECT_FALSE(nav_manager.was_committed());
+  // .. and the navigation should have been aborted.
+  EXPECT_FALSE(nav_manager.was_successful());
+  // Fallback handling should discard the child browsing context and render the
+  // fallback contents.
+  // TODO(dcheng): Chrome is not compliant with the spec. An HTTP error triggers
+  // fallback content, which is supposed to discard the nested browsing
+  // context...
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  EXPECT_EQ("fallback", EvalJs(web_contents(), "document.body.innerText"));
+
+  // `WaitForNavigationFinished()` should imply the `NavigationRequest` has been
+  // cleaned up as well, but check to be sure.
+  EXPECT_FALSE(first_child->navigation_request());
+}
+
+// Test that a cross-site navigation in <object> that fails with an HTTP error
+// and also subsequently fails to load the body still directly triggers fallback
+// handling, rather than triggering fallback handling in the renderer after it
+// receives a `CommitNavigation()` IPC.
+IN_PROC_BROWSER_TEST_P(
+    SitePerProcessBrowserTest,
+    ObjectTagCrossSiteNavigationWithHTTPErrorAndFailedBodyLoad) {
+  // Set up a test page with a same-site child frame hosted in an <object> tag.
+  // TODO(dcheng): In the future, it might be useful to also have a test where
+  // the child frame is same-site but cross-origin, and have the parent
+  // initiate the navigation in the child frame.
+  GURL url1(embedded_test_server()->GetURL("a.com", "/object-frame.html"));
+  EXPECT_TRUE(NavigateToURL(web_contents(), url1));
+
+  // There should be one nested browsing context.
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  // And there should be no fallback content displayed.
+  EXPECT_EQ("", EvalJs(web_contents(), "document.body.innerText"));
+
+  // This test differs from CommitNavigationWithHTTPErrorInObjectTag by
+  // triggering a body load failure. `ObjectNavigationFallbackBodyLoader`
+  // detects this by setting a disconnect handler on the `mojo::Receiver` for
+  // `network:;mojom::URLLoaderClient`. Exercise this code path by:
+  // 1. inserting a test `NavigationThrottle`
+  // 2. replacing the `network::mojom::URLLoaderClient` endpoint with one where
+  //    the corresponding `mojo::Remote` is simply closed at
+  //    `WILL_PROCESS_RESPONSE` time.
+  TestNavigationThrottleInserter navigation_throttle_inserter(
+      web_contents(),
+      base::BindRepeating(
+          [](NavigationHandle* handle) -> std::unique_ptr<NavigationThrottle> {
+            auto throttle = std::make_unique<TestNavigationThrottle>(handle);
+            throttle->SetCallback(
+                TestNavigationThrottle::WILL_PROCESS_RESPONSE,
+                base::BindLambdaForTesting([handle]() {
+                  // Swap out the URL loader client endpoint and just drop the
+                  // mojo::Remote. This will trigger the mojo::Receiver to be
+                  // disconnected, which should still trigger fallback handling
+                  // despite body loading failing.
+                  mojo::Remote<network::mojom::URLLoaderClient>
+                      remote_to_be_dropped;
+                  auto* request = static_cast<NavigationRequest*>(handle);
+                  request->mutable_url_loader_client_endpoints_for_testing()
+                      ->url_loader_client =
+                      remote_to_be_dropped.BindNewPipeAndPassReceiver();
+                }));
+            return throttle;
+          }));
+
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a cross-site page that will result in a
+  // 404, though the body loading will fail.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  GURL url2(embedded_test_server()->GetURL("b.com", "/page404.html"));
+  TestNavigationManager nav_manager(web_contents(), url2);
+  FrameTreeNode* first_child = root->child_at(0);
+  EXPECT_TRUE(BeginNavigateToURLFromRenderer(
+      first_child->render_manager()->current_frame_host(), url2));
+
+  // Cross-site navigations always force a speculative RFH to be created.
+  EXPECT_TRUE(first_child->render_manager()->speculative_frame_host());
+
+  nav_manager.WaitForNavigationFinished();
+  // There should be no commit...
+  EXPECT_FALSE(nav_manager.was_committed());
+  // .. and the navigation should have been aborted.
+  EXPECT_FALSE(nav_manager.was_successful());
+  // Fallback handling should discard the child browsing context and render the
+  // fallback contents.
+  // TODO(dcheng): Chrome is not compliant with the spec. An HTTP error triggers
+  // fallback content, which is supposed to discard the nested browsing
+  // context...
+  EXPECT_EQ(1, EvalJs(web_contents(), "window.length"));
+  EXPECT_EQ("fallback", EvalJs(web_contents(), "document.body.innerText"));
+
+  // `WaitForNavigationFinished()` should imply the `NavigationRequest` has been
+  // cleaned up as well, but check to be sure.
+  EXPECT_FALSE(first_child->navigation_request());
+}
+
+// Test that a same-site navigation in <object> that fails with a network error
+// directly triggers fallback handling, rather than triggering fallback handling
+// in the renderer after it receives a `CommitFailedNavigation()` IPC.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
+                       ObjectTagSameSiteNavigationWithNetworkError) {
   // Set up a test page with a same-site child frame hosted in an <object> tag.
   GURL url1(embedded_test_server()->GetURL("a.com", "/object-frame.html"));
   EXPECT_TRUE(NavigateToURL(web_contents(), url1));
 
-  // Now navigate the first child to another same-site page that will result in
-  // a network error. Note that with subframe RenderDocument, this will create a
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a same-site page that will result in a
+  // network error. Note that with subframe RenderDocument, this will create a
   // speculative RFH.
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
   GURL error_url(embedded_test_server()->GetURL("a.com", "/empty.html"));
@@ -10848,15 +9802,51 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(BeginNavigateToURLFromRenderer(
       first_child->render_manager()->current_frame_host(), error_url));
 
-  // Note: this needs to be checked before `WaitForResponse()`, as the
-  // `CommitFailedNavigation()` IPC is sent somewhere inside
-  // `WaitForResponse()`.
-  bool using_speculative_rfh =
+  const bool using_speculative_rfh =
       !!first_child->render_manager()->speculative_frame_host();
   EXPECT_EQ(using_speculative_rfh,
             GetRenderDocumentLevel() == RenderDocumentLevel::kSubframe);
 
-  // Returns false the test server has already been shutdown.
+  // `WaitForResponse()` should signal failure by returning `false` false since
+  // the URLLoaderInterceptor forces a network error.
+  EXPECT_FALSE(nav_manager.WaitForResponse());
+
+  nav_manager.WaitForNavigationFinished();
+  EXPECT_FALSE(nav_manager.was_committed());
+
+  // Make sure that the speculative RFH has been cleaned up, if needed.
+  EXPECT_EQ(nullptr, first_child->render_manager()->speculative_frame_host());
+}
+
+// Test that a cross-site navigation in <object> that fails with a network error
+// directly triggers fallback handling, rather than triggering fallback handling
+// in the renderer after it receives a `CommitFailedNavigation()` IPC.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
+                       ObjectTagCrossSiteNavigationWithNetworkError) {
+  // Set up a test page with a same-site child frame hosted in an <object> tag.
+  GURL url1(embedded_test_server()->GetURL("a.com", "/object-frame.html"));
+  EXPECT_TRUE(NavigateToURL(web_contents(), url1));
+
+  // <object> fallback handling should never reach ReadyToCommitNavigation.
+  AssertNoReadyToCommitNavigationCalls asserter(web_contents());
+
+  // Now navigate the first child to a cross-site page that will result in a
+  // network error.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  GURL error_url(embedded_test_server()->GetURL("b.com", "/empty.html"));
+  std::unique_ptr<URLLoaderInterceptor> interceptor =
+      URLLoaderInterceptor::SetupRequestFailForURL(error_url,
+                                                   net::ERR_CONNECTION_REFUSED);
+  TestNavigationManager nav_manager(web_contents(), error_url);
+  FrameTreeNode* first_child = root->child_at(0);
+  EXPECT_TRUE(BeginNavigateToURLFromRenderer(
+      first_child->render_manager()->current_frame_host(), error_url));
+
+  // Cross-site navigations always force a speculative RFH to be created.
+  EXPECT_TRUE(first_child->render_manager()->speculative_frame_host());
+
+  // `WaitForResponse()` should signal failure by returning `false` false since
+  // the URLLoaderInterceptor forces a network error.
   EXPECT_FALSE(nav_manager.WaitForResponse());
 
   nav_manager.WaitForNavigationFinished();
@@ -11070,7 +10060,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TestChildProcessImportance) {
-  web_contents()->SetMainFrameImportance(ChildProcessImportance::MODERATE);
+  web_contents()->SetPrimaryMainFrameImportance(
+      ChildProcessImportance::MODERATE);
 
   // Construct root page with one child in different domain.
   GURL main_url(embedded_test_server()->GetURL(
@@ -11089,13 +10080,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TestChildProcessImportance) {
       child->current_frame_host()->GetProcess()->GetEffectiveImportance());
 
   // Check setting importance.
-  web_contents()->SetMainFrameImportance(ChildProcessImportance::NORMAL);
+  web_contents()->SetPrimaryMainFrameImportance(ChildProcessImportance::NORMAL);
   EXPECT_EQ(ChildProcessImportance::NORMAL,
             root->current_frame_host()->GetProcess()->GetEffectiveImportance());
   EXPECT_EQ(
       ChildProcessImportance::NORMAL,
       child->current_frame_host()->GetProcess()->GetEffectiveImportance());
-  web_contents()->SetMainFrameImportance(ChildProcessImportance::IMPORTANT);
+  web_contents()->SetPrimaryMainFrameImportance(
+      ChildProcessImportance::IMPORTANT);
   EXPECT_EQ(ChildProcessImportance::IMPORTANT,
             root->current_frame_host()->GetProcess()->GetEffectiveImportance());
   EXPECT_EQ(
@@ -11137,7 +10129,7 @@ class TouchSelectionControllerClientTestWrapper
   void InitWaitForSelectionEvent(ui::SelectionEventType expected_event) {
     DCHECK(!run_loop_);
     expected_event_ = expected_event;
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
   }
 
   void Wait() {
@@ -11296,10 +10288,10 @@ class TouchSelectionControllerClientAndroidSiteIsolationTest
 
   gfx::PointF GetPointInChild() {
     gfx::PointF point_f;
-    std::string str;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        child_frame_tree_node_->current_frame_host(), "get_point_inside_text()",
-        &str));
+    std::string str =
+        EvalJs(child_frame_tree_node_->current_frame_host(),
+               "get_point_inside_text()", EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+            .ExtractString();
     ConvertJSONToPoint(str, &point_f);
     point_f = child_rwhv()->TransformPointToRootCoordSpaceF(point_f);
     return point_f;
@@ -11590,9 +10582,8 @@ class TouchEventObserver : public RenderWidgetHost::InputEventObserver {
 //
 // This test is disabled due to flakiness on all platforms, but especially on
 // Android.  See https://crbug.com/945025.
-// Note: temporarily re-enabled to collect data on the try-bots ... it will be
-// disabled again once we have some data.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TouchEventAckQueueOrdering) {
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
+                       DISABLED_TouchEventAckQueueOrdering) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -11604,8 +10595,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TouchEventAckQueueOrdering) {
   // Add a *slow* & non-passive touch event handler in the child. It needs to
   // be non-passive to ensure TouchStart doesn't get acked until after the
   // touch handler completes.
-  EXPECT_TRUE(ExecuteScript(child_node,
-                            "touch_event_count = 0;\
+  EXPECT_TRUE(ExecJs(child_node,
+                     "touch_event_count = 0;\
        function touch_handler(ev) {\
          var start = Date.now();\
          while (Date.now() < start + 1000) {}\
@@ -11648,16 +10639,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TouchEventAckQueueOrdering) {
   {
     // We need to know the center of the child's body, but in root view
     // coordinates.
-    std::string str;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        child_node,
-        "var rect = document.body.getBoundingClientRect();\
+    std::string str = EvalJs(child_node,
+                             "var rect = document.body.getBoundingClientRect();\
          var point = {\
            x: rect.left + rect.width / 2,\
            y: rect.top + rect.height / 2\
          };\
-         window.domAutomationController.send(JSON.stringify(point));",
-        &str));
+         JSON.stringify(point);")
+                          .ExtractString();
     ConvertJSONToPoint(str, &child_tap_point);
     child_tap_point = child_node->current_frame_host()
                           ->GetView()
@@ -11697,11 +10686,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TouchEventAckQueueOrdering) {
   child_ack_waiter.Wait();
 
   // Verify the child did receive two touch events.
-  int child_touch_event_count = 0;
-  EXPECT_TRUE(ExecuteScriptAndExtractInt(
-      child_node, "window.domAutomationController.send(touch_event_count);",
-      &child_touch_event_count));
-  EXPECT_EQ(2, child_touch_event_count);
+  EXPECT_EQ(2, EvalJs(child_node, "touch_event_count;"));
 
   // Verify Acks from parent arrive first.
   EXPECT_EQ(4u, outgoing_touch_event_ids.size());
@@ -11932,8 +10917,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Set up a slow unload handler to force the RFH to linger in the unloaded but
   // not-yet-deleted state.
-  EXPECT_TRUE(
-      ExecuteScript(rfh, "window.onunload=function(e){ while(1); };\n"));
+  EXPECT_TRUE(ExecJs(rfh, "window.onunload=function(e){ while(1); };\n"));
 
   rfh->DisableUnloadTimerForTesting();
   RenderFrameDeletedObserver rfh_observer(rfh);
@@ -11955,9 +10939,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       rfh->lifecycle_state(),
       testing::AnyOf(
           testing::Eq(
-              RenderFrameHostImpl::LifecycleState::kRunningUnloadHandlers),
+              RenderFrameHostImpl::LifecycleStateImpl::kRunningUnloadHandlers),
           testing::Eq(
-              RenderFrameHostImpl::LifecycleState::kInBackForwardCache)));
+              RenderFrameHostImpl::LifecycleStateImpl::kInBackForwardCache)));
 
   ASSERT_FALSE(rfh_observer.deleted());
 
@@ -12045,13 +11029,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(
       root->child_at(0)->child_at(0)->active_sandbox_flags(),
       root->child_at(0)->child_at(0)->effective_frame_policy().sandbox_flags);
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0)->child_at(0),
-      "window.domAutomationController.send("
-      "    !window.open('data:text/html,dataurl'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(0)->child_at(0),
+                         "!window.open('data:text/html,dataurl');"));
   EXPECT_EQ(1u, Shell::windows().size());
 
   // Finally, navigate the grandchild frame to a new origin, creating a new site
@@ -12081,13 +11060,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(
       root->child_at(0)->child_at(0)->active_sandbox_flags(),
       root->child_at(0)->child_at(0)->effective_frame_policy().sandbox_flags);
-  success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0)->child_at(0),
-      "window.domAutomationController.send("
-      "    !window.open('data:text/html,dataurl'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(0)->child_at(0),
+                         "!window.open('data:text/html,dataurl');"));
   EXPECT_EQ(1u, Shell::windows().size());
 }
 
@@ -12135,21 +11109,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(
       root->child_at(0)->child_at(0)->active_sandbox_flags(),
       root->child_at(0)->child_at(0)->effective_frame_policy().sandbox_flags);
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0)->child_at(0),
-      "window.domAutomationController.send("
-      "    !window.open('data:text/html,dataurl'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(0)->child_at(0),
+                         "!window.open('data:text/html,dataurl');"));
   EXPECT_EQ(1u, Shell::windows().size());
 
   // Update the sandbox attribute in the child frame. This should be overridden
   // by the CSP-set sandbox on this frame: The grandchild should *not* receive
   // an allowance for popups after it is navigated.
-  EXPECT_TRUE(ExecuteScript(root->child_at(0),
-                            "document.querySelector('iframe').sandbox = "
-                            "    'allow-scripts allow-popups';"));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     "document.querySelector('iframe').sandbox = "
+                     "    'allow-scripts allow-popups';"));
   // Finally, navigate the grandchild frame to another page on the top-level
   // origin; the active sandbox flags should still come from the it's parent's
   // CSP and the frame owner attributes.
@@ -12164,13 +11133,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(
       root->child_at(0)->child_at(0)->active_sandbox_flags(),
       root->child_at(0)->child_at(0)->effective_frame_policy().sandbox_flags);
-  success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(0)->child_at(0),
-      "window.domAutomationController.send("
-      "    !window.open('data:text/html,dataurl'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(0)->child_at(0),
+                         "!window.open('data:text/html,dataurl');"));
   EXPECT_EQ(1u, Shell::windows().size());
 }
 
@@ -12218,9 +11182,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
             root->child_at(1)->active_sandbox_flags());
 
   // Remove the sandbox attribute from the child frame.
-  EXPECT_TRUE(ExecuteScript(root,
-                            "document.querySelectorAll('iframe')[1]"
-                            ".removeAttribute('sandbox');"));
+  EXPECT_TRUE(ExecJs(root,
+                     "document.querySelectorAll('iframe')[1]"
+                     ".removeAttribute('sandbox');"));
   // Finally, navigate that child frame to another page on the same origin with
   // no CSP-set sandbox. Its sandbox flags should be completely cleared, and
   // should be cleared in the proxy in the main frame's renderer as well.
@@ -12248,13 +11212,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Check the sandbox flags in the grandchild frame's renderer by attempting
   // to open a popup. This should succeed.
-  bool success = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->child_at(1)->child_at(0),
-      "window.domAutomationController.send("
-      "    !!window.open('data:text/html,dataurl'));",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->child_at(1)->child_at(0),
+                         "!!window.open('data:text/html,dataurl');"));
   EXPECT_EQ(2u, Shell::windows().size());
 }
 
@@ -12485,15 +11444,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* nested_child = root->child_at(0)->child_at(0);
   WaitForHitTestData(nested_child->current_frame_host());
 
-  EXPECT_TRUE(
-      ExecuteScript(nested_child->current_frame_host(), "startTest();"));
+  EXPECT_TRUE(ExecJs(nested_child->current_frame_host(), "startTest();"));
 
   // Test passes if the main renderer doesn't crash. Ping to verify.
-  bool success;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root->current_frame_host(), "window.domAutomationController.send(true);",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(root->current_frame_host(), "true;"));
 }
 
 // Tests that a cross-process iframe asked to navigate to the same URL will
@@ -12514,9 +11468,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL iframe_fragment_url = GURL(iframe->current_url().spec() + "#foo");
   {
     TestNavigationObserver observer(shell()->web_contents());
-    EXPECT_TRUE(
-        ExecuteScript(iframe->current_frame_host(),
-                      JsReplace("location.href=$1", iframe_fragment_url)));
+    EXPECT_TRUE(ExecJs(iframe->current_frame_host(),
+                       JsReplace("location.href=$1", iframe_fragment_url)));
     observer.Wait();
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_EQ(iframe_fragment_url, iframe->current_url());
@@ -12527,10 +11480,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // and not as a normal load of the same URL. This should succeed.
   {
     TestNavigationObserver observer(shell()->web_contents());
-    EXPECT_TRUE(
-        ExecuteScript(root->current_frame_host(),
-                      JsReplace("document.getElementById('child-0').src=$1",
-                                iframe_fragment_url)));
+    EXPECT_TRUE(ExecJs(root->current_frame_host(),
+                       JsReplace("document.getElementById('child-0').src=$1",
+                                 iframe_fragment_url)));
     observer.Wait();
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_EQ(iframe_fragment_url, iframe->current_url());
@@ -12555,12 +11507,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SizeAvailableAfterCommit) {
   child->navigator().controller().LoadURLWithParams(params);
   commit_observer.WaitForCommit();
 
-  int height = -1;
-  EXPECT_TRUE(ExecuteScriptAndExtractInt(
-      child, "window.domAutomationController.send(window.innerHeight);",
-      &height));
-
-  EXPECT_GT(height, 0);
+  EXPECT_GT(EvalJs(child, "window.innerHeight;").ExtractDouble(), 0);
 }
 
 // Test that a late mojo::AgentSchedulingGroupHost::DidUnloadRenderFrame won't
@@ -12765,6 +11712,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   TestNavigationObserver back_load_observer(shell()->web_contents());
   shell()->web_contents()->GetController().GoBack();
   back_load_observer.Wait();
+  new_shell->web_contents()->WasHidden();
   EXPECT_EQ(1, popup_process->VisibleClientCount());
   EXPECT_EQ(1u, popup_process->GetFrameDepth());
 
@@ -12871,7 +11819,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // +4 for a 2px border on each iframe.
   gfx::PointF expected(iframe_b_offset_left + iframe_c_offset_left + 4,
                        iframe_b_offset_top + iframe_c_offset_top + 4);
-  blink::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   root->render_manager()->GetRenderWidgetHostView()->GetScreenInfo(
       &screen_info);
   // Convert from CSS to physical pixels
@@ -12928,23 +11876,20 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add an onmessage handler to the subframe to send back a bool of whether
   // the subframe has focus.
-  EXPECT_TRUE(
-      ExecuteScript(root->child_at(0),
-                    "window.addEventListener('message', function(event) {\n"
-                    "  domAutomationController.send(document.hasFocus());\n"
-                    "});"));
+  EXPECT_TRUE(ExecJs(root->child_at(0),
+                     "window.addEventListener('message', function(event) {\n"
+                     "  domAutomationController.send(document.hasFocus());\n"
+                     "});"));
 
   // Now, send a postMessage from main frame to subframe, and then focus the
   // subframe in the same script.  postMessage should be scheduled after the
   // focus() call, so the IPC to focus the subframe should arrive before the
   // postMessage IPC, and the subframe should already know that it's focused in
   // the onmessage handler.
-  bool child_has_focus = false;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(root,
-                                          "frames[0].postMessage('','*');\n"
-                                          "frames[0].focus();\n",
-                                          &child_has_focus));
-  EXPECT_TRUE(child_has_focus);
+  EXPECT_EQ(true, EvalJs(root,
+                         "frames[0].postMessage('','*');\n"
+                         "frames[0].focus();\n",
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 // Ensure that if a cross-process postMessage is scheduled, and then the target
@@ -12959,19 +11904,19 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Send a postMessage to the subframe and then immediately detach the
   // subframe.
-  EXPECT_TRUE(ExecuteScript(root,
-                            "frames[0].postMessage('','*');\n"
-                            "document.body.removeChild(\n"
-                            "    document.querySelector('iframe'));\n"));
+  EXPECT_TRUE(ExecJs(root,
+                     "frames[0].postMessage('','*');\n"
+                     "document.body.removeChild(\n"
+                     "    document.querySelector('iframe'));\n"));
 
   // Test passes if the main renderer doesn't crash.  Use setTimeout to ensure
   // this ping is evaluated after the (scheduled) postMessage is processed.
-  bool success;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      root,
-      "setTimeout(() => { window.domAutomationController.send(true); }, 0)",
-      &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(
+      true,
+      EvalJs(
+          root,
+          "setTimeout(() => { window.domAutomationController.send(true); }, 0)",
+          EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 // Tests that the last committed URL is preserved on an RFH even after the RFH
@@ -12999,7 +11944,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // The old RFH should be pending deletion.
   EXPECT_TRUE(rfh->IsPendingDeletion());
-  EXPECT_FALSE(rfh->IsCurrent());
+  EXPECT_FALSE(rfh->IsActive());
   EXPECT_NE(rfh, web_contents()->GetMainFrame());
 
   // Check that it still has a valid last committed URL.
@@ -13333,7 +12278,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // which is the scale factor for b.com's iframe element in the main frame.
   while (true) {
     auto* rwh_b = child_b->current_frame_host()->GetRenderWidgetHost();
-    base::Optional<blink::VisualProperties> properties =
+    absl::optional<blink::VisualProperties> properties =
         rwh_b->LastComputedVisualProperties();
     if (properties && cc::MathUtil::IsFloatNearlyTheSame(
                           properties->compositing_scale_factor, 0.5f)) {
@@ -13349,7 +12294,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // parent frame b.com (0.5).
   while (true) {
     auto* rwh_c = child_c->current_frame_host()->GetRenderWidgetHost();
-    base::Optional<blink::VisualProperties> properties =
+    absl::optional<blink::VisualProperties> properties =
         rwh_c->LastComputedVisualProperties();
     if (properties && cc::MathUtil::IsFloatNearlyTheSame(
                           properties->compositing_scale_factor, 0.5f)) {
@@ -13364,7 +12309,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // scale factor of its parent d.com (0.5).
   while (true) {
     auto* rwh_d = child_d->current_frame_host()->GetRenderWidgetHost();
-    base::Optional<blink::VisualProperties> properties =
+    absl::optional<blink::VisualProperties> properties =
         rwh_d->LastComputedVisualProperties();
     if (properties && cc::MathUtil::IsFloatNearlyTheSame(
                           properties->compositing_scale_factor, 0.25f)) {
@@ -13404,7 +12349,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // which is the scale factor for b.com's iframe element in the main frame.
   while (true) {
     auto* rwh_b = child_b->current_frame_host()->GetRenderWidgetHost();
-    base::Optional<blink::VisualProperties> properties =
+    absl::optional<blink::VisualProperties> properties =
         rwh_b->LastComputedVisualProperties();
     if (properties && cc::MathUtil::IsFloatNearlyTheSame(
                           properties->compositing_scale_factor, 0.5f)) {
@@ -13423,7 +12368,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // the final value is non-zero.
   while (true) {
     auto* rwh_b = child_b->current_frame_host()->GetRenderWidgetHost();
-    base::Optional<blink::VisualProperties> properties =
+    absl::optional<blink::VisualProperties> properties =
         rwh_b->LastComputedVisualProperties();
     if (properties && !cc::MathUtil::IsFloatNearlyTheSame(
                           properties->compositing_scale_factor, 0.5f)) {
@@ -13455,9 +12400,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Position the select element so that it is out of the viewport, then scroll
   // it into view.
-  EXPECT_TRUE(ExecuteScript(
-      child_node, "document.querySelector('select').style.top='2000px';"));
-  EXPECT_TRUE(ExecuteScript(root, "window.scrollTo(0, 1900);"));
+  EXPECT_TRUE(ExecJs(child_node,
+                     "document.querySelector('select').style.top='2000px';"));
+  EXPECT_TRUE(ExecJs(root, "window.scrollTo(0, 1900);"));
 
   // Wait for a viewport intersection update to be dispatched to the child, and
   // ensure it is processed by the browser before continuing.
@@ -13749,7 +12694,7 @@ class ClosePageBeforeCommitHelper : public DidCommitNavigationInterceptor {
       : DidCommitNavigationInterceptor(web_contents) {}
 
   void Wait() {
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
     run_loop_.reset();
   }
@@ -13794,9 +12739,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add a blank grandchild frame.
   RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 1);
-  EXPECT_TRUE(ExecuteScript(
-      root->child_at(0),
-      "document.body.appendChild(document.createElement('iframe'));"));
+  EXPECT_TRUE(
+      ExecJs(root->child_at(0),
+             "document.body.appendChild(document.createElement('iframe'));"));
   frame_observer.Wait();
   FrameTreeNode* grandchild = root->child_at(0)->child_at(0);
 
@@ -13806,15 +12751,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   //
   // Just before this URL commits, close the page.
   ClosePageBeforeCommitHelper close_page_helper(web_contents());
-  EXPECT_TRUE(
-      ExecuteScript(grandchild, JsReplace("location = $1", same_site_url)));
+  EXPECT_TRUE(ExecJs(grandchild, JsReplace("location = $1", same_site_url)));
   close_page_helper.Wait();
 
   // Test passes if the a.com renderer doesn't crash. Ping to verify.
-  bool success;
-  EXPECT_TRUE(ExecuteScriptAndExtractBool(
-      new_shell, "window.domAutomationController.send(true);", &success));
-  EXPECT_TRUE(success);
+  EXPECT_EQ(true, EvalJs(new_shell, "true;"));
 }
 
 class SitePerProcessBrowserTouchActionTest : public SitePerProcessBrowserTest {
@@ -13837,8 +12778,8 @@ class SitePerProcessBrowserTouchActionTest : public SitePerProcessBrowserTest {
       RenderWidgetHostViewBase* rwhv_root,
       RenderWidgetHostViewBase* rwhv_child,
       const gfx::Point& event_position,
-      base::Optional<cc::TouchAction>& effective_touch_action,
-      base::Optional<cc::TouchAction>& allowed_touch_action) {
+      absl::optional<cc::TouchAction>& effective_touch_action,
+      absl::optional<cc::TouchAction>& allowed_touch_action) {
     InputEventAckWaiter ack_observer(
         rwhv_child->GetRenderWidgetHost(),
         base::BindRepeating([](blink::mojom::InputEventResultSource source,
@@ -13972,7 +12913,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
       "new_iframe.src = '%s';"
       "document.body.appendChild(new_iframe);",
       c_url.spec().c_str());
-  EXPECT_TRUE(ExecuteScript(root, create_frame_script));
+  EXPECT_TRUE(ExecJs(root, create_frame_script));
   EXPECT_TRUE(WaitForLoadStop(web_contents()));
   ASSERT_EQ(2U, root->child_count());
 
@@ -13984,6 +12925,31 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
 
   SetBrowserClientForTesting(old_client);
 }
+
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
+                       CheckForceEnableZoomValue) {
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("foo.com", "/title1.html")));
+  EXPECT_FALSE(GetTouchActionForceEnableZoom(
+      web_contents()->GetMainFrame()->GetRenderViewHost()->GetWidget()));
+
+  EnableForceZoomContentClient new_client;
+  ContentBrowserClient* old_client = SetBrowserClientForTesting(&new_client);
+  new_client.set_old_client(old_client);
+
+  web_contents()->OnWebPreferencesChanged();
+
+  EXPECT_TRUE(GetTouchActionForceEnableZoom(
+      web_contents()->GetMainFrame()->GetRenderViewHost()->GetWidget()));
+
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("bar.com", "/title2.html")));
+
+  EXPECT_TRUE(GetTouchActionForceEnableZoom(
+      web_contents()->GetMainFrame()->GetRenderViewHost()->GetWidget()));
+  SetBrowserClientForTesting(old_client);
+}
+
 #endif  // defined(OS_ANDROID)
 
 // Flaky on every platform, failing most of the time on Android.
@@ -14008,8 +12974,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
   EXPECT_TRUE(NavigateToURLFromRenderer(child, b_url));
 
   // Force the renderer to generate a new frame.
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.touchAction = 'none'"));
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.touchAction = 'none'"));
   // Waits for the next frame.
   WaitForHitTestData(child->current_frame_host());
   std::unique_ptr<MainThreadFrameObserver> child_thread_observer(
@@ -14027,8 +12992,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
 
   WaitForTouchActionUpdated(root_thread_observer.get(),
                             child_thread_observer.get());
-  base::Optional<cc::TouchAction> effective_touch_action;
-  base::Optional<cc::TouchAction> allowed_touch_action;
+  absl::optional<cc::TouchAction> effective_touch_action;
+  absl::optional<cc::TouchAction> allowed_touch_action;
   cc::TouchAction expected_touch_action = cc::TouchAction::kPan;
   // Gestures are filtered by the intersection of touch-action values of the
   // touched element and all its ancestors up to the one that implements the
@@ -14040,8 +13005,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
   if (allowed_touch_action.has_value())
     EXPECT_EQ(expected_touch_action, allowed_touch_action.value());
 
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.touchAction = 'auto'"));
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.touchAction = 'auto'"));
   WaitForTouchActionUpdated(root_thread_observer.get(),
                             child_thread_observer.get());
   expected_touch_action = cc::TouchAction::kAuto;
@@ -14088,8 +13052,7 @@ IN_PROC_BROWSER_TEST_F(
           root->current_frame_host()->GetRenderWidgetHost()));
   root_thread_observer->Wait();
 
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.touchAction = 'none'"));
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.touchAction = 'none'"));
 
   // Wait for child frame ready in order to get the correct point inside child.
   WaitForHitTestData(child->current_frame_host());
@@ -14108,35 +13071,28 @@ IN_PROC_BROWSER_TEST_F(
   // Child should inherit effective touch action none from root.
   WaitForTouchActionUpdated(root_thread_observer.get(),
                             child_thread_observer.get());
-  base::Optional<cc::TouchAction> effective_touch_action;
-  base::Optional<cc::TouchAction> allowed_touch_action;
+  absl::optional<cc::TouchAction> effective_touch_action;
+  absl::optional<cc::TouchAction> allowed_touch_action;
   cc::TouchAction expected_touch_action = cc::TouchAction::kPan;
   GetTouchActionsForChild(router, rwhv_root, rwhv_child, point_inside_child,
                           effective_touch_action, allowed_touch_action);
-  cc::TouchAction effective_touch_action_result =
-      effective_touch_action.has_value() ? effective_touch_action.value()
-                                         : cc::TouchAction::kAuto;
   if (allowed_touch_action.has_value())
     EXPECT_EQ(expected_touch_action, allowed_touch_action.value());
 
   // Child should inherit effective touch action none from parent.
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.touchAction = 'auto'"));
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.touchAction = 'auto'"));
+  EXPECT_TRUE(ExecJs(
       parent,
       "document.getElementById('parent-div').style.touchAction = 'none';"));
   WaitForTouchActionUpdated(root_thread_observer.get(),
                             child_thread_observer.get());
   GetTouchActionsForChild(router, rwhv_root, rwhv_child, point_inside_child,
                           effective_touch_action, allowed_touch_action);
-  effective_touch_action_result = effective_touch_action.has_value()
-                                      ? effective_touch_action.value()
-                                      : cc::TouchAction::kAuto;
   if (allowed_touch_action.has_value())
     EXPECT_EQ(expected_touch_action, allowed_touch_action.value());
 
   // Child should inherit effective touch action auto from root and parent.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       parent,
       "document.getElementById('parent-div').style.touchAction = 'auto'"));
   WaitForTouchActionUpdated(root_thread_observer.get(),
@@ -14144,9 +13100,6 @@ IN_PROC_BROWSER_TEST_F(
   expected_touch_action = cc::TouchAction::kAuto;
   GetTouchActionsForChild(router, rwhv_root, rwhv_child, point_inside_child,
                           effective_touch_action, allowed_touch_action);
-  effective_touch_action_result = effective_touch_action.has_value()
-                                      ? effective_touch_action.value()
-                                      : cc::TouchAction::kAuto;
   if (allowed_touch_action.has_value())
     EXPECT_EQ(expected_touch_action, allowed_touch_action.value());
 }
@@ -14178,8 +13131,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
           root->current_frame_host()->GetRenderWidgetHost()));
   root_thread_observer->Wait();
 
-  EXPECT_TRUE(
-      ExecuteScript(shell(), "document.body.style.touchAction = 'none'"));
+  EXPECT_TRUE(ExecJs(shell(), "document.body.style.touchAction = 'none'"));
 
   // Wait for child frame ready in order to get the correct point inside child.
   WaitForHitTestData(child->current_frame_host());
@@ -14197,8 +13149,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
   // Child should inherit effective touch action none from root.
   WaitForTouchActionUpdated(root_thread_observer.get(),
                             child_thread_observer.get());
-  base::Optional<cc::TouchAction> effective_touch_action;
-  base::Optional<cc::TouchAction> allowed_touch_action;
+  absl::optional<cc::TouchAction> effective_touch_action;
+  absl::optional<cc::TouchAction> allowed_touch_action;
   cc::TouchAction expected_touch_action =
       cc::TouchAction::kPan | cc::TouchAction::kInternalPanXScrolls;
   GetTouchActionsForChild(router, rwhv_root, rwhv_child, point_inside_child,
@@ -14216,8 +13168,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
   WaitForHitTestData(child->current_frame_host());
   // Navigation destroys the previous RenderWidgetHost, so we need to begin
   // observing the new renderer main thread associated with the child frame.
-  child_thread_observer.reset(new MainThreadFrameObserver(
-      child->current_frame_host()->GetRenderWidgetHost()));
+  child_thread_observer = std::make_unique<MainThreadFrameObserver>(
+      child->current_frame_host()->GetRenderWidgetHost());
 
   rwhv_child = static_cast<RenderWidgetHostViewBase*>(
       child->current_frame_host()->GetRenderWidgetHost()->GetView());
@@ -14228,62 +13180,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTouchActionTest,
                           effective_touch_action, allowed_touch_action);
   if (allowed_touch_action.has_value())
     EXPECT_EQ(expected_touch_action, allowed_touch_action.value());
-}
-
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       ChildFrameCrashMetrics_KilledWhileVisible) {
-  // Set-up a frame tree that helps verify what the metrics tracks:
-  // 1) frames (12 frames are affected if B process gets killed) or
-  // 2) crashes (simply 1 crash if B process gets killed)?
-  // 3) widgets (10 b widgets and 1 c widget are affected if B is killed,
-  //    but a sad frame will appear only in 9 widgets - this excludes
-  //    widgets for the b,c(b) part of the frame tree) or
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b(b,c(b)),b,b,b,b,b,b,b,b)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-
-  std::vector<std::unique_ptr<SadFrameShownObserver>> observers;
-  for (size_t i = 0U; i < root->child_count(); i++) {
-    // At this point, all b.com subframes should be considered visible.
-    RenderFrameProxyHost* proxy_to_parent =
-        root->child_at(i)->render_manager()->GetProxyToParent();
-    CrossProcessFrameConnector* connector =
-        proxy_to_parent->cross_process_frame_connector();
-    EXPECT_TRUE(connector->IsVisible())
-        << " subframe " << i << " with URL " << root->child_at(i)->current_url()
-        << " is hidden";
-    observers.push_back(
-        std::make_unique<SadFrameShownObserver>(root->child_at(i)));
-  }
-
-  // Kill the child frame and wait for each of the subframe FrameTreeNodes to
-  // show a sad frame.
-  base::HistogramTester histograms;
-  RenderProcessHost* child_process =
-      root->child_at(0)->current_frame_host()->GetProcess();
-  RenderProcessHostWatcher crash_observer(
-      child_process, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  child_process->Shutdown(0);
-  crash_observer.Wait();
-  for (size_t i = 0U; i < root->child_count(); i++) {
-    SCOPED_TRACE(testing::Message()
-                 << " Waiting for sad frame from subframe " << i
-                 << " with URL:" << root->child_at(i)->current_url());
-    observers[i]->Wait();
-  }
-
-  // Verify that the expected metrics got logged.
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kCrashedWhileVisible, 9);
-
-  // Hide and show the web contents and verify that no more metrics got logged.
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kCrashedWhileVisible, 9);
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
@@ -14303,107 +13199,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Verify that no child frame metrics got logged.
   histograms.ExpectTotalCount("Stability.ChildFrameCrash.Visibility", 0);
-}
-
-// Disable the feature to mark hidden tabs with sad frames for reload, for use
-// in tests where this feature interferes with the behavior being tested.
-class SitePerProcessBrowserTestWithoutSadFrameTabReload
-    : public SitePerProcessBrowserTest {
- public:
-  SitePerProcessBrowserTestWithoutSadFrameTabReload() {
-    feature_list_.InitAndDisableFeature(
-        features::kReloadHiddenTabsWithCrashedSubframes);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-// This test is flaky on Win7.
-// TODO(crbug.com/1179074): Deflake it and enable this test back.
-#if defined(OS_WIN)
-#define MAYBE_ChildFrameCrashMetrics_KilledWhileHiddenThenShown \
-  DISABLED_ChildFrameCrashMetrics_KilledWhileHiddenThenShown
-#else
-#define MAYBE_ChildFrameCrashMetrics_KilledWhileHiddenThenShown \
-  ChildFrameCrashMetrics_KilledWhileHiddenThenShown
-#endif
-IN_PROC_BROWSER_TEST_P(
-    SitePerProcessBrowserTestWithoutSadFrameTabReload,
-    MAYBE_ChildFrameCrashMetrics_KilledWhileHiddenThenShown) {
-  // Set-up a frame tree that helps verify what the metrics tracks:
-  // 1) frames (12 frames are affected if B process gets killed) or
-  // 2) widgets (10 b widgets and 1 c widget are affected if B is killed) or
-  // 3) crashes (1 crash if B process gets killed)?
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b(b,c),b,b,b,b,b,b,b,b,b)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-
-  // Hide the web contents (UpdateWebContentsVisibility is called twice to avoid
-  // hitting the |!did_first_set_visible_| case).  Make sure all subframes are
-  // considered hidden at this point.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  for (size_t i = 0U; i < root->child_count(); i++) {
-    RenderFrameProxyHost* proxy_to_parent =
-        root->child_at(i)->render_manager()->GetProxyToParent();
-    CrossProcessFrameConnector* connector =
-        proxy_to_parent->cross_process_frame_connector();
-    EXPECT_FALSE(connector->IsVisible())
-        << " subframe " << i << " with URL " << root->child_at(i)->current_url()
-        << " is visible";
-  }
-
-  // Kill the subframe.
-  base::HistogramTester histograms;
-  RenderProcessHost* child_process =
-      root->child_at(0)->current_frame_host()->GetProcess();
-  RenderProcessHostWatcher crash_observer(
-      child_process, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  child_process->Shutdown(0);
-  crash_observer.Wait();
-
-  // Verify that no child frame metrics got logged (yet - while WebContents are
-  // hidden).
-  histograms.ExpectTotalCount("Stability.ChildFrameCrash.Visibility", 0);
-  histograms.ExpectTotalCount(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason", 0);
-
-  // Show the web contents, wait for each of the subframe FrameTreeNodes to
-  // show a sad frame, and verify that the expected metrics got logged.
-  std::vector<std::unique_ptr<SadFrameShownObserver>> observers;
-  for (size_t i = 0U; i < root->child_count(); i++) {
-    observers.push_back(
-        std::make_unique<SadFrameShownObserver>(root->child_at(i)));
-  }
-
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-
-  for (size_t i = 0U; i < root->child_count(); i++) {
-    SCOPED_TRACE(testing::Message()
-                 << " Waiting for sad frame from subframe " << i
-                 << " with URL:" << root->child_at(i)->current_url());
-    observers[i]->Wait();
-  }
-
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kShownAfterCrashing, 10);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason",
-      CrossProcessFrameConnector::ShownAfterCrashingReason::kTabWasShown, 10);
-
-  // Hide and show the web contents again and verify that no more metrics got
-  // logged.
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kShownAfterCrashing, 10);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason",
-      CrossProcessFrameConnector::ShownAfterCrashingReason::kTabWasShown, 10);
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
@@ -14433,9 +13228,18 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Navigate away - this will trigger logging of the UMA.
   EXPECT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kNeverVisibleAfterCrash, 10);
+
+  // Wait until the page with the crashed frame gets unloaded (triggering its
+  // evicton if it got into the back/forward cache), so that the histogram will
+  // be recorded when the renderer process is gone.
+  // TODO(https://crbug.com/1193386): Ensure pages with crashed subframes won't
+  // get into back/forward cache.
+  InactiveRenderFrameHostDeletionObserver inactive_rfh_deletion_observer(
+      web_contents());
+  inactive_rfh_deletion_observer.Wait();
+
+  histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
+                                CrashVisibility::kNeverVisibleAfterCrash, 10);
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
@@ -14456,7 +13260,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       document.body.insertBefore(p, frame);
     }
   )";
-  EXPECT_TRUE(ExecuteScript(root, filling_script));
+  EXPECT_TRUE(ExecJs(root, filling_script));
   // This will ensure that browser has received the
   // FrameHostMsg_UpdateViewportIntersection IPC message from the renderer main
   // thread.
@@ -14484,7 +13288,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     var frame = document.body.querySelectorAll("iframe")[0];
     frame.scrollIntoView();
   )";
-  EXPECT_TRUE(ExecuteScript(root, scrolling_script));
+  EXPECT_TRUE(ExecJs(root, scrolling_script));
   // Wait for FrameHostMsg_UpdateViewportIntersection again.
   EXPECT_EQ(true,
             EvalJsAfterLifecycleUpdate(root->current_frame_host(), "", "true"));
@@ -14500,386 +13304,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       1);
 }
 
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithoutSadFrameTabReload,
-                       ChildFrameCrashMetrics_ScrolledIntoViewAfterTabIsShown) {
-  // Start on a page that has a single iframe, which is positioned out of
-  // view, and navigate that iframe cross-site.
-  GURL main_url(
-      embedded_test_server()->GetURL("a.com", "/iframe_out_of_view.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_TRUE(NavigateToURLFromRenderer(
-      root->child_at(0),
-      embedded_test_server()->GetURL("b.com", "/title1.html")));
-
-  // Hide the web contents (UpdateWebContentsVisibility is called twice to avoid
-  // hitting the |!did_first_set_visible_| case).
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-
-  // Kill the child frame.
-  base::HistogramTester histograms;
-  RenderProcessHost* child_process =
-      root->child_at(0)->current_frame_host()->GetProcess();
-  RenderProcessHostWatcher crash_observer(
-      child_process, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  child_process->Shutdown(0);
-  crash_observer.Wait();
-
-  // Verify that no child frame crash metrics got logged yet.
-  histograms.ExpectTotalCount("Stability.ChildFrameCrash.Visibility", 0);
-  histograms.ExpectTotalCount(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason", 0);
-
-  // Show the web contents.  The crash metrics still shouldn't be logged, since
-  // the crashed frame is out of view.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  histograms.ExpectTotalCount("Stability.ChildFrameCrash.Visibility", 0);
-  histograms.ExpectTotalCount(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason", 0);
-
-  // Scroll the subframe into view and wait until the scrolled frame draws
-  // itself.
-  std::string scrolling_script = R"(
-    var frame = document.body.querySelector("iframe");
-    frame.scrollIntoView();
-  )";
-  EXPECT_TRUE(ExecuteScript(root, scrolling_script));
-  // This will ensure that browser has received the
-  // FrameHostMsg_UpdateViewportIntersection IPC message from the renderer main
-  // thread.
-  EXPECT_EQ(true,
-            EvalJsAfterLifecycleUpdate(root->current_frame_host(), "", "true"));
-
-  // Verify that the expected metrics got logged.
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kShownAfterCrashing, 1);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason",
-      CrossProcessFrameConnector::ShownAfterCrashingReason::
-          kViewportIntersectionAfterTabWasShown,
-      1);
-
-  // Hide and show the web contents again and verify that no more metrics got
-  // logged.
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.Visibility",
-      CrossProcessFrameConnector::CrashVisibility::kShownAfterCrashing, 1);
-  histograms.ExpectUniqueSample(
-      "Stability.ChildFrameCrash.ShownAfterCrashingReason",
-      CrossProcessFrameConnector::ShownAfterCrashingReason::
-          kViewportIntersectionAfterTabWasShown,
-      1);
-}
-
-class SitePerProcessBrowserTestWithSadFrameTabReload
-    : public SitePerProcessBrowserTest {
- public:
-  SitePerProcessBrowserTestWithSadFrameTabReload() {
-    // Disable the feature to mark hidden tabs with sad frames for reload, since
-    // it makes the scenario for which this test collects metrics impossible.
-    feature_list_.InitAndEnableFeature(
-        features::kReloadHiddenTabsWithCrashedSubframes);
-  }
-
-  void CrashProcess(FrameTreeNode* ftn) {
-    RenderProcessHost* process = ftn->current_frame_host()->GetProcess();
-    RenderProcessHostWatcher crash_observer(
-        process, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-    process->Shutdown(0);
-    crash_observer.Wait();
-    EXPECT_FALSE(ftn->current_frame_host()->IsRenderFrameLive());
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-// Verify the feature where hidden tabs with a visible crashed subframe are
-// marked for reload. This avoids showing crashed subframes if a hidden tab is
-// eventually shown. See https://crbug.com/841572.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       ReloadHiddenTabWithCrashedSubframeInViewport) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-
-  // Hide the WebContents (UpdateWebContentsVisibility is called twice to avoid
-  // hitting the |!did_first_set_visible_| case).
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  EXPECT_EQ(Visibility::HIDDEN, web_contents()->GetVisibility());
-
-  // Kill the b.com subframe's process.  This should mark the hidden
-  // WebContents for reload.
-  {
-    base::HistogramTester histograms;
-    CrashProcess(root->child_at(0));
-    histograms.ExpectUniqueSample(
-        "Stability.ChildFrameCrash.TabMarkedForReload", true, 1);
-    histograms.ExpectUniqueSample(
-        "Stability.ChildFrameCrash.TabMarkedForReload.Visibility",
-        blink::mojom::FrameVisibility::kRenderedInViewport, 1);
-  }
-
-  // Show the WebContents.  This should trigger a reload of the main frame.
-  {
-    base::HistogramTester histograms;
-    web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-    EXPECT_TRUE(WaitForLoadStop(web_contents()));
-    histograms.ExpectUniqueSample(
-        "Navigation.LoadIfNecessaryType",
-        NavigationControllerImpl::NeedsReloadType::kCrashedSubframe, 1);
-  }
-
-  // Both frames should now have live renderer processes.
-  EXPECT_TRUE(root->current_frame_host()->IsRenderFrameLive());
-  EXPECT_TRUE(root->child_at(0)->current_frame_host()->IsRenderFrameLive());
-}
-
-// Verify that when a tab is reloaded because it was previously marked for
-// reload due to having a sad frame, we log the sad frame as shown during a tab
-// reload, rather than being shown to the user directly, since the sad frame is
-// expected to go away shortly. See https://crbug.com/1132938.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       CrashedSubframeVisibilityMetricsDuringTabReload) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b,c)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-
-  // Hide the WebContents (UpdateWebContentsVisibility is called twice to avoid
-  // hitting the |!did_first_set_visible_| case).
-  RenderWidgetHostVisibilityObserver hide_observer(
-      root->child_at(0)->current_frame_host()->GetRenderWidgetHost(),
-      false /* became_visible */);
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  EXPECT_EQ(Visibility::HIDDEN, web_contents()->GetVisibility());
-  hide_observer.WaitUntilSatisfied();
-
-  // Kill the b.com subframe's process.  This should mark the hidden
-  // WebContents for reload.
-  CrashProcess(root->child_at(0));
-  auto& controller = static_cast<NavigationControllerImpl&>(
-      shell()->web_contents()->GetController());
-  EXPECT_TRUE(controller.NeedsReload());
-  EXPECT_EQ(1, controller.GetEntryCount());
-
-  // Show the WebContents. This should trigger a reload of the main frame.  Sad
-  // frame visibility metrics should indicate that the sad frame is shown while
-  // the tab is being reloaded.  Because the tab reload will wipe out the sad
-  // frame, this isn't as bad as kShownAfterCrashing.
-  {
-    base::HistogramTester histograms;
-    SadFrameShownObserver sad_frame_observer(root->child_at(0));
-    TestNavigationManager manager(web_contents(), main_url);
-    web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-    EXPECT_TRUE(manager.WaitForRequestStart());
-    sad_frame_observer.Wait();
-
-    histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
-                                  CrashVisibility::kShownWhileAncestorIsLoading,
-                                  1);
-
-    // Ensure no new metrics are logged after the reload completes.
-    manager.WaitForNavigationFinished();
-    EXPECT_TRUE(manager.was_successful());
-    EXPECT_FALSE(controller.NeedsReload());
-    EXPECT_EQ(1, controller.GetEntryCount());
-    histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
-                                  CrashVisibility::kShownWhileAncestorIsLoading,
-                                  1);
-  }
-}
-
-// Verify that a sad frame shown when its parent frame is loading is logged
-// with appropriate metrics, namely as kShownWhileAncestorIsLoading rather than
-// kShownAfterCrashing. See https://crbug.com/1132938.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       CrashedSubframeVisibilityMetricsDuringParentLoad) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b(c))"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  FrameTreeNode* child = root->child_at(0);
-  FrameTreeNode* grandchild = child->child_at(0);
-
-  // Hide the grandchild frame.
-  RenderWidgetHostVisibilityObserver hide_observer(
-      grandchild->current_frame_host()->GetRenderWidgetHost(),
-      false /* became_visible */);
-  EXPECT_TRUE(ExecuteScript(
-      child, "document.querySelector('iframe').style.display = 'none'"));
-  hide_observer.WaitUntilSatisfied();
-
-  // Kill the c.com grandchild process.
-  CrashProcess(grandchild);
-
-  // Start a navigation in the b.com frame, but don't commit.
-  GURL url_d(embedded_test_server()->GetURL("d.com", "/title1.html"));
-  TestNavigationManager manager(web_contents(), url_d);
-  EXPECT_TRUE(ExecuteScript(child, JsReplace("location.href = $1", url_d)));
-  EXPECT_TRUE(manager.WaitForRequestStart());
-
-  // Make the grandchild iframe with the sad frame visible again.  This should
-  // get logged as kShownWhileAncestorIsLoading, because its parent is
-  // currently loading.
-  {
-    base::HistogramTester histograms;
-    SadFrameShownObserver sad_frame_observer(grandchild);
-    EXPECT_TRUE(ExecuteScript(
-        child, "document.querySelector('iframe').style.display = 'block'"));
-    sad_frame_observer.Wait();
-
-    histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
-                                  CrashVisibility::kShownWhileAncestorIsLoading,
-                                  1);
-
-    // Ensure no new metrics are logged after the navigation completes.
-    manager.WaitForNavigationFinished();
-    EXPECT_TRUE(manager.was_successful());
-    histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
-                                  CrashVisibility::kShownWhileAncestorIsLoading,
-                                  1);
-  }
-}
-
-// Verify the feature where hidden tabs with crashed subframes are marked for
-// reload. This avoids showing crashed subframes if a hidden tab is eventually
-// shown. Similar to the test above, except that the crashed subframe is
-// scrolled out of view.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       ReloadHiddenTabWithCrashedSubframeOutOfView) {
-  // Set WebContents to VISIBLE to avoid hitting the |!did_first_set_visible_|
-  // case when we hide it later.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-
-  // Navigate to a page with an OOPIF that's scrolled out of view.
-  GURL out_of_view_url(
-      embedded_test_server()->GetURL("a.com", "/iframe_out_of_view.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), out_of_view_url));
-  EXPECT_EQ("LOADED", EvalJsWithManualReply(shell(), "notifyWhenLoaded();"));
-  NavigateIframeToURL(web_contents(), "test_iframe",
-                      embedded_test_server()->GetURL("b.com", "/title1.html"));
-
-  // This will ensure that the layout has completed and visibility of the OOPIF
-  // has been updated in the browser process.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(true,
-            EvalJsAfterLifecycleUpdate(root->current_frame_host(), "", "true"));
-
-  // Verify the OOPIF isn't visible at the moment.
-  RenderFrameProxyHost* proxy_to_parent =
-      root->child_at(0)->render_manager()->GetProxyToParent();
-  CrossProcessFrameConnector* connector =
-      proxy_to_parent->cross_process_frame_connector();
-  EXPECT_FALSE(connector->IsVisible());
-  EXPECT_EQ(blink::mojom::FrameVisibility::kRenderedOutOfViewport,
-            connector->visibility());
-
-  // Hide the WebContents and crash the OOPIF.
-  {
-    base::HistogramTester histograms;
-    web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-    CrashProcess(root->child_at(0));
-    histograms.ExpectUniqueSample(
-        "Stability.ChildFrameCrash.TabMarkedForReload", true, 1);
-    histograms.ExpectUniqueSample(
-        "Stability.ChildFrameCrash.TabMarkedForReload.Visibility",
-        blink::mojom::FrameVisibility::kRenderedOutOfViewport, 1);
-  }
-
-  EXPECT_TRUE(root->current_frame_host()->IsRenderFrameLive());
-  EXPECT_FALSE(root->child_at(0)->current_frame_host()->IsRenderFrameLive());
-
-  // Show the tab and ensure that it reloads.
-  {
-    base::HistogramTester histograms;
-    web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-    EXPECT_TRUE(WaitForLoadStop(web_contents()));
-    histograms.ExpectUniqueSample(
-        "Navigation.LoadIfNecessaryType",
-        NavigationControllerImpl::NeedsReloadType::kCrashedSubframe, 1);
-  }
-
-  EXPECT_TRUE(root->current_frame_host()->IsRenderFrameLive());
-  EXPECT_TRUE(root->child_at(0)->current_frame_host()->IsRenderFrameLive());
-}
-
-// Verify that hidden tabs with a crashed subframe are not marked for reload
-// when the crashed subframe is hidden with "display:none".
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       DoNotReloadHiddenTabWithHiddenCrashedSubframe) {
-  // Set WebContents to VISIBLE to avoid hitting the |!did_first_set_visible_|
-  // case when we hide it later.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-
-  GURL hidden_iframe_url(
-      embedded_test_server()->GetURL("a.com", "/page_with_hidden_iframe.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), hidden_iframe_url));
-  NavigateIframeToURL(web_contents(), "test_iframe",
-                      embedded_test_server()->GetURL("b.com", "/title1.html"));
-
-  // Ensure that the parent frame has propagated the OOPIF's hidden visibility
-  // to the browser process by forcing requestAnimationFrame and
-  // waiting for layout to finish.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  EXPECT_EQ(true,
-            EvalJsAfterLifecycleUpdate(root->current_frame_host(), "", "true"));
-
-  // The OOPIF should be hidden at this point.
-  RenderFrameProxyHost* proxy_to_parent =
-      root->child_at(0)->render_manager()->GetProxyToParent();
-  EXPECT_TRUE(proxy_to_parent->cross_process_frame_connector()->IsHidden());
-
-  // Crashing a hidden OOPIF shouldn't mark the tab for reload.
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  base::HistogramTester histograms;
-  CrashProcess(root->child_at(0));
-  histograms.ExpectUniqueSample("Stability.ChildFrameCrash.TabMarkedForReload",
-                                false, 1);
-
-  // Making the WebContents visible again should keep the sad frame and should
-  // not load anything new.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  EXPECT_TRUE(WaitForLoadStop(web_contents()));
-  EXPECT_TRUE(root->current_frame_host()->IsRenderFrameLive());
-  EXPECT_FALSE(root->child_at(0)->current_frame_host()->IsRenderFrameLive());
-}
-
-// Ensure that the sad frame reload policy doesn't trigger for a visible tab,
-// even if it becomes hidden and then visible again.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       DoNotReloadVisibleTabWithCrashedSubframe) {
-  // Set WebContents to VISIBLE to avoid hitting the |!did_first_set_visible_|
-  // case when we hide it later.
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  EXPECT_EQ(Visibility::VISIBLE, web_contents()->GetVisibility());
-
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
-  base::HistogramTester histograms;
-  CrashProcess(root->child_at(0));
-  histograms.ExpectUniqueSample("Stability.ChildFrameCrash.TabMarkedForReload",
-                                false, 1);
-
-  EXPECT_EQ(Visibility::VISIBLE, web_contents()->GetVisibility());
-  web_contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
-  web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-  EXPECT_TRUE(WaitForLoadStop(web_contents()));
-  EXPECT_TRUE(root->current_frame_host()->IsRenderFrameLive());
-  EXPECT_FALSE(root->child_at(0)->current_frame_host()->IsRenderFrameLive());
-  histograms.ExpectUniqueSample("Stability.ChildFrameCrash.TabMarkedForReload",
-                                false, 1);
-}
-
 // Check that when a frame changes a subframe's size twice and then sends a
 // postMessage to the subframe, the subframe's onmessage handler sees the new
 // size.  In particular, ensure that the postMessage won't get reordered with
@@ -14893,7 +13317,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* root = web_contents()->GetFrameTree()->root();
 
   // Add an onmessage handler to the subframe to send back its width.
-  EXPECT_TRUE(ExecuteScript(root->child_at(0), R"(
+  EXPECT_TRUE(ExecJs(root->child_at(0), R"(
       window.addEventListener('message', function(event) {
         domAutomationController.send(document.body.clientWidth);
       });)"));
@@ -14912,15 +13336,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Now, resize the subframe twice from the main frame and send it a
   // postMessage. The postMessage handler should see the second updated size.
-  int width = 0;
-  EXPECT_TRUE(ExecuteScriptAndExtractInt(root, R"(
+  EXPECT_EQ(700, EvalJs(root, R"(
       var f = document.querySelector('iframe');
       f.width = 500;
       f.offsetTop; // force layout; this sends a resize IPC for width of 500.
       f.width = 700;
       f.offsetTop; // force layout; this sends a resize IPC for width of 700.
-      f.contentWindow.postMessage('foo', '*');)", &width));
-  EXPECT_EQ(width, 700);
+      f.contentWindow.postMessage('foo', '*');)",
+                        EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 class SitePerProcessAndProcessPerSiteBrowserTest
@@ -14961,12 +13384,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessAndProcessPerSiteBrowserTest,
   EXPECT_NE(foo_site_instance, web_contents()->GetSiteInstance());
 
   // Ensure the new page can access cookies without getting killed.
-  EXPECT_TRUE(ExecuteScript(web_contents(), "document.cookie = 'foo=bar';"));
-  std::string cookie;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      web_contents(), "window.domAutomationController.send(document.cookie);",
-      &cookie));
-  EXPECT_EQ("foo=bar", cookie);
+  EXPECT_TRUE(ExecJs(web_contents(), "document.cookie = 'foo=bar';"));
+  EXPECT_EQ("foo=bar", EvalJs(web_contents(), "document.cookie;"));
 }
 
 namespace {
@@ -15011,12 +13430,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Give the page a beforeunload handler that does a replaceState.  Do this
   // from setTimeout so that the navigation that triggers beforeunload is
   // already started when the replaceState happens.
-  EXPECT_TRUE(ExecuteScript(root,
-                            "window.onbeforeunload = function (e) {"
-                            "  setTimeout(() => {"
-                            "    history.replaceState({}, 'footitle', 'foo');"
-                            "  }, 0);"
-                            "};\n"));
+  EXPECT_TRUE(ExecJs(root,
+                     "window.onbeforeunload = function (e) {"
+                     "  setTimeout(() => {"
+                     "    history.replaceState({}, 'footitle', 'foo');"
+                     "  }, 0);"
+                     "};\n"));
 
   GURL url2 = embedded_test_server()->GetURL("b.com", "/title1.html");
   TestNavigationManager cross_site_navigation(web_contents(), url2);
@@ -15027,7 +13446,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // https://crbug.com/825677 was triggered only when replaceState ran while
   // having a user gesture, which will be the case here since ExecuteScript
   // runs with a user gesture.
-  EXPECT_TRUE(ExecuteScript(root, JsReplace("location.href = $1", url2)));
+  EXPECT_TRUE(ExecJs(root, JsReplace("location.href = $1", url2)));
   EXPECT_TRUE(cross_site_navigation.WaitForRequestStart());
 
   // Now wait for the replaceState to commit while the cross-process navigation
@@ -15066,7 +13485,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
             subframe->effective_frame_policy().sandbox_flags);
 
   // Set the "sandbox" attribute on the subframe; pending policy should update.
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       root, "document.querySelector('iframe').sandbox = 'allow-scripts';"));
   // "allow-scripts" resets both SandboxFlags::Scripts and
   // SandboxFlags::AutomaticFeatures bits per blink::ParseSandboxPolicy().
@@ -15081,8 +13500,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Commit a same-document navigation with replaceState.  The new sandbox
   // flags should still be pending but not effective.
   SameDocumentCommitObserver replace_state_observer(web_contents());
-  EXPECT_TRUE(
-      ExecuteScript(subframe, "history.replaceState({}, 'footitle', 'foo');"));
+  EXPECT_TRUE(ExecJs(subframe, "history.replaceState({}, 'footitle', 'foo');"));
   replace_state_observer.Wait();
 
   EXPECT_EQ(expected_flags, subframe->pending_frame_policy().sandbox_flags);
@@ -15094,8 +13512,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL fragment_url = GURL(subframe->current_url().spec() + "#foo");
   {
     SameDocumentCommitObserver fragment_observer(web_contents());
-    EXPECT_TRUE(
-        ExecuteScript(subframe, JsReplace("location.href=$1", fragment_url)));
+    EXPECT_TRUE(ExecJs(subframe, JsReplace("location.href=$1", fragment_url)));
     fragment_observer.Wait();
     EXPECT_EQ(fragment_url, subframe->current_url());
   }
@@ -15122,7 +13539,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "var blob = new Blob(['foo'], {type : 'text/html'});"
       "var url = URL.createObjectURL(blob);"
       "location = url;";
-  EXPECT_TRUE(ExecuteScript(subframe, blob_script));
+  EXPECT_TRUE(ExecJs(subframe, blob_script));
   observer.Wait();
   RenderFrameHostImpl* subframe_rfh = subframe->current_frame_host();
   EXPECT_TRUE(subframe_rfh->GetLastCommittedURL().SchemeIsBlob());
@@ -15138,7 +13555,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   FrameTreeNode* popup_subframe = popup_root->child_at(0);
 
   TestNavigationObserver popup_observer(new_shell->web_contents());
-  EXPECT_TRUE(ExecuteScript(popup_subframe, blob_script));
+  EXPECT_TRUE(ExecJs(popup_subframe, blob_script));
   popup_observer.Wait();
   RenderFrameHostImpl* popup_subframe_rfh =
       popup_subframe->current_frame_host();
@@ -15185,7 +13602,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // hung b.com URL once the first message is received.
   GURL hung_b_url(embedded_test_server()->GetURL("b.com", "/hung"));
   TestNavigationManager manager(new_shell->web_contents(), hung_b_url);
-  EXPECT_TRUE(ExecuteScript(shell(), JsReplace(R"(
+  EXPECT_TRUE(ExecJs(shell(), JsReplace(R"(
       window.done = false;
       window.onmessage = () => {
         if (!window.done) {
@@ -15193,14 +13610,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
           window.done = true;
         }
       };)",
-                                               hung_b_url)));
+                                        hung_b_url)));
 
   // In the popup, install an unload handler to send a lot of postMessages to
   // the opener.  This keeps the MessageLoop in the b.com process busy after
   // navigating away from the current document.  In https://crbug.com/794625,
   // this was needed so that a subsequent IPC to recreate a proxy arrives
   // before the process fully shuts down.
-  EXPECT_TRUE(ExecuteScript(new_shell, R"(
+  EXPECT_TRUE(ExecJs(new_shell, R"(
       window.onunload = () => {
         for (var i=0; i<10000; i++)
           opener.postMessage('hi','*');
@@ -15210,8 +13627,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // process, and hence initiates process shutdown.
   TestFrameNavigationObserver commit_observer(popup_root);
   GURL another_a_url(embedded_test_server()->GetURL("a.com", "/title3.html"));
-  EXPECT_TRUE(
-      ExecuteScript(new_shell, JsReplace("location = $1", another_a_url)));
+  EXPECT_TRUE(ExecJs(new_shell, JsReplace("location = $1", another_a_url)));
   commit_observer.WaitForCommit();
 
   // At this point, popup's original RFH is pending deletion.
@@ -15253,7 +13669,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Hang the first tab's renderer.
   const char* kHungScript = "setTimeout(function() { for (;;) {}; }, 0);";
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), kHungScript));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), kHungScript));
 
   // Attempt to navigate the second tab to a.com.  This will attempt to reuse
   // the hung process.
@@ -15298,7 +13714,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Hang the first tab's renderer.
   const char* kHungScript = "setTimeout(function() { for (;;) {}; }, 0);";
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), kHungScript));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), kHungScript));
 
   // Hide the second tab.  This should prevent reporting of hangs in this tab
   // (see https://crbug.com/881812).
@@ -15577,29 +13993,23 @@ IN_PROC_BROWSER_TEST_P(CrossProcessNavigationObjectElementTest, FallbackShown) {
 
   // Load the contents of <object> (first navigation which is to a valid
   // existing resource) and wait for 'load' event on <object>.
-  std::string result;
-  ASSERT_TRUE(ExecuteScriptAndExtractString(
-      web_contents(), JsReplace("setUrl($1, true);", object_valid_url),
-      &result));
-  ASSERT_EQ("OBJECT_LOAD", result);
+  ASSERT_EQ(
+      "OBJECT_LOAD",
+      EvalJs(web_contents(), JsReplace("setUrl($1, true);", object_valid_url),
+             EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Verify fallback content is not shown.
-  bool fallback_visible = true;
-  ASSERT_TRUE(ExecuteScriptAndExtractBool(
-      web_contents(), "fallbackVisible(true)", &fallback_visible));
-  ASSERT_FALSE(fallback_visible);
+  ASSERT_EQ(false, EvalJs(web_contents(), "fallbackVisible(true)",
+                          EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Navigate the <object>'s frame to invalid origin. Make sure we do not report
   // the 'load' event (the 404 content loads inside the <object>'s frame and the
   // 'load' event might fire before fallback is detected).
-  fallback_visible = false;
-  ASSERT_TRUE(
-      ExecuteScriptAndExtractBool(web_contents(),
-                                  JsReplace("setUrl($1, false);"
-                                            "notifyWhenFallbackShown();",
-                                            object_invalid_url),
-                                  &fallback_visible));
-  ASSERT_TRUE(fallback_visible);
+  ASSERT_EQ(true, EvalJs(web_contents(),
+                         JsReplace("setUrl($1, false);"
+                                   "notifyWhenFallbackShown();",
+                                   object_invalid_url),
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 INSTANTIATE_TEST_SUITE_P(SitePerProcess,
@@ -15607,105 +14017,6 @@ INSTANTIATE_TEST_SUITE_P(SitePerProcess,
                          testing::Values(std::make_tuple("a", "a", "b"),
                                          std::make_tuple("a", "b", "b"),
                                          std::make_tuple("a", "b", "c")));
-
-class ScrollingIntegrationTest : public SitePerProcessBrowserTest {
- public:
-  ScrollingIntegrationTest() = default;
-  ~ScrollingIntegrationTest() override = default;
-
-  void DoScroll(const gfx::Point& point,
-                const gfx::Vector2d& distance,
-                content::mojom::GestureSourceType source) {
-    SyntheticSmoothScrollGestureParams params;
-    params.gesture_source_type = source;
-    params.anchor = gfx::PointF(point);
-    params.distances.push_back(-distance);
-    params.granularity = ui::ScrollGranularity::kScrollByPrecisePixel;
-
-    auto gesture = std::make_unique<SyntheticSmoothScrollGesture>(params);
-
-    // Runs until we get the SyntheticGestureCompleted callback
-    base::RunLoop run_loop;
-    GetRenderWidgetHostImpl()->QueueSyntheticGesture(
-        std::move(gesture),
-        base::BindLambdaForTesting([&](SyntheticGesture::Result result) {
-          EXPECT_EQ(SyntheticGesture::GESTURE_FINISHED, result);
-          run_loop.Quit();
-        }));
-    run_loop.Run();
-  }
-
-  double GetScrollTop() {
-    FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                              ->GetFrameTree()
-                              ->root();
-    return EvalJs(root, "window.scrollY").ExtractDouble();
-  }
-
-  void WaitForVerticalScroll() {
-    RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
-    gfx::Vector2dF default_scroll_offset;
-    while (frame_observer.LastRenderFrameMetadata()
-               .root_scroll_offset.value_or(default_scroll_offset)
-               .y() <= 0) {
-      frame_observer.WaitForMetadataChange();
-    }
-  }
-
-  RenderWidgetHostImpl* GetRenderWidgetHostImpl() {
-    FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                              ->GetFrameTree()
-                              ->root();
-    return root->current_frame_host()->GetRenderWidgetHost();
-  }
-};
-
-// Tests basic scrolling after navigating to a new origin works. Guards against
-// bugs like https://crbug.com/899234 which are caused by invalid
-// initialization due to the cross-origin provisional frame swap.
-IN_PROC_BROWSER_TEST_P(ScrollingIntegrationTest,
-                       ScrollAfterCrossOriginNavigation) {
-  // Navigate to the a.com domain first.
-  GURL url_domain_a(
-      embedded_test_server()->GetURL("a.com", "/simple_page.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), url_domain_a));
-
-  // Now navigate to baz.com, this should cause a cross-origin navigation which
-  // will load into a provisional frame and then swap in as a local main frame.
-  // This test ensures all the correct initialization takes place in the
-  // renderer so that a basic scrolling smoke test works.
-  GURL url_domain_b(embedded_test_server()->GetURL(
-      "baz.com", "/scrollable_page_with_iframe.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), url_domain_b));
-  ASSERT_TRUE(WaitForLoadStop(shell()->web_contents()));
-
-  {
-    // TODO(bokan): We currently don't have a good way to know when the
-    // compositor's scrolling layers are ready after changes on the main thread.
-    // We wait a timeout but that's really a hack. Fixing is tracked in
-    // https://crbug.com/897520
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(),
-        base::TimeDelta::FromMilliseconds(3000));
-    run_loop.Run();
-  }
-
-  content::mojom::GestureSourceType source;
-
-// TODO(bokan): Mac doesn't support touch events and for an unknown reason,
-// Android doesn't like mouse wheel here. https://crbug.com/897520.
-#if defined(OS_ANDROID)
-  source = content::mojom::GestureSourceType::kTouchInput;
-#else
-  source = content::mojom::GestureSourceType::kTouchpadInput;
-#endif
-
-  // Perform the scroll (below the iframe), ensure it's correctly processed.
-  DoScroll(gfx::Point(100, 110), gfx::Vector2d(0, 500), source);
-  WaitForVerticalScroll();
-  EXPECT_GT(GetScrollTop(), 0);
-}
 
 #if !defined(OS_ANDROID)
 // This test verifies that after occluding a WebContents the RAF inside a
@@ -15732,7 +14043,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     run_loop.Run();
   };
 
-  ASSERT_TRUE(ExecuteScript(subframe, "reset_count();"));
+  ASSERT_TRUE(ExecJs(subframe, "reset_count();"));
   allow_time_for_rafs();
   int32_t default_raf_count = EvalJs(subframe, "raf_count").ExtractInt();
   // On a 60 fps we should expect more than 30 counts - however purely for
@@ -15740,17 +14051,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // much lower value. This verifies that we did get *some* rAFs.
   EXPECT_GT(default_raf_count, 5);
   web_contents()->WasOccluded();
-  ASSERT_TRUE(ExecuteScript(subframe, "reset_count();"));
+  ASSERT_TRUE(ExecJs(subframe, "reset_count();"));
   allow_time_for_rafs();
   int32_t raf_count = EvalJs(subframe, "raf_count").ExtractInt();
   // If the frame is throttled, we should expect 0 rAFs.
   EXPECT_EQ(raf_count, 0);
   // Sanity-check: unoccluding will reverse the effect.
   web_contents()->WasShown();
-  ASSERT_TRUE(ExecuteScript(subframe, "reset_count();"));
+  ASSERT_TRUE(ExecJs(subframe, "reset_count();"));
   allow_time_for_rafs();
-  ASSERT_TRUE(ExecuteScriptAndExtractInt(
-      subframe, "window.domAutomationController.send(raf_count)", &raf_count));
+  raf_count = EvalJs(subframe, "raf_count").ExtractInt();
   EXPECT_GT(raf_count, 5);
 }
 #endif
@@ -15805,18 +14115,19 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   ASSERT_TRUE(NavigateToURL(shell(), main_frame_url));
   GURL cross_origin(embedded_test_server()->GetURL("b.com", "/title1.html"));
   std::string msg =
-      EvalJsWithManualReply(
-          shell(), JsReplace("var object = document.createElement('object');"
-                             "document.body.appendChild(object);"
-                             "object.data = $1;"
-                             "object.type='text/html';"
-                             "object.notify = true;"
-                             "object.onload = () => {"
-                             "  if (!object.notify) return;"
-                             "  object.notify = false;"
-                             "  window.domAutomationController.send('done');"
-                             "};",
-                             cross_origin))
+      EvalJs(shell(),
+             JsReplace("var object = document.createElement('object');"
+                       "document.body.appendChild(object);"
+                       "object.data = $1;"
+                       "object.type='text/html';"
+                       "object.notify = true;"
+                       "object.onload = () => {"
+                       "  if (!object.notify) return;"
+                       "  object.notify = false;"
+                       "  window.domAutomationController.send('done');"
+                       "};",
+                       cross_origin),
+             EXECUTE_SCRIPT_USE_MANUAL_REPLY)
           .ExtractString();
   ASSERT_EQ("done", msg);
   // To track the frame's visibility an EmbeddedContentView is needed. The
@@ -15875,11 +14186,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   RenderFrameHostImpl* rfh_c =
       rfh_b->frame_tree_node()->render_manager()->speculative_frame_host();
 
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_a->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_b->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kSpeculative,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kSpeculative,
             rfh_c->lifecycle_state());
 
   // 3) Deletion of B. The unload handler takes times to execute.
@@ -15888,9 +14199,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       ExecJs(rfh_a, JsReplace("document.querySelector('iframe').remove();")));
   EXPECT_FALSE(delete_b.deleted());
   EXPECT_TRUE(delete_c.deleted());  // The speculative RFH is deleted.
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_a->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kRunningUnloadHandlers,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kRunningUnloadHandlers,
             rfh_b->lifecycle_state());
 
   // The navigation has been canceled.
@@ -15930,13 +14241,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   RenderFrameHostImpl* rfh_d =
       rfh_c->frame_tree_node()->render_manager()->speculative_frame_host();
 
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_a->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_b->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_c->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kSpeculative,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kSpeculative,
             rfh_d->lifecycle_state());
 
   // 3) Deletion of D. The unload handler takes times to execute.
@@ -15946,12 +14257,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_FALSE(delete_b.deleted());
   EXPECT_FALSE(delete_c.deleted());
   EXPECT_TRUE(delete_d.deleted());  // The speculative RFH is deleted.
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kActive,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kActive,
             rfh_a->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kReadyToBeDeleted,
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kReadyToBeDeleted,
             rfh_b->lifecycle_state());
-  EXPECT_EQ(RenderFrameHostImpl::LifecycleState::kRunningUnloadHandlers,
+  EXPECT_EQ(RenderFrameHost::LifecycleState::kPendingDeletion,
+            rfh_b->GetLifecycleState());
+  EXPECT_EQ(RenderFrameHostImpl::LifecycleStateImpl::kRunningUnloadHandlers,
             rfh_c->lifecycle_state());
+  EXPECT_EQ(RenderFrameHost::LifecycleState::kPendingDeletion,
+            rfh_c->GetLifecycleState());
 
   // The navigation has been canceled.
   navigation_observer.WaitForNavigationFinished();
@@ -16060,7 +14375,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // window.open from A in B to url_c.
   DidStartNavigationObserver did_start_navigation_observer(web_contents());
-  EXPECT_TRUE(ExecuteScript(rfh_b, "window.name = 'name';"));
+  EXPECT_TRUE(ExecJs(rfh_b, "window.name = 'name';"));
   ExecuteScriptAsync(rfh_a, JsReplace("window.open($1, 'name');", url_c));
 
   // Simulate A deleting C.
@@ -16099,7 +14414,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   std::string script =
       "var s = '<div>Hello</div>\\n';\n"
       "document.write(s.repeat(200));";
-  EXPECT_TRUE(ExecuteScript(child, script));
+  EXPECT_TRUE(ExecJs(child, script));
 
   RenderFrameSubmissionObserver observer_a(root);
   RenderFrameSubmissionObserver observer_b(child);
@@ -16576,7 +14891,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   ASSERT_TRUE(b2_to_c2_message_filter->MessageReceived());
 
   // Window scroll offset will be scaled by device scale factor
-  blink::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   a_node->render_manager()->GetRenderWidgetHostView()->GetScreenInfo(
       &screen_info);
   float expected_y = screen_info.device_scale_factor * 5.0;
@@ -16618,6 +14933,37 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       ::testing::MatchesRegex(
           "SecurityError: Blocked a frame with origin \"http://a.com:\\d+\" "
           "from accessing a cross-origin frame."));
+}
+
+// Make sure that a popup with a cross site subframe can be closed from the
+// subframe.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CloseNoopenerWindow) {
+  GURL main_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // Open a same site popup with a subframe using the noopener ref.
+  GURL popup_url(
+      embedded_test_server()->GetURL("a.com", "/page_with_blank_iframe.html"));
+  ShellAddedObserver new_shell_observer;
+  EXPECT_TRUE(ExecJs(
+      shell(),
+      JsReplace("popup = window.open($1,'_blank','noopener');", popup_url)));
+  Shell* popup = new_shell_observer.GetShell();
+  WebContentsImpl* popup_web_contents =
+      static_cast<WebContentsImpl*>(popup->web_contents());
+  FrameTreeNode* popup_root = popup_web_contents->GetFrameTree()->root();
+  EXPECT_TRUE(WaitForLoadStop(popup_web_contents));
+
+  // Navigate the popup subframe cross site to b.com.
+  FrameTreeNode* child = popup_root->child_at(0);
+  GURL cross_origin_url(
+      embedded_test_server()->GetURL("b.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURLFromRenderer(child, cross_origin_url));
+
+  // Check that the popup successfully closes from the subframe.
+  WebContentsDestroyedWatcher destroyed_watcher(popup->web_contents());
+  EXPECT_TRUE(ExecJs(child, "window.parent.close()"));
+  destroyed_watcher.Wait();
 }
 
 class SitePerProcessCompositorViewportBrowserTest
@@ -16728,6 +15074,97 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_NE(js_process, web_contents()->GetMainFrame()->GetProcess());
 }
 
+// Tests that when a non-root frame in an iframe, performs a RAF to emulate a
+// scroll, that metrics are reported.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ScrollByRAF) {
+  base::HistogramTester histogram_tester;
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(b(b))"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  ASSERT_EQ(1U, root->child_count());
+
+  EXPECT_EQ(
+      " Site A ------------ proxies for B\n"
+      "   +--Site B ------- proxies for A\n"
+      "        +--Site B -- proxies for A\n"
+      "Where A = http://a.com/\n"
+      "      B = http://b.com/",
+      DepictFrameTree(root));
+
+  // Layout all three frames, so that the animation has a region to mark dirty.
+  LayoutNonRecursiveForTestingViewportIntersection(root->current_frame_host());
+  LayoutNonRecursiveForTestingViewportIntersection(
+      root->child_at(0)->current_frame_host());
+  LayoutNonRecursiveForTestingViewportIntersection(
+      root->child_at(0)->child_at(0)->current_frame_host());
+
+  // Add a div to the nested iframe, so that it can be animated.
+  RenderFrameSubmissionObserver frame_observer(root->child_at(0)->child_at(0));
+  std::string addContent(R"(
+      var d = document.createElement('div');
+      d.id = 'animationtarget';
+      d.innerHTML = 'Hey Listen!';
+      document.body.appendChild(d);
+    )");
+  ASSERT_TRUE(
+      EvalJsAfterLifecycleUpdate(
+          root->child_at(0)->child_at(0)->current_frame_host(), "", addContent)
+          .error.empty());
+  frame_observer.WaitForAnyFrameSubmission();
+
+  // Fetch the initial metrics, as adding a div can incidentally trigger RAF
+  // metrics.
+  FetchHistogramsFromChildProcesses();
+  auto initial_samples = histogram_tester.GetAllSamples(
+      "Graphics.Smoothness.PercentDroppedFrames.MainThread.RAF");
+  ASSERT_EQ(initial_samples.size(), 0u);
+
+  const int pre_scroll_frame_count = frame_observer.render_frame_count();
+
+  // Run a RAF that takes more than one frame, as metrics due to not track
+  // frames where WillBeginMainFrame occurs before it is triggered. Subsequent
+  // RAFs in the sequence will be measured.
+  std::string scrollByRAF(R"(
+     var offset = 0;
+      function run() {
+        let child = document.getElementById("animationtarget");
+        var rect = child.getBoundingClientRect();
+        child.style = 'transform: translateY(' + parseInt(offset)+'px);';
+        offset += 1;
+        requestAnimationFrame(run);
+      }
+      run();
+     )");
+  ASSERT_TRUE(
+      EvalJsAfterLifecycleUpdate(
+          root->child_at(0)->child_at(0)->current_frame_host(), scrollByRAF, "")
+          .error.empty());
+
+  // There will have been one frame before the RAF sequence. The minimum for
+  // reporting if 100 frames, however we need to wait at least one extra frame.
+  // On Android the animation begins during the initial call to
+  // EvalJsAfterLifecycleUpdate. However on Linux the first translate is not
+  // applied until the subsequent frame. So we wait for the minimum, then verify
+  // afterwards.
+  const int kExpectedNumberFrames = 101 + pre_scroll_frame_count;
+  while (frame_observer.render_frame_count() < kExpectedNumberFrames)
+    frame_observer.WaitForAnyFrameSubmission();
+
+  // We now wait for FrameSequenceTracker to time out in order for it to report.
+  // This will occur once the minimum 100 frames have been produced, and 5s have
+  // passed. If the test times out then the bug is back.
+  while (histogram_tester
+             .GetAllSamples(
+                 "Graphics.Smoothness.PercentDroppedFrames.MainThread.RAF")
+             .empty()) {
+    frame_observer.WaitForAnyFrameSubmission();
+    FetchHistogramsFromChildProcesses();
+  }
+}
+
 // Check that a urn:uuid subframe instantiated from a same-origin WebBundle
 // reuses its parent's process.
 IN_PROC_BROWSER_TEST_P(SitePerProcessWebBundleBrowserTest, SameSiteBundle) {
@@ -16736,7 +15173,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessWebBundleBrowserTest, SameSiteBundle) {
   GURL main_url(https_server()->GetURL(
       "foo.test", "/web_bundle/frame_parent.html?wbn=" + bundle_url.spec()));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  base::string16 expected_title(base::UTF8ToUTF16("OK"));
+  std::u16string expected_title(u"OK");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
@@ -16757,7 +15194,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessWebBundleBrowserTest, CrossSiteBundle) {
   GURL main_url(https_server()->GetURL(
       "foo.test", "/web_bundle/frame_parent.html?wbn=" + bundle_url.spec()));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  base::string16 expected_title(base::UTF8ToUTF16("OK"));
+  std::u16string expected_title(u"OK");
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
@@ -16766,19 +15203,105 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessWebBundleBrowserTest, CrossSiteBundle) {
   FrameTreeNode* child_node = root->child_at(0);
   EXPECT_EQ(child_node->current_url(),
             GURL("urn:uuid:429fcc4e-0696-4bad-b099-ee9175f023ae"));
+  url::Origin last_committed_origin =
+      child_node->current_frame_host()->GetLastCommittedOrigin();
+  EXPECT_TRUE(last_committed_origin.opaque());
+  const url::SchemeHostPort& tuple =
+      last_committed_origin.GetTupleOrPrecursorTupleIfOpaque();
+  EXPECT_EQ("bar.test", tuple.host());
+
+  // An iframe nested in the urn:uuid iframe gets a non-opaque origin.
+  TestNavigationObserver observer(shell()->web_contents());
+
+  // Create the subframe now.
+  GURL c_url = https_server()->GetURL("c.test", "/title1.html");
+  std::string create_frame_script = base::StringPrintf(
+      "var new_iframe = document.createElement('iframe');"
+      "new_iframe.src = '%s';"
+      "document.body.appendChild(new_iframe);",
+      c_url.spec().c_str());
+  EXPECT_TRUE(ExecJs(child_node, create_frame_script));
+
+  observer.WaitForNavigationFinished();
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  ASSERT_EQ(1U, child_node->child_count());
+  FrameTreeNode* grandchild_node = child_node->child_at(0);
+  url::Origin grandchild_committed_origin =
+      grandchild_node->current_frame_host()->GetLastCommittedOrigin();
+  EXPECT_FALSE(grandchild_committed_origin.opaque());
+  const url::SchemeHostPort& c_tuple =
+      grandchild_committed_origin.GetTupleOrPrecursorTupleIfOpaque();
+  EXPECT_EQ("c.test", c_tuple.host());
+  EXPECT_FALSE(
+      last_committed_origin.IsSameOriginWith(grandchild_committed_origin));
+
   EXPECT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
+      " Site A ------------ proxies for B C\n"
+      "   +--Site B ------- proxies for A C\n"
+      "        +--Site C -- proxies for A B\n"
       "Where A = https://foo.test/\n"
-      "      B = https://bar.test/",
+      "      B = https://bar.test/\n"
+      "      C = https://c.test/",
       DepictFrameTree(root));
+}
+
+// Tests that verify the feature disabling process reuse.
+class DisableProcessReusePolicyTest : public SitePerProcessBrowserTest {
+ public:
+  DisableProcessReusePolicyTest() {
+    scoped_feature_list_.InitAndEnableFeature(features::kDisableProcessReuse);
+  }
+  ~DisableProcessReusePolicyTest() override = default;
+
+  DisableProcessReusePolicyTest(const DisableProcessReusePolicyTest&) = delete;
+  DisableProcessReusePolicyTest& operator=(
+      const DisableProcessReusePolicyTest&) = delete;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// In two tabs with the same site, open a cross site iframe in each (same site
+// for the iframes). Make sure these do not have the same process ID.
+IN_PROC_BROWSER_TEST_P(DisableProcessReusePolicyTest,
+                       DisableProcessReusePolicy) {
+  GURL url(
+      embedded_test_server()->GetURL("www.foo.com", "/page_with_iframe.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* child = root->child_at(0);
+
+  // Navigate the subframe cross site, and make sure it is an OOPIF.
+  GURL cross_site_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  TestNavigationObserver observer(shell()->web_contents());
+  EXPECT_TRUE(NavigateToURLFromRenderer(child, cross_site_url));
+  EXPECT_TRUE(child->current_frame_host()->IsCrossProcessSubframe());
+
+  // Open an new tab in a separate BrowsingInstance with the same url as the
+  // first tab and open a subframe, also to |cross_site_url|.
+  Shell* second_shell = CreateBrowser();
+  EXPECT_TRUE(NavigateToURL(second_shell, url));
+  FrameTreeNode* second_root =
+      static_cast<WebContentsImpl*>(second_shell->web_contents())
+          ->GetFrameTree()
+          ->root();
+  FrameTreeNode* second_child = second_root->child_at(0);
+  EXPECT_TRUE(NavigateToURLFromRenderer(second_child, cross_site_url));
+  EXPECT_TRUE(second_child->current_frame_host()->IsCrossProcessSubframe());
+
+  scoped_refptr<SiteInstanceImpl> second_shell_instance =
+      second_child->current_frame_host()->GetSiteInstance();
+  EXPECT_NE(
+      SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE,
+      second_shell_instance->process_reuse_policy());
+
+  EXPECT_NE(child->current_frame_host()->GetProcess(),
+            second_child->current_frame_host()->GetProcess());
 }
 
 INSTANTIATE_TEST_SUITE_P(All,
                          RequestDelayingSitePerProcessBrowserTest,
-                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
-INSTANTIATE_TEST_SUITE_P(All,
-                         ScrollingIntegrationTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 #if defined(OS_ANDROID)
 INSTANTIATE_TEST_SUITE_P(All,
@@ -16795,12 +15318,6 @@ INSTANTIATE_TEST_SUITE_P(All,
                          SitePerProcessBrowserTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 INSTANTIATE_TEST_SUITE_P(All,
-                         SitePerProcessBrowserTestWithoutSadFrameTabReload,
-                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
-INSTANTIATE_TEST_SUITE_P(All,
-                         SitePerProcessBrowserTestWithSadFrameTabReload,
-                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
-INSTANTIATE_TEST_SUITE_P(All,
                          SitePerProcessBrowserTouchActionTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 INSTANTIATE_TEST_SUITE_P(All,
@@ -16809,16 +15326,13 @@ INSTANTIATE_TEST_SUITE_P(All,
 INSTANTIATE_TEST_SUITE_P(All,
                          SitePerProcessIgnoreCertErrorsBrowserTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
+INSTANTIATE_TEST_SUITE_P(All,
+                         DisableProcessReusePolicyTest,
+                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 INSTANTIATE_TEST_SUITE_P(
     All,
     SitePerProcessIgnoreCertErrorsAllowMixedContentBrowserTest,
     testing::ValuesIn(RenderDocumentFeatureLevelValues()));
-INSTANTIATE_TEST_SUITE_P(All,
-                         SitePerProcessProgrammaticScrollTest,
-                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
-INSTANTIATE_TEST_SUITE_P(All,
-                         SitePerProcessScrollAnchorTest,
-                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 INSTANTIATE_TEST_SUITE_P(All,
                          SitePerProcessWebBundleBrowserTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));

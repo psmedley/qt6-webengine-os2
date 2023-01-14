@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -37,8 +38,8 @@
 #include "services/network/test/test_url_loader_factory.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/components/account_manager/account_manager.h"
 #include "ash/components/account_manager/account_manager_factory.h"
+#include "components/account_manager_core/chromeos/account_manager.h"
 #include "components/signin/internal/identity_manager/test_profile_oauth2_token_service_delegate_chromeos.h"
 #endif
 
@@ -105,7 +106,10 @@ IdentityManagerDependenciesOwner::IdentityManagerDependenciesOwner(
       raw_signin_client_(signin_client_param) {
 }
 
-IdentityManagerDependenciesOwner::~IdentityManagerDependenciesOwner() = default;
+IdentityManagerDependenciesOwner::~IdentityManagerDependenciesOwner() {
+  if (owned_signin_client_)
+    owned_signin_client_->Shutdown();
+}
 
 sync_preferences::TestingPrefServiceSyncable*
 IdentityManagerDependenciesOwner::pref_service() {
@@ -168,6 +172,7 @@ void IdentityTestEnvironment::Initialize() {
   test_identity_manager_observer_ =
       std::make_unique<TestIdentityManagerObserver>(identity_manager());
   diagnostics_observation_.Observe(identity_manager());
+  identity_manager_observation_.Observe(identity_manager());
 }
 
 IdentityTestEnvironment::IdentityTestEnvironment(
@@ -186,7 +191,7 @@ IdentityTestEnvironment::IdentityTestEnvironment(
   IdentityManager::RegisterProfilePrefs(test_pref_service->registry());
   IdentityManager::RegisterLocalStatePrefs(test_pref_service->registry());
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  ash::AccountManager::RegisterPrefs(test_pref_service->registry());
+  account_manager::AccountManager::RegisterPrefs(test_pref_service->registry());
 
   owned_identity_manager_ = BuildIdentityManagerForTests(
       test_signin_client, test_pref_service, base::FilePath(),
@@ -220,10 +225,11 @@ IdentityTestEnvironment::BuildIdentityManagerForTests(
     account_manager->InitializeInEphemeralMode(
         signin_client->GetURLLoaderFactory());
   } else {
-    ash::AccountManager::DelayNetworkCallRunner immediate_callback_runner =
-        base::BindRepeating([](base::OnceClosure closure) -> void {
-          std::move(closure).Run();
-        });
+    account_manager::AccountManager::DelayNetworkCallRunner
+        immediate_callback_runner =
+            base::BindRepeating([](base::OnceClosure closure) -> void {
+              std::move(closure).Run();
+            });
     account_manager->Initialize(user_data_dir,
                                 signin_client->GetURLLoaderFactory(),
                                 immediate_callback_runner, base::DoNothing());
@@ -236,7 +242,9 @@ IdentityTestEnvironment::BuildIdentityManagerForTests(
   auto token_service = std::make_unique<FakeProfileOAuth2TokenService>(
       pref_service,
       std::make_unique<TestProfileOAuth2TokenServiceDelegateChromeOS>(
-          account_tracker_service.get(), account_manager,
+          account_tracker_service.get(),
+          account_manager_factory->GetAccountManagerMojoService(
+              user_data_dir.value()),
           /*is_regular_profile=*/true));
 
   return FinishBuildIdentityManagerForTests(
@@ -339,11 +347,17 @@ IdentityTestEnvironment::FinishBuildIdentityManagerForTests(
       std::move(gaia_cookie_manager_service);
   init_params.primary_account_manager = std::move(primary_account_manager);
   init_params.token_service = std::move(token_service);
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  init_params.signin_client = signin_client;
+#endif
 
   return std::make_unique<IdentityManager>(std::move(init_params));
 }
 
-IdentityTestEnvironment::~IdentityTestEnvironment() = default;
+IdentityTestEnvironment::~IdentityTestEnvironment() {
+  if (owned_identity_manager_)
+    owned_identity_manager_->Shutdown();
+}
 
 IdentityManager* IdentityTestEnvironment::identity_manager() {
   DCHECK(raw_identity_manager_ || owned_identity_manager_);
@@ -358,14 +372,14 @@ IdentityTestEnvironment::identity_manager_observer() {
   return test_identity_manager_observer_.get();
 }
 
-CoreAccountInfo IdentityTestEnvironment::SetPrimaryAccount(
-    const std::string& email) {
-  return signin::SetPrimaryAccount(identity_manager(), email);
+void IdentityTestEnvironment::WaitForRefreshTokensLoaded() {
+  signin::WaitForRefreshTokensLoaded(identity_manager());
 }
 
-CoreAccountInfo IdentityTestEnvironment::SetUnconsentedPrimaryAccount(
-    const std::string& email) {
-  return signin::SetUnconsentedPrimaryAccount(identity_manager(), email);
+CoreAccountInfo IdentityTestEnvironment::SetPrimaryAccount(
+    const std::string& email,
+    ConsentLevel consent_level) {
+  return signin::SetPrimaryAccount(identity_manager(), email, consent_level);
 }
 
 void IdentityTestEnvironment::SetRefreshTokenForPrimaryAccount() {
@@ -381,40 +395,10 @@ void IdentityTestEnvironment::RemoveRefreshTokenForPrimaryAccount() {
 }
 
 AccountInfo IdentityTestEnvironment::MakePrimaryAccountAvailable(
-    const std::string& email) {
-  return signin::MakePrimaryAccountAvailable(identity_manager(), email);
-}
-
-AccountInfo IdentityTestEnvironment::MakeUnconsentedPrimaryAccountAvailable(
-    const std::string& email) {
-  DCHECK(!identity_manager()->HasPrimaryAccount(ConsentLevel::kNotRequired));
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Chrome OS sets the unconsented primary account during login and does not
-  // allow signout.
-  AccountInfo account_info = MakeAccountAvailable(email);
-  identity_manager()->GetPrimaryAccountMutator()->SetUnconsentedPrimaryAccount(
-      account_info.account_id);
-#elif defined(OS_IOS)
-  // iOS only support the primary account.
-  AccountInfo account_info = MakePrimaryAccountAvailable(email);
-#else
-  // Android and Desktop platforms.
-  AccountInfo account_info =
-      MakeAccountAvailableWithCookies(email, GetTestGaiaIdForEmail(email));
-  base::RunLoop().RunUntilIdle();
-  // Tests that don't use the |SigninManager| needs the unconsented primary
-  // account to be set manually.
-  if (!identity_manager()->HasPrimaryAccount(ConsentLevel::kNotRequired)) {
-    identity_manager()
-        ->GetPrimaryAccountMutator()
-        ->SetUnconsentedPrimaryAccount(account_info.account_id);
-  }
-#endif
-  DCHECK(identity_manager()->HasPrimaryAccount(ConsentLevel::kNotRequired));
-  DCHECK_EQ(email, identity_manager()
-                       ->GetPrimaryAccountInfo(ConsentLevel::kNotRequired)
-                       .email);
-  return account_info;
+    const std::string& email,
+    ConsentLevel consent_level) {
+  return signin::MakePrimaryAccountAvailable(identity_manager(), email,
+                                             consent_level);
 }
 
 void IdentityTestEnvironment::RevokeSyncConsent() {
@@ -475,7 +459,7 @@ void IdentityTestEnvironment::
         const std::string& token,
         const base::Time& expiration,
         const std::string& id_token) {
-  WaitForAccessTokenRequestIfNecessary(base::nullopt);
+  WaitForAccessTokenRequestIfNecessary(absl::nullopt);
   fake_token_service()->IssueTokenForAllPendingRequests(
       TokenResponseBuilder()
           .WithAccessToken(token)
@@ -505,7 +489,7 @@ void IdentityTestEnvironment::
         const base::Time& expiration,
         const std::string& id_token,
         const ScopeSet& scopes) {
-  WaitForAccessTokenRequestIfNecessary(base::nullopt);
+  WaitForAccessTokenRequestIfNecessary(absl::nullopt);
   fake_token_service()->IssueTokenForScope(scopes,
                                            TokenResponseBuilder()
                                                .WithAccessToken(token)
@@ -517,7 +501,7 @@ void IdentityTestEnvironment::
 void IdentityTestEnvironment::
     WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
         const GoogleServiceAuthError& error) {
-  WaitForAccessTokenRequestIfNecessary(base::nullopt);
+  WaitForAccessTokenRequestIfNecessary(absl::nullopt);
   fake_token_service()->IssueErrorForAllPendingRequests(error);
 }
 
@@ -560,11 +544,13 @@ void IdentityTestEnvironment::OnAccessTokenRequested(
                      weak_ptr_factory_.GetWeakPtr(), account_id));
 }
 
-void IdentityTestEnvironment::OnIdentityManagerShutdown() {
+void IdentityTestEnvironment::OnIdentityManagerShutdown(
+    signin::IdentityManager* identity_manager) {
   // Remove the Observers that IdentityTestEnvironment added during its
   // initialization.
   test_identity_manager_observer_.reset();
   diagnostics_observation_.Reset();
+  identity_manager_observation_.Reset();
 }
 
 void IdentityTestEnvironment::HandleOnAccessTokenRequested(
@@ -593,7 +579,7 @@ void IdentityTestEnvironment::HandleOnAccessTokenRequested(
 }
 
 void IdentityTestEnvironment::WaitForAccessTokenRequestIfNecessary(
-    base::Optional<CoreAccountId> account_id) {
+    absl::optional<CoreAccountId> account_id) {
   // Handle HandleOnAccessTokenRequested getting called before
   // WaitForAccessTokenRequestIfNecessary.
   if (account_id) {

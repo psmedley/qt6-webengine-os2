@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/views_export.h"
@@ -23,8 +24,10 @@ class ToggleImageButton;
 // Creates an ImageButton with an ink drop and a centered image built from a
 // vector icon that tracks color changes in NativeTheme.
 VIEWS_EXPORT std::unique_ptr<ImageButton>
-CreateVectorImageButtonWithNativeTheme(Button::PressedCallback callback,
-                                       const gfx::VectorIcon& icon);
+CreateVectorImageButtonWithNativeTheme(
+    Button::PressedCallback callback,
+    const gfx::VectorIcon& icon,
+    absl::optional<int> dip_size = absl::nullopt);
 
 // Creates an ImageButton with an ink drop and a centered image in preparation
 // for applying a vector icon with SetImageFromVectorIcon below.

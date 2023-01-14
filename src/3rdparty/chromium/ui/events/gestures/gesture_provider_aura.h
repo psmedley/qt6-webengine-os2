@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_EVENTS_GESTURE_DETECTION_UI_GESTURE_PROVIDER_H_
-#define UI_EVENTS_GESTURE_DETECTION_UI_GESTURE_PROVIDER_H_
+#ifndef UI_EVENTS_GESTURES_GESTURE_PROVIDER_AURA_H_
+#define UI_EVENTS_GESTURES_GESTURE_PROVIDER_AURA_H_
 
 #include <stdint.h>
 
@@ -27,6 +27,10 @@ class EVENTS_EXPORT GestureProviderAuraClient {
   virtual ~GestureProviderAuraClient() {}
   virtual void OnGestureEvent(GestureConsumer* consumer,
                               GestureEvent* event) = 0;
+
+  // Called when `gesture_provider` will be destroyed.
+  virtual void OnGestureProviderAuraWillBeDestroyed(
+      GestureProviderAura* gesture_provider) {}
 };
 
 // Provides gesture detection and dispatch given a sequence of touch events
@@ -41,6 +45,10 @@ class EVENTS_EXPORT GestureProviderAura : public GestureProviderClient {
     gesture_consumer_ = consumer;
   }
 
+  FilteredGestureProvider& filtered_gesture_provider() {
+    return filtered_gesture_provider_;
+  }
+
   bool OnTouchEvent(TouchEvent* event);
   void OnTouchEventAck(uint32_t unique_touch_event_id,
                        bool event_consumed,
@@ -50,6 +58,9 @@ class EVENTS_EXPORT GestureProviderAura : public GestureProviderClient {
   void OnTouchEnter(int pointer_id, float x, float y);
 
   void ResetGestureHandlingState();
+
+  // Synthesizes gesture end events and sends to the associated consumer.
+  void SendSynthesizedEndEvents();
 
   // GestureProviderClient implementation
   void OnGestureEvent(const GestureEventData& gesture) override;
@@ -71,4 +82,4 @@ class EVENTS_EXPORT GestureProviderAura : public GestureProviderClient {
 
 }  // namespace ui
 
-#endif  // UI_EVENTS_GESTURE_DETECTION_UI_GESTURE_PROVIDER_H_
+#endif  // UI_EVENTS_GESTURES_GESTURE_PROVIDER_AURA_H_

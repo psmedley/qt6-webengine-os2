@@ -8,9 +8,9 @@ import {assert} from 'chrome://resources/js/assert.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 
 import {isTabElement, TabElement} from './tab.js';
-import {isTabGroupElement, TabGroupElement} from './tab_group.js';
-import {TabStripEmbedderProxy, TabStripEmbedderProxyImpl} from './tab_strip_embedder_proxy.js';
-import {TabData, TabNetworkState, TabsApiProxy, TabsApiProxyImpl} from './tabs_api_proxy.js';
+import {isDragHandle, isTabGroupElement, TabGroupElement} from './tab_group.js';
+import {Tab, TabNetworkState} from './tab_strip.mojom-webui.js';
+import {TabsApiProxy, TabsApiProxyImpl} from './tabs_api_proxy.js';
 
 /** @const {number} */
 export const PLACEHOLDER_TAB_ID = -1;
@@ -40,7 +40,7 @@ function getGroupIdDataType() {
   return loadTimeData.getString('tabGroupIdDataType');
 }
 
-/** @return {!TabData} */
+/** @return {!Tab} */
 function getDefaultTabData() {
   return {
     active: false,
@@ -50,12 +50,12 @@ function getDefaultTabData() {
     id: -1,
     index: -1,
     isDefaultFavicon: false,
-    networkState: TabNetworkState.NONE,
+    networkState: TabNetworkState.kNone,
     pinned: false,
     shouldHideThrobber: false,
     showIcon: true,
     title: '',
-    url: '',
+    url: {url: ''},
   };
 }
 
@@ -122,9 +122,6 @@ class DragSession {
 
     /** @private @const {!TabsApiProxy} */
     this.tabsProxy_ = TabsApiProxyImpl.getInstance();
-
-    /** @private {!TabStripEmbedderProxy} */
-    this.tabStripEmbedderProxy_ = TabStripEmbedderProxyImpl.getInstance();
   }
 
   /**
@@ -159,7 +156,7 @@ class DragSession {
       const isPinned = event.dataTransfer.types.includes('pinned');
       const placeholderTabElement =
           /** @type {!TabElement} */ (document.createElement('tabstrip-tab'));
-      placeholderTabElement.tab = /** @type {!TabData} */ (Object.assign(
+      placeholderTabElement.tab = /** @type {!Tab} */ (Object.assign(
           getDefaultTabData(), {id: PLACEHOLDER_TAB_ID, pinned: isPinned}));
       placeholderTabElement.setDragging(true);
       delegate.placeTabElement(placeholderTabElement, -1, isPinned);
@@ -254,10 +251,6 @@ class DragSession {
 
     this.element_.setDragging(false);
     this.element_.setDraggedOut(false);
-
-    if (event.type === 'dragend') {
-      this.maybeShowTabContextMenu_();
-    }
   }
 
   /** @return {boolean} */
@@ -311,22 +304,6 @@ class DragSession {
 
     this.element_.setDragging(false);
     this.element_.setDraggedOut(false);
-
-    if (!wasDraggingPlaceholder) {
-      this.maybeShowTabContextMenu_();
-    }
-  }
-
-  /** @private */
-  maybeShowTabContextMenu_() {
-    if (!isTabElement(this.element_) || this.hasMoved_) {
-      return;
-    }
-
-    // If the user was dragging a tab and the tab has not ever been moved,
-    // show a context menu instead.
-    this.tabStripEmbedderProxy_.showTabContextMenu(
-        this.element_.tab.id, this.lastPoint_.x, this.lastPoint_.y);
   }
 
   /**
@@ -514,9 +491,6 @@ export class DragManager {
 
     /** @private {!TabsApiProxy} */
     this.tabsProxy_ = TabsApiProxyImpl.getInstance();
-
-    /** @private {!TabStripEmbedderProxy} */
-    this.tabStripEmbedderProxy_ = TabStripEmbedderProxyImpl.getInstance();
   }
 
   /**
@@ -545,24 +519,29 @@ export class DragManager {
 
   /** @param {!DragEvent} event */
   onDragStart_(event) {
-    const draggedItem =
-        /** @type {!Array<!Element>} */ (event.composedPath()).find(item => {
-          return isTabElement(item) || isTabGroupElement(item);
-        });
+    const composedPath = /** @type {!Array<!Element>} */ (event.composedPath());
+    const draggedItem = composedPath.find(item => {
+      return isTabElement(item) || isTabGroupElement(item);
+    });
     if (!draggedItem) {
+      return;
+    }
+
+    // If we are dragging a tab or tab group element ensure its touch pressed
+    // state is reset to avoid any associated css effects making it onto the
+    // drag image.
+    if (isTabElement(draggedItem) || isTabGroupElement(draggedItem)) {
+      /** @private {!TabElement|!TabGroupElement} */ (draggedItem)
+          .setTouchPressed(false);
+    }
+
+    // Make sure drag handle is under touch point when dragging a tab group.
+    if (isTabGroupElement(draggedItem) && !composedPath.find(isDragHandle)) {
       return;
     }
 
     if (this.delegate_.shouldPreventDrag()) {
       event.preventDefault();
-
-      // The gesture to start a drag and to open a context menu are the same
-      // on touch, so fallback to showing the context menu when drag is
-      // prevented.
-      if (isTabElement(draggedItem)) {
-        this.tabStripEmbedderProxy_.showTabContextMenu(
-            draggedItem.tab.id, event.clientX, event.clientY);
-      }
       return;
     }
 

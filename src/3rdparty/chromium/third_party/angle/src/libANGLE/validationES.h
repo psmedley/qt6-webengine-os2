@@ -755,6 +755,9 @@ bool ValidateGetMultisamplefvBase(const Context *context,
                                   const GLfloat *val);
 bool ValidateSampleMaskiBase(const Context *context, GLuint maskNumber, GLbitfield mask);
 
+bool ValidateProgramExecutableXFBBuffersPresent(const Context *context,
+                                                const ProgramExecutable *programExecutable);
+
 // We should check with Khronos if returning INVALID_FRAMEBUFFER_OPERATION is OK when querying
 // implementation format info for incomplete framebuffers. It seems like these queries are
 // incongruent with the other errors.
@@ -763,9 +766,11 @@ template <GLenum ErrorCode = GL_INVALID_FRAMEBUFFER_OPERATION>
 ANGLE_INLINE bool ValidateFramebufferComplete(const Context *context,
                                               const Framebuffer *framebuffer)
 {
-    if (!framebuffer->isComplete(context))
+    const FramebufferStatus &framebufferStatus = framebuffer->checkStatus(context);
+    if (!framebufferStatus.isComplete())
     {
-        context->validationError(ErrorCode, err::kFramebufferIncomplete);
+        ASSERT(framebufferStatus.reason != nullptr);
+        context->validationError(ErrorCode, framebufferStatus.reason);
         return false;
     }
 

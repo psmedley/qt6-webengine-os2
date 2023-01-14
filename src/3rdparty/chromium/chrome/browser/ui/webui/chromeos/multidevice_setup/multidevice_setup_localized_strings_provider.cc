@@ -18,6 +18,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/multidevice_setup_resources.h"
 #include "chrome/grit/multidevice_setup_resources_map.h"
+#include "chrome/grit/oobe_resources.h"
 #include "chromeos/grit/chromeos_resources.h"
 #include "chromeos/services/multidevice_setup/public/cpp/url_provider.h"
 #include "components/login/localized_values_builder.h"
@@ -35,7 +36,7 @@ namespace multidevice_setup {
 
 namespace {
 
-const char kFootnoteMarker[] = "*";
+const char16_t kFootnoteMarker[] = u"*";
 
 constexpr webui::LocalizedString kLocalizedStringsWithoutPlaceholders[] = {
     {"accept", IDS_MULTIDEVICE_SETUP_ACCEPT_LABEL},
@@ -72,11 +73,11 @@ constexpr webui::LocalizedString kLocalizedStringsWithoutPlaceholders[] = {
 
 struct LocalizedStringWithName {
   LocalizedStringWithName(const char* name,
-                          const base::string16& localized_string)
+                          const std::u16string& localized_string)
       : name(name), localized_string(localized_string) {}
 
   const char* name;
-  base::string16 localized_string;
+  std::u16string localized_string;
 };
 
 const std::vector<LocalizedStringWithName>&
@@ -92,8 +93,7 @@ GetLocalizedStringsWithPlaceholders() {
             "startSetupPageMessage",
             l10n_util::GetStringFUTF16(
                 IDS_MULTIDEVICE_SETUP_START_SETUP_PAGE_MESSAGE,
-                ui::GetChromeOSDeviceName(),
-                base::ASCIIToUTF16(kFootnoteMarker),
+                ui::GetChromeOSDeviceName(), kFootnoteMarker,
                 base::UTF8ToUTF16(
                     chromeos::multidevice_setup::
                         GetBoardSpecificBetterTogetherSuiteLearnMoreUrl()
@@ -103,7 +103,7 @@ GetLocalizedStringsWithPlaceholders() {
             "startSetupPageFootnote",
             l10n_util::GetStringFUTF16(
                 IDS_MULTIDEVICE_SETUP_START_SETUP_PAGE_FOOTNOTE,
-                base::ASCIIToUTF16(kFootnoteMarker)));
+                kFootnoteMarker));
 
         localized_strings.emplace_back(
             "startSetupPageFeatureListHeader",
@@ -138,8 +138,8 @@ void AddLocalizedStrings(content::WebUIDataSource* html_source) {
       "wifiSyncEnabled",
       base::FeatureList::IsEnabled(chromeos::features::kWifiSyncAndroid));
 
-  html_source->AddBoolean("newLayoutEnabled",
-                          chromeos::features::IsNewOobeLayoutEnabled());
+  // TODO(crbug.com/1202135): Remove along with JS part.
+  html_source->AddBoolean("newLayoutEnabled", true);
 
   for (const auto& entry : GetLocalizedStringsWithPlaceholders())
     html_source->AddString(entry.name, entry.localized_string);
@@ -159,7 +159,7 @@ void AddLocalizedValuesToBuilder(::login::LocalizedValuesBuilder* builder) {
   // localization calls separately.
   builder->AddF(
       "startSetupPageMessage", IDS_MULTIDEVICE_SETUP_START_SETUP_PAGE_MESSAGE,
-      ui::GetChromeOSDeviceName(), base::ASCIIToUTF16(kFootnoteMarker),
+      ui::GetChromeOSDeviceName(), kFootnoteMarker,
       base::UTF8ToUTF16(chromeos::multidevice_setup::
                             GetBoardSpecificBetterTogetherSuiteLearnMoreUrl()
                                 .spec()));
@@ -170,7 +170,7 @@ void AddLocalizedValuesToBuilder(::login::LocalizedValuesBuilder* builder) {
 
   builder->AddF("startSetupPageFootnote",
                 IDS_MULTIDEVICE_SETUP_START_SETUP_PAGE_FOOTNOTE,
-                base::ASCIIToUTF16(kFootnoteMarker));
+                kFootnoteMarker);
 
   builder->AddF(
       "startSetupPageFeatureListAwm",

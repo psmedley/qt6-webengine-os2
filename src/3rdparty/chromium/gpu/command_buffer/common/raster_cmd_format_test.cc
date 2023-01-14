@@ -10,6 +10,7 @@
 #include <limits>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
@@ -54,10 +55,7 @@ class RasterFormatTest : public testing::Test {
   unsigned char buffer_[1024];
 };
 
-// GCC requires these declarations, but MSVC requires they not be present
-#ifndef _MSC_VER
 const unsigned char RasterFormatTest::kInitialValue;
-#endif
 
 #include "gpu/command_buffer/common/raster_cmd_format_test_autogen.h"
 

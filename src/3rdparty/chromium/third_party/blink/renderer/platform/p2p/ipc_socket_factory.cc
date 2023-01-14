@@ -8,10 +8,10 @@
 
 #include <algorithm>
 #include <list>
+#include <memory>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_checker.h"
@@ -76,6 +76,8 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
                         public blink::P2PSocketClientDelegate {
  public:
   IpcPacketSocket();
+  IpcPacketSocket(const IpcPacketSocket&) = delete;
+  IpcPacketSocket& operator=(const IpcPacketSocket&) = delete;
   ~IpcPacketSocket() override;
 
   // Struct to track information when a packet is received by this socket for
@@ -199,10 +201,8 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
   size_t current_discard_bytes_sequence_;
 
   // Track the total number of packets and the number of packets discarded.
-  size_t packets_discarded_;
-  size_t total_packets_;
-
-  DISALLOW_COPY_AND_ASSIGN(IpcPacketSocket);
+  int packets_discarded_;
+  int total_packets_;
 };
 
 // Simple wrapper around P2PAsyncAddressResolver. The main purpose of this
@@ -422,7 +422,8 @@ int IpcPacketSocket::SendTo(const void* data,
   send_bytes_available_ -= data_size;
 
   Vector<int8_t> data_vector;
-  data_vector.Append(reinterpret_cast<const int8_t*>(data), data_size);
+  data_vector.Append(reinterpret_cast<const int8_t*>(data),
+                     base::checked_cast<wtf_size_t>(data_size));
   uint64_t packet_id = client_->Send(address_chrome, data_vector, options);
 
   // Ensure packet_id is not 0. It can't be the case according to
@@ -434,7 +435,7 @@ int IpcPacketSocket::SendTo(const void* data,
   TraceSendThrottlingState();
 
   // Fake successful send. The caller ignores result anyway.
-  return data_size;
+  return base::checked_cast<int>(data_size);
 }
 
 int IpcPacketSocket::Close() {
@@ -698,7 +699,7 @@ void AsyncAddressResolverImpl::Destroy(bool wait) {
 void AsyncAddressResolverImpl::OnAddressResolved(
     const Vector<net::IPAddress>& addresses) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  for (size_t i = 0; i < addresses.size(); ++i) {
+  for (wtf_size_t i = 0; i < addresses.size(); ++i) {
     rtc::SocketAddress socket_address;
     if (!jingle_glue::IPEndPointToSocketAddress(
             net::IPEndPoint(addresses[i], 0), &socket_address)) {
@@ -723,8 +724,10 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateUdpSocket(
     const rtc::SocketAddress& local_address,
     uint16_t min_port,
     uint16_t max_port) {
+  auto socket_dispatcher = socket_dispatcher_.Lock();
+  DCHECK(socket_dispatcher);
   auto socket_client = std::make_unique<P2PSocketClientImpl>(
-      socket_dispatcher_, traffic_annotation_);
+      socket_dispatcher, traffic_annotation_);
   std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   if (!socket->Init(network::P2P_SOCKET_UDP, std::move(socket_client),
                     local_address, min_port, max_port, rtc::SocketAddress())) {
@@ -745,8 +748,10 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateServerTcpSocket(
   network::P2PSocketType type = (opts & rtc::PacketSocketFactory::OPT_STUN)
                                     ? network::P2P_SOCKET_STUN_TCP_SERVER
                                     : network::P2P_SOCKET_TCP_SERVER;
+  auto socket_dispatcher = socket_dispatcher_.Lock();
+  DCHECK(socket_dispatcher);
   auto socket_client = std::make_unique<P2PSocketClientImpl>(
-      socket_dispatcher_, traffic_annotation_);
+      socket_dispatcher, traffic_annotation_);
   std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   if (!socket->Init(type, std::move(socket_client), local_address, min_port,
                     max_port, rtc::SocketAddress())) {
@@ -779,8 +784,10 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateClientTcpSocket(
                ? network::P2P_SOCKET_STUN_TCP_CLIENT
                : network::P2P_SOCKET_TCP_CLIENT;
   }
+  auto socket_dispatcher = socket_dispatcher_.Lock();
+  DCHECK(socket_dispatcher);
   auto socket_client = std::make_unique<P2PSocketClientImpl>(
-      socket_dispatcher_, traffic_annotation_);
+      socket_dispatcher, traffic_annotation_);
   std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   if (!socket->Init(type, std::move(socket_client), local_address, 0, 0,
                     remote_address))
@@ -789,9 +796,9 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateClientTcpSocket(
 }
 
 rtc::AsyncResolverInterface* IpcPacketSocketFactory::CreateAsyncResolver() {
-  std::unique_ptr<AsyncAddressResolverImpl> resolver(
-      new AsyncAddressResolverImpl(socket_dispatcher_));
-  return resolver.release();
+  auto socket_dispatcher = socket_dispatcher_.Lock();
+  DCHECK(socket_dispatcher);
+  return new AsyncAddressResolverImpl(socket_dispatcher);
 }
 
 }  // namespace blink

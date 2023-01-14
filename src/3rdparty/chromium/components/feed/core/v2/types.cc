@@ -7,10 +7,10 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/json/values_util.h"
 #include "base/pickle.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/util/values/values_util.h"
 #include "base/values.h"
 #include "components/feed/core/v2/public/types.h"
 
@@ -50,7 +50,7 @@ bool UnpickleNetworkResponseInfo(base::PickleIterator& iterator,
 }
 
 void PickleOptionalNetworkResponseInfo(
-    const base::Optional<NetworkResponseInfo>& value,
+    const absl::optional<NetworkResponseInfo>& value,
     base::Pickle& pickle) {
   if (value.has_value()) {
     pickle.WriteBool(true);
@@ -62,7 +62,7 @@ void PickleOptionalNetworkResponseInfo(
 
 bool UnpickleOptionalNetworkResponseInfo(
     base::PickleIterator& iterator,
-    base::Optional<NetworkResponseInfo>& value) {
+    absl::optional<NetworkResponseInfo>& value) {
   bool has_network_response_info = false;
   if (!iterator.ReadBool(&has_network_response_info))
     return false;
@@ -134,15 +134,15 @@ std::string SerializeDebugStreamData(const DebugStreamData& data) {
       base::span<const uint8_t>(pickle_data_ptr, pickle.size()));
 }
 
-base::Optional<DebugStreamData> DeserializeDebugStreamData(
+absl::optional<DebugStreamData> DeserializeDebugStreamData(
     base::StringPiece base64_encoded) {
   std::string binary_data;
   if (!base::Base64Decode(base64_encoded, &binary_data))
-    return base::nullopt;
+    return absl::nullopt;
   base::Pickle pickle(binary_data.data(), binary_data.size());
   DebugStreamData result;
   if (!UnpickleDebugStreamData(base::PickleIterator(pickle), result))
-    return base::nullopt;
+    return absl::nullopt;
   return result;
 }
 
@@ -153,9 +153,9 @@ DebugStreamData& DebugStreamData::operator=(const DebugStreamData&) = default;
 
 base::Value PersistentMetricsDataToValue(const PersistentMetricsData& data) {
   base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetKey("day_start", util::TimeToValue(data.current_day_start));
+  dict.SetKey("day_start", base::TimeToValue(data.current_day_start));
   dict.SetKey("time_spent_in_feed",
-              util::TimeDeltaToValue(data.accumulated_time_spent_in_feed));
+              base::TimeDeltaToValue(data.accumulated_time_spent_in_feed));
   return dict;
 }
 
@@ -163,13 +163,13 @@ PersistentMetricsData PersistentMetricsDataFromValue(const base::Value& value) {
   PersistentMetricsData result;
   if (!value.is_dict())
     return result;
-  base::Optional<base::Time> day_start =
-      util::ValueToTime(value.FindKey("day_start"));
+  absl::optional<base::Time> day_start =
+      base::ValueToTime(value.FindKey("day_start"));
   if (!day_start)
     return result;
   result.current_day_start = *day_start;
-  base::Optional<base::TimeDelta> time_spent_in_feed =
-      util::ValueToTimeDelta(value.FindKey("time_spent_in_feed"));
+  absl::optional<base::TimeDelta> time_spent_in_feed =
+      base::ValueToTimeDelta(value.FindKey("time_spent_in_feed"));
   if (time_spent_in_feed) {
     result.accumulated_time_spent_in_feed = *time_spent_in_feed;
   }
@@ -184,5 +184,34 @@ void LoadLatencyTimes::StepComplete(StepKind kind) {
   steps_.push_back(Step{kind, now - last_time_});
   last_time_ = now;
 }
+
+ContentIdSet::ContentIdSet() = default;
+ContentIdSet::~ContentIdSet() = default;
+ContentIdSet::ContentIdSet(base::flat_set<int64_t> content_ids)
+    : content_ids_(std::move(content_ids)) {}
+ContentIdSet::ContentIdSet(const ContentIdSet&) = default;
+ContentIdSet::ContentIdSet(ContentIdSet&&) = default;
+ContentIdSet& ContentIdSet::operator=(const ContentIdSet&) = default;
+ContentIdSet& ContentIdSet::operator=(ContentIdSet&&) = default;
+bool ContentIdSet::ContainsAllOf(const ContentIdSet& items) const {
+  for (int64_t id : items.content_ids_) {
+    if (!content_ids_.contains(id))
+      return false;
+  }
+  return true;
+}
+bool ContentIdSet::IsEmpty() const {
+  return content_ids_.empty();
+}
+bool ContentIdSet::operator==(const ContentIdSet& rhs) const {
+  return content_ids_ == rhs.content_ids_;
+}
+
+LaunchResult::LaunchResult(LoadStreamStatus load_stream_status,
+                           feedwire::DiscoverLaunchResult launch_result)
+    : load_stream_status(load_stream_status), launch_result(launch_result) {}
+LaunchResult::LaunchResult(const LaunchResult& other) = default;
+LaunchResult::~LaunchResult() = default;
+LaunchResult& LaunchResult::operator=(const LaunchResult& other) = default;
 
 }  // namespace feed

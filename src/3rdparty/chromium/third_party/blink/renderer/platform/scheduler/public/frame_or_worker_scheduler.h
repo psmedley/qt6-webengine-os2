@@ -11,11 +11,13 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/scheduling_lifecycle_state.h"
 #include "third_party/blink/renderer/platform/scheduler/public/scheduling_policy.h"
+#include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 class FrameScheduler;
+class WebSchedulingTaskQueue;
 
 // This is the base class of FrameScheduler and WorkerScheduler.
 class PLATFORM_EXPORT FrameOrWorkerScheduler {
@@ -34,12 +36,12 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
 
    public:
     explicit LifecycleObserverHandle(FrameOrWorkerScheduler* scheduler);
+    LifecycleObserverHandle(const LifecycleObserverHandle&) = delete;
+    LifecycleObserverHandle& operator=(const LifecycleObserverHandle&) = delete;
     ~LifecycleObserverHandle();
 
    private:
     base::WeakPtr<FrameOrWorkerScheduler> scheduler_;
-
-    DISALLOW_COPY_AND_ASSIGN(LifecycleObserverHandle);
   };
 
   // RAII handle which should be kept alive as long as the feature is active
@@ -50,10 +52,10 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
    public:
     SchedulingAffectingFeatureHandle() = default;
     SchedulingAffectingFeatureHandle(SchedulingAffectingFeatureHandle&&);
-    inline ~SchedulingAffectingFeatureHandle() { reset(); }
-
     SchedulingAffectingFeatureHandle& operator=(
         SchedulingAffectingFeatureHandle&&);
+
+    inline ~SchedulingAffectingFeatureHandle() { reset(); }
 
     explicit operator bool() const { return scheduler_.get(); }
 
@@ -73,8 +75,6 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
     SchedulingPolicy::Feature feature_ = SchedulingPolicy::Feature::kMaxValue;
     SchedulingPolicy policy_;
     base::WeakPtr<FrameOrWorkerScheduler> scheduler_;
-
-    DISALLOW_COPY_AND_ASSIGN(SchedulingAffectingFeatureHandle);
   };
 
   virtual ~FrameOrWorkerScheduler();
@@ -116,6 +116,9 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
   std::unique_ptr<LifecycleObserverHandle> AddLifecycleObserver(
       ObserverType,
       OnLifecycleStateChangedCallback) WARN_UNUSED_RESULT;
+
+  virtual std::unique_ptr<WebSchedulingTaskQueue> CreateWebSchedulingTaskQueue(
+      WebSchedulingPriority) = 0;
 
   virtual FrameScheduler* ToFrameScheduler() { return nullptr; }
 

@@ -11,7 +11,7 @@ import "mojo/public/mojom/base/time.mojom";
 import "mojo/public/mojom/base/unguessable_token.mojom";
 import "mojo/public/mojom/base/values.mojom";
 import "services/network/public/mojom/address_list.mojom";
-import "services/network/public/mojom/auth_and_certificate_observer.mojom";
+import "services/network/public/mojom/url_loader_network_service_observer.mojom";
 import "services/network/public/mojom/cert_verifier_service.mojom";
 import "services/network/public/mojom/client_security_state.mojom";
 import "services/network/public/mojom/cookie_access_observer.mojom";
@@ -19,6 +19,7 @@ import "services/network/public/mojom/cookie_manager.mojom";
 import "services/network/public/mojom/cors_origin_pattern.mojom";
 import "services/network/public/mojom/cross_origin_embedder_policy.mojom";
 import "services/network/public/mojom/default_credentials.mojom";
+import "services/network/public/mojom/devtools_observer.mojom";
 import "services/network/public/mojom/host_resolver.mojom";
 import "services/network/public/mojom/http_request_headers.mojom";
 import "services/network/public/mojom/ip_address.mojom";
@@ -38,7 +39,6 @@ import "services/network/public/mojom/proxy_config.mojom";
 import "services/network/public/mojom/proxy_config_with_annotation.mojom";
 import "services/network/public/mojom/proxy_lookup_client.mojom";
 import "services/network/public/mojom/proxy_resolving_socket.mojom";
-import "services/network/public/mojom/quic_transport.mojom";
 import "services/network/public/mojom/restricted_cookie_manager.mojom";
 import "services/network/public/mojom/site_for_cookies.mojom";
 import "services/network/public/mojom/ssl_config.mojom";
@@ -47,17 +47,16 @@ import "services/network/public/mojom/trust_tokens.mojom";
 import "services/network/public/mojom/udp_socket.mojom";
 import "services/network/public/mojom/url_loader.mojom";
 import "services/network/public/mojom/url_loader_factory.mojom";
+import "services/network/public/mojom/url_request.mojom";
 import "services/network/public/mojom/url_response_head.mojom";
 import "services/network/public/mojom/websocket.mojom";
+import "services/network/public/mojom/web_transport.mojom";
 import "services/proxy_resolver/public/mojom/proxy_resolver.mojom";
 import "url/mojom/origin.mojom";
 import "url/mojom/url.mojom";
 
-[EnableIf=is_chromeos]
+[EnableIf=is_chromeos_ash]
 import "services/network/public/mojom/dhcp_wpad_url_client.mojom";
-
-[EnableIf=is_ct_supported]
-import "services/network/public/mojom/ct_log_info.mojom";
 
 const uint32 kWebSocketOptionNone = 0;
 // Disallow the request from sending cookies. Disallow the response from writing
@@ -130,7 +129,7 @@ interface CustomProxyConfigClient {
   ClearBadProxiesCache();
 };
 
-[EnableIf=is_chromeos]
+[EnableIf=is_chromeos_ash]
 struct AdditionalCertificates {
   // List of all additional certificates.
   array<X509Certificate> all_certificates;
@@ -226,8 +225,8 @@ struct NetworkContextParams {
   // Retrieves the PAC script URL set via DHCP from the browser process. Only
   // used if |proxy_resolver_factory| is set. Note: optional because some tests
   // build their own NetworkContextParams and don't need a DHCP WPAD client.
-  [EnableIf=is_chromeos]
-  DhcpWpadUrlClient? dhcp_wpad_url_client;
+  [EnableIf=is_chromeos_ash]
+  pending_remote<DhcpWpadUrlClient>? dhcp_wpad_url_client;
 
   // Points to the cookie file. An in-memory cookie store is used if it's empty.
   mojo_base.mojom.FilePath? cookie_path;
@@ -265,10 +264,9 @@ struct NetworkContextParams {
   // logic. If null, an in-memory cache will be used instead.
   mojo_base.mojom.FilePath? http_server_properties_path;
 
-  // The directory in which to store cached transport security properties (like
-  // HSTS). The file itself will be called "TransportSecurity". If null, or the
-  // file can't be opened, an in-memory store will be used instead.
-  mojo_base.mojom.FilePath? transport_security_persister_path;
+  // The file to store cached transport security properties (like HSTS). If
+  // null, or the file can't be opened, an in-memory store will be used instead.
+  mojo_base.mojom.FilePath? transport_security_persister_file_path;
 
   // Enabled protocols. Note that these apply to all fetches, including those
   // used to fetch PAC scripts. Note that currently data URLs are always enabled
@@ -362,30 +360,17 @@ struct NetworkContextParams {
   [EnableIf=is_ct_supported]
   bool enable_sct_auditing = false;
 
-  // The Certificate Transparency logs that are known to the client. SCTs from
-  // these logs will be extracted and verified; other SCTs will be treated as
-  // unrecognized.
-  [EnableIf=is_ct_supported]
-  array<CTLogInfo> ct_logs;
-
   // The initial CT policy to be used for requests. See
   // NetworkContext.SetCTPolicy() for more.
   [EnableIf=is_ct_supported]
   CTPolicy? ct_policy;
-
-  // When the Certificate Transparency logs in |ct_logs| were last updated. If
-  // |enforce_chrome_ct_policy| is set, and |ct_log_update_time| is not
-  // sufficiently recent, enforcement of the "Certificate Transparency in
-  // Chrome" policy will be disabled.
-  [EnableIf=is_ct_supported]
-  mojo_base.mojom.Time ct_log_update_time;
 
   // Contains a pipe to a CertVerifierService.
   CertVerifierServiceRemoteParams cert_verifier_params;
 
   // Initial additional certificates that will be used for certificate
   // validation.
-  [EnableIf=is_chromeos]
+  [EnableIf=is_chromeos_ash]
   AdditionalCertificates? initial_additional_certificates;
 
   // Parameters for constructing the cookie manager.
@@ -454,6 +439,11 @@ struct NetworkContextParams {
   // If true, all requests that can take a NetworkIsolationKey or IsolationInfo
   // must be given a non-empty one.
   bool require_network_isolation_key = false;
+
+  // If true, then the correct permissions have been set on the network service
+  // files and sandbox can be enabled for this network context.
+  [EnableIf=win_permissions_validation]
+  bool win_permissions_set = false;
 };
 
 struct NetworkConditions {
@@ -489,23 +479,6 @@ struct ClearDataFilter {
 
   // List of URL origins.
   array<url.mojom.Origin> origins;
-};
-
-// Represents the accumulated network usage for a consumer.
-struct NetworkUsage {
-  // |process_id| is 0 for the browser process, otherwise it's the child process
-  // ID.
-  int32 process_id;
-
-  // The ID of the IPC route for the consumer, which identifies the RenderFrame
-  // or like-thing.
-  int32 routing_id;
-
-  // Raw bytes received from the network since the start/restart of the service.
-  int64 total_bytes_received;
-
-  // Raw bytes sent to the network since the start/restart of the service.
-  int64 total_bytes_sent;
 };
 
 // Represents a signed exchange report.
@@ -591,6 +564,9 @@ struct URLLoaderFactoryParams {
   // Whether |isolated_world_origin| from network::ResourceRequest should be
   // ignored.  Set |ignore_isolated_world_origin| to |false| to allow isolated
   // worlds to bypass CORS security checks via OriginAccessList.
+  //
+  // TODO(https://crbug.com/1098410): Remove the `ignore_isolated_world_origin`
+  // field once Chrome Platform Apps are gone.
   bool ignore_isolated_world_origin = true;
 
   // Indicate whether a request is not from web page ( probably from chrome
@@ -631,6 +607,10 @@ struct URLLoaderFactoryParams {
   // take precedence over automatically assigning an IsolationInfo.
   bool automatically_assign_isolation_info = false;
 
+  // Whether URLLoaders created by this factory need to call
+  // URLLoaderNetworkServiceObserver::OnLoadingStateUpdate.
+  bool provide_loading_state_updates = false;
+
   // An identifier for toplevel frame. This is used for resource accounting
   // for keepalive requests. When this factory is for a dedicated worker,
   // the identifier for the toplevel frame of the ancestor's frame is given.
@@ -651,17 +631,21 @@ struct URLLoaderFactoryParams {
   pending_remote<CookieAccessObserver>? cookie_observer;
 
   // Used to notify clients about authentication and certificate events.
-  pending_remote<AuthenticationAndCertificateObserver>? auth_cert_observer;
+  pending_remote<URLLoaderNetworkServiceObserver>? url_loader_network_observer;
+
+  // Used to notify devtools about events.
+  pending_remote<DevToolsObserver>? devtools_observer;
 
   // If this equals kForbid, the context to which this loader is bound does not
   // allow any Trust Tokens (https://github.com/wicg/trust-token-api)
   // redemption or signing operations.
   //
   // This is set to kForbid for requests from subframes with the
-  // `trust-token-redemption` Feature Policy feature disabled by (1) policies
-  // inherited from their parents, or (2) the frames' iframe tag attributes.
+  // `trust-token-redemption` Permissions Policy feature disabled by (1)
+  // policies inherited from their parents, or (2) the frames' iframe tag
+  // attributes.
   //
-  // Note: Response headers can also disable this Feature Policy feature.
+  // Note: Response headers can also disable this Permissions Policy feature.
   // This will not necessarily be reflected in the the enum's value. The
   // response headers' value is only available from an untrusted source.
   // - If the renderer behaves correctly, renderer-side checks guarantee that
@@ -671,8 +655,8 @@ struct URLLoaderFactoryParams {
   // propagating the renderer's untrusted report about the response headers'
   // value.
   //
-  // TODO(crbug.com/1071848): Once Feature Policy headers are available from a
-  // trusted source, it would be good to set this depending on the headers'
+  // TODO(crbug.com/1071848): Once Permissions Policy headers are available from
+  // a trusted source, it would be good to set this depending on the headers'
   // values, too.
   TrustTokenRedemptionPolicy trust_token_redemption_policy = kPotentiallyPermit;
 
@@ -708,17 +692,6 @@ interface NetworkContextClient {
   // Checks if a Domain Reliability report can be uploaded for the given origin.
   OnCanSendDomainReliabilityUpload(url.mojom.Url origin) => (bool allowed);
 
-  // Called when the Clear-Site-Data header has been received. The callback
-  // should be run after the data is deleted.
-  // https://www.w3.org/TR/clear-site-data/
-  // TODO(crbug.com/876931): We might want to move header parsing work to
-  // Network Service for security concerns (e.g. |header_value| => booleans).
-  OnClearSiteData(int32 process_id,
-                  int32 routing_id,
-                  url.mojom.Url url,
-                  string header_value,
-                  int32 load_flags) => ();
-
   // Called to generate an auth token for SPNEGO authentication on Android.
   [EnableIf=is_android]
   OnGenerateHttpNegotiateAuthToken(string server_auth_token, bool can_delegate,
@@ -727,7 +700,7 @@ interface NetworkContextClient {
                                    (int32 result, string auth_token);
 
   // Notification that a trust anchor was used for the given user.
-  [EnableIf=is_chromeos]
+  [EnableIf=is_chromeos_ash]
   OnTrustAnchorUsed();
 
   // If it's supported by the implementation, attempts to provide a response to
@@ -817,6 +790,13 @@ interface NetworkContext {
   GetStoredTrustTokenCounts()
       => (array<StoredTrustTokensForIssuer> tokens);
 
+  // Deletes all Trust Tokens issued by |issuer|.
+  //
+  // This method is narrower as ClearTrustTokenData. ClearTrustTokenData
+  // also clears out Redemption Records.
+  DeleteStoredTrustTokens(url.mojom.Origin issuer)
+      => (DeleteStoredTrustTokensStatus status);
+
   // Clears network objects with implicit URL history information. Data related
   // to events that happened prior to |start_time| and after |end_time| may be
   // retained. Only applies to network objects without more specific methods
@@ -875,22 +855,22 @@ interface NetworkContext {
   ClearHttpAuthCache(mojo_base.mojom.Time start_time,
                      mojo_base.mojom.Time end_time) => ();
 
-  // Clears all report entries from the reporting cache. Should not be called if
+  // Clears all report entries from the reporting cache. This has no effect if
   // the ENABLE_REPORTING build flag is false.
   //
   // If a non-null |filter| is specified, will clear only entries matching the
   // filter.
   ClearReportingCacheReports(ClearDataFilter? filter) => ();
 
-  // Clears all client entries from the reporting cache. Should not be called if
+  // Clears all client entries from the reporting cache. This has no effect if
   // the ENABLE_REPORTING build flag is false.
   //
   // If a non-null |filter| is specified, will clear only entries matching the
   // filter.
   ClearReportingCacheClients(ClearDataFilter? filter) => ();
 
-  // Clears policy entries from the NetworkErrorLoggingService. Should not be
-  // called if the ENABLE_REPORTING build flag is false.
+  // Clears policy entries from the NetworkErrorLoggingService. This has no
+  // effect if the ENABLE_REPORTING build flag is false.
   //
   // If a non-null |filter| is specified, will clear only entries matching the
   // filter.
@@ -904,6 +884,19 @@ interface NetworkContext {
 
   // Returns a JSON value containing data for displaying on a debugging page.
   GetDomainReliabilityJSON() => (mojo_base.mojom.Value data);
+
+  // Configures per-resource reporting endpoints set with the
+  // Reporting-Endpoints header.
+  // |network_isolation_key| is used when creating the endpoints in the
+  // ReportingCache, and will need to match the key sent when reports are queued
+  // in order for these reporting endpoints to be considered for delivery.
+  // |endpoints| is a mapping of endpoint name to URL (URLs here are represented
+  // as strings, and will be rejected if they fail to parse or are not secure).
+  //
+  // Spec: https://w3c.github.io/reporting/#header
+  SetDocumentReportingEndpoints(
+      url.mojom.Origin origin, NetworkIsolationKey network_isolation_key,
+      map<string,string> endpoints);
 
   // Queues a report via the Reporting API. |type| describes the type of report
   // (as well as what data will contained in |body|). |group| specifies the
@@ -958,7 +951,7 @@ interface NetworkContext {
   SetEnableReferrers(bool enable_referrers);
 
   // Updates the additional trust anchors for certificate verification.
-  [EnableIf=is_chromeos]
+  [EnableIf=is_chromeos_ash]
   UpdateAdditionalCertificates(AdditionalCertificates? additional_certificates);
 
   // Updates the CT policy to be used for requests. Only applies if the
@@ -1109,6 +1102,11 @@ interface NetworkContext {
   // |header_client| as WebSocket connection errors. They are disconnected when
   // the connection is established, and due to message ordering uncertainty we
   // cannot know what happened.
+  //
+  // |throttling_profile_id| can be provided to allow network conditions
+  // emulation for this web socket connection. Emulated network conditions
+  // can be set by calling SetNetworkConditions with a matching throttling
+  // profile id.
   CreateWebSocket(
       url.mojom.Url url,
       array<string> requested_protocols,
@@ -1120,23 +1118,24 @@ interface NetworkContext {
       uint32 options,
       MutableNetworkTrafficAnnotationTag traffic_annotation,
       pending_remote<WebSocketHandshakeClient> handshake_client,
-      pending_remote<AuthenticationAndCertificateObserver>? auth_cert_observer,
+      pending_remote<URLLoaderNetworkServiceObserver>? url_loader_network_observer,
       pending_remote<WebSocketAuthenticationHandler>? auth_handler,
-      pending_remote<TrustedHeaderClient>? header_client);
+      pending_remote<TrustedHeaderClient>? header_client,
+      mojo_base.mojom.UnguessableToken? throttling_profile_id);
 
-  // Creates a QuicTransport connection to |url|. |origin| is used for the
+  // Creates a WebTransport connection to |url|. |origin| is used for the
   // client indication - see
   // https://tools.ietf.org/html/draft-vvv-webtransport-quic-01#section-3.2 .
   // When |fingerprints| is not empty, it is used to verify the certificate.
   // https://wicg.github.io/web-transport/#dom-quictransportconfiguration-server_certificate_fingerprints
   //
   // It is recommended to detect mojo connection errors on |handshake_client|.
-  CreateQuicTransport(
+  CreateWebTransport(
         url.mojom.Url url,
         url.mojom.Origin origin,
         NetworkIsolationKey network_isolation_key,
-        array<QuicTransportCertificateFingerprint> fingerprints,
-        pending_remote<QuicTransportHandshakeClient> handshake_client);
+        array<WebTransportCertificateFingerprint> fingerprints,
+        pending_remote<WebTransportHandshakeClient> handshake_client);
 
   // Create a NetLogExporter, which helps export NetLog to an existing file.
   // Note that the log is generally global, including all NetworkContexts
@@ -1209,17 +1208,6 @@ interface NetworkContext {
                               string ocsp_response,
                               string sct_list) => (int32 error_code,
                                                    CertVerifyResult cv_result);
-
-  // Parses response headers and returns a structured version to the caller.
-  // This call originates from the browser process. Used for navigations when
-  // the URLLoader didn't provide ParsedHeader in the first place. This happens
-  // when the raw headers represent untrustworthy input and the URLLoader used
-  // lives in a non-sandboxed process. It can also happen from some exotic
-  // URLLoader where parsing hasn't been implemented.
-  // In particular, this is used for request served from AppCache, WebBundle,
-  // Extensions, etc.
-  ParseHeaders(url.mojom.Url url, HttpResponseHeaders headers)
-      => (ParsedHeaders parsed_headers);
 
   // Adds explicitly-specified data as if it was processed from an
   // HSTS header. Used by tests and implementation of chrome://net-internals.
@@ -1301,7 +1289,7 @@ interface NetworkContext {
   // |auth_scheme| is the authentication scheme of the challenge and it's
   // specified as a case-insensitive string. Unlike server credentials, proxy
   // credentials are not keyed on NetworkIsolationKey.
-  [EnableIf=is_chromeos]
+  [EnableIf=is_chromeos_ash]
   LookupProxyAuthCredentials(proxy_resolver.mojom.ProxyServer proxy_server,
       string auth_scheme, string realm)
       => (AuthCredentials? credentials);

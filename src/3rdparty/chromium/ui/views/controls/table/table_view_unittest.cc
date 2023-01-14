@@ -9,10 +9,11 @@
 #include <string>
 #include <utility>
 
+#include "base/cxx17_backports.h"
 #include "base/macros.h"
-#include "base/numerics/ranges.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -63,8 +64,17 @@ class TableViewTestHelper {
 
   const gfx::FontList& font_list() { return table_->font_list_; }
 
-  AXVirtualView* GetVirtualAccessibilityRow(int row) {
-    return table_->GetVirtualAccessibilityRow(row);
+  AXVirtualView* GetVirtualAccessibilityBodyRow(int row) {
+    return table_->GetVirtualAccessibilityBodyRow(row);
+  }
+
+  AXVirtualView* GetVirtualAccessibilityHeaderRow() {
+    return table_->GetVirtualAccessibilityHeaderRow();
+  }
+
+  AXVirtualView* GetVirtualAccessibilityHeaderCell(int visible_column_index) {
+    return table_->GetVirtualAccessibilityCellImpl(
+        GetVirtualAccessibilityHeaderRow(), visible_column_index);
   }
 
   AXVirtualView* GetVirtualAccessibilityCell(int row,
@@ -131,7 +141,7 @@ class TableViewTestHelper {
 
 namespace {
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 constexpr int kCtrlOrCmdMask = ui::EF_COMMAND_DOWN;
 #else
 constexpr int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
@@ -173,19 +183,19 @@ class TestTableModel2 : public ui::TableModel {
   void MoveRows(int row_from, int length, int row_to);
 
   // Allows overriding the tooltip for testing.
-  void SetTooltip(const base::string16& tooltip);
+  void SetTooltip(const std::u16string& tooltip);
 
   // ui::TableModel:
   int RowCount() override;
-  base::string16 GetText(int row, int column_id) override;
-  base::string16 GetTooltip(int row) override;
+  std::u16string GetText(int row, int column_id) override;
+  std::u16string GetTooltip(int row) override;
   void SetObserver(ui::TableModelObserver* observer) override;
   int CompareValues(int row1, int row2, int column_id) override;
 
  private:
   ui::TableModelObserver* observer_ = nullptr;
 
-  base::Optional<base::string16> tooltip_;
+  absl::optional<std::u16string> tooltip_;
 
   // The data.
   std::vector<std::vector<int>> rows_;
@@ -236,10 +246,9 @@ void TestTableModel2::RemoveRow(int row) {
 void TestTableModel2::RemoveRows(int row, int length) {
   DCHECK(row >= 0 && length >= 0);
   if (row >= 0 && row <= static_cast<int>(rows_.size())) {
-    rows_.erase(
-        rows_.begin() + row,
-        rows_.begin() + base::ClampToRange(row + length, 0,
-                                           static_cast<int>(rows_.size())));
+    rows_.erase(rows_.begin() + row,
+                rows_.begin() + base::clamp(row + length, 0,
+                                            static_cast<int>(rows_.size())));
   }
 
   if (observer_ && length > 0)
@@ -269,7 +278,7 @@ void TestTableModel2::MoveRows(int row_from, int length, int row_to) {
     observer_->OnItemsMoved(row_from, length, row_to);
 }
 
-void TestTableModel2::SetTooltip(const base::string16& tooltip) {
+void TestTableModel2::SetTooltip(const std::u16string& tooltip) {
   tooltip_ = tooltip;
 }
 
@@ -277,13 +286,12 @@ int TestTableModel2::RowCount() {
   return static_cast<int>(rows_.size());
 }
 
-base::string16 TestTableModel2::GetText(int row, int column_id) {
+std::u16string TestTableModel2::GetText(int row, int column_id) {
   return base::NumberToString16(rows_[row][column_id]);
 }
 
-base::string16 TestTableModel2::GetTooltip(int row) {
-  return tooltip_ ? *tooltip_
-                  : base::ASCIIToUTF16("Tooltip") + base::NumberToString16(row);
+std::u16string TestTableModel2::GetTooltip(int row) {
+  return tooltip_ ? *tooltip_ : u"Tooltip" + base::NumberToString16(row);
 }
 
 void TestTableModel2::SetObserver(ui::TableModelObserver* observer) {
@@ -422,9 +430,9 @@ class TableViewTest : public ViewsTestBase,
 
     model_ = std::make_unique<TestTableModel2>();
     std::vector<ui::TableColumn> columns(2);
-    columns[0].title = base::ASCIIToUTF16("Title Column 0");
+    columns[0].title = u"Title Column 0";
     columns[0].sortable = true;
-    columns[1].title = base::ASCIIToUTF16("Title Column 1");
+    columns[1].title = u"Title Column 1";
     columns[1].id = 1;
     columns[1].sortable = true;
 
@@ -445,12 +453,13 @@ class TableViewTest : public ViewsTestBase,
     helper_ = std::make_unique<TableViewTestHelper>(table_);
 
     widget_ = std::make_unique<Widget>();
-    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+    Widget::InitParams params =
+        CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.bounds = gfx::Rect(0, 0, 650, 650);
     params.delegate = GetWidgetDelegate(widget_.get());
     widget_->Init(std::move(params));
-    widget_->GetContentsView()->AddChildView(std::move(scroll_view));
+    widget_->GetRootView()->AddChildView(std::move(scroll_view));
     widget_->Show();
   }
 
@@ -461,7 +470,6 @@ class TableViewTest : public ViewsTestBase,
 
   void ClickOnRow(int row, int flags) {
     ui::test::EventGenerator generator(GetRootWindow(widget_.get()));
-    generator.set_assume_window_at_origin(false);
     generator.set_flags(flags);
     generator.set_current_screen_location(GetPointForRow(row));
     generator.PressLeftButton();
@@ -501,12 +509,7 @@ class TableViewTest : public ViewsTestBase,
   }
 
   void VerifyTableViewAndAXOrder(std::string expected_view_order) {
-    auto& virtual_children = table_->GetViewAccessibility().virtual_children();
-
-    // Makes sure the virtual children count takes into account of the header
-    // row.
-    int virtual_row_count = table_->GetRowCount() + (helper_->header() ? 1 : 0);
-    EXPECT_EQ(virtual_row_count, int{virtual_children.size()});
+    VerifyAXRowIndexes();
 
     // The table views should match the expected view order.
     EXPECT_EQ(expected_view_order, GetRowsInViewOrderAsString(table_));
@@ -518,6 +521,33 @@ class TableViewTest : public ViewsTestBase,
     }
 
     EXPECT_EQ(expected_view_order, GetRowsInVirtualViewAsString(table_));
+  }
+
+  // Verifies that there is an unique, properly-indexed virtual row for every
+  // row.
+  void VerifyAXRowIndexes() {
+    auto& virtual_children = table_->GetViewAccessibility().virtual_children();
+
+    // Makes sure the virtual row count factors in the presence of the header.
+    const int first_row_index = helper_->header() ? 1 : 0;
+    const int virtual_row_count = table_->GetRowCount() + first_row_index;
+    EXPECT_EQ(virtual_row_count, static_cast<int>(virtual_children.size()));
+
+    // Make sure every virtual row is valid.
+    for (int index = first_row_index; index < virtual_row_count; index++) {
+      const auto& row = virtual_children[index];
+      ASSERT_TRUE(row);
+
+      // Normalize the row index to account for the presence of a header if
+      // necessary.
+      const int normalized_index = index - first_row_index;
+
+      // Make sure the stored row index matches the row index in the table.
+      const ui::AXNodeData& row_data = row->GetCustomData();
+      const int stored_index =
+          row_data.GetIntAttribute(ax::mojom::IntAttribute::kTableRowIndex);
+      EXPECT_EQ(stored_index, normalized_index);
+    }
   }
 
   // Helper function for comparing the bounds of |table_|'s virtual
@@ -615,7 +645,7 @@ TEST_P(TableViewTest, RebuildVirtualAccessibilityChildren) {
                 ax::mojom::IntAttribute::kTableColumnCount)));
 
   // The header takes up another row.
-  ASSERT_EQ(size_t{table_->GetRowCount() + 1},
+  ASSERT_EQ(static_cast<size_t>(table_->GetRowCount() + 1),
             view_accessibility.virtual_children().size());
   const auto& header = view_accessibility.virtual_children().front();
   ASSERT_TRUE(header);
@@ -689,9 +719,9 @@ TEST_P(TableViewTest, UpdateVirtualAccessibilityChildrenBoundsHideColumn) {
                                expected_bounds_after_hiding);
 }
 
-TEST_P(TableViewTest, GetVirtualAccessibilityRow) {
+TEST_P(TableViewTest, GetVirtualAccessibilityBodyRow) {
   for (int i = 0; i < table_->GetRowCount(); ++i) {
-    const AXVirtualView* row = helper_->GetVirtualAccessibilityRow(i);
+    const AXVirtualView* row = helper_->GetVirtualAccessibilityBodyRow(i);
     ASSERT_TRUE(row);
     const ui::AXNodeData& row_data = row->GetData();
     EXPECT_EQ(ax::mojom::Role::kRow, row_data.role);
@@ -713,6 +743,29 @@ TEST_P(TableViewTest, GetVirtualAccessibilityCell) {
                        ax::mojom::IntAttribute::kTableCellColumnIndex)));
     }
   }
+}
+
+TEST_P(TableViewTest, ChangingCellFiresAccessibilityEvent) {
+  int text_changed_count = 0;
+  table_->GetViewAccessibility().set_accessibility_events_callback(
+      base::BindLambdaForTesting(
+          [&](const ui::AXPlatformNodeDelegate*, const ax::mojom::Event event) {
+            if (event == ax::mojom::Event::kTextChanged)
+              ++text_changed_count;
+          }));
+
+  // A kTextChanged event is fired when a cell's data is accessed and
+  // its computed accessible text isn't the same as the previously cached
+  // value. Ensure that the cached value is correctly updated so that
+  // retrieving the data multiple times doesn't result in firing additional
+  // kTextChanged events.
+  const AXVirtualView* cell = helper_->GetVirtualAccessibilityCell(0, 0);
+  ASSERT_TRUE(cell);
+  ui::AXNodeData cell_data;
+  for (int i = 0; i < 100; ++i)
+    cell_data = cell->GetData();
+
+  EXPECT_EQ(1, text_changed_count);
 }
 
 // Verifies SetColumnVisibility().
@@ -1072,7 +1125,7 @@ TEST_P(TableViewTest, Tooltip) {
     return gfx::Point(5, (row + 0.5) * table_->GetRowHeight());
   };
   auto expected = [](int row) {
-    return base::ASCIIToUTF16("Tooltip") + base::NumberToString16(row);
+    return u"Tooltip" + base::NumberToString16(row);
   };
   EXPECT_EQ(expected(0), table_->GetTooltipText(local_point_for_row(0)));
   EXPECT_EQ(expected(1), table_->GetTooltipText(local_point_for_row(1)));
@@ -1419,7 +1472,7 @@ TEST_P(TableViewTest, SelectionNoSelectOnRemove) {
 }
 
 // No touch on desktop Mac. Tracked in http://crbug.com/445520.
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
 // Verifies selection works by way of a gesture.
 TEST_P(TableViewTest, SelectOnTap) {
   // Initially no selection.
@@ -1503,8 +1556,15 @@ TEST_P(TableViewTest, KeyUpDown) {
   EXPECT_EQ(1, observer.GetChangedCountAndClear());
   EXPECT_EQ("active=0 anchor=0 selection=0 1", SelectionStateAsString());
 
+  // Key up at this point will clear selection and navigate into the header.
+  EXPECT_FALSE(table_->header_row_is_active());
   PressKey(ui::VKEY_UP);
-  EXPECT_EQ(0, observer.GetChangedCountAndClear());
+  EXPECT_TRUE(table_->header_row_is_active());
+  EXPECT_EQ(1, observer.GetChangedCountAndClear());
+  EXPECT_EQ("active=-1 anchor=-1 selection=", SelectionStateAsString());
+
+  PressKey(ui::VKEY_DOWN);
+  EXPECT_EQ(1, observer.GetChangedCountAndClear());
   EXPECT_EQ("active=0 anchor=0 selection=0 1", SelectionStateAsString());
 
   // Sort the table descending by column 1, view now looks like:
@@ -1522,8 +1582,15 @@ TEST_P(TableViewTest, KeyUpDown) {
   EXPECT_EQ("active=-1 anchor=-1 selection=", SelectionStateAsString());
 
   observer.GetChangedCountAndClear();
-  // Up with nothing selected selects the first row.
+
+  // Up with nothing selected moves selection into the table's header.
+  EXPECT_FALSE(table_->header_row_is_active());
   PressKey(ui::VKEY_UP);
+  EXPECT_TRUE(table_->header_row_is_active());
+  EXPECT_EQ(0, observer.GetChangedCountAndClear());
+  EXPECT_EQ("active=-1 anchor=-1 selection=", SelectionStateAsString());
+
+  PressKey(ui::VKEY_DOWN);
   EXPECT_EQ(1, observer.GetChangedCountAndClear());
   EXPECT_EQ("active=2 anchor=2 selection=2", SelectionStateAsString());
 
@@ -1563,9 +1630,12 @@ TEST_P(TableViewTest, KeyUpDown) {
   EXPECT_EQ(1, observer.GetChangedCountAndClear());
   EXPECT_EQ("active=2 anchor=2 selection=2", SelectionStateAsString());
 
+  // Key up at this point will clear selection and navigate into the header.
+  EXPECT_FALSE(table_->header_row_is_active());
   PressKey(ui::VKEY_UP);
-  EXPECT_EQ(0, observer.GetChangedCountAndClear());
-  EXPECT_EQ("active=2 anchor=2 selection=2", SelectionStateAsString());
+  EXPECT_TRUE(table_->header_row_is_active());
+  EXPECT_EQ(1, observer.GetChangedCountAndClear());
+  EXPECT_EQ("active=-1 anchor=-1 selection=", SelectionStateAsString());
 
   table_->set_observer(nullptr);
 }
@@ -1955,11 +2025,81 @@ TEST_P(TableViewTest, RemovingSortedRowsDoesNotCauseOverflow) {
   // consequently attempt to access the last element in the model via the
   // `view_to_model_` mapping. This will result in a crash if the view-model
   // mappings have not been appropriately updated.
-  model_->SetTooltip(base::ASCIIToUTF16(""));
+  model_->SetTooltip(u"");
   model_->RemoveRow(0);
   model_->RemoveRow(0);
   model_->RemoveRow(0);
   model_->RemoveRow(0);
+}
+
+// Ensure that the TableView's header row is keyboard accessible.
+// Tests for crbug.com/1189851.
+TEST_P(TableViewTest, TableHeaderRowAccessibleViewFocusable) {
+  ASSERT_NE(nullptr, helper_->header());
+  table_->RequestFocus();
+  RunPendingMessages();
+
+  // If no table body row has selection the TableView itself is focused and
+  // there is no focused virtual view.
+  EXPECT_TRUE(table_->HasFocus());
+  EXPECT_FALSE(table_->header_row_is_active());
+  EXPECT_EQ(nullptr, table_->GetViewAccessibility().FocusedVirtualChild());
+
+  // Hitting the up arrow key should give the header focus and make it active.
+  PressKey(ui::VKEY_UP);
+  RunPendingMessages();
+  EXPECT_TRUE(table_->HasFocus());
+  EXPECT_TRUE(table_->header_row_is_active());
+  EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderRow(),
+            table_->GetViewAccessibility().FocusedVirtualChild());
+
+  // Hitting the down arrow key should move focus back into the body.
+  PressKey(ui::VKEY_DOWN);
+  RunPendingMessages();
+  EXPECT_TRUE(table_->HasFocus());
+  EXPECT_FALSE(table_->header_row_is_active());
+  EXPECT_NE(helper_->GetVirtualAccessibilityHeaderRow(),
+            table_->GetViewAccessibility().FocusedVirtualChild());
+}
+
+// Ensure that the TableView's header columns are keyboard accessible.
+// Tests for crbug.com/1189851.
+TEST_P(TableViewTest, TableHeaderColumnAccessibleViewsFocusable) {
+  if (!PlatformStyle::kTableViewSupportsKeyboardNavigationByCell)
+    return;
+
+  ASSERT_NE(nullptr, helper_->header());
+  table_->RequestFocus();
+  RunPendingMessages();
+
+  // Hitting the up arrow key should give the header focus and make it active.
+  auto& view_accessibility = table_->GetViewAccessibility();
+  PressKey(ui::VKEY_UP);
+  RunPendingMessages();
+  EXPECT_TRUE(table_->HasFocus());
+  EXPECT_TRUE(table_->header_row_is_active());
+  EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderRow(),
+            view_accessibility.FocusedVirtualChild());
+
+  // Navigating with arrow keys should move focus between TableView header
+  // columns.
+  PressKey(ui::VKEY_RIGHT);
+  RunPendingMessages();
+  ASSERT_EQ(0, helper_->GetActiveVisibleColumnIndex());
+  EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(0),
+            view_accessibility.FocusedVirtualChild());
+
+  PressKey(ui::VKEY_RIGHT);
+  RunPendingMessages();
+  ASSERT_EQ(1, helper_->GetActiveVisibleColumnIndex());
+  EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(1),
+            view_accessibility.FocusedVirtualChild());
+
+  PressKey(ui::VKEY_LEFT);
+  RunPendingMessages();
+  ASSERT_EQ(0, helper_->GetActiveVisibleColumnIndex());
+  EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(0),
+            view_accessibility.FocusedVirtualChild());
 }
 
 namespace {

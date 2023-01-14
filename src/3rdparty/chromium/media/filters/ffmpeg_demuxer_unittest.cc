@@ -6,18 +6,18 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
@@ -341,9 +341,9 @@ class FFmpegDemuxerTest : public testing::Test {
     Demuxer::MediaTracksUpdatedCB tracks_updated_cb = base::BindRepeating(
         &FFmpegDemuxerTest::OnMediaTracksUpdated, base::Unretained(this));
 
-    demuxer_.reset(new FFmpegDemuxer(
+    demuxer_ = std::make_unique<FFmpegDemuxer>(
         base::ThreadTaskRunnerHandle::Get(), data_source_.get(),
-        encrypted_media_init_data_cb, tracks_updated_cb, media_log, false));
+        encrypted_media_init_data_cb, tracks_updated_cb, media_log, false);
   }
 
   void CreateDataSource(const std::string& name) {
@@ -357,7 +357,7 @@ class FFmpegDemuxerTest : public testing::Test {
                     .Append(FILE_PATH_LITERAL("data"))
                     .AppendASCII(name);
 
-    data_source_.reset(new FileDataSource());
+    data_source_ = std::make_unique<FileDataSource>();
     EXPECT_TRUE(data_source_->Initialize(file_path));
   }
 

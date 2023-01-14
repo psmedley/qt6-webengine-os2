@@ -8,12 +8,13 @@
 #ifndef SKSL_SYMBOLTABLE
 #define SKSL_SYMBOLTABLE
 
+#include "include/private/SkSLString.h"
+#include "include/private/SkSLSymbol.h"
 #include "include/private/SkTArray.h"
 #include "include/private/SkTHash.h"
 #include "src/sksl/SkSLErrorReporter.h"
-#include "src/sksl/SkSLString.h"
-#include "src/sksl/ir/SkSLSymbol.h"
 
+#include <forward_list>
 #include <memory>
 #include <vector>
 
@@ -56,12 +57,12 @@ public:
      * UnresolvedFunction symbol (pointing to all of the candidates) will be added to the symbol
      * table and returned.
      */
-    const Symbol* operator[](StringFragment name);
+    const Symbol* operator[](skstd::string_view name);
 
     /**
      * Creates a new name for a symbol which already exists; does not take ownership of Symbol*.
      */
-    void addAlias(StringFragment name, const Symbol* symbol);
+    void addAlias(skstd::string_view name, const Symbol* symbol);
 
     void addWithoutOwnership(const Symbol* symbol);
 
@@ -110,7 +111,7 @@ public:
         return fBuiltin;
     }
 
-    const String* takeOwnershipOfString(std::unique_ptr<String> n);
+    const String* takeOwnershipOfString(String n);
 
     std::shared_ptr<SymbolTable> fParent;
 
@@ -118,7 +119,7 @@ public:
 
 private:
     struct SymbolKey {
-        StringFragment fName;
+        skstd::string_view fName;
         uint32_t       fHash;
 
         bool operator==(const SymbolKey& that) const { return fName == that.fName; }
@@ -128,7 +129,7 @@ private:
         };
     };
 
-    static SymbolKey MakeSymbolKey(StringFragment name) {
+    static SymbolKey MakeSymbolKey(skstd::string_view name) {
         return SymbolKey{name, SkOpts::hash_fn(name.data(), name.size(), 0)};
     }
 
@@ -138,7 +139,7 @@ private:
 
     bool fBuiltin = false;
     std::vector<std::unique_ptr<IRNode>> fOwnedNodes;
-    std::vector<std::unique_ptr<String>> fOwnedStrings;
+    std::forward_list<String> fOwnedStrings;
     SkTHashMap<SymbolKey, const Symbol*, SymbolKey::Hash> fSymbols;
     ErrorReporter& fErrorReporter;
 

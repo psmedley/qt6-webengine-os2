@@ -52,10 +52,10 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   // ModelTypeSyncBridge implementation.
   std::unique_ptr<syncer::MetadataChangeList> CreateMetadataChangeList()
       override;
-  base::Optional<syncer::ModelError> MergeSyncData(
+  absl::optional<syncer::ModelError> MergeSyncData(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_data) override;
-  base::Optional<syncer::ModelError> ApplySyncChanges(
+  absl::optional<syncer::ModelError> ApplySyncChanges(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_changes) override;
   void GetData(StorageKeyList storage_keys, DataCallback callback) override;
@@ -133,6 +133,14 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   // Synchronously load sync metadata from the autofill table and pass it to the
   // processor so that it can start tracking changes.
   void LoadMetadata();
+
+  // TODO(crbug/com/1196021): Clean up duplicate functions and use it for
+  // logging only.
+  // Checks whether any virtual card metadata for new_data is new and make
+  // corresponding changes.
+  void ProcessVirtualCardMetadataChanges(
+      const std::vector<std::unique_ptr<CreditCard>>& old_data,
+      const std::vector<CreditCard>& new_data);
 
   // AutofillProfileSyncBridge is owned by |web_data_backend_| through
   // SupportsUserData, so it's guaranteed to outlive |this|.

@@ -4,6 +4,8 @@
 
 #include "components/captive_portal/content/captive_portal_service.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -12,6 +14,7 @@
 #include "base/test/test_timeouts.h"
 #include "components/captive_portal/content/captive_portal_service.h"
 #include "components/captive_portal/core/captive_portal_testing_utils.h"
+#include "components/captive_portal/core/captive_portal_types.h"
 #include "components/embedder_support/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
@@ -84,12 +87,12 @@ class CaptivePortalServiceTest : public testing::Test,
 
     CaptivePortalService::set_state_for_testing(testing_state);
 
-    browser_context_.reset(new content::TestBrowserContext());
-    tick_clock_.reset(new base::SimpleTestTickClock());
+    browser_context_ = std::make_unique<content::TestBrowserContext>();
+    tick_clock_ = std::make_unique<base::SimpleTestTickClock>();
     tick_clock_->Advance(base::TimeTicks::Now() - tick_clock_->NowTicks());
-    service_.reset(new CaptivePortalService(browser_context_.get(),
-                                            &pref_service_, tick_clock_.get(),
-                                            test_loader_factory()));
+    service_ = std::make_unique<CaptivePortalService>(
+        browser_context_.get(), &pref_service_, tick_clock_.get(),
+        test_loader_factory());
 
     // Use no delays for most tests.
     set_initial_backoff_no_portal(base::TimeDelta());
@@ -148,7 +151,7 @@ class CaptivePortalServiceTest : public testing::Test,
     ASSERT_EQ(base::TimeDelta(), GetTimeUntilNextRequest());
 
     CaptivePortalObserver observer(service());
-    service()->DetectCaptivePortal(CaptivePortalProbeReason::kCertificateError);
+    service()->DetectCaptivePortal();
 
     EXPECT_EQ(CaptivePortalService::STATE_TIMER_RUNNING, service()->state());
     EXPECT_FALSE(FetchingURL());
@@ -180,7 +183,7 @@ class CaptivePortalServiceTest : public testing::Test,
     ASSERT_EQ(base::TimeDelta(), GetTimeUntilNextRequest());
 
     CaptivePortalObserver observer(service());
-    service()->DetectCaptivePortal(CaptivePortalProbeReason::kCertificateError);
+    service()->DetectCaptivePortal();
 
     EXPECT_EQ(CaptivePortalService::STATE_TIMER_RUNNING, service()->state());
     EXPECT_FALSE(FetchingURL());
@@ -364,7 +367,7 @@ TEST_F(CaptivePortalServiceTest, CaptivePortalPrefDisabledWhileRunning) {
   CaptivePortalObserver observer(service());
 
   // Needed to create the URLFetcher, even if it never returns any results.
-  service()->DetectCaptivePortal(CaptivePortalProbeReason::kCertificateError);
+  service()->DetectCaptivePortal();
 
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(FetchingURL());
@@ -391,7 +394,7 @@ TEST_F(CaptivePortalServiceTest, CaptivePortalPrefDisabledWhilePending) {
   set_initial_backoff_no_portal(base::TimeDelta::FromDays(1));
 
   CaptivePortalObserver observer(service());
-  service()->DetectCaptivePortal(CaptivePortalProbeReason::kCertificateError);
+  service()->DetectCaptivePortal();
   EXPECT_FALSE(FetchingURL());
   EXPECT_TRUE(TimerRunning());
 
@@ -418,7 +421,7 @@ TEST_F(CaptivePortalServiceTest, CaptivePortalPrefEnabledWhilePending) {
   RunDisabledTest(0);
 
   CaptivePortalObserver observer(service());
-  service()->DetectCaptivePortal(CaptivePortalProbeReason::kCertificateError);
+  service()->DetectCaptivePortal();
   EXPECT_FALSE(FetchingURL());
   EXPECT_TRUE(TimerRunning());
 

@@ -19,6 +19,7 @@
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/public/dns_over_https_server_config.h"
 #include "net/dns/public/secure_dns_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_stream_factory_test_util.h"
 #include "net/log/net_log.h"
 #include "net/socket/transport_client_socket_pool.h"
@@ -32,6 +33,7 @@
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 namespace {
@@ -134,8 +136,8 @@ class HttpWithDnsOverHttpsTest : public TestWithTaskEnvironment {
       char header_data[kHeaderSize];
       base::BigEndianWriter header_writer(header_data, kHeaderSize);
       header_writer.WriteU16(query.id());  // Same ID as before
-      char flags[] = {0x81, 0x80};
-      header_writer.WriteBytes(flags, 2);
+      uint8_t flags[] = {0x81, 0x80};
+      header_writer.WriteBytes(reinterpret_cast<char*>(flags), 2);
       header_writer.WriteU16(1);  // 1 question
       header_writer.WriteU16(1);  // 1 answer
       header_writer.WriteU16(0);  // No authority records
@@ -253,9 +255,8 @@ TEST_F(HttpWithDnsOverHttpsTest, EndToEnd) {
   loop.Run();
 
   ClientSocketPool::GroupId group_id(
-      HostPortPair(request_info.url.host(), request_info.url.IntPort()),
-      ClientSocketPool::SocketType::kHttp, PrivacyMode::PRIVACY_MODE_DISABLED,
-      NetworkIsolationKey(), false /* disable_secure_dns */);
+      url::SchemeHostPort(request_info.url), PrivacyMode::PRIVACY_MODE_DISABLED,
+      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
   EXPECT_EQ(network_session
                 ->GetSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL,
                                 ProxyServer::Direct())

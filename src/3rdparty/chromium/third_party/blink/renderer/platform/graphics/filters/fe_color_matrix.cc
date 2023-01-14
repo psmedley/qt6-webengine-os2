@@ -23,6 +23,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_color_matrix.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
@@ -145,7 +146,7 @@ sk_sp<PaintFilter> FEColorMatrix::CreateImageFilter() {
   sk_sp<PaintFilter> input(paint_filter_builder::Build(
       InputEffect(0), OperatingInterpolationSpace()));
   sk_sp<SkColorFilter> filter = CreateColorFilter(type_, values_);
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   return sk_make_sp<ColorFilterPaintFilter>(std::move(filter), std::move(input),
                                             base::OptionalOrNullptr(crop_rect));
 }

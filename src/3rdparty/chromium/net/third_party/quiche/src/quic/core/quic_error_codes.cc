@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "quic/core/quic_error_codes.h"
+
 #include <cstdint>
 #include <cstring>
 
 #include "absl/strings/str_cat.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
-#include "quic/core/quic_error_codes.h"
 #include "quic/platform/api/quic_logging.h"
 
 namespace quic {
@@ -54,6 +55,9 @@ const char* QuicRstStreamErrorCodeToString(QuicRstStreamErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_STREAM_ENCODER_STREAM_ERROR);
     RETURN_STRING_LITERAL(QUIC_STREAM_DECODER_STREAM_ERROR);
     RETURN_STRING_LITERAL(QUIC_STREAM_UNKNOWN_APPLICATION_ERROR_CODE);
+    RETURN_STRING_LITERAL(QUIC_STREAM_WEBTRANSPORT_SESSION_GONE);
+    RETURN_STRING_LITERAL(
+        QUIC_STREAM_WEBTRANSPORT_BUFFERED_STREAMS_LIMIT_EXCEEDED);
     RETURN_STRING_LITERAL(QUIC_STREAM_LAST_ERROR);
   }
   // Return a default value so that we return this when |error| doesn't match
@@ -234,6 +238,7 @@ const char* QuicErrorCodeToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_HTTP_GOAWAY_ID_LARGER_THAN_PREVIOUS);
     RETURN_STRING_LITERAL(QUIC_HTTP_RECEIVE_SPDY_SETTING);
     RETURN_STRING_LITERAL(QUIC_HTTP_RECEIVE_SPDY_FRAME);
+    RETURN_STRING_LITERAL(QUIC_HTTP_RECEIVE_SERVER_PUSH);
     RETURN_STRING_LITERAL(QUIC_HPACK_INDEX_VARINT_ERROR);
     RETURN_STRING_LITERAL(QUIC_HPACK_NAME_LENGTH_VARINT_ERROR);
     RETURN_STRING_LITERAL(QUIC_HPACK_VALUE_LENGTH_VARINT_ERROR);
@@ -674,6 +679,9 @@ QuicErrorCodeToIetfMapping QuicErrorCodeToTransportErrorCode(
     case QUIC_HTTP_STREAM_LIMIT_TOO_LOW:
       return {false, static_cast<uint64_t>(
                          QuicHttp3ErrorCode::GENERAL_PROTOCOL_ERROR)};
+    case QUIC_HTTP_RECEIVE_SERVER_PUSH:
+      return {false, static_cast<uint64_t>(
+                         QuicHttp3ErrorCode::GENERAL_PROTOCOL_ERROR)};
     case QUIC_HTTP_ZERO_RTT_RESUMPTION_SETTINGS_MISMATCH:
       return {false, static_cast<uint64_t>(QuicHttp3ErrorCode::SETTINGS_ERROR)};
     case QUIC_HTTP_ZERO_RTT_REJECTION_SETTINGS_MISMATCH:
@@ -874,6 +882,10 @@ uint64_t RstStreamErrorCodeToIetfResetStreamErrorCode(
           QuicHttpQpackErrorCode::DECODER_STREAM_ERROR);
     case QUIC_STREAM_UNKNOWN_APPLICATION_ERROR_CODE:
       return static_cast<uint64_t>(QuicHttp3ErrorCode::INTERNAL_ERROR);
+    case QUIC_STREAM_WEBTRANSPORT_SESSION_GONE:
+      return static_cast<uint64_t>(QuicHttp3ErrorCode::CONNECT_ERROR);
+    case QUIC_STREAM_WEBTRANSPORT_BUFFERED_STREAMS_LIMIT_EXCEEDED:
+      return static_cast<uint64_t>(QuicHttp3ErrorCode::CONNECT_ERROR);
     case QUIC_STREAM_LAST_ERROR:
       return static_cast<uint64_t>(QuicHttp3ErrorCode::INTERNAL_ERROR);
   }

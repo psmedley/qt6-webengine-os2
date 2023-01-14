@@ -8,16 +8,21 @@
 #include "include/core/SkString.h"
 #include "include/effects/SkLumaColorFilter.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "src/core/SkRuntimeEffectPriv.h"
 
 sk_sp<SkColorFilter> SkLumaColorFilter::Make() {
+#ifdef SK_ENABLE_SKSL
     const char* code =
-        "uniform shader input;"
-        "half4 main() {"
-            "return saturate(dot(half3(0.2126, 0.7152, 0.0722), sample(input).rgb)).000r;"
+        "half4 main(half4 inColor) {"
+            "return saturate(dot(half3(0.2126, 0.7152, 0.0722), inColor.rgb)).000r;"
         "}";
-    auto [effect, err] = SkRuntimeEffect::Make(SkString{code});
-    SkASSERT(effect && err.isEmpty());
+    sk_sp<SkRuntimeEffect> effect = SkMakeCachedRuntimeEffect(SkRuntimeEffect::MakeForColorFilter,
+                                                              code);
+    SkASSERT(effect);
 
-    sk_sp<SkColorFilter> input = nullptr;
-    return effect->makeColorFilter(SkData::MakeEmpty(), &input, 1);
+    return effect->makeColorFilter(SkData::MakeEmpty());
+#else
+    // TODO(skia:12197)
+    return nullptr;
+#endif
 }

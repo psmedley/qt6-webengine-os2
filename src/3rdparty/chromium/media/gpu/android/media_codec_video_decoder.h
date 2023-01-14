@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "base/containers/circular_deque.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
+#include "gpu/command_buffer/service/ref_counted_lock.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_preferences.h"
 #include "media/base/android/media_crypto_context.h"
@@ -28,6 +28,7 @@
 #include "media/gpu/android/surface_chooser_helper.h"
 #include "media/gpu/android/video_frame_factory.h"
 #include "media/gpu/media_gpu_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -60,7 +61,9 @@ struct PendingDecode {
 // playbacks that need them.
 // TODO: Lazy initialization should be handled at a higher layer of the media
 // stack for both simplicity and cross platform support.
-class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final : public VideoDecoder {
+class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final
+    : public VideoDecoder,
+      public gpu::RefCountedLockHelperDrDc {
  public:
   static std::vector<SupportedVideoDecoderConfig> GetSupportedConfigs();
 
@@ -76,10 +79,10 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final : public VideoDecoder {
       std::unique_ptr<AndroidVideoSurfaceChooser> surface_chooser,
       AndroidOverlayMojoFactoryCB overlay_factory_cb,
       RequestOverlayInfoCB request_overlay_info_cb,
-      std::unique_ptr<VideoFrameFactory> video_frame_factory);
+      std::unique_ptr<VideoFrameFactory> video_frame_factory,
+      scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
   // VideoDecoder implementation:
-  std::string GetDisplayName() const override;
   VideoDecoderType GetDecoderType() const override;
   void Initialize(const VideoDecoderConfig& config,
                   bool low_delay,
@@ -106,7 +109,8 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final : public VideoDecoder {
       std::unique_ptr<AndroidVideoSurfaceChooser> surface_chooser,
       AndroidOverlayMojoFactoryCB overlay_factory_cb,
       RequestOverlayInfoCB request_overlay_info_cb,
-      std::unique_ptr<VideoFrameFactory> video_frame_factory);
+      std::unique_ptr<VideoFrameFactory> video_frame_factory,
+      scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
   // Set up |cdm_context| as part of initialization.  Guarantees that |init_cb|
   // will be called depending on the outcome, though not necessarily before this
@@ -243,7 +247,7 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final : public VideoDecoder {
   bool waiting_for_key_ = false;
 
   // The reason for the current drain operation if any.
-  base::Optional<DrainType> drain_type_;
+  absl::optional<DrainType> drain_type_;
 
   // The current reset cb if a Reset() is in progress.
   base::OnceClosure reset_cb_;
@@ -331,6 +335,9 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder final : public VideoDecoder {
 
   // Width, in pixels, of the resolution that we last told the codec about.
   int last_width_ = 0;
+
+  // KEY_MAX_INPUT_SIZE configured for the current codec.
+  size_t max_input_size_ = 0;
 
   // Optional crypto object from the Cdm.
   base::android::ScopedJavaGlobalRef<jobject> media_crypto_;

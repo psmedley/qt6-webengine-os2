@@ -36,13 +36,14 @@
 #include "services/service_manager/public/cpp/bind_source_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/sms/webotp_service_destroyed_reason.h"
 #include "third_party/blink/public/common/sms/webotp_service_outcome.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-shared.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom.h"
 
 using base::BindLambdaForTesting;
-using base::Optional;
+using absl::optional;
 using blink::WebOTPServiceDestroyedReason;
 using blink::mojom::SmsStatus;
 using blink::mojom::WebOTPService;
@@ -60,7 +61,7 @@ namespace content {
 class RenderFrameHost;
 
 using Entry = ukm::builders::SMSReceiver;
-using FailureType = SmsFetcher::FailureType;
+using FailureType = SmsFetchFailureType;
 using UserConsent = SmsFetcher::UserConsent;
 
 namespace {
@@ -80,7 +81,7 @@ class Service {
   Service(WebContents* web_contents,
           const Origin& origin,
           std::unique_ptr<UserConsentHandler> user_consent_handler)
-      : fetcher_(web_contents->GetBrowserContext(), &provider_),
+      : fetcher_(&provider_),
         consent_handler_(std::move(user_consent_handler)) {
     // Set a stub delegate because sms service checks existence of delegate and
     // cancels requests early if one does not exist.
@@ -186,6 +187,109 @@ class WebOTPServiceTest : public RenderViewHostTestHarness {
     EXPECT_TRUE(ukm_recorder()->GetEntriesByName(Entry::kEntryName).empty());
   }
 
+  void RecordFailureOutcomeWithTimerActivation(
+      FailureType failure_type,
+      blink::WebOTPServiceOutcome expected_outcome) {
+    GURL url = GURL(kTestUrl);
+    NavigateAndCommit(url);
+
+    Service service(web_contents());
+
+    base::RunLoop ukm_loop;
+    ukm_recorder()->SetOnAddEntryCallback(Entry::kEntryName,
+                                          ukm_loop.QuitClosure());
+
+    EXPECT_CALL(*service.provider(), Retrieve(_, _)).WillOnce(Invoke([&]() {
+      service.NotifyFailure(failure_type);
+      // Triggers the timer immediately to emulate the timeout behavior.
+      service.ActivateTimer();
+    }));
+
+    service.MakeRequest(base::DoNothing());
+
+    ukm_loop.Run();
+
+    ExpectOutcomeUKM(url, expected_outcome);
+    ASSERT_FALSE(service.fetcher()->HasSubscribers());
+  }
+
+  void NotRecordFailureOutcomeWithoutTimerActivation(FailureType failure_type) {
+    GURL url = GURL(kTestUrl);
+    NavigateAndCommit(url);
+
+    Service service(web_contents());
+
+    base::RunLoop loop;
+    EXPECT_CALL(*service.provider(), Retrieve(_, _)).WillOnce(Invoke([&]() {
+      service.NotifyFailure(failure_type);
+      loop.Quit();
+    }));
+
+    service.MakeRequest(base::DoNothing());
+
+    loop.Run();
+    ExpectNoOutcomeUKM();
+    ASSERT_FALSE(service.fetcher()->HasSubscribers());
+  }
+
+  void RecordFailureOutcomeUponPreviousRequestCancelled(
+      FailureType failure_type,
+      blink::WebOTPServiceOutcome expected_outcome) {
+    GURL url = GURL(kTestUrl);
+    NavigateAndCommit(url);
+
+    Service service(web_contents());
+
+    base::RunLoop loop;
+    EXPECT_CALL(*service.provider(), Retrieve(_, _)).WillOnce(Invoke([&]() {
+      service.NotifyFailure(failure_type);
+      loop.Quit();
+    }));
+
+    service.MakeRequest(base::DoNothing());
+
+    loop.Run();
+
+    ::testing::Mock::VerifyAndClear(&service);
+    base::RunLoop loop2;
+
+    EXPECT_CALL(*service.provider(), Retrieve(_, _)).WillOnce(Invoke([&]() {
+      loop2.Quit();
+    }));
+
+    // The second request to the same service cancels the previous outstanding
+    // request.
+    service.MakeRequest(base::DoNothing());
+
+    loop2.Run();
+
+    ExpectOutcomeUKM(url, expected_outcome);
+  }
+
+  void RecordFailureOutcomeUponDestruction(
+      FailureType failure_type,
+      blink::WebOTPServiceOutcome expected_outcome) {
+    GURL url = GURL(kTestUrl);
+    NavigateAndCommit(url);
+    {
+      Service service(web_contents());
+
+      base::RunLoop loop;
+      EXPECT_CALL(*service.provider(), Retrieve(_, _)).WillOnce(Invoke([&]() {
+        service.NotifyFailure(failure_type);
+        loop.Quit();
+      }));
+
+      service.MakeRequest(base::DoNothing());
+
+      loop.Run();
+    }
+    // |service| going out of scope means that the outstanding request would be
+    // considered failed with |kUnhandledRequest|.
+
+    ExpectOutcomeUKM(url, expected_outcome);
+  }
+
  private:
   base::HistogramTester histogram_tester_;
   std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
@@ -202,12 +306,12 @@ TEST_F(WebOTPServiceTest, Basic) {
 
   base::RunLoop loop;
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "hi");
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke(
+          [&service]() { service.NotifyReceive(GURL(kTestUrl), "hi"); }));
 
   service.MakeRequest(BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) {
+      [&loop](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kSuccess, status);
         EXPECT_EQ("hi", otp.value());
         loop.Quit();
@@ -226,12 +330,12 @@ TEST_F(WebOTPServiceTest, HandlesMultipleCalls) {
   {
     base::RunLoop loop;
 
-    EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-      service.NotifyReceive(GURL(kTestUrl), "first");
-    }));
+    EXPECT_CALL(*service.provider(), Retrieve(_, _))
+        .WillOnce(Invoke(
+            [&service]() { service.NotifyReceive(GURL(kTestUrl), "first"); }));
 
     service.MakeRequest(BindLambdaForTesting(
-        [&loop](SmsStatus status, const Optional<string>& otp) {
+        [&loop](SmsStatus status, const optional<string>& otp) {
           EXPECT_EQ("first", otp.value());
           EXPECT_EQ(SmsStatus::kSuccess, status);
           loop.Quit();
@@ -243,12 +347,12 @@ TEST_F(WebOTPServiceTest, HandlesMultipleCalls) {
   {
     base::RunLoop loop;
 
-    EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-      service.NotifyReceive(GURL(kTestUrl), "second");
-    }));
+    EXPECT_CALL(*service.provider(), Retrieve(_, _))
+        .WillOnce(Invoke(
+            [&service]() { service.NotifyReceive(GURL(kTestUrl), "second"); }));
 
     service.MakeRequest(BindLambdaForTesting(
-        [&loop](SmsStatus status, const Optional<string>& otp) {
+        [&loop](SmsStatus status, const optional<string>& otp) {
           EXPECT_EQ("second", otp.value());
           EXPECT_EQ(SmsStatus::kSuccess, status);
           loop.Quit();
@@ -264,20 +368,21 @@ TEST_F(WebOTPServiceTest, IgnoreFromOtherOrigins) {
   Service service(web_contents());
 
   SmsStatus sms_status;
-  Optional<string> response;
+  optional<string> response;
 
   base::RunLoop sms_loop;
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    // Delivers an SMS from an unrelated origin first and expect the
-    // receiver to ignore it.
-    service.NotifyReceive(GURL("http://b.com"), "wrong");
-    service.NotifyReceive(GURL(kTestUrl), "right");
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        // Delivers an SMS from an unrelated origin first and expect the
+        // receiver to ignore it.
+        service.NotifyReceive(GURL("http://b.com"), "wrong");
+        service.NotifyReceive(GURL(kTestUrl), "right");
+      }));
 
   service.MakeRequest(
       BindLambdaForTesting([&sms_status, &response, &sms_loop](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status = status;
         response = otp;
         sms_loop.Quit();
@@ -295,22 +400,23 @@ TEST_F(WebOTPServiceTest, ExpectOneReceiveTwo) {
   Service service(web_contents());
 
   SmsStatus sms_status;
-  Optional<string> response;
+  optional<string> response;
 
   base::RunLoop sms_loop;
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    // Delivers two SMSes for the same origin, even if only one was being
-    // expected.
-    ASSERT_TRUE(service.fetcher()->HasSubscribers());
-    service.NotifyReceive(GURL(kTestUrl), "first");
-    ASSERT_FALSE(service.fetcher()->HasSubscribers());
-    service.NotifyReceive(GURL(kTestUrl), "second");
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        // Delivers two SMSes for the same origin, even if only one was being
+        // expected.
+        ASSERT_TRUE(service.fetcher()->HasSubscribers());
+        service.NotifyReceive(GURL(kTestUrl), "first");
+        ASSERT_FALSE(service.fetcher()->HasSubscribers());
+        service.NotifyReceive(GURL(kTestUrl), "second");
+      }));
 
   service.MakeRequest(
       BindLambdaForTesting([&sms_status, &response, &sms_loop](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status = status;
         response = otp;
         sms_loop.Quit();
@@ -328,20 +434,20 @@ TEST_F(WebOTPServiceTest, AtMostOneSmsRequestPerOrigin) {
   Service service(web_contents());
 
   SmsStatus sms_status1;
-  Optional<string> response1;
+  optional<string> response1;
   SmsStatus sms_status2;
-  Optional<string> response2;
+  optional<string> response2;
 
   base::RunLoop sms1_loop, sms2_loop;
 
-  EXPECT_CALL(*service.provider(), Retrieve(_))
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
       .WillOnce(Return())
       .WillOnce(Invoke(
           [&service]() { service.NotifyReceive(GURL(kTestUrl), "second"); }));
 
   service.MakeRequest(
       BindLambdaForTesting([&sms_status1, &response1, &sms1_loop](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status1 = status;
         response1 = otp;
         sms1_loop.Quit();
@@ -351,7 +457,7 @@ TEST_F(WebOTPServiceTest, AtMostOneSmsRequestPerOrigin) {
   // one request can be pending per origin per tab.
   service.MakeRequest(
       BindLambdaForTesting([&sms_status2, &response2, &sms2_loop](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status2 = status;
         response2 = otp;
         sms2_loop.Quit();
@@ -360,7 +466,7 @@ TEST_F(WebOTPServiceTest, AtMostOneSmsRequestPerOrigin) {
   sms1_loop.Run();
   sms2_loop.Run();
 
-  EXPECT_EQ(base::nullopt, response1);
+  EXPECT_EQ(absl::nullopt, response1);
   EXPECT_EQ(SmsStatus::kCancelled, sms_status1);
 
   EXPECT_EQ("second", response2.value());
@@ -376,23 +482,23 @@ TEST_F(WebOTPServiceTest, CleansUp) {
   web_contents_impl->SetDelegate(&delegate);
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
 
   base::RunLoop navigate;
 
-  EXPECT_CALL(provider, Retrieve(_)).WillOnce(Invoke([&navigate]() {
+  EXPECT_CALL(provider, Retrieve(_, _)).WillOnce(Invoke([&navigate]() {
     navigate.Quit();
   }));
 
   base::RunLoop reload;
 
   service->Receive(base::BindLambdaForTesting(
-      [&reload](SmsStatus status, const Optional<string>& otp) {
+      [&reload](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kUnhandledRequest, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         reload.Quit();
       }));
 
@@ -411,7 +517,7 @@ TEST_F(WebOTPServiceTest, CancelForNoDelegate) {
   NavigateAndCommit(GURL(kTestUrl));
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
@@ -419,9 +525,9 @@ TEST_F(WebOTPServiceTest, CancelForNoDelegate) {
   base::RunLoop loop;
 
   service->Receive(base::BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) {
+      [&loop](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kCancelled, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         loop.Quit();
       }));
 
@@ -442,9 +548,9 @@ TEST_F(WebOTPServiceTest, Abort) {
   base::RunLoop loop;
 
   service.MakeRequest(BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) {
+      [&loop](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kAborted, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         loop.Quit();
       }));
 
@@ -466,23 +572,23 @@ TEST_F(WebOTPServiceTest, RecordMetricsForNewPage) {
   web_contents_impl->SetDelegate(&delegate);
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
 
   base::RunLoop navigate;
 
-  EXPECT_CALL(provider, Retrieve(_)).WillOnce(Invoke([&navigate]() {
+  EXPECT_CALL(provider, Retrieve(_, _)).WillOnce(Invoke([&navigate]() {
     navigate.Quit();
   }));
 
   base::RunLoop reload;
 
   service->Receive(base::BindLambdaForTesting(
-      [&reload](SmsStatus status, const Optional<string>& otp) {
+      [&reload](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kUnhandledRequest, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         reload.Quit();
       }));
 
@@ -504,23 +610,23 @@ TEST_F(WebOTPServiceTest, RecordMetricsForSamePage) {
   web_contents_impl->SetDelegate(&delegate);
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
 
   base::RunLoop navigate;
 
-  EXPECT_CALL(provider, Retrieve(_)).WillOnce(Invoke([&navigate]() {
+  EXPECT_CALL(provider, Retrieve(_, _)).WillOnce(Invoke([&navigate]() {
     navigate.Quit();
   }));
 
   base::RunLoop reload;
 
   service->Receive(base::BindLambdaForTesting(
-      [&reload](SmsStatus status, const Optional<string>& otp) {
+      [&reload](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kUnhandledRequest, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         reload.Quit();
       }));
 
@@ -566,7 +672,6 @@ class ServiceWithPrompt : public Service {
   void ConfirmPrompt() {
     if (on_complete_callback_.is_null()) {
       FAIL() << "User prompt is not available";
-      return;
     }
     std::move(on_complete_callback_).Run(UserConsentResult::kApproved);
     on_complete_callback_.Reset();
@@ -575,7 +680,6 @@ class ServiceWithPrompt : public Service {
   void DismissPrompt() {
     if (on_complete_callback_.is_null()) {
       FAIL() << "User prompt is not available";
-      return;
     }
     std::move(on_complete_callback_).Run(UserConsentResult::kDenied);
     ActivateTimer();
@@ -598,23 +702,25 @@ TEST_F(WebOTPServiceTest, SecondRequestDuringPrompt) {
   ServiceWithPrompt service(web_contents());
 
   SmsStatus sms_status1;
-  Optional<string> response1;
+  optional<string> response1;
   SmsStatus sms_status2;
-  Optional<string> response2;
+  optional<string> response2;
 
   base::RunLoop sms_loop;
 
   // Expect SMS Prompt to be created once.
   service.ExpectRequestUserConsent();
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "second", UserConsent::kNotObtained);
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "second",
+                              UserConsent::kNotObtained);
+      }));
 
   // First request.
   service.MakeRequest(
       BindLambdaForTesting([&sms_status1, &response1, &service](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status1 = status;
         response1 = otp;
         service.ConfirmPrompt();
@@ -623,7 +729,7 @@ TEST_F(WebOTPServiceTest, SecondRequestDuringPrompt) {
   // Make second request before confirming prompt.
   service.MakeRequest(
       BindLambdaForTesting([&sms_status2, &response2, &sms_loop](
-                               SmsStatus status, const Optional<string>& otp) {
+                               SmsStatus status, const optional<string>& otp) {
         sms_status2 = status;
         response2 = otp;
         sms_loop.Quit();
@@ -631,7 +737,7 @@ TEST_F(WebOTPServiceTest, SecondRequestDuringPrompt) {
 
   sms_loop.Run();
 
-  EXPECT_EQ(base::nullopt, response1);
+  EXPECT_EQ(absl::nullopt, response1);
   EXPECT_EQ(SmsStatus::kCancelled, sms_status1);
 
   EXPECT_EQ("second", response2.value());
@@ -648,17 +754,18 @@ TEST_F(WebOTPServiceTest, AbortWhilePrompt) {
   service.ExpectRequestUserConsent();
 
   service.MakeRequest(BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) {
+      [&loop](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kAborted, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         loop.Quit();
       }));
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kNotObtained);
-    EXPECT_TRUE(service.IsPromptOpen());
-    service.AbortRequest();
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kNotObtained);
+        EXPECT_TRUE(service.IsPromptOpen());
+        service.AbortRequest();
+      }));
 
   loop.Run();
 
@@ -678,17 +785,19 @@ TEST_F(WebOTPServiceTest, RequestAfterAbortWhilePrompt) {
     service.ExpectRequestUserConsent();
 
     service.MakeRequest(BindLambdaForTesting(
-        [&loop](SmsStatus status, const Optional<string>& otp) {
+        [&loop](SmsStatus status, const optional<string>& otp) {
           EXPECT_EQ(SmsStatus::kAborted, status);
-          EXPECT_EQ(base::nullopt, otp);
+          EXPECT_EQ(absl::nullopt, otp);
           loop.Quit();
         }));
 
-    EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-      service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
-      EXPECT_TRUE(service.IsPromptOpen());
-      service.AbortRequest();
-    }));
+    EXPECT_CALL(*service.provider(), Retrieve(_, _))
+        .WillOnce(Invoke([&service]() {
+          service.NotifyReceive(GURL(kTestUrl), "hi",
+                                UserConsent::kNotObtained);
+          EXPECT_TRUE(service.IsPromptOpen());
+          service.AbortRequest();
+        }));
 
     loop.Run();
   }
@@ -704,7 +813,7 @@ TEST_F(WebOTPServiceTest, RequestAfterAbortWhilePrompt) {
     service.ExpectRequestUserConsent();
 
     service.MakeRequest(BindLambdaForTesting(
-        [&loop](SmsStatus status, const Optional<string>& otp) {
+        [&loop](SmsStatus status, const optional<string>& otp) {
           // Verify that the 2nd request completes successfully after prompt
           // confirmation.
           EXPECT_EQ(SmsStatus::kSuccess, status);
@@ -712,10 +821,12 @@ TEST_F(WebOTPServiceTest, RequestAfterAbortWhilePrompt) {
           loop.Quit();
         }));
 
-    EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-      service.NotifyReceive(GURL(kTestUrl), "hi2", UserConsent::kNotObtained);
-      service.ConfirmPrompt();
-    }));
+    EXPECT_CALL(*service.provider(), Retrieve(_, _))
+        .WillOnce(Invoke([&service]() {
+          service.NotifyReceive(GURL(kTestUrl), "hi2",
+                                UserConsent::kNotObtained);
+          service.ConfirmPrompt();
+        }));
 
     loop.Run();
   }
@@ -731,23 +842,24 @@ TEST_F(WebOTPServiceTest, SecondRequestWhilePrompt) {
   service.ExpectRequestUserConsent();
 
   service.MakeRequest(BindLambdaForTesting(
-      [&callback_loop1](SmsStatus status, const Optional<string>& otp) {
+      [&callback_loop1](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kAborted, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         callback_loop1.Quit();
       }));
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
-    service.AbortRequest();
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
+        service.AbortRequest();
+      }));
 
   callback_loop1.Run();
 
   base::ThreadTaskRunnerHandle::Get()->PostTaskAndReply(
       FROM_HERE, BindLambdaForTesting([&]() {
         service.MakeRequest(BindLambdaForTesting(
-            [&callback_loop2](SmsStatus status, const Optional<string>& otp) {
+            [&callback_loop2](SmsStatus status, const optional<string>& otp) {
               EXPECT_EQ(SmsStatus::kSuccess, status);
               EXPECT_EQ("hi", otp.value());
               callback_loop2.Quit();
@@ -774,13 +886,14 @@ TEST_F(WebOTPServiceTest, RecordTimeMetricsForContinueOnSuccess) {
 
   service.ExpectRequestUserConsent();
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kNotObtained);
-    service.ConfirmPrompt();
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kNotObtained);
+        service.ConfirmPrompt();
+      }));
 
   service.MakeRequest(BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) { loop.Quit(); }));
+      [&loop](SmsStatus status, const optional<string>& otp) { loop.Quit(); }));
 
   loop.Run();
 
@@ -799,13 +912,14 @@ TEST_F(WebOTPServiceTest, RecordMetricsForCancelOnSuccess) {
 
   service.ExpectRequestUserConsent();
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
-    service.DismissPrompt();
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
+        service.DismissPrompt();
+      }));
 
   service.MakeRequest(BindLambdaForTesting(
-      [&loop](SmsStatus status, const Optional<string>& otp) { loop.Quit(); }));
+      [&loop](SmsStatus status, const optional<string>& otp) { loop.Quit(); }));
 
   loop.Run();
 
@@ -827,23 +941,23 @@ TEST_F(WebOTPServiceTest, RecordMetricsForExistingPage) {
   web_contents_impl->SetDelegate(&delegate);
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
 
   base::RunLoop navigate;
 
-  EXPECT_CALL(provider, Retrieve(_)).WillOnce(Invoke([&navigate]() {
+  EXPECT_CALL(provider, Retrieve(_, _)).WillOnce(Invoke([&navigate]() {
     navigate.Quit();
   }));
 
   base::RunLoop reload;
 
   service->Receive(base::BindLambdaForTesting(
-      [&reload](SmsStatus status, const Optional<string>& otp) {
+      [&reload](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kUnhandledRequest, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         reload.Quit();
       }));
 
@@ -858,7 +972,7 @@ TEST_F(WebOTPServiceTest, RecordMetricsForExistingPage) {
       WebOTPServiceDestroyedReason::kNavigateExistingPage, 1);
 }
 
-TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeWithTimerActivation) {
+TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeWithoutFailure) {
   GURL url = GURL(kTestUrl);
   NavigateAndCommit(url);
 
@@ -868,81 +982,63 @@ TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeWithTimerActivation) {
   ukm_recorder()->SetOnAddEntryCallback(Entry::kEntryName,
                                         ukm_loop.QuitClosure());
 
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyFailure(FailureType::kPromptTimeout);
-    service.ActivateTimer();
-  }));
+  service.ExpectRequestUserConsent();
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
+        service.ActivateTimer();
+      }));
 
-  service.MakeRequest(BindLambdaForTesting(
-      [](SmsStatus status, const Optional<string>& otp) {}));
+  service.MakeRequest(base::DoNothing());
 
   ukm_loop.Run();
 
   ExpectOutcomeUKM(url, blink::WebOTPServiceOutcome::kTimeout);
 }
 
+TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeWithTimerActivation) {
+  RecordFailureOutcomeWithTimerActivation(
+      FailureType::kPromptTimeout, blink::WebOTPServiceOutcome::kTimeout);
+}
+
 TEST_F(WebOTPServiceTest, NotRecordTimeoutAsOutcomeWithoutTimerActivation) {
-  GURL url = GURL(kTestUrl);
-  NavigateAndCommit(url);
+  NotRecordFailureOutcomeWithoutTimerActivation(FailureType::kPromptTimeout);
+}
 
-  ServiceWithPrompt service(web_contents());
+TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeUponPreviousRequestCancelled) {
+  RecordFailureOutcomeUponPreviousRequestCancelled(
+      FailureType::kPromptTimeout, blink::WebOTPServiceOutcome::kTimeout);
+}
 
-  base::RunLoop loop;
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&]() {
-    service.NotifyFailure(FailureType::kPromptTimeout);
-    loop.Quit();
-  }));
-
-  service.MakeRequest(BindLambdaForTesting(
-      [](SmsStatus status, const Optional<string>& otp) {}));
-
-  loop.Run();
-  ExpectNoOutcomeUKM();
+TEST_F(WebOTPServiceTest, RecordTimeoutAsOutcomeUponDestruction) {
+  RecordFailureOutcomeUponDestruction(FailureType::kPromptTimeout,
+                                      blink::WebOTPServiceOutcome::kTimeout);
 }
 
 TEST_F(WebOTPServiceTest, RecordUserCancelledAsOutcome) {
-  GURL url = GURL(kTestUrl);
-  NavigateAndCommit(url);
-
-  ServiceWithPrompt service(web_contents());
-
-  base::RunLoop ukm_loop;
-  ukm_recorder()->SetOnAddEntryCallback(Entry::kEntryName,
-                                        ukm_loop.QuitClosure());
-
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyFailure(FailureType::kPromptCancelled);
-    service.ActivateTimer();
-  }));
-
-  service.MakeRequest(BindLambdaForTesting(
-      [](SmsStatus status, const Optional<string>& otp) {}));
-
-  ukm_loop.Run();
-
-  ExpectOutcomeUKM(url, blink::WebOTPServiceOutcome::kUserCancelled);
+  RecordFailureOutcomeWithTimerActivation(
+      FailureType::kPromptCancelled,
+      blink::WebOTPServiceOutcome::kUserCancelled);
   ExpectTimingUKM("TimeUserCancelMs");
   histogram_tester().ExpectTotalCount("Blink.Sms.Receive.TimeUserCancel", 1);
 }
 
 TEST_F(WebOTPServiceTest,
        NotRecordUserCancelledAsOutcomeWithoutTimerActivation) {
-  GURL url = GURL(kTestUrl);
-  NavigateAndCommit(url);
+  NotRecordFailureOutcomeWithoutTimerActivation(FailureType::kPromptCancelled);
+}
 
-  ServiceWithPrompt service(web_contents());
+TEST_F(WebOTPServiceTest,
+       RecordUserCancelledAsOutcomeUponPreviousRequestCancelled) {
+  RecordFailureOutcomeUponPreviousRequestCancelled(
+      FailureType::kPromptCancelled,
+      blink::WebOTPServiceOutcome::kUserCancelled);
+}
 
-  base::RunLoop loop;
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&]() {
-    service.NotifyFailure(FailureType::kPromptCancelled);
-    loop.Quit();
-  }));
-
-  service.MakeRequest(BindLambdaForTesting(
-      [](SmsStatus status, const Optional<string>& otp) {}));
-
-  loop.Run();
-  ExpectNoOutcomeUKM();
+TEST_F(WebOTPServiceTest, RecordUserCancelledAsOutcomeUponDestruction) {
+  RecordFailureOutcomeUponDestruction(
+      FailureType::kPromptCancelled,
+      blink::WebOTPServiceOutcome::kUserCancelled);
 }
 
 TEST_F(WebOTPServiceTest, RecordUserDismissPrompt) {
@@ -956,13 +1052,13 @@ TEST_F(WebOTPServiceTest, RecordUserDismissPrompt) {
                                         ukm_loop.QuitClosure());
 
   service.ExpectRequestUserConsent();
-  EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-    service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
-    service.DismissPrompt();
-  }));
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service]() {
+        service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
+        service.DismissPrompt();
+      }));
 
-  service.MakeRequest(BindLambdaForTesting(
-      [](SmsStatus status, const Optional<string>& otp) {}));
+  service.MakeRequest(base::DoNothing());
 
   ukm_loop.Run();
 
@@ -981,7 +1077,7 @@ TEST_F(WebOTPServiceTest, RecordUnhandledRequestOnNavigation) {
   web_contents_impl->SetDelegate(&delegate);
 
   NiceMock<MockSmsProvider> provider;
-  SmsFetcherImpl fetcher(web_contents()->GetBrowserContext(), &provider);
+  SmsFetcherImpl fetcher(&provider);
   mojo::Remote<blink::mojom::WebOTPService> service;
   EXPECT_TRUE(WebOTPService::Create(&fetcher, main_rfh(),
                                     service.BindNewPipeAndPassReceiver()));
@@ -991,16 +1087,16 @@ TEST_F(WebOTPServiceTest, RecordUnhandledRequestOnNavigation) {
 
   base::RunLoop navigate;
 
-  EXPECT_CALL(provider, Retrieve(_)).WillOnce(Invoke([&navigate]() {
+  EXPECT_CALL(provider, Retrieve(_, _)).WillOnce(Invoke([&navigate]() {
     navigate.Quit();
   }));
 
   base::RunLoop reload;
 
   service->Receive(base::BindLambdaForTesting(
-      [&reload](SmsStatus status, const Optional<string>& otp) {
+      [&reload](SmsStatus status, const optional<string>& otp) {
         EXPECT_EQ(SmsStatus::kUnhandledRequest, status);
-        EXPECT_EQ(base::nullopt, otp);
+        EXPECT_EQ(absl::nullopt, otp);
         reload.Quit();
       }));
 
@@ -1040,18 +1136,115 @@ TEST_F(WebOTPServiceTest, NotRecordUnhandledRequestWhenRequestIsHandled) {
                                           ukm_loop.QuitClosure());
 
     service.ExpectRequestUserConsent();
-    EXPECT_CALL(*service.provider(), Retrieve(_)).WillOnce(Invoke([&service]() {
-      service.NotifyReceive(GURL(kTestUrl), "hi", UserConsent::kNotObtained);
-      service.DismissPrompt();
-    }));
+    EXPECT_CALL(*service.provider(), Retrieve(_, _))
+        .WillOnce(Invoke([&service]() {
+          service.NotifyReceive(GURL(kTestUrl), "hi",
+                                UserConsent::kNotObtained);
+          service.DismissPrompt();
+        }));
 
-    service.MakeRequest(BindLambdaForTesting(
-        [](SmsStatus status, const Optional<string>& otp) {}));
+    service.MakeRequest(base::DoNothing());
 
     ukm_loop.Run();
   }
 
   ExpectOutcomeUKM(url, blink::WebOTPServiceOutcome::kUserCancelled);
+}
+
+TEST_F(WebOTPServiceTest, RecordWebContentsVisibilityForUserConsentAPI) {
+  NavigateAndCommit(GURL(kTestUrl));
+  base::HistogramTester histogram_tester;
+
+  // Sets the WebContents to visible
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents());
+  web_contents_impl->UpdateWebContentsVisibility(Visibility::VISIBLE);
+  ASSERT_EQ(web_contents_impl->GetVisibility(), Visibility::VISIBLE);
+  Service service1(web_contents_impl);
+
+  base::RunLoop loop1;
+
+  EXPECT_CALL(*service1.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service1]() {
+        service1.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kObtained);
+      }));
+
+  service1.MakeRequest(BindLambdaForTesting(
+      [&loop1](SmsStatus status, const optional<string>& otp) {
+        loop1.Quit();
+      }));
+
+  loop1.Run();
+
+  histogram_tester.ExpectBucketCount("Blink.Sms.WebContentsVisibleOnReceive", 1,
+                                     1);
+  histogram_tester.ExpectTotalCount("Blink.Sms.WebContentsVisibleOnReceive", 1);
+
+  // Sets the WebContents to invisible
+  web_contents_impl->UpdateWebContentsVisibility(Visibility::HIDDEN);
+  ASSERT_NE(web_contents_impl->GetVisibility(), Visibility::VISIBLE);
+
+  Service service2(web_contents_impl);
+
+  base::RunLoop loop2;
+  EXPECT_CALL(*service2.provider(), Retrieve(_, _))
+      .WillOnce(Invoke([&service2]() {
+        service2.NotifyReceive(GURL(kTestUrl), "ABC", UserConsent::kObtained);
+      }));
+
+  service2.MakeRequest(BindLambdaForTesting(
+      [&loop2](SmsStatus status, const optional<string>& otp) {
+        loop2.Quit();
+      }));
+
+  loop2.Run();
+
+  histogram_tester.ExpectBucketCount("Blink.Sms.WebContentsVisibleOnReceive", 0,
+                                     1);
+  histogram_tester.ExpectTotalCount("Blink.Sms.WebContentsVisibleOnReceive", 2);
+}
+
+TEST_F(WebOTPServiceTest, RecordCancelledAsOutcome) {
+  GURL url = GURL(kTestUrl);
+  NavigateAndCommit(url);
+
+  ServiceWithPrompt service(web_contents());
+
+  base::RunLoop sms1_loop, sms2_loop;
+  base::RunLoop ukm_loop;
+  ukm_recorder()->SetOnAddEntryCallback(Entry::kEntryName,
+                                        ukm_loop.QuitClosure());
+
+  EXPECT_CALL(*service.provider(), Retrieve(_, _))
+      .WillOnce(Return())
+      .WillOnce(Invoke([&sms2_loop]() { sms2_loop.Quit(); }));
+
+  service.MakeRequest(BindLambdaForTesting(
+      [&sms1_loop](SmsStatus status, const optional<string>& otp) {
+        sms1_loop.Quit();
+      }));
+
+  // The 2nd request will cancel the 1st one.
+  service.MakeRequest(base::DoNothing());
+
+  sms1_loop.Run();
+  sms2_loop.Run();
+  ukm_loop.Run();
+
+  ExpectOutcomeUKM(url, blink::WebOTPServiceOutcome::kCancelled);
+}
+
+TEST_F(WebOTPServiceTest,
+       RecordCrossDeviceFailureAsOutcomeUponPreviousRequestCancelled) {
+  RecordFailureOutcomeUponPreviousRequestCancelled(
+      FailureType::kCrossDeviceFailure,
+      blink::WebOTPServiceOutcome::kCrossDeviceFailure);
+}
+
+TEST_F(WebOTPServiceTest, RecordCrossDeviceFailureAsOutcomeUponDestruction) {
+  RecordFailureOutcomeUponDestruction(
+      FailureType::kCrossDeviceFailure,
+      blink::WebOTPServiceOutcome::kCrossDeviceFailure);
 }
 
 }  // namespace content

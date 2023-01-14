@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -140,6 +139,8 @@ class CONTENT_EXPORT ContentClient {
     // Registers a URL scheme as strictly empty documents, allowing them to
     // commit synchronously.
     std::vector<std::string> empty_document_schemes;
+    // Registers a URL scheme as extension scheme.
+    std::vector<std::string> extension_schemes;
 #if defined(OS_ANDROID) || defined(TOOLKIT_QT)
     // Normally, non-standard schemes canonicalize to opaque origins. However,
     // Android WebView requires non-standard schemes to still be preserved.
@@ -150,16 +151,17 @@ class CONTENT_EXPORT ContentClient {
   virtual void AddAdditionalSchemes(Schemes* schemes) {}
 
   // Returns a string resource given its id.
-  virtual base::string16 GetLocalizedString(int message_id);
+  virtual std::u16string GetLocalizedString(int message_id);
 
   // Returns a string resource given its id and replace $1 with the given
   // replacement.
-  virtual base::string16 GetLocalizedString(int message_id,
-                                            const base::string16& replacement);
+  virtual std::u16string GetLocalizedString(int message_id,
+                                            const std::u16string& replacement);
 
   // Return the contents of a resource in a StringPiece given the resource id.
-  virtual base::StringPiece GetDataResource(int resource_id,
-                                            ui::ScaleFactor scale_factor);
+  virtual base::StringPiece GetDataResource(
+      int resource_id,
+      ui::ResourceScaleFactor scale_factor);
 
   // Returns the raw bytes of a scale independent data resource.
   virtual base::RefCountedMemory* GetDataResourceBytes(int resource_id);

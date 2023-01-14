@@ -6,11 +6,11 @@
 #define EXTENSIONS_BROWSER_API_VIRTUAL_KEYBOARD_PRIVATE_VIRTUAL_KEYBOARD_DELEGATE_H_
 
 #include <memory>
+#include <set>
 #include <string>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/strings/string16.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/api/virtual_keyboard.h"
@@ -29,7 +29,7 @@ class VirtualKeyboardDelegate {
   using OnSetModeCallback = base::OnceCallback<void(bool success)>;
 
   using OnGetClipboardHistoryCallback =
-      base::Callback<void(base::Value history)>;
+      base::OnceCallback<void(base::Value history)>;
 
   // Fetch information about the preferred configuration of the keyboard. On
   // exit, |settings| is populated with the keyboard configuration if execution
@@ -46,7 +46,7 @@ class VirtualKeyboardDelegate {
   virtual bool HideKeyboard() = 0;
 
   // Insert |text| verbatim into a text area. Returns true if successful.
-  virtual bool InsertText(const base::string16& text) = 0;
+  virtual bool InsertText(const std::u16string& text) = 0;
 
   // Notifiy system that keyboard loading is complete. Used in UMA stats to
   // track loading performance. Returns true if the notification was handled.

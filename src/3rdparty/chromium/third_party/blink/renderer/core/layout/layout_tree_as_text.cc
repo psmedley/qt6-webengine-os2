@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
-#include "third_party/blink/renderer/core/layout/layout_details_marker.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_file_upload_control.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
@@ -233,25 +232,6 @@ void LayoutTreeAsText::WriteLayoutObject(WTF::TextStream& ts,
        << " rs=" << c.ResolvedRowSpan() << " cs=" << c.ColSpan() << "]";
   }
 
-  if (o.IsDetailsMarker()) {
-    ts << ": ";
-    const auto& marker = To<LayoutDetailsMarker>(o);
-    switch (marker.GetOrientation(marker.StyleRef(), marker.IsOpen())) {
-      case LayoutDetailsMarker::kLeft:
-        ts << "left";
-        break;
-      case LayoutDetailsMarker::kRight:
-        ts << "right";
-        break;
-      case LayoutDetailsMarker::kUp:
-        ts << "up";
-        break;
-      case LayoutDetailsMarker::kDown:
-        ts << "down";
-        break;
-    }
-  }
-
   if (o.IsListMarkerForNormalContent()) {
     String text = To<LayoutListMarker>(o).GetText();
     if (!text.IsEmpty()) {
@@ -343,7 +323,7 @@ static void WriteInlineBox(WTF::TextStream& ts,
      << " pos=(" << box.X() << "," << box.Y() << ")"
      << " size=(" << box.Width() << "," << box.Height() << ")"
      << " baseline=" << box.BaselinePosition(kAlphabeticBaseline) << "/"
-     << box.BaselinePosition(kIdeographicBaseline);
+     << box.BaselinePosition(kCentralBaseline);
 }
 
 static void WriteInlineTextBox(WTF::TextStream& ts,
@@ -702,15 +682,13 @@ void LayoutTreeAsText::WriteLayers(WTF::TextStream& ts,
     layer->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
         .CalculateRects(
             ClipRectsContext(root_layer,
-                             &root_layer->GetLayoutObject().FirstFragment(),
-                             kUncachedClipRects),
+                             &root_layer->GetLayoutObject().FirstFragment()),
             &layer->GetLayoutObject().FirstFragment(), nullptr, layer_bounds,
             damage_rect, clip_rect_to_apply);
   } else {
     layer->Clipper(PaintLayer::GeometryMapperOption::kDoNotUseGeometryMapper)
-        .CalculateRects(
-            ClipRectsContext(root_layer, nullptr, kUncachedClipRects), nullptr,
-            nullptr, layer_bounds, damage_rect, clip_rect_to_apply);
+        .CalculateRects(ClipRectsContext(root_layer, nullptr), nullptr, nullptr,
+                        layer_bounds, damage_rect, clip_rect_to_apply);
   }
 
   PhysicalOffset offset_from_root;

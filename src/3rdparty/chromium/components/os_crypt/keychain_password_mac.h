@@ -16,6 +16,12 @@ class AppleKeychain;
 
 class COMPONENT_EXPORT(OS_CRYPT) KeychainPassword {
  public:
+#if defined(ALLOW_RUNTIME_CONFIGURABLE_KEY_STORAGE)
+  using KeychainNameType = std::string;
+#else
+  using KeychainNameType = const std::string;
+#endif
+
   KeychainPassword(const crypto::AppleKeychain& keychain);
   ~KeychainPassword();
 
@@ -28,8 +34,8 @@ class COMPONENT_EXPORT(OS_CRYPT) KeychainPassword {
   std::string GetPassword() const;
 
   // The service and account names used in Chrome's Safe Storage keychain item.
-  static COMPONENT_EXPORT(OS_CRYPT) const char service_name[];
-  static COMPONENT_EXPORT(OS_CRYPT) const char account_name[];
+  static COMPONENT_EXPORT(OS_CRYPT) KeychainNameType& GetServiceName();
+  static COMPONENT_EXPORT(OS_CRYPT) KeychainNameType& GetAccountName();
 
  private:
   const crypto::AppleKeychain& keychain_;

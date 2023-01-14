@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/infobars/confirm_infobar_creator.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -15,17 +16,17 @@ namespace extensions {
 
 // static
 infobars::InfoBar* IncognitoConnectabilityInfoBarDelegate::Create(
-    InfoBarService* infobar_service,
-    const base::string16& message,
+    infobars::ContentInfoBarManager* infobar_manager,
+    const std::u16string& message,
     IncognitoConnectabilityInfoBarDelegate::InfoBarCallback callback) {
-  return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate>(
+  return infobar_manager->AddInfoBar(
+      CreateConfirmInfoBar(std::unique_ptr<ConfirmInfoBarDelegate>(
           new IncognitoConnectabilityInfoBarDelegate(message,
                                                      std::move(callback)))));
 }
 
 IncognitoConnectabilityInfoBarDelegate::IncognitoConnectabilityInfoBarDelegate(
-    const base::string16& message,
+    const std::u16string& message,
     InfoBarCallback callback)
     : message_(message), answered_(false), callback_(std::move(callback)) {}
 
@@ -45,11 +46,11 @@ IncognitoConnectabilityInfoBarDelegate::GetIdentifier() const {
   return INCOGNITO_CONNECTABILITY_INFOBAR_DELEGATE;
 }
 
-base::string16 IncognitoConnectabilityInfoBarDelegate::GetMessageText() const {
+std::u16string IncognitoConnectabilityInfoBarDelegate::GetMessageText() const {
   return message_;
 }
 
-base::string16 IncognitoConnectabilityInfoBarDelegate::GetButtonLabel(
+std::u16string IncognitoConnectabilityInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ? IDS_PERMISSION_ALLOW
                                                          : IDS_PERMISSION_DENY);

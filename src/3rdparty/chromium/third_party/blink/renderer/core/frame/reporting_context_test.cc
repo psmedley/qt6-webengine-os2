@@ -7,7 +7,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/core/frame/deprecation_report_body.h"
+#include "third_party/blink/renderer/core/frame/document_policy_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/permissions_policy_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/report.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
@@ -15,13 +18,13 @@
 namespace blink {
 
 class ReportingContextTest : public testing::Test {
+ public:
+  ReportingContextTest(const ReportingContextTest&) = delete;
+  ReportingContextTest& operator=(const ReportingContextTest&) = delete;
+
  protected:
   ReportingContextTest() = default;
-
   ~ReportingContextTest() override = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ReportingContextTest);
 };
 
 class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
@@ -41,9 +44,11 @@ class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
     broker_.SetBinderForTesting(ReportingServiceProxy::Name_, {});
   }
 
-  base::Optional<base::Time> DeprecationReportAnticipatedRemoval() const {
+  absl::optional<base::Time> DeprecationReportAnticipatedRemoval() const {
     return deprecation_report_anticipated_removal_;
   }
+
+  const String& LastMessage() const { return last_message_; }
 
  private:
   void BindReceiver(mojo::ScopedMessagePipeHandle handle) {
@@ -53,7 +58,7 @@ class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
 
   void QueueDeprecationReport(const KURL& url,
                               const String& id,
-                              base::Optional<base::Time> anticipated_removal,
+                              absl::optional<base::Time> anticipated_removal,
                               const String& message,
                               const String& source_file,
                               int32_t line_number,
@@ -91,13 +96,14 @@ class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
       std::move(reached_callback_).Run();
   }
 
-  void QueueFeaturePolicyViolationReport(const KURL& url,
-                                         const String& policy_id,
-                                         const String& disposition,
-                                         const String& message,
-                                         const String& source_file,
-                                         int32_t line_number,
-                                         int32_t column_number) override {
+  void QueuePermissionsPolicyViolationReport(const KURL& url,
+                                             const String& policy_id,
+                                             const String& disposition,
+                                             const String& message,
+                                             const String& source_file,
+                                             int32_t line_number,
+                                             int32_t column_number) override {
+    last_message_ = message;
     if (reached_callback_)
       std::move(reached_callback_).Run();
   }
@@ -110,6 +116,7 @@ class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
                                           const String& source_file,
                                           int32_t line_number,
                                           int32_t column_number) override {
+    last_message_ = message;
     if (reached_callback_)
       std::move(reached_callback_).Run();
   }
@@ -119,7 +126,10 @@ class MockReportingServiceProxy : public mojom::blink::ReportingServiceProxy {
   base::OnceClosure reached_callback_;
 
   // Last reported values
-  base::Optional<base::Time> deprecation_report_anticipated_removal_;
+  absl::optional<base::Time> deprecation_report_anticipated_removal_;
+
+  // Last reported report's message.
+  String last_message_;
 };
 
 TEST_F(ReportingContextTest, CountQueuedReports) {
@@ -161,6 +171,42 @@ TEST_F(ReportingContextTest, DeprecationReportContent) {
   // calls.
   EXPECT_EQ(base::Time::FromJsTime(1000),
             *reporting_service.DeprecationReportAnticipatedRemoval());
+}
+
+TEST_F(ReportingContextTest, PermissionsPolicyViolationReportMessage) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>();
+  auto* win = dummy_page_holder->GetFrame().DomWindow();
+
+  base::RunLoop run_loop;
+  MockReportingServiceProxy reporting_service(win->GetBrowserInterfaceBroker(),
+                                              run_loop.QuitClosure());
+  auto* body = MakeGarbageCollected<PermissionsPolicyViolationReportBody>(
+      "FeatureId", "TestMessage1", "enforce");
+  auto* report = MakeGarbageCollected<Report>(
+      "permissions-policy-violation", win->document()->Url().GetString(), body);
+  auto* reporting_context = ReportingContext::From(win);
+  reporting_context->QueueReport(report);
+  run_loop.Run();
+
+  EXPECT_EQ(reporting_service.LastMessage(), body->message());
+}
+
+TEST_F(ReportingContextTest, DocumentPolicyViolationReportMessage) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>();
+  auto* win = dummy_page_holder->GetFrame().DomWindow();
+
+  base::RunLoop run_loop;
+  MockReportingServiceProxy reporting_service(win->GetBrowserInterfaceBroker(),
+                                              run_loop.QuitClosure());
+  auto* body = MakeGarbageCollected<DocumentPolicyViolationReportBody>(
+      "FeatureId", "TestMessage2", "enforce", "https://resource.com");
+  auto* report = MakeGarbageCollected<Report>(
+      "document-policy-violation", win->document()->Url().GetString(), body);
+  auto* reporting_context = ReportingContext::From(win);
+  reporting_context->QueueReport(report);
+  run_loop.Run();
+
+  EXPECT_EQ(reporting_service.LastMessage(), body->message());
 }
 
 }  // namespace blink

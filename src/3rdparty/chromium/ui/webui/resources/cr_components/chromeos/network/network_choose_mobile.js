@@ -13,16 +13,21 @@ Polymer({
   behaviors: [I18nBehavior],
 
   properties: {
-    /** @private {!chromeos.networkConfig.mojom.ManagedProperties|undefined} */
-    managedProperties: {
-      type: Object,
-      observer: 'managedPropertiesChanged_',
-    },
-
     /** @type {?OncMojo.DeviceStateProperties} */
     deviceState: {
       type: Object,
       value: null,
+    },
+
+    disabled: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @type {!chromeos.networkConfig.mojom.ManagedProperties|undefined} */
+    managedProperties: {
+      type: Object,
+      observer: 'managedPropertiesChanged_',
     },
 
     /**
@@ -111,7 +116,8 @@ Polymer({
    * @private
    */
   getEnableScanButton_(properties) {
-    return properties.connectionState ===
+    return !this.disabled &&
+        properties.connectionState ===
         chromeos.networkConfig.mojom.ConnectionStateType.kNotConnected &&
         !!this.deviceState && !this.deviceState.scanning;
   },
@@ -123,7 +129,7 @@ Polymer({
    */
   getEnableSelectNetwork_(properties) {
     return (
-        !!this.deviceState && !this.deviceState.scanning &&
+        !this.disabled && !!this.deviceState && !this.deviceState.scanning &&
         properties.connectionState ===
             chromeos.networkConfig.mojom.ConnectionStateType.kNotConnected &&
         !!properties.typeProperties.cellular.foundNetworks &&

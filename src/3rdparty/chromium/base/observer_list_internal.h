@@ -11,7 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_types.h"
 
-#if DCHECK_IS_ON()
+#if DCHECK_IS_ON() || EXPENSIVE_DCHECKS_ARE_ON()
 #include "base/debug/stack_trace.h"
 #endif
 
@@ -42,15 +42,15 @@ class BASE_EXPORT UncheckedObserverAdapter {
     return static_cast<ObserverType*>(adapter.ptr_);
   }
 
-#if DCHECK_IS_ON()
+#if EXPENSIVE_DCHECKS_ARE_ON()
   std::string GetCreationStackString() const { return stack_.ToString(); }
-#endif
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 
  private:
   void* ptr_;
-#if DCHECK_IS_ON()
+#if EXPENSIVE_DCHECKS_ARE_ON()
   base::debug::StackTrace stack_;
-#endif
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 };
 
 // Adapter for CheckedObserver types so that they can use the same syntax as a

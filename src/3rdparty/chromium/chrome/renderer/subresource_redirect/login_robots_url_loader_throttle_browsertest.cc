@@ -5,6 +5,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/renderer/subresource_redirect/login_robots_decider_agent.h"
+#include "chrome/renderer/subresource_redirect/robots_rules_parser_cache.h"
 #include "chrome/renderer/subresource_redirect/subresource_redirect_url_loader_throttle.h"
 #include "chrome/renderer/subresource_redirect/subresource_redirect_util.h"
 #include "chrome/test/base/chrome_render_view_test.h"
@@ -14,6 +15,7 @@
 #include "content/public/renderer/render_view.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
@@ -117,10 +119,18 @@ class SubresourceRedirectLoginRobotsURLLoaderThrottleTest
         blink::features::kSubresourceRedirect);
   }
 
-  void SetUpRobotsRules(const std::string& origin,
+  void SetUpRobotsRules(const std::string& origin_str,
                         const std::vector<RobotsRule>& patterns) {
-    login_robots_decider_agent_->UpdateRobotsRulesForTesting(
-        url::Origin::Create(GURL(origin)), GetRobotsRulesProtoString(patterns));
+    const auto origin = url::Origin::Create(GURL(origin_str));
+    RobotsRulesParserCache& robots_rules_parser_cache =
+        RobotsRulesParserCache::Get();
+    if (!robots_rules_parser_cache.DoRobotsRulesParserExist(origin)) {
+      robots_rules_parser_cache.CreateRobotsRulesParser(
+          origin, base::TimeDelta::FromSeconds(2));
+    }
+    EXPECT_TRUE(robots_rules_parser_cache.DoRobotsRulesParserExist(origin));
+    robots_rules_parser_cache.UpdateRobotsRules(
+        origin, GetRobotsRulesProtoString(patterns));
   }
 
   std::unique_ptr<SubresourceRedirectURLLoaderThrottle>
@@ -133,7 +143,7 @@ class SubresourceRedirectLoginRobotsURLLoaderThrottleTest
     request.SetPreviewsState(previews_state);
     request.SetRequestDestination(request_destination);
     auto throttle = SubresourceRedirectURLLoaderThrottle::MaybeCreateThrottle(
-        request, view_->GetMainRenderFrame()->GetRoutingID());
+        request, GetMainRenderFrame()->GetRoutingID());
     EXPECT_TRUE(throttle.get());
     return throttle;
   }
@@ -148,6 +158,7 @@ class SubresourceRedirectLoginRobotsURLLoaderThrottleTest
 
   void SetLoggedInState(bool is_logged_in) {
     login_robots_decider_agent_->SetLoggedInState(is_logged_in);
+    login_robots_decider_agent_->ReadyToCommitNavigation(nullptr);
   }
 
  protected:
@@ -160,7 +171,7 @@ class SubresourceRedirectLoginRobotsURLLoaderThrottleTest
            {"enable_public_image_hints_based_compression", "false"}}}},
         {});
     login_robots_decider_agent_ = new LoginRobotsDeciderAgent(
-        &associated_interfaces_, view_->GetMainRenderFrame());
+        &associated_interfaces_, GetMainRenderFrame());
   }
 
  protected:
@@ -198,6 +209,18 @@ TEST_F(SubresourceRedirectLoginRobotsURLLoaderThrottleTest,
       {true, true, network::mojom::RequestDestination::kImage,
        blink::PreviewsTypes::SUBRESOURCE_REDIRECT_ON,
        "http://www.test.com/test.jpg", false},
+      {true, true, network::mojom::RequestDestination::kImage,
+       blink::PreviewsTypes::SUBRESOURCE_REDIRECT_ON,
+       "http://www.test.com/test.jpg", false},
+      {true, true, network::mojom::RequestDestination::kImage,
+       blink::PreviewsTypes::SUBRESOURCE_REDIRECT_ON, "mailto:foo@bar.com",
+       false},
+      {true, true, network::mojom::RequestDestination::kImage,
+       blink::PreviewsTypes::SUBRESOURCE_REDIRECT_ON,
+       "data:image/png;base64,"
+       "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/"
+       "w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",
+       false},
   };
 
   for (const TestCase& test_case : kTestCases) {
@@ -211,10 +234,9 @@ TEST_F(SubresourceRedirectLoginRobotsURLLoaderThrottleTest,
     request.SetPreviewsState(test_case.previews_state);
     request.SetUrl(GURL(test_case.url));
     request.SetRequestDestination(test_case.destination);
-    EXPECT_EQ(
-        test_case.expected_is_throttle_created,
-        SubresourceRedirectURLLoaderThrottle::MaybeCreateThrottle(
-            request, view_->GetMainRenderFrame()->GetRoutingID()) != nullptr);
+    EXPECT_EQ(test_case.expected_is_throttle_created,
+              SubresourceRedirectURLLoaderThrottle::MaybeCreateThrottle(
+                  request, GetMainRenderFrame()->GetRoutingID()) != nullptr);
   }
 }
 
@@ -325,10 +347,10 @@ TEST_F(SubresourceRedirectLoginRobotsURLLoaderThrottleTest,
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult", 2);
   histogram_tester_.ExpectBucketCount(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
-      RedirectResult::kRedirectable, 1);
+      SubresourceRedirectResult::kRedirectable, 1);
   histogram_tester_.ExpectBucketCount(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
-      RedirectResult::kIneligibleRobotsDisallowed, 1);
+      SubresourceRedirectResult::kIneligibleRobotsDisallowed, 1);
 }
 
 // Tests the cases when robots rules are sent, after throttles are
@@ -370,10 +392,10 @@ TEST_F(SubresourceRedirectLoginRobotsURLLoaderThrottleTest,
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult", 2);
   histogram_tester_.ExpectBucketCount(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
-      RedirectResult::kRedirectable, 1);
+      SubresourceRedirectResult::kRedirectable, 1);
   histogram_tester_.ExpectBucketCount(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
-      RedirectResult::kIneligibleRobotsDisallowed, 1);
+      SubresourceRedirectResult::kIneligibleRobotsDisallowed, 1);
 }
 
 // Tests the cases when robots rules retrieval timesout.
@@ -411,7 +433,7 @@ TEST_F(SubresourceRedirectLoginRobotsURLLoaderThrottleTest,
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult", 2);
   histogram_tester_.ExpectBucketCount(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
-      RedirectResult::kIneligibleRobotsTimeout, 2);
+      SubresourceRedirectResult::kIneligibleRobotsTimeout, 2);
 }
 
 }  // namespace subresource_redirect

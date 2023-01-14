@@ -59,6 +59,14 @@ Event::Properties GetEventPropertiesFromXEvent(EventType type,
 
     // Keyboard group
     auto state = static_cast<uint32_t>(key->state);
+    properties.emplace(kPropertyKeyboardState,
+                       Values{
+                           static_cast<uint8_t>(state),
+                           static_cast<uint8_t>(state >> 8),
+                           static_cast<uint8_t>(state >> 16),
+                           static_cast<uint8_t>(state >> 24),
+                       });
+
     uint8_t group = XkbGroupForCoreState(state);
     properties.emplace(kPropertyKeyboardGroup, Values{group});
 
@@ -66,11 +74,11 @@ Event::Properties GetEventPropertiesFromXEvent(EventType type,
     uint8_t hw_keycode = static_cast<uint8_t>(key->detail);
     properties.emplace(kPropertyKeyboardHwKeyCode, Values{hw_keycode});
 
-    // IBus-gtk specific flags
-    uint8_t ibus_flags = (state >> kPropertyKeyboardIBusFlagOffset) &
-                         kPropertyKeyboardIBusFlagMask;
-    if (ibus_flags)
-      properties.emplace(kPropertyKeyboardIBusFlag, Values{ibus_flags});
+    // IBus-/fctix-GTK specific flags
+    uint8_t ime_flags = (state >> kPropertyKeyboardImeFlagOffset) &
+                        kPropertyKeyboardImeFlagMask;
+    if (ime_flags)
+      properties.emplace(kPropertyKeyboardImeFlag, Values{ime_flags});
 
   } else if (type == ET_MOUSE_EXITED) {
     // NotifyVirtual events are created for intermediate windows that the

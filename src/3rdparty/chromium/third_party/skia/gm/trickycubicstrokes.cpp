@@ -17,11 +17,13 @@
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
 #include "include/gpu/GrContextOptions.h"
-#include "include/gpu/GrRecordingContext.h"
+#include "include/gpu/GrDirectContext.h"
+#include "include/utils/SkRandom.h"
 #include "src/core/SkGeometry.h"
+#include "src/gpu/GrCaps.h"
+#include "src/gpu/GrDirectContextPriv.h"
 #include "src/gpu/GrDrawingManager.h"
 #include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/tessellate/GrTessellationPathRenderer.h"
 
 static constexpr float kStrokeWidth = 30;
 static constexpr int kCellSize = 200;
@@ -99,14 +101,25 @@ enum class FillMode {
     kScale
 };
 
-static void draw_test(SkCanvas* canvas, const SkColor strokeColor) {
+static void draw_test(SkCanvas* canvas, SkPaint::Cap cap, SkPaint::Join join) {
+    SkRandom rand;
+
+    if (canvas->recordingContext() &&
+        canvas->recordingContext()->priv().caps()->shaderCaps()->tessellationSupport() &&
+        canvas->recordingContext()->priv().caps()->shaderCaps()->maxTessellationSegments() == 5) {
+        // The caller successfully overrode the max tessellation segments to 5. Indicate this in the
+        // background color.
+        canvas->clear(SkColorSetARGB(255, 64, 0, 0));
+    } else {
+        canvas->clear(SK_ColorBLACK);
+    }
+
     SkPaint strokePaint;
     strokePaint.setAntiAlias(true);
     strokePaint.setStrokeWidth(kStrokeWidth);
-    strokePaint.setColor(strokeColor);
     strokePaint.setStyle(SkPaint::kStroke_Style);
-
-    canvas->clear(SK_ColorBLACK);
+    strokePaint.setStrokeCap(cap);
+    strokePaint.setStrokeJoin(join);
 
     for (size_t i = 0; i < SK_ARRAY_COUNT(kTrickyCubics); ++i) {
         auto [originalPts, numPts, fillMode, scale] = kTrickyCubics[i];
@@ -145,6 +158,7 @@ static void draw_test(SkCanvas* canvas, const SkColor strokeColor) {
         SkAutoCanvasRestore acr(canvas, true);
         canvas->concat(matrix);
         strokePaint.setStrokeWidth(kStrokeWidth / matrix.getMaxScale());
+        strokePaint.setColor(rand.nextU() | 0xff808080);
         SkPath path = SkPath().moveTo(p[0]);
         if (numPts == 4) {
             path.cubicTo(p[1], p[2], p[3]);
@@ -160,10 +174,17 @@ static void draw_test(SkCanvas* canvas, const SkColor strokeColor) {
 }
 
 DEF_SIMPLE_GM(trickycubicstrokes, canvas, kTestWidth, kTestHeight) {
-    draw_test(canvas, SK_ColorGREEN);
+    draw_test(canvas, SkPaint::kButt_Cap, SkPaint::kMiter_Join);
 }
 
-class TrickyCubicStrokes_tess_segs_5 : public skiagm::GpuGM {
+DEF_SIMPLE_GM(trickycubicstrokes_roundcaps, canvas, kTestWidth, kTestHeight) {
+    draw_test(canvas, SkPaint::kRound_Cap, SkPaint::kRound_Join);
+}
+
+#if SK_GPU_V1
+#include "src/gpu/tessellate/GrTessellationPathRenderer.h"
+
+class TrickyCubicStrokes_tess_segs_5 : public skiagm::GM {
     SkString onShortName() override {
         return SkString("trickycubicstrokes_tess_segs_5");
     }
@@ -183,34 +204,41 @@ class TrickyCubicStrokes_tess_segs_5 : public skiagm::GpuGM {
 
     void modifyGrContextOptions(GrContextOptions* options) override {
         options->fMaxTessellationSegmentsOverride = kMaxTessellationSegmentsOverride;
+        options->fAlwaysPreferHardwareTessellation = true;
         // Only allow the tessellation path renderer.
         options->fGpuPathRenderers = (GpuPathRenderers)((int)options->fGpuPathRenderers &
                                                         (int)GpuPathRenderers::kTessellation);
     }
 
-    DrawResult onDraw(GrRecordingContext* context, GrSurfaceDrawContext*, SkCanvas* canvas,
-                      SkString* errorMsg) override {
-        if (!context->priv().caps()->shaderCaps()->tessellationSupport() ||
-            !GrTessellationPathRenderer::IsSupported(*context->priv().caps())) {
+    DrawResult onDraw(SkCanvas* canvas, SkString* errorMsg) override {
+        auto dContext = GrAsDirectContext(canvas->recordingContext());
+        if (!dContext) {
+            *errorMsg = "GM relies on having access to a live direct context.";
+            return DrawResult::kSkip;
+        }
+
+        if (!dContext->priv().caps()->shaderCaps()->tessellationSupport() ||
+            !GrTessellationPathRenderer::IsSupported(*dContext->priv().caps())) {
             errorMsg->set("Tessellation not supported.");
             return DrawResult::kSkip;
         }
-        auto opts = context->priv().drawingManager()->testingOnly_getOptionsForPathRendererChain();
+        auto opts = dContext->priv().drawingManager()->testingOnly_getOptionsForPathRendererChain();
         if (!(opts.fGpuPathRenderers & GpuPathRenderers::kTessellation)) {
             errorMsg->set("GrTessellationPathRenderer disabled.");
             return DrawResult::kSkip;
         }
-        if (context->priv().caps()->shaderCaps()->maxTessellationSegments() !=
+        if (dContext->priv().caps()->shaderCaps()->maxTessellationSegments() !=
             kMaxTessellationSegmentsOverride) {
             errorMsg->set("modifyGrContextOptions did not affect maxTessellationSegments. "
                           "(Are you running viewer? If so use '--maxTessellationSegments 5'.)");
             return DrawResult::kFail;
         }
         // Suppress a tessellator warning message that caps.maxTessellationSegments is too small.
-        GrRecordingContextPriv::AutoSuppressWarningMessages aswm(context);
-        draw_test(canvas, SK_ColorRED);
+        GrRecordingContextPriv::AutoSuppressWarningMessages aswm(dContext);
+        draw_test(canvas, SkPaint::kButt_Cap, SkPaint::kMiter_Join);
         return DrawResult::kOk;
     }
 };
 
 DEF_GM( return new TrickyCubicStrokes_tess_segs_5; )
+#endif // SK_GPU_V1

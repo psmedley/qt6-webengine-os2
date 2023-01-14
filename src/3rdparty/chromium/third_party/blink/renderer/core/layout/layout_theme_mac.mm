@@ -36,6 +36,9 @@ namespace blink {
 namespace {
 Color GetSystemColor(MacSystemColorID color_id,
                      mojom::blink::ColorScheme color_scheme) {
+  // TODO(almaher): Consider using the mac light and dark high-contrast themes
+  // here instead if forced colors mode is enabled.
+
   // In tests, a WebSandboxSupport may not be set up. Just return a dummy
   // color, in this case, black.
   auto* sandbox_support = Platform::Current()->GetSandboxSupport();
@@ -86,7 +89,7 @@ bool LayoutThemeMac::IsAccentColorCustomized(
       return false;
     }
   } else {
-    int user_custom_color = [[NSUserDefaults standardUserDefaults]
+    NSInteger user_custom_color = [[NSUserDefaults standardUserDefaults]
         integerForKey:@"AppleAquaColorVariant"];
     if (user_custom_color == NSBlueControlTint ||
         user_custom_color == NSDefaultControlTint) {
@@ -94,6 +97,16 @@ bool LayoutThemeMac::IsAccentColorCustomized(
     }
   }
   return true;
+}
+
+Color LayoutThemeMac::GetAccentColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  if (@available(macOS 10.14, *)) {
+    return GetSystemColor(MacSystemColorID::kControlAccentColor, color_scheme);
+  } else {
+    return static_cast<RGBA32>([[NSUserDefaults standardUserDefaults]
+        integerForKey:@"AppleAquaColorVariant"]);
+  }
 }
 
 Color LayoutThemeMac::GetCustomFocusRingColor(
@@ -140,7 +153,6 @@ bool LayoutThemeMac::UsesTestModeFocusRingColor() const {
 }
 
 LayoutTheme& LayoutTheme::NativeTheme() {
-  DCHECK(features::IsFormControlsRefreshEnabled());
   DEFINE_STATIC_REF(LayoutTheme, layout_theme, (LayoutThemeMac::Create()));
   return *layout_theme;
 }

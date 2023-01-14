@@ -4,7 +4,7 @@
 
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include <set>
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom.h"
@@ -43,7 +43,7 @@ WebSandboxFlags ParseWebSandboxToken(const base::StringPiece& token) {
   };
 
   for (const auto& it : table) {
-    if (CompareCaseInsensitiveASCII(it.token, token) == 0)
+    if (base::CompareCaseInsensitiveASCII(it.token, token) == 0)
       return it.flags;
   }
 

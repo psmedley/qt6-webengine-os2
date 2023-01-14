@@ -28,7 +28,6 @@
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_cache.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
@@ -52,6 +51,8 @@ class PLATFORM_EXPORT FontFallbackList : public RefCounted<FontFallbackList> {
     return base::AdoptRef(new FontFallbackList(font_fallback_map));
   }
 
+  FontFallbackList(const FontFallbackList&) = delete;
+  FontFallbackList& operator=(const FontFallbackList&) = delete;
   ~FontFallbackList();
 
   // Returns whether the cached data is valid. We can use a FontFallbackList
@@ -115,6 +116,8 @@ class PLATFORM_EXPORT FontFallbackList : public RefCounted<FontFallbackList> {
   scoped_refptr<FontData> GetFontData(const FontDescription&);
 
   const SimpleFontData* DeterminePrimarySimpleFontData(const FontDescription&);
+  const SimpleFontData* DeterminePrimarySimpleFontDataCore(
+      const FontDescription&);
 
   FallbackListCompositeKey CompositeKey(const FontDescription&) const;
 
@@ -134,10 +137,8 @@ class PLATFORM_EXPORT FontFallbackList : public RefCounted<FontFallbackList> {
   bool is_invalid_ : 1;
 
   base::WeakPtr<ShapeCache> shape_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(FontFallbackList);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_FALLBACK_LIST_H_

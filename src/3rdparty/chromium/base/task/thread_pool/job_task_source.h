@@ -14,7 +14,6 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
-#include "base/optional.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/task/common/checked_lock.h"
 #include "base/task/post_job.h"
@@ -97,9 +96,10 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   // ever modified under a lock or read atomically (optimistic read).
   class State {
    public:
-    static constexpr size_t kCanceledMask = 1;
-    static constexpr size_t kWorkerCountBitOffset = 1;
-    static constexpr size_t kWorkerCountIncrement = 1 << kWorkerCountBitOffset;
+    static constexpr uint32_t kCanceledMask = 1;
+    static constexpr int kWorkerCountBitOffset = 1;
+    static constexpr uint32_t kWorkerCountIncrement = 1
+                                                      << kWorkerCountBitOffset;
 
     struct Value {
       size_t worker_count() const { return value >> kWorkerCountBitOffset; }
@@ -150,6 +150,9 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
     bool IsWaiting() {
       return value_.load(std::memory_order_relaxed) != kNotWaiting;
     }
+
+    // Resets the status as kNotWaiting  using std::memory_order_relaxed.
+    void Reset();
 
     // Sets the status as kWaitingForWorkerToYield using
     // std::memory_order_relaxed.

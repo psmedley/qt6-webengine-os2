@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_MESSAGING_WEB_MESSAGE_PORT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_MESSAGING_WEB_MESSAGE_PORT_H_
 
+#include <string>
 #include <utility>
 
-#include "base/strings/string16.h"
 #include "mojo/public/cpp/bindings/connector.h"
 #include "mojo/public/cpp/bindings/message.h"
 #include "third_party/blink/public/common/common_export.h"
@@ -82,6 +82,10 @@ class BLINK_COMMON_EXPORT WebMessagePort : public mojo::MessageReceiver {
   // Factory function for creating two ends of a message channel. The two ports
   // are conjugates of each other.
   static std::pair<WebMessagePort, WebMessagePort> CreatePair();
+
+  // Wraps one end of a message channel. |port|'s mojo pipe must
+  // be paired, valid and not entangled.
+  static WebMessagePort Create(MessagePortDescriptor port);
 
   // Sets a message receiver for this message port. Once bound any incoming
   // messages to this port will be routed to the provided |receiver| with
@@ -185,7 +189,7 @@ struct BLINK_COMMON_EXPORT WebMessagePort::Message {
   ~Message();
 
   // Creates a message with the given |data|.
-  explicit Message(const base::string16& data);
+  explicit Message(const std::u16string& data);
 
   // Creates a message with the given collection of |ports| to be transferred.
   explicit Message(std::vector<WebMessagePort> ports);
@@ -195,13 +199,13 @@ struct BLINK_COMMON_EXPORT WebMessagePort::Message {
 
   // Creates a message with |data| and a collection of |ports| to be
   // transferred.
-  Message(const base::string16& data, std::vector<WebMessagePort> ports);
+  Message(const std::u16string& data, std::vector<WebMessagePort> ports);
 
   // Creates a message with |data| and a single |port| to be transferred.
-  Message(const base::string16& data, WebMessagePort port);
+  Message(const std::u16string& data, WebMessagePort port);
 
   // A UTF-16 message.
-  base::string16 data;
+  std::u16string data;
 
   // Other message ports that are to be transmitted as part of this message.
   std::vector<WebMessagePort> ports;

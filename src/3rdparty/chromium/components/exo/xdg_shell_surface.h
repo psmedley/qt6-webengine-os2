@@ -6,14 +6,10 @@
 #define COMPONENTS_EXO_XDG_SHELL_SURFACE_H_
 
 #include <cstdint>
-#include <memory>
-#include <string>
 
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/wm/window_state_observer.h"
 #include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "components/exo/shell_surface.h"
 #include "components/exo/surface_observer.h"
 #include "components/exo/surface_tree_host.h"

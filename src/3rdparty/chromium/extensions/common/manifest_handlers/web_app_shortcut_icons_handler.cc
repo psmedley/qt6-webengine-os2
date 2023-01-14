@@ -55,7 +55,7 @@ WebAppShortcutIconsHandler::WebAppShortcutIconsHandler() = default;
 WebAppShortcutIconsHandler::~WebAppShortcutIconsHandler() = default;
 
 bool WebAppShortcutIconsHandler::Parse(Extension* extension,
-                                       base::string16* error) {
+                                       std::u16string* error) {
   // The "web_app_shortcut_icons" key is only available for Bookmark Apps.
   // Including it elsewhere results in an install warning, and the shortcut
   // icons are not parsed.
@@ -75,7 +75,7 @@ bool WebAppShortcutIconsHandler::Parse(Extension* extension,
   }
 
   int shortcut_index = -1;
-  for (const auto& entry : shortcut_icons_val->DictItems()) {
+  for (auto entry : shortcut_icons_val->DictItems()) {
     ++shortcut_index;
     const base::DictionaryValue* shortcut_item_icons = nullptr;
     if (!entry.second.GetAsDictionary(&shortcut_item_icons)) {

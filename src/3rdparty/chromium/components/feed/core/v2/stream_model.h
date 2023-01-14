@@ -16,9 +16,10 @@
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/content_id.pb.h"
 #include "components/feed/core/v2/proto_util.h"
-#include "components/feed/core/v2/public/feed_stream_api.h"
+#include "components/feed/core/v2/public/stream_type.h"
 #include "components/feed/core/v2/stream_model/ephemeral_change.h"
 #include "components/feed/core/v2/stream_model/feature_tree.h"
+#include "components/feed/core/v2/types.h"
 
 namespace feedwire {
 class DataOperation;
@@ -30,6 +31,15 @@ struct StreamModelUpdateRequest;
 // An in-memory stream model.
 class StreamModel {
  public:
+  // Information about the context to pass to this model.
+  struct Context {
+    Context();
+    ~Context();
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+    ContentRevision::Generator revision_generator;
+  };
+
   // Information about an update to the model.
   struct UiUpdate {
     struct SharedStateInfo {
@@ -79,7 +89,7 @@ class StreamModel {
     virtual void OnStoreChange(StoreUpdate update) = 0;
   };
 
-  StreamModel();
+  explicit StreamModel(Context* context);
   ~StreamModel();
 
   StreamModel(const StreamModel& src) = delete;
@@ -116,6 +126,9 @@ class StreamModel {
   // Returns the content identified by |ContentRevision|.
   const feedstore::Content* FindContent(ContentRevision revision) const;
 
+  // Returns the ContentId of the content.
+  feedwire::ContentId FindContentId(ContentRevision revision) const;
+
   // Returns the shared state data identified by |id|.
   const std::string* FindSharedStateData(const std::string& id) const;
 
@@ -131,9 +144,20 @@ class StreamModel {
   bool RejectEphemeralChange(EphemeralChangeId id);
 
   const std::string& GetNextPageToken() const;
+  // Time the client received this stream data. 'NextPage' requests do not
+  // change this time.
+  base::Time GetLastAddedTime() const;
+  // Returns a set of content IDs contained. This remains constant even
+  // after data operations or next-page requests.
+  ContentIdSet GetContentIds() const;
 
   // Outputs a string representing the model state for debugging or testing.
   std::string DumpStateForTesting();
+
+  // Returns true if one or more "cards" can be rendered from the content.
+  bool HasVisibleContent();
+
+  ContentStats GetContentStats() const;
 
  private:
   struct SharedState {

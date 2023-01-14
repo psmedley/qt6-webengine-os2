@@ -9,8 +9,8 @@
 
 #include <memory>
 
+#include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/optional.h"
 
@@ -33,6 +33,8 @@ class IJS_Runtime {
 
   class ScopedEventContext {
    public:
+    FX_STACK_ALLOCATED();
+
     explicit ScopedEventContext(IJS_Runtime* pRuntime);
     ~ScopedEventContext();
 

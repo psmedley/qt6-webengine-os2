@@ -40,8 +40,10 @@ class CertStoreHost;
 class CertStoreInstance;
 class ClipboardHost;
 class ClipboardInstance;
+class CompatibilityModeInstance;
 class CrashCollectorHost;
 class CrashCollectorInstance;
+class DarkThemeInstance;
 class DigitalGoodsInstance;
 class DiskQuotaHost;
 class DiskQuotaInstance;
@@ -57,16 +59,21 @@ class InputMethodManagerHost;
 class InputMethodManagerInstance;
 class IntentHelperHost;
 class IntentHelperInstance;
+class KeyboardShortcutHost;
+class KeyboardShortcutInstance;
 class KeymasterHost;
 class KeymasterInstance;
 class KioskHost;
 class KioskInstance;
 class LockScreenInstance;
 class MediaSessionInstance;
+class MemoryInstance;
 class MetricsHost;
 class MetricsInstance;
 class MidisHost;
 class MidisInstance;
+class NearbyShareHost;
+class NearbyShareInstance;
 class NetHost;
 class NetInstance;
 class ObbMounterHost;
@@ -109,6 +116,7 @@ class WakeLockHost;
 class WakeLockInstance;
 class WallpaperHost;
 class WallpaperInstance;
+class WebApkInstance;
 }  // namespace mojom
 
 // Holds Mojo channels which proxy to ARC side implementation. The actual
@@ -187,9 +195,15 @@ class ArcBridgeService {
   clipboard() {
     return &clipboard_;
   }
+  ConnectionHolder<mojom::CompatibilityModeInstance>* compatibility_mode() {
+    return &compatibility_mode_;
+  }
   ConnectionHolder<mojom::CrashCollectorInstance, mojom::CrashCollectorHost>*
   crash_collector() {
     return &crash_collector_;
+  }
+  ConnectionHolder<mojom::DarkThemeInstance>* dark_theme() {
+    return &dark_theme_;
   }
   ConnectionHolder<mojom::DigitalGoodsInstance>* digital_goods() {
     return &digital_goods_;
@@ -221,6 +235,11 @@ class ArcBridgeService {
   intent_helper() {
     return &intent_helper_;
   }
+  ConnectionHolder<mojom::KeyboardShortcutInstance,
+                   mojom::KeyboardShortcutHost>*
+  keyboard_shortcut() {
+    return &keyboard_shortcut_;
+  }
   ConnectionHolder<mojom::KeymasterInstance, mojom::KeymasterHost>*
   keymaster() {
     return &keymaster_;
@@ -234,11 +253,16 @@ class ArcBridgeService {
   ConnectionHolder<mojom::MediaSessionInstance>* media_session() {
     return &media_session_;
   }
+  ConnectionHolder<mojom::MemoryInstance>* memory() { return &memory_; }
   ConnectionHolder<mojom::MetricsInstance, mojom::MetricsHost>* metrics() {
     return &metrics_;
   }
   ConnectionHolder<mojom::MidisInstance, mojom::MidisHost>* midis() {
     return &midis_;
+  }
+  ConnectionHolder<mojom::NearbyShareInstance, mojom::NearbyShareHost>*
+  nearby_share() {
+    return &nearby_share_;
   }
   ConnectionHolder<mojom::NetInstance, mojom::NetHost>* net() { return &net_; }
   ConnectionHolder<mojom::ObbMounterInstance, mojom::ObbMounterHost>*
@@ -310,6 +334,7 @@ class ArcBridgeService {
   wallpaper() {
     return &wallpaper_;
   }
+  ConnectionHolder<mojom::WebApkInstance>* webapk() { return &webapk_; }
 
  private:
   base::ObserverList<Observer> observer_list_;
@@ -332,8 +357,10 @@ class ArcBridgeService {
   ConnectionHolder<mojom::CastReceiverInstance> cast_receiver_;
   ConnectionHolder<mojom::CertStoreInstance, mojom::CertStoreHost> cert_store_;
   ConnectionHolder<mojom::ClipboardInstance, mojom::ClipboardHost> clipboard_;
+  ConnectionHolder<mojom::CompatibilityModeInstance> compatibility_mode_;
   ConnectionHolder<mojom::CrashCollectorInstance, mojom::CrashCollectorHost>
       crash_collector_;
+  ConnectionHolder<mojom::DarkThemeInstance> dark_theme_;
   ConnectionHolder<mojom::DigitalGoodsInstance> digital_goods_;
   ConnectionHolder<mojom::DiskQuotaInstance, mojom::DiskQuotaHost> disk_quota_;
   ConnectionHolder<mojom::EnterpriseReportingInstance,
@@ -348,12 +375,17 @@ class ArcBridgeService {
       input_method_manager_;
   ConnectionHolder<mojom::IntentHelperInstance, mojom::IntentHelperHost>
       intent_helper_;
+  ConnectionHolder<mojom::KeyboardShortcutInstance, mojom::KeyboardShortcutHost>
+      keyboard_shortcut_;
   ConnectionHolder<mojom::KeymasterInstance, mojom::KeymasterHost> keymaster_;
   ConnectionHolder<mojom::KioskInstance, mojom::KioskHost> kiosk_;
   ConnectionHolder<mojom::LockScreenInstance> lock_screen_;
   ConnectionHolder<mojom::MediaSessionInstance> media_session_;
+  ConnectionHolder<mojom::MemoryInstance> memory_;
   ConnectionHolder<mojom::MetricsInstance, mojom::MetricsHost> metrics_;
   ConnectionHolder<mojom::MidisInstance, mojom::MidisHost> midis_;
+  ConnectionHolder<mojom::NearbyShareInstance, mojom::NearbyShareHost>
+      nearby_share_;
   ConnectionHolder<mojom::NetInstance, mojom::NetHost> net_;
   ConnectionHolder<mojom::ObbMounterInstance, mojom::ObbMounterHost>
       obb_mounter_;
@@ -384,6 +416,7 @@ class ArcBridgeService {
       volume_mounter_;
   ConnectionHolder<mojom::WakeLockInstance, mojom::WakeLockHost> wake_lock_;
   ConnectionHolder<mojom::WallpaperInstance, mojom::WallpaperHost> wallpaper_;
+  ConnectionHolder<mojom::WebApkInstance> webapk_;
   DISALLOW_COPY_AND_ASSIGN(ArcBridgeService);
 };
 

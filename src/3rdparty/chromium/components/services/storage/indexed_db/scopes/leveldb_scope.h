@@ -115,12 +115,10 @@ class LevelDBScope {
   struct EmptyRangeLessThan {
     // This constructor is needed to satisfy the constraints of having default
     // construction of the |empty_ranges_| flat_map below.
-    EmptyRangeLessThan() noexcept;
-    EmptyRangeLessThan(const leveldb::Comparator* comparator) noexcept;
-    EmptyRangeLessThan(const EmptyRangeLessThan& other) noexcept;
-    EmptyRangeLessThan(EmptyRangeLessThan&& other) noexcept;
-    EmptyRangeLessThan& operator=(const EmptyRangeLessThan& other) noexcept;
-    EmptyRangeLessThan& operator=(EmptyRangeLessThan&& other) noexcept;
+    EmptyRangeLessThan();
+    explicit EmptyRangeLessThan(const leveldb::Comparator* comparator);
+    EmptyRangeLessThan(const EmptyRangeLessThan& other);
+    EmptyRangeLessThan& operator=(const EmptyRangeLessThan& other);
 
     // The ranges are expected to be disjoint.
     bool operator()(const EmptyRange& lhs, const EmptyRange& rhs) const;

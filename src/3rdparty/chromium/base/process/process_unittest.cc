@@ -21,6 +21,8 @@
 #if defined(OS_WIN)
 #include "base/win/base_win_buildflags.h"
 #include "base/win/windows_version.h"
+
+#include <windows.h>
 #endif
 
 namespace {
@@ -124,7 +126,6 @@ MULTIPROCESS_TEST_MAIN(SleepyChildProcess) {
 
 // TODO(https://crbug.com/726484): Enable these tests on Fuchsia when
 // CreationTime() is implemented.
-#if !defined(OS_FUCHSIA)
 TEST_F(ProcessTest, CreationTimeCurrentProcess) {
   // The current process creation time should be less than or equal to the
   // current time.
@@ -149,8 +150,8 @@ TEST_F(ProcessTest, CreationTimeOtherProcess) {
       // Time::Now() is a combination of system clock and
       // QueryPerformanceCounter(). Tolerate 100 ms for the clock mismatch.
       TimeDelta::FromMilliseconds(100);
-#elif defined(OS_APPLE)
-      // On Mac, process creation time should be very precise.
+#elif defined(OS_APPLE) || defined(OS_FUCHSIA)
+      // On Mac and Fuchsia, process creation time should be very precise.
       TimeDelta::FromMilliseconds(0);
 #else
 #error Unsupported platform
@@ -164,7 +165,6 @@ TEST_F(ProcessTest, CreationTimeOtherProcess) {
   EXPECT_TRUE(process.Terminate(kDummyExitCode, true));
 }
 #endif  // !defined(OS_ANDROID)
-#endif  // !defined(OS_FUCHSIA)
 
 TEST_F(ProcessTest, Terminate) {
   Process process(SpawnChild("SleepyChildProcess"));
@@ -183,8 +183,8 @@ TEST_F(ProcessTest, Terminate) {
 
   EXPECT_NE(TERMINATION_STATUS_STILL_RUNNING,
             GetTerminationStatus(process.Handle(), &exit_code));
-#if !defined(OS_POSIX) && !defined(OS_FUCHSIA)
-  // The POSIX & Fuchsia implementations actually ignore the exit_code.
+#if defined(OS_WIN)
+  // Only Windows propagates the |exit_code| set in Terminate().
   EXPECT_EQ(kExpectedExitCode, exit_code);
 #endif
 }

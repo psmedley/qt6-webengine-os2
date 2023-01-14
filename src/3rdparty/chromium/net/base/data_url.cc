@@ -9,7 +9,7 @@
 #include "net/base/data_url.h"
 
 #include "base/base64.h"
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -110,7 +110,7 @@ bool DataURL::Parse(const GURL& url,
     // of the data, and should be stripped. Otherwise, the escaped whitespace
     // could be part of the payload, so don't strip it.
     if (base64_encoded) {
-      std::string unescaped_body = UnescapeBinaryURLComponent(raw_body);
+      std::string unescaped_body = base::UnescapeBinaryURLComponent(raw_body);
 
       // Strip spaces, which aren't allowed in Base64 encoding.
       base::EraseIf(unescaped_body, base::IsAsciiWhitespace<char>);
@@ -138,7 +138,7 @@ bool DataURL::Parse(const GURL& url,
         raw_body = temp;
       }
 
-      *data = UnescapeBinaryURLComponent(raw_body);
+      *data = base::UnescapeBinaryURLComponent(raw_body);
     }
   }
 

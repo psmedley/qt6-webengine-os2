@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "chrome/browser/ui/webui/settings/chromeos/hierarchy.h"
+#include "chrome/browser/ui/webui/settings/chromeos/os_apps_page/app_notification_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/os_settings_sections.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
@@ -29,7 +30,7 @@ OsSettingsManager::OsSettingsManager(
     signin::IdentityManager* identity_manager,
     android_sms::AndroidSmsService* android_sms_service,
     CupsPrintersManager* printers_manager,
-    apps::AppServiceProxy* app_service_proxy)
+    apps::AppServiceProxyChromeOs* app_service_proxy)
     : search_tag_registry_(
           std::make_unique<SearchTagRegistry>(local_search_service_proxy)),
       sections_(
@@ -53,7 +54,9 @@ OsSettingsManager::OsSettingsManager(
           std::make_unique<SearchHandler>(search_tag_registry_.get(),
                                           sections_.get(),
                                           hierarchy_.get(),
-                                          local_search_service_proxy)) {}
+                                          local_search_service_proxy)),
+      app_notification_handler_(
+          std::make_unique<AppNotificationHandler>(app_service_proxy)) {}
 
 OsSettingsManager::~OsSettingsManager() = default;
 
@@ -71,6 +74,7 @@ void OsSettingsManager::AddHandlers(content::WebUI* web_ui) {
 void OsSettingsManager::Shutdown() {
   // Note: These must be deleted in the opposite order of their creation to
   // prevent against UAF violations.
+  app_notification_handler_.reset();
   search_handler_.reset();
   settings_user_action_tracker_.reset();
   hierarchy_.reset();

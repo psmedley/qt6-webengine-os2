@@ -11,10 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "services/network/public/mojom/referrer_policy.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/navigation/impression.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-forward.h"
 #include "ui/base/ui_base_types.h"
@@ -49,11 +48,11 @@ struct BLINK_COMMON_EXPORT UntrustworthyContextMenuParams {
   // The text associated with the link. May be an empty string if the contents
   // of the link are an image.
   // Will be empty if |link_url| is empty.
-  base::string16 link_text;
+  std::u16string link_text;
 
-  // The impression declared by the link. May be base::nullopt even if
+  // The impression declared by the link. May be absl::nullopt even if
   // |link_url| is non-empty.
-  base::Optional<blink::Impression> impression;
+  absl::optional<blink::Impression> impression;
 
   // The link URL to be used ONLY for "copy link address". We don't validate
   // this field in the frontend process.
@@ -73,30 +72,30 @@ struct BLINK_COMMON_EXPORT UntrustworthyContextMenuParams {
   int media_flags;
 
   // This is the text of the selection that the context menu was invoked on.
-  base::string16 selection_text;
+  std::u16string selection_text;
 
   // This is the title text of the selection that the context menu was
   // invoked on.
-  base::string16 title_text;
+  std::u16string title_text;
 
   // This is the alt text of the selection that the context menu was
   // invoked on.
-  base::string16 alt_text;
+  std::u16string alt_text;
 
   // This is the suggested filename to be used when saving file through "Save
   // Link As" option of context menu.
-  base::string16 suggested_filename;
+  std::u16string suggested_filename;
 
   // The misspelled word under the cursor, if any. Used to generate the
   // |dictionary_suggestions| list.
-  base::string16 misspelled_word;
+  std::u16string misspelled_word;
 
   // Suggested replacements for a misspelled word under the cursor.
   // This vector gets populated in the render process host
   // by intercepting ViewHostMsg_ContextMenu in ResourceMessageFilter
   // and populating dictionary_suggestions if the type is EDITABLE
   // and the misspelled_word is not empty.
-  std::vector<base::string16> dictionary_suggestions;
+  std::vector<std::u16string> dictionary_suggestions;
 
   // If editable, flag for whether spell check is enabled or not.
   bool spellcheck_enabled;
@@ -132,6 +131,10 @@ struct BLINK_COMMON_EXPORT UntrustworthyContextMenuParams {
 
   // Start position of the selection text.
   int selection_start_offset;
+
+  // The context menu was opened by right clicking on an existing
+  // highlight/fragment.
+  bool opened_from_highlight = false;
 
  private:
   void Assign(const UntrustworthyContextMenuParams& other);

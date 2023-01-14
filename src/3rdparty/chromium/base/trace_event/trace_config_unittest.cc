@@ -6,11 +6,11 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/macros.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_config_memory_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 namespace trace_event {
@@ -284,7 +284,7 @@ TEST(TraceConfigTest, ConstructDefaultTraceConfig) {
   CheckDefaultTraceConfigBehavior(tc_empty_json_string);
 
   // Constructor from dictionary value.
-  DictionaryValue dict;
+  Value dict(Value::Type::DICTIONARY);
   TraceConfig tc_dict(dict);
   EXPECT_STREQ("", tc_dict.ToCategoryFilterString().c_str());
   EXPECT_STREQ(kDefaultTraceConfigString, tc_dict.ToString().c_str());
@@ -333,7 +333,7 @@ TEST(TraceConfigTest, DisabledByDefaultCategoryFilterString) {
 
 TEST(TraceConfigTest, TraceConfigFromDict) {
   // Passing in empty dictionary will result in default trace config.
-  DictionaryValue dict;
+  Value dict(Value::Type::DICTIONARY);
   TraceConfig tc(dict);
   EXPECT_STREQ(kDefaultTraceConfigString, tc.ToString().c_str());
   EXPECT_EQ(RECORD_UNTIL_FULL, tc.GetTraceRecordMode());
@@ -341,7 +341,8 @@ TEST(TraceConfigTest, TraceConfigFromDict) {
   EXPECT_FALSE(tc.IsArgumentFilterEnabled());
   EXPECT_STREQ("", tc.ToCategoryFilterString().c_str());
 
-  Optional<Value> default_value = JSONReader::Read(kDefaultTraceConfigString);
+  absl::optional<Value> default_value =
+      JSONReader::Read(kDefaultTraceConfigString);
   ASSERT_TRUE(default_value);
   ASSERT_TRUE(default_value->is_dict());
   TraceConfig default_tc(*default_value);
@@ -351,7 +352,8 @@ TEST(TraceConfigTest, TraceConfigFromDict) {
   EXPECT_FALSE(default_tc.IsArgumentFilterEnabled());
   EXPECT_STREQ("", default_tc.ToCategoryFilterString().c_str());
 
-  Optional<Value> custom_value = JSONReader::Read(kCustomTraceConfigString);
+  absl::optional<Value> custom_value =
+      JSONReader::Read(kCustomTraceConfigString);
   ASSERT_TRUE(custom_value);
   ASSERT_TRUE(custom_value->is_dict());
   TraceConfig custom_tc(*custom_value);

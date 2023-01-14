@@ -21,12 +21,12 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/notreached.h"
-#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
@@ -52,13 +52,15 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/data_pipe_getter.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/fake_test_cert_verifier_params_factory.h"
 #include "services/network/test/test_network_context_client.h"
-#include "services/network/test/test_network_service_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -421,7 +423,7 @@ class SimpleLoaderTestHelper : public SimpleURLLoaderStreamConsumer {
       done_ = true;
     }
 
-    download_as_stream_response_body_.append(string_piece.as_string());
+    download_as_stream_response_body_.append(std::string(string_piece));
 
     if (download_to_stream_destroy_on_data_received_) {
       run_loop_.Quit();
@@ -625,13 +627,13 @@ class SimpleURLLoaderTestBase {
         network_context_.BindNewPipeAndPassReceiver(),
         std::move(context_params));
 
-    mojo::PendingRemote<network::mojom::NetworkServiceClient>
-        network_service_client_remote;
-    network_service_client_ = std::make_unique<TestNetworkServiceClient>(
-        network_service_client_remote.InitWithNewPipeAndPassReceiver());
-    network_service_remote->SetClient(
-        std::move(network_service_client_remote),
-        network::mojom::NetworkServiceParams::New());
+    mojo::PendingReceiver<network::mojom::URLLoaderNetworkServiceObserver>
+        default_observer_receiver;
+    network::mojom::NetworkServiceParamsPtr network_service_params =
+        network::mojom::NetworkServiceParams::New();
+    network_service_params->default_observer =
+        default_observer_receiver.InitWithNewPipeAndPassRemote();
+    network_service_remote->SetParams(std::move(network_service_params));
 
     mojo::PendingRemote<network::mojom::NetworkContextClient>
         network_context_client_remote;
@@ -687,7 +689,6 @@ class SimpleURLLoaderTestBase {
   base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<network::mojom::NetworkService> network_service_;
-  std::unique_ptr<network::mojom::NetworkServiceClient> network_service_client_;
   std::unique_ptr<network::mojom::NetworkContextClient> network_context_client_;
   mojo::Remote<network::mojom::NetworkContext> network_context_;
   mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory_;
@@ -2196,7 +2197,7 @@ class MockURLLoader : public network::mojom::URLLoader {
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override {}
+      const absl::optional<GURL>& new_url) override {}
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {
     NOTREACHED();
@@ -2256,7 +2257,6 @@ class MockURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> url_loader_receiver,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& url_request,
@@ -2788,6 +2788,9 @@ TEST_P(SimpleURLLoaderTest, RetryOn5xx) {
       EXPECT_EQ(test_case.expected_num_requests - 1,
                 test_helper->download_as_stream_retries());
     }
+
+    EXPECT_EQ(test_case.expected_num_requests - 1,
+              test_helper->simple_url_loader()->GetNumRetries());
   }
 }
 
@@ -2880,6 +2883,9 @@ TEST_P(SimpleURLLoaderTest, RetryOnNameNotResolved) {
       EXPECT_EQ(test_case.expected_num_requests - 1,
                 test_helper->download_as_stream_retries());
     }
+
+    EXPECT_EQ(test_case.expected_num_requests - 1,
+              test_helper->simple_url_loader()->GetNumRetries());
   }
 }
 
@@ -3061,6 +3067,9 @@ TEST_P(SimpleURLLoaderTest, RetryOnNetworkChange) {
         EXPECT_EQ(test_case.expected_num_requests - 1,
                   test_helper->download_as_stream_retries());
       }
+
+      EXPECT_EQ(test_case.expected_num_requests - 1,
+                test_helper->simple_url_loader()->GetNumRetries());
     }
   }
 
@@ -3427,11 +3436,17 @@ class SimpleURLLoaderMockTimeTest : public testing::Test {
  public:
   SimpleURLLoaderMockTimeTest()
       : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
-        disallow_blocking_(std::make_unique<base::ScopedDisallowBlocking>()) {
+        disallow_blocking_(std::make_unique<base::ScopedDisallowBlocking>()) {}
+  ~SimpleURLLoaderMockTimeTest() override = default;
+
+  void SetUp() override {
     SimpleURLLoader::SetTimeoutTickClockForTest(
         task_environment_.GetMockTickClock());
   }
-  ~SimpleURLLoaderMockTimeTest() override {}
+
+  void TearDown() override {
+    SimpleURLLoader::SetTimeoutTickClockForTest(nullptr);
+  }
 
   std::unique_ptr<SimpleLoaderTestHelper> CreateHelper() {
     std::unique_ptr<network::ResourceRequest> resource_request =

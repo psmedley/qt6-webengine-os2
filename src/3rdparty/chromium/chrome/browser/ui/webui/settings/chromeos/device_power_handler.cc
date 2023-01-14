@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "ash/public/cpp/ash_pref_names.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/public/cpp/power_utils.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -29,12 +29,12 @@ namespace chromeos {
 namespace settings {
 namespace {
 
-base::string16 GetBatteryTimeText(base::TimeDelta time_left) {
+std::u16string GetBatteryTimeText(base::TimeDelta time_left) {
   int hour = 0;
   int min = 0;
   ash::power_utils::SplitTimeIntoHoursAndMinutes(time_left, &hour, &min);
 
-  base::string16 time_text;
+  std::u16string time_text;
   if (hour == 0 || min == 0) {
     // Display only one unit ("2 hours" or "10 minutes").
     return ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_DURATION,
@@ -115,23 +115,24 @@ PowerHandler::TestAPI::TestAPI(PowerHandler* handler) : handler_(handler) {}
 PowerHandler::TestAPI::~TestAPI() = default;
 
 void PowerHandler::TestAPI::RequestPowerManagementSettings() {
-  base::ListValue args;
-  handler_->HandleRequestPowerManagementSettings(&args);
+  base::Value args(base::Value::Type::LIST);
+  handler_->HandleRequestPowerManagementSettings(
+      &base::Value::AsListValue(args));
 }
 
 void PowerHandler::TestAPI::SetIdleBehavior(IdleBehavior behavior,
                                             bool when_on_ac) {
-  base::ListValue args;
-  args.AppendInteger(static_cast<int>(behavior));
-  args.AppendBoolean(when_on_ac);
-  handler_->HandleSetIdleBehavior(&args);
+  base::Value args(base::Value::Type::LIST);
+  args.Append(static_cast<int>(behavior));
+  args.Append(when_on_ac);
+  handler_->HandleSetIdleBehavior(&base::Value::AsListValue(args));
 }
 
 void PowerHandler::TestAPI::SetLidClosedBehavior(
     PowerPolicyController::Action behavior) {
-  base::ListValue args;
-  args.AppendInteger(behavior);
-  handler_->HandleSetLidClosedBehavior(&args);
+  base::Value args(base::Value::Type::LIST);
+  args.Append(behavior);
+  handler_->HandleSetLidClosedBehavior(&base::Value::AsListValue(args));
 }
 
 PowerHandler::PowerHandler(PrefService* prefs) : prefs_(prefs) {}
@@ -230,10 +231,10 @@ void PowerHandler::HandleRequestPowerManagementSettings(
 void PowerHandler::HandleSetIdleBehavior(const base::ListValue* args) {
   AllowJavascript();
 
-  int value = 0;
-  bool when_on_ac = true;
-  CHECK(args->GetInteger(0, &value));
-  CHECK(args->GetBoolean(1, &when_on_ac));
+  const auto& list = args->GetList();
+  CHECK_GE(list.size(), 2u);
+  int value = list[0].GetInt();
+  bool when_on_ac = list[1].GetBool();
 
   const char* idle_pref = when_on_ac ? ash::prefs::kPowerAcIdleAction
                                      : ash::prefs::kPowerBatteryIdleAction;
@@ -280,8 +281,9 @@ void PowerHandler::HandleSetIdleBehavior(const base::ListValue* args) {
 void PowerHandler::HandleSetLidClosedBehavior(const base::ListValue* args) {
   AllowJavascript();
 
-  int value = 0;
-  CHECK(args->GetInteger(0, &value));
+  const auto& list = args->GetList();
+  CHECK_GE(list.size(), 1u);
+  int value = list[0].GetInt();
   switch (static_cast<PowerPolicyController::Action>(value)) {
     case PowerPolicyController::ACTION_SUSPEND:
       prefs_->ClearPref(ash::prefs::kPowerLidClosedAction);
@@ -296,7 +298,7 @@ void PowerHandler::HandleSetLidClosedBehavior(const base::ListValue* args) {
 }
 
 void PowerHandler::SendBatteryStatus() {
-  const base::Optional<power_manager::PowerSupplyProperties>& proto =
+  const absl::optional<power_manager::PowerSupplyProperties>& proto =
       PowerManagerClient::Get()->GetLastStatus();
   DCHECK(proto);
   bool charging = proto->battery_state() ==
@@ -314,7 +316,7 @@ void PowerHandler::SendBatteryStatus() {
     show_time = ash::power_utils::ShouldDisplayBatteryTime(time_left);
   }
 
-  base::string16 status_text;
+  std::u16string status_text;
   if (show_time) {
     status_text = l10n_util::GetStringFUTF16(
         charging ? IDS_SETTINGS_BATTERY_STATUS_CHARGING
@@ -339,7 +341,7 @@ void PowerHandler::SendBatteryStatus() {
 }
 
 void PowerHandler::SendPowerSources() {
-  const base::Optional<power_manager::PowerSupplyProperties>& proto =
+  const absl::optional<power_manager::PowerSupplyProperties>& proto =
       PowerManagerClient::Get()->GetLastStatus();
   DCHECK(proto);
   base::ListValue sources_list;
@@ -411,7 +413,7 @@ void PowerHandler::SendPowerManagementSettings(bool force) {
 }
 
 void PowerHandler::OnGotSwitchStates(
-    base::Optional<PowerManagerClient::SwitchStates> result) {
+    absl::optional<PowerManagerClient::SwitchStates> result) {
   if (!result.has_value())
     return;
   lid_state_ = result->lid_state;

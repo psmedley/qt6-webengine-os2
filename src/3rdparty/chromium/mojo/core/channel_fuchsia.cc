@@ -12,16 +12,17 @@
 #include <zircon/status.h>
 #include <zircon/syscalls.h>
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
+#include "base/cxx17_backports.h"
 #include "base/files/scoped_file.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_pump_for_io.h"
-#include "base/stl_util.h"
 #include "base/synchronization/lock.h"
 #include "base/task/current_thread.h"
 #include "base/task_runner.h"
@@ -245,8 +246,9 @@ class ChannelFuchsia : public Channel,
 
     base::CurrentThread::Get()->AddDestructionObserver(this);
 
-    read_watch_.reset(
-        new base::MessagePumpForIO::ZxHandleWatchController(FROM_HERE));
+    read_watch_ =
+        std::make_unique<base::MessagePumpForIO::ZxHandleWatchController>(
+            FROM_HERE);
     base::CurrentIOThread::Get()->WatchZxHandle(
         handle_.get(), true /* persistent */,
         ZX_CHANNEL_READABLE | ZX_CHANNEL_PEER_CLOSED, read_watch_.get(), this);

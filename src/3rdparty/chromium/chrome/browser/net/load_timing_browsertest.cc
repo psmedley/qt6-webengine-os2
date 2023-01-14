@@ -31,7 +31,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
-#include "third_party/blink/public/common/features.h"
+#include "services/network/public/cpp/features.h"
 #include "url/gurl.h"
 
 // This file tests that net::LoadTimingInfo is correctly hooked up to the
@@ -74,12 +74,10 @@ class LoadTimingBrowserTest : public InProcessBrowserTest {
 
     // Unlike the above times, secureConnectionStart will be zero when not
     // applicable.  In that case, leave ssl_start as null.
-    bool ssl_start_zero = false;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-                    browser()->tab_strip_model()->GetActiveWebContents(),
-                    "window.domAutomationController.send("
-                        "performance.timing.secureConnectionStart == 0);",
-                    &ssl_start_zero));
+    bool ssl_start_zero =
+        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        "performance.timing.secureConnectionStart == 0;")
+            .ExtractBool();
     if (!ssl_start_zero)
       navigation_deltas->ssl_start = GetResultDelta("secureConnectionStart");
     else
@@ -100,15 +98,13 @@ class LoadTimingBrowserTest : public InProcessBrowserTest {
   // Returns the time between performance.timing.fetchStart and the time with
   // the specified name.  This time must be non-negative.
   int GetResultDelta(const std::string& name) {
-    int time_ms = 0;
     std::string command(base::StringPrintf(
-        "window.domAutomationController.send("
-            "performance.timing.%s - performance.timing.fetchStart);",
+        "performance.timing.%s - performance.timing.fetchStart;",
         name.c_str()));
-    EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
-                    browser()->tab_strip_model()->GetActiveWebContents(),
-                    command.c_str(),
-                    &time_ms));
+    int time_ms =
+        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        command.c_str())
+            .ExtractInt();
     // Basic sanity check.
     EXPECT_GE(time_ms, 0);
     return time_ms;
@@ -177,38 +173,6 @@ IN_PROC_BROWSER_TEST_F(LoadTimingBrowserTest, Proxy) {
   EXPECT_LT(navigation_deltas.send_start,
             navigation_deltas.receive_headers_end);
 
-  EXPECT_EQ(navigation_deltas.ssl_start, -1);
-}
-
-// Test fixture for tests that depend on FTP support. Moved out to a separate
-// fixture since remaining functionality should be tested without FTP support.
-//
-// TODO(https://crbug.com/333943): Remove FTP specific tests and test fixtures.
-class LoadTimingBrowserTestWithFtp : public LoadTimingBrowserTest {
- public:
-  LoadTimingBrowserTestWithFtp() {
-    scoped_feature_list_.InitAndEnableFeature(blink::features::kFtpProtocol);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(LoadTimingBrowserTestWithFtp, FTP) {
-  net::SpawnedTestServer ftp_server(net::SpawnedTestServer::TYPE_FTP,
-                                    base::FilePath());
-  ASSERT_TRUE(ftp_server.Start());
-  GURL url = ftp_server.GetURL("/");
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  TimingDeltas navigation_deltas;
-  GetResultDeltas(&navigation_deltas);
-
-  EXPECT_EQ(navigation_deltas.dns_start, 0);
-  EXPECT_EQ(navigation_deltas.dns_end, 0);
-  EXPECT_EQ(navigation_deltas.connect_start, 0);
-  EXPECT_EQ(navigation_deltas.connect_end, 0);
-  EXPECT_EQ(navigation_deltas.receive_headers_end, 0);
   EXPECT_EQ(navigation_deltas.ssl_start, -1);
 }
 

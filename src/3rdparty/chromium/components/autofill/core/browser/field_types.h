@@ -5,22 +5,22 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FIELD_TYPES_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FIELD_TYPES_H_
 
-#include <map>
-#include <set>
+#include <type_traits>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_piece_forward.h"
 #include "components/autofill/core/common/dense_set.h"
 
 namespace autofill {
 
 // NOTE: This list MUST not be modified except to keep it synchronized with the
-// Autofill server's version.  The server aggregates and stores these types over
+// Autofill server's version. The server aggregates and stores these types over
 // several versions, so we must remain fully compatible with the Autofill
-// server, which is itself backward-compatible.  The list must be kept up to
+// server, which is itself backward-compatible. The list must be kept up to
 // date with the Autofill server list.
 //
-// The list of all field types natively understood by the Autofill server.  A
+// NOTE: When deprecating field types, also update IsValidServerFieldType().
+//
+// The list of all field types natively understood by the Autofill server. A
 // subset of these types is used to store Autofill data in the user's profile.
 enum ServerFieldType {
   // Server indication that it has no data for the requested field.
@@ -106,6 +106,8 @@ enum ServerFieldType {
   // these are likely to be filled out differently on a case by case basis,
   // they are here primarily for use by Autocheckout.
   MERCHANT_EMAIL_SIGNUP = 73,
+  // A promo/gift/coupon code, usually entered during checkout on a commerce web
+  // site to reduce the cost of a purchase.
   MERCHANT_PROMO_CODE = 74,
 
   // Field types for the password fields. PASSWORD is the default type for all
@@ -346,6 +348,13 @@ enum class FieldTypeGroup {
 };
 
 using ServerFieldTypeSet = DenseSet<ServerFieldType, MAX_VALID_FIELD_TYPE>;
+
+// Returns |raw_value| if it corresponds to a non-deprecated enumeration
+// constant of ServerFieldType other than MAX_VALID_FIELD_TYPE. Otherwise,
+// returns |fallback_value|.
+ServerFieldType ToSafeServerFieldType(
+    std::underlying_type_t<ServerFieldType> raw_value,
+    ServerFieldType fallback_value);
 
 // Returns whether the field can be filled with data.
 bool IsFillableFieldType(ServerFieldType field_type);

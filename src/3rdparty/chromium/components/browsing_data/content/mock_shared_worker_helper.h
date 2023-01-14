@@ -10,6 +10,10 @@
 
 #include "components/browsing_data/content/shared_worker_helper.h"
 
+namespace blink {
+class StorageKey;
+}  // namespace blink
+
 namespace content {
 class BrowserContext;
 }
@@ -37,7 +41,7 @@ class MockSharedWorkerHelper : public SharedWorkerHelper {
   void StartFetching(FetchCallback callback) override;
   void DeleteSharedWorker(const GURL& worker,
                           const std::string& name,
-                          const url::Origin& constructor_origin) override;
+                          const blink::StorageKey& storage_key) override;
 
  private:
   ~MockSharedWorkerHelper() override;

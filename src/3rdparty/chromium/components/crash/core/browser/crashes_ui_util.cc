@@ -8,9 +8,9 @@
 #include <utility>
 #include <vector>
 
+#include "base/cxx17_backports.h"
 #include "base/i18n/time_formatting.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/values.h"
 #include "components/strings/grit/components_chromium_strings.h"
 #include "components/strings/grit/components_strings.h"
@@ -45,10 +45,12 @@ const size_t kCrashesUILocalizedStringsCount =
     base::size(kCrashesUILocalizedStrings);
 
 const char kCrashesUICrashesJS[] = "crashes.js";
+const char kCrashesUICrashesCSS[] = "crashes.css";
+const char kCrashesUISadTabSVG[] = "sadtab.svg";
 const char kCrashesUIRequestCrashList[] = "requestCrashList";
 const char kCrashesUIRequestCrashUpload[] = "requestCrashUpload";
 const char kCrashesUIShortProductName[] = "shortProductName";
-const char kCrashesUIUpdateCrashList[] = "updateCrashList";
+const char kCrashesUIUpdateCrashList[] = "update-crash-list";
 const char kCrashesUIRequestSingleCrashUpload[] = "requestSingleCrashUpload";
 
 std::string UploadInfoStateAsString(UploadList::UploadInfo::State state) {

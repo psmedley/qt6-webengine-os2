@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "quic/tools/quic_client_base.h"
+
+#include <algorithm>
 #include <memory>
 
 #include "quic/core/crypto/quic_random.h"
@@ -64,6 +66,7 @@ class QuicClientSocketMigrationValidationResultDelegate
       std::unique_ptr<QuicPathValidationContext> context) override {
     QUIC_LOG(WARNING) << "Fail to validate path " << *context
                       << ", stop migrating.";
+    client_->session()->connection()->OnPathValidationFailureAtClient();
   }
 
  private:
@@ -147,7 +150,7 @@ bool QuicClientBase::Connect() {
     num_attempts++;
   }
   if (session() == nullptr) {
-    QUIC_BUG << "Missing session after Connect";
+    QUIC_BUG(quic_bug_10906_1) << "Missing session after Connect";
     return false;
   }
   return session()->connection()->connected();
@@ -230,7 +233,8 @@ bool QuicClientBase::EncryptionBeingEstablished() {
 
 bool QuicClientBase::WaitForEvents() {
   if (!connected()) {
-    QUIC_BUG << "Cannot call WaitForEvents on non-connected client";
+    QUIC_BUG(quic_bug_10906_2)
+        << "Cannot call WaitForEvents on non-connected client";
     return false;
   }
 
@@ -256,6 +260,8 @@ bool QuicClientBase::MigrateSocketWithSpecifiedPort(
     const QuicIpAddress& new_host,
     int port) {
   if (!connected()) {
+    QUICHE_DVLOG(1)
+        << "MigrateSocketWithSpecifiedPort failed as connection has closed";
     return false;
   }
 
@@ -263,11 +269,17 @@ bool QuicClientBase::MigrateSocketWithSpecifiedPort(
   std::unique_ptr<QuicPacketWriter> writer =
       CreateWriterForNewNetwork(new_host, port);
   if (writer == nullptr) {
+    QUICHE_DVLOG(1)
+        << "MigrateSocketWithSpecifiedPort failed from writer creation";
     return false;
   }
-  session()->MigratePath(network_helper_->GetLatestClientAddress(),
-                         session()->connection()->peer_address(), writer.get(),
-                         false);
+  if (!session()->MigratePath(network_helper_->GetLatestClientAddress(),
+                              session()->connection()->peer_address(),
+                              writer.get(), false)) {
+    QUICHE_DVLOG(1)
+        << "MigrateSocketWithSpecifiedPort failed from session()->MigratePath";
+    return false;
+  }
   set_writer(writer.release());
   return true;
 }
@@ -335,7 +347,8 @@ const QuicClientBase::NetworkHelper* QuicClientBase::network_helper() const {
 
 void QuicClientBase::WaitForStreamToClose(QuicStreamId id) {
   if (!connected()) {
-    QUIC_BUG << "Cannot WaitForStreamToClose on non-connected client";
+    QUIC_BUG(quic_bug_10906_3)
+        << "Cannot WaitForStreamToClose on non-connected client";
     return;
   }
 
@@ -346,7 +359,8 @@ void QuicClientBase::WaitForStreamToClose(QuicStreamId id) {
 
 bool QuicClientBase::WaitForOneRttKeysAvailable() {
   if (!connected()) {
-    QUIC_BUG << "Cannot WaitForOneRttKeysAvailable on non-connected client";
+    QUIC_BUG(quic_bug_10906_4)
+        << "Cannot WaitForOneRttKeysAvailable on non-connected client";
     return false;
   }
 
@@ -430,13 +444,20 @@ QuicConnectionId QuicClientBase::GetClientConnectionId() {
 bool QuicClientBase::CanReconnectWithDifferentVersion(
     ParsedQuicVersion* version) const {
   if (session_ == nullptr || session_->connection() == nullptr ||
-      session_->error() != QUIC_INVALID_VERSION ||
-      session_->connection()->server_supported_versions().empty()) {
+      session_->error() != QUIC_INVALID_VERSION) {
     return false;
   }
+
+  const auto& server_supported_versions =
+      session_->connection()->server_supported_versions();
+  if (server_supported_versions.empty()) {
+    return false;
+  }
+
   for (const auto& client_version : supported_versions_) {
-    if (QuicContainsValue(session_->connection()->server_supported_versions(),
-                          client_version)) {
+    if (std::find(server_supported_versions.begin(),
+                  server_supported_versions.end(),
+                  client_version) != server_supported_versions.end()) {
       *version = client_version;
       return true;
     }
@@ -462,6 +483,7 @@ class ValidationResultDelegate : public QuicPathValidator::ResultDelegate {
       std::unique_ptr<QuicPathValidationContext> context) override {
     QUIC_LOG(WARNING) << "Fail to validate path " << *context
                       << ", stop migrating.";
+    client_->session()->connection()->OnPathValidationFailureAtClient();
   }
 
  private:

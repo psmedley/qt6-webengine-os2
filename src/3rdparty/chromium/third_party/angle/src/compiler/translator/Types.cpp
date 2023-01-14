@@ -185,6 +185,7 @@ TType::TType(const TPublicType &p)
       mInterfaceBlock(nullptr),
       mStructure(nullptr),
       mIsStructSpecifier(false),
+      mInterfaceBlockFieldIndex(0),
       mMangledName(nullptr)
 {
     ASSERT(primarySize <= 4);
@@ -223,20 +224,21 @@ TType::TType(const TType &t)
 
 TType &TType::operator=(const TType &t)
 {
-    type               = t.type;
-    precision          = t.precision;
-    qualifier          = t.qualifier;
-    invariant          = t.invariant;
-    precise            = t.precise;
-    memoryQualifier    = t.memoryQualifier;
-    layoutQualifier    = t.layoutQualifier;
-    primarySize        = t.primarySize;
-    secondarySize      = t.secondarySize;
-    mArraySizesStorage = nullptr;
-    mInterfaceBlock    = t.mInterfaceBlock;
-    mStructure         = t.mStructure;
-    mIsStructSpecifier = t.mIsStructSpecifier;
-    mMangledName       = t.mMangledName;
+    type                      = t.type;
+    precision                 = t.precision;
+    qualifier                 = t.qualifier;
+    invariant                 = t.invariant;
+    precise                   = t.precise;
+    memoryQualifier           = t.memoryQualifier;
+    layoutQualifier           = t.layoutQualifier;
+    primarySize               = t.primarySize;
+    secondarySize             = t.secondarySize;
+    mArraySizesStorage        = nullptr;
+    mInterfaceBlock           = t.mInterfaceBlock;
+    mStructure                = t.mStructure;
+    mIsStructSpecifier        = t.mIsStructSpecifier;
+    mInterfaceBlockFieldIndex = t.mInterfaceBlockFieldIndex;
+    mMangledName              = t.mMangledName;
 
     if (t.mArraySizesStorage)
     {
@@ -412,6 +414,11 @@ bool TType::isStructureContainingType(TBasicType t) const
 bool TType::isStructureContainingSamplers() const
 {
     return mStructure ? mStructure->containsSamplers() : false;
+}
+
+bool TType::isInterfaceBlockContainingType(TBasicType t) const
+{
+    return isInterfaceBlock() ? mInterfaceBlock->containsType(t) : false;
 }
 
 bool TType::canReplaceWithConstantUnion() const
@@ -698,6 +705,21 @@ void TType::toArrayBaseType()
     onArrayDimensionsChange(TSpan<const unsigned int>());
 }
 
+void TType::toMatrixColumnType()
+{
+    ASSERT(isMatrix());
+    primarySize   = secondarySize;
+    secondarySize = 1;
+    invalidateMangledName();
+}
+
+void TType::toComponentType()
+{
+    primarySize   = 1;
+    secondarySize = 1;
+    invalidateMangledName();
+}
+
 void TType::setInterfaceBlock(const TInterfaceBlock *interfaceBlockIn)
 {
     if (mInterfaceBlock != interfaceBlockIn)
@@ -705,6 +727,12 @@ void TType::setInterfaceBlock(const TInterfaceBlock *interfaceBlockIn)
         mInterfaceBlock = interfaceBlockIn;
         invalidateMangledName();
     }
+}
+
+void TType::setInterfaceBlockField(const TInterfaceBlock *interfaceBlockIn, size_t fieldIndex)
+{
+    setInterfaceBlock(interfaceBlockIn);
+    mInterfaceBlockFieldIndex = fieldIndex;
 }
 
 const char *TType::getMangledName() const

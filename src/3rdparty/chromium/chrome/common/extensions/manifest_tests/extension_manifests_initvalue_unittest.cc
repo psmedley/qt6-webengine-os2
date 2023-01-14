@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/i18n/rtl.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
@@ -178,14 +178,14 @@ TEST_F(InitValueManifestTest, InitFromValueValidNameInRTL) {
   scoped_refptr<Extension> extension(LoadAndExpectSuccess(
       "init_valid_name_no_rtl.json"));
 
-  base::string16 localized_name(base::ASCIIToUTF16("Dictionary (by Google)"));
+  std::u16string localized_name(u"Dictionary (by Google)");
   base::i18n::AdjustStringForLocaleDirection(&localized_name);
   EXPECT_EQ(localized_name, base::UTF8ToUTF16(extension->name()));
 
   // Strong RTL characters in name.
   extension = LoadAndExpectSuccess("init_valid_name_strong_rtl.json");
 
-  localized_name = base::WideToUTF16(L"Dictionary (\x05D1\x05D2" L" Google)");
+  localized_name = u"Dictionary (\x05D1\x05D2 Google)";
   base::i18n::AdjustStringForLocaleDirection(&localized_name);
   EXPECT_EQ(localized_name, base::UTF8ToUTF16(extension->name()));
 

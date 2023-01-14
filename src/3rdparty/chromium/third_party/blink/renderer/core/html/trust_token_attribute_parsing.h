@@ -7,11 +7,8 @@
 
 #include <memory>
 
-#include "base/optional.h"
 #include "services/network/public/mojom/trust_tokens.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
-
-#include <memory>
 
 namespace blink {
 

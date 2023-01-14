@@ -31,6 +31,7 @@
 
 #include "services/network/public/mojom/content_security_policy.mojom-blink.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
@@ -61,7 +62,6 @@ class OrdinalNumber;
 
 namespace blink {
 
-class ContentSecurityPolicyResponseHeaders;
 class ConsoleMessage;
 class DOMWrapperWorld;
 class Element;
@@ -105,7 +105,7 @@ class CORE_EXPORT ContentSecurityPolicyDelegate : public GarbageCollectedMixin {
   // See https://w3c.github.io/webappsec-csp/#create-violation-for-global.
   // These functions are used to create the violation object.
   virtual std::unique_ptr<SourceLocation> GetSourceLocation() = 0;
-  virtual base::Optional<uint16_t> GetStatusCode() = 0;
+  virtual absl::optional<uint16_t> GetStatusCode() = 0;
   // If the Delegate is not bound to a document, a null string should be
   // returned as the referrer.
   virtual String GetDocumentReferrer() = 0;
@@ -184,24 +184,12 @@ class CORE_EXPORT ContentSecurityPolicy final
 
   static const size_t kMaxSampleLength = 40;
 
-  // Parse raw Content Security Policy strings into mojo types.
-  static WTF::Vector<network::mojom::blink::ContentSecurityPolicyPtr>
-  ParseHeaders(const ContentSecurityPolicyResponseHeaders& headers);
-
   ContentSecurityPolicy();
   ~ContentSecurityPolicy();
   void Trace(Visitor*) const;
 
   bool IsBound();
   void BindToDelegate(ContentSecurityPolicyDelegate&);
-  void CopyStateFrom(const ContentSecurityPolicy*);
-
-  void DidReceiveHeaders(const ContentSecurityPolicyResponseHeaders&);
-  void DidReceiveHeader(const String&,
-                        const SecurityOrigin& self_origin,
-                        network::mojom::ContentSecurityPolicyType,
-                        network::mojom::ContentSecurityPolicySource);
-  void ReportAccumulatedHeaders() const;
 
   void AddPolicies(
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> policies);
@@ -221,9 +209,9 @@ class CORE_EXPORT ContentSecurityPolicy final
   bool AllowEval(ReportingDisposition,
                  ExceptionStatus,
                  const String& script_content);
-  bool AllowWasmEval(ReportingDisposition,
-                     ExceptionStatus,
-                     const String& script_content);
+  bool AllowWasmCodeGeneration(ReportingDisposition,
+                               ExceptionStatus,
+                               const String& script_content);
 
   // AllowFromSource() wrappers.
   bool AllowBaseURI(const KURL&);
@@ -307,7 +295,8 @@ class CORE_EXPORT ContentSecurityPolicy final
   bool AllowTrustedTypeAssignmentFailure(
       const String& message,
       const String& sample = String(),
-      const String& sample_prefix = String());
+      const String& sample_prefix = String(),
+      absl::optional<base::UnguessableToken> issue_id = absl::nullopt);
 
   void UsesScriptHashAlgorithms(uint8_t content_security_policy_hash_algorithm);
   void UsesStyleHashAlgorithms(uint8_t content_security_policy_hash_algorithm);
@@ -323,27 +312,8 @@ class CORE_EXPORT ContentSecurityPolicy final
   // |m_executionContext|.
   void LogToConsole(ConsoleMessage*, LocalFrame* = nullptr);
 
-  void ReportDirectiveAsSourceExpression(const String& directive_name,
-                                         const String& source_expression);
-  void ReportDuplicateDirective(const String&);
-  void ReportInvalidDirectiveValueCharacter(const String& directive_name,
-                                            const String& value);
-  void ReportInvalidPathCharacter(const String& directive_name,
-                                  const String& value,
-                                  const char);
-  void ReportInvalidRequireTrustedTypesFor(const String&);
-  void ReportInvalidSandboxFlags(const String&);
-  void ReportInvalidSourceExpression(const String& directive_name,
-                                     const String& source);
-  void ReportMultipleReportToEndpoints();
-  void ReportUnsupportedDirective(const String&);
-  void ReportInvalidInReportOnly(const String&);
-  void ReportInvalidDirectiveInMeta(const String& directive_name);
   void ReportReportOnlyInMeta(const String&);
   void ReportMetaOutsideHead(const String&);
-  void ReportValueForEmptyDirective(const String& directive_name,
-                                    const String& value);
-  void ReportMixedContentReportURI(const String& endpoint);
 
   // If a frame is passed in, the report will be sent using it as a context. If
   // no frame is passed in, the report will be sent via this object's
@@ -351,21 +321,26 @@ class CORE_EXPORT ContentSecurityPolicy final
   // available).
   // If |sourceLocation| is not set, the source location will be the context's
   // current location.
-  void ReportViolation(const String& directive_text,
-                       CSPDirectiveName effective_type,
-                       const String& console_message,
-                       const KURL& blocked_url,
-                       const Vector<String>& report_endpoints,
-                       bool use_reporting_api,
-                       const String& header,
-                       network::mojom::ContentSecurityPolicyType,
-                       ContentSecurityPolicyViolationType,
-                       std::unique_ptr<SourceLocation>,
-                       LocalFrame* = nullptr,
-                       RedirectStatus = RedirectStatus::kFollowedRedirect,
-                       Element* = nullptr,
-                       const String& source = g_empty_string,
-                       const String& source_prefix = g_empty_string);
+  // If an inspector issue is reported, and |issue_id| is present, it will be
+  // reported on the issue. This is useful to provide a link from the
+  // JavaScript TypeError to the inspector issue in the DevTools front-end.
+  void ReportViolation(
+      const String& directive_text,
+      CSPDirectiveName effective_type,
+      const String& console_message,
+      const KURL& blocked_url,
+      const Vector<String>& report_endpoints,
+      bool use_reporting_api,
+      const String& header,
+      network::mojom::ContentSecurityPolicyType,
+      ContentSecurityPolicyViolationType,
+      std::unique_ptr<SourceLocation>,
+      LocalFrame* = nullptr,
+      RedirectStatus = RedirectStatus::kFollowedRedirect,
+      Element* = nullptr,
+      const String& source = g_empty_string,
+      const String& source_prefix = g_empty_string,
+      absl::optional<base::UnguessableToken> issue_id = absl::nullopt);
 
   // Called when mixed content is detected on a page; will trigger a violation
   // report if the 'block-all-mixed-content' directive is specified for a
@@ -392,8 +367,6 @@ class CORE_EXPORT ContentSecurityPolicy final
   }
 
   bool ExperimentalFeaturesEnabled() const;
-
-  bool ShouldSendCSPHeader(ResourceType) const;
 
   // Whether the main world's CSP should be bypassed based on the current
   // javascript world we are in.
@@ -463,11 +436,6 @@ class CORE_EXPORT ContentSecurityPolicy final
   FRIEND_TEST_ALL_PREFIXES(FrameFetchContextTest,
                            PopulateResourceRequestChecksReportOnlyCSP);
 
-  Vector<network::mojom::blink::ContentSecurityPolicyPtr> Parse(
-      const String&,
-      const SecurityOrigin& self_origin,
-      network::mojom::ContentSecurityPolicyType,
-      network::mojom::ContentSecurityPolicySource);
   void ApplyPolicySideEffectsToDelegate();
   void ReportUseCounters(
       const Vector<network::mojom::blink::ContentSecurityPolicyPtr>& policies);
@@ -522,7 +490,8 @@ class CORE_EXPORT ContentSecurityPolicy final
       ContentSecurityPolicyViolationType violation_type,
       LocalFrame*,
       Element*,
-      SourceLocation*);
+      SourceLocation*,
+      absl::optional<base::UnguessableToken> issue_id);
 
   Member<ContentSecurityPolicyDelegate> delegate_;
   bool override_inline_style_allowed_ = false;
@@ -543,8 +512,6 @@ class CORE_EXPORT ContentSecurityPolicy final
   bool require_trusted_types_;
   String disable_eval_error_message_;
   mojom::blink::InsecureRequestPolicy insecure_request_policy_;
-
-  String self_protocol_;
 
   bool supports_wasm_eval_ = false;
 };

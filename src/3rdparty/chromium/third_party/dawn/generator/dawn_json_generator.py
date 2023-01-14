@@ -593,7 +593,7 @@ def as_frontendType(typ):
 def as_wireType(typ):
     if typ.category == 'object':
         return typ.name.CamelCase() + '*'
-    elif typ.category in ['bitmask', 'enum']:
+    elif typ.category in ['bitmask', 'enum', 'structure']:
         return 'WGPU' + typ.name.CamelCase()
     else:
         return as_cppType(typ.name)
@@ -697,6 +697,11 @@ class MultiGeneratorFromDawnJSON(Generator):
                 FileRender('webgpu_cpp.h', 'src/include/dawn/webgpu_cpp.h',
                            [base_params, api_params]))
 
+            renders.append(
+                FileRender('webgpu_cpp_print.h',
+                           'src/include/dawn/webgpu_cpp_print.h',
+                           [base_params, api_params]))
+
         if 'dawn_proc' in targets:
             renders.append(
                 FileRender('dawn_proc.c', 'src/dawn/dawn_proc.c',
@@ -765,6 +770,14 @@ class MultiGeneratorFromDawnJSON(Generator):
             renders.append(
                 FileRender('dawn_native/ProcTable.cpp',
                            'src/dawn_native/ProcTable.cpp', frontend_params))
+            renders.append(
+                FileRender('dawn_native/ChainUtils.h',
+                           'src/dawn_native/ChainUtils_autogen.h',
+                           frontend_params))
+            renders.append(
+                FileRender('dawn_native/ChainUtils.cpp',
+                           'src/dawn_native/ChainUtils_autogen.cpp',
+                           frontend_params))
 
         if 'dawn_wire' in targets:
             additional_params = compute_wire_params(api_params, wire_json)

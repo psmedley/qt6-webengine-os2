@@ -28,7 +28,6 @@
 #include "src/dsp/constants.h"
 #include "src/dsp/dsp.h"
 #include "src/dsp/x86/common_avx2.h"
-#include "src/dsp/x86/common_sse4.h"
 #include "src/utils/common.h"
 #include "src/utils/constants.h"
 
@@ -116,7 +115,8 @@ inline void WienerHorizontalTap7(const uint8_t* src, const ptrdiff_t src_stride,
   filter[0] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0100));
   filter[1] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0302));
   filter[2] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0102));
-  filter[3] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x8000));
+  filter[3] = _mm256_shuffle_epi8(
+      coefficients, _mm256_set1_epi16(static_cast<int16_t>(0x8000)));
   for (int y = height; y != 0; --y) {
     __m256i s = LoadUnaligned32(src);
     __m256i ss[4];
@@ -144,7 +144,8 @@ inline void WienerHorizontalTap5(const uint8_t* src, const ptrdiff_t src_stride,
   __m256i filter[3];
   filter[0] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0201));
   filter[1] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0203));
-  filter[2] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x8001));
+  filter[2] = _mm256_shuffle_epi8(
+      coefficients, _mm256_set1_epi16(static_cast<int16_t>(0x8001)));
   for (int y = height; y != 0; --y) {
     __m256i s = LoadUnaligned32(src);
     __m256i ss[4];
@@ -171,7 +172,8 @@ inline void WienerHorizontalTap3(const uint8_t* src, const ptrdiff_t src_stride,
                                  int16_t** const wiener_buffer) {
   __m256i filter[2];
   filter[0] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x0302));
-  filter[1] = _mm256_shuffle_epi8(coefficients, _mm256_set1_epi16(0x8002));
+  filter[1] = _mm256_shuffle_epi8(
+      coefficients, _mm256_set1_epi16(static_cast<int16_t>(0x8002)));
   for (int y = height; y != 0; --y) {
     __m256i s = LoadUnaligned32(src);
     __m256i ss[4];
@@ -481,11 +483,14 @@ inline void WienerVerticalTap1(const int16_t* wiener_buffer,
 }
 
 void WienerFilter_AVX2(
-    const RestorationUnitInfo& restoration_info, const void* const source,
-    const ptrdiff_t stride, const void* const top_border,
-    const ptrdiff_t top_border_stride, const void* const bottom_border,
+    const RestorationUnitInfo& LIBGAV1_RESTRICT restoration_info,
+    const void* LIBGAV1_RESTRICT const source, const ptrdiff_t stride,
+    const void* LIBGAV1_RESTRICT const top_border,
+    const ptrdiff_t top_border_stride,
+    const void* LIBGAV1_RESTRICT const bottom_border,
     const ptrdiff_t bottom_border_stride, const int width, const int height,
-    RestorationBuffer* const restoration_buffer, void* const dest) {
+    RestorationBuffer* LIBGAV1_RESTRICT const restoration_buffer,
+    void* LIBGAV1_RESTRICT const dest) {
   const int16_t* const number_leading_zero_coefficients =
       restoration_info.wiener_info.number_leading_zero_coefficients;
   const int number_rows_to_skip = std::max(
@@ -2878,11 +2883,14 @@ inline void BoxFilterProcessPass2(const RestorationUnitInfo& restoration_info,
 // in the end of each row. It is safe to overwrite the output as it will not be
 // part of the visible frame.
 void SelfGuidedFilter_AVX2(
-    const RestorationUnitInfo& restoration_info, const void* const source,
-    const ptrdiff_t stride, const void* const top_border,
-    const ptrdiff_t top_border_stride, const void* const bottom_border,
+    const RestorationUnitInfo& LIBGAV1_RESTRICT restoration_info,
+    const void* LIBGAV1_RESTRICT const source, const ptrdiff_t stride,
+    const void* LIBGAV1_RESTRICT const top_border,
+    const ptrdiff_t top_border_stride,
+    const void* LIBGAV1_RESTRICT const bottom_border,
     const ptrdiff_t bottom_border_stride, const int width, const int height,
-    RestorationBuffer* const restoration_buffer, void* const dest) {
+    RestorationBuffer* LIBGAV1_RESTRICT const restoration_buffer,
+    void* LIBGAV1_RESTRICT const dest) {
   const int index = restoration_info.sgr_proj_info.index;
   const int radius_pass_0 = kSgrProjParams[index][0];  // 2 or 0
   const int radius_pass_1 = kSgrProjParams[index][2];  // 1 or 0

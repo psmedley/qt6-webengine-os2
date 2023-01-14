@@ -4,10 +4,10 @@
 
 import * as acorn from './package/dist/acorn.mjs';
 
-export let Token: acorn.Token;
-export let Comment: acorn.Comment;
+import type * as ESTree from './estree-legacy';
+export {ESTree};
 
-export const tokTypes = acorn.tokTypes;
+export { Comment, defaultOptions, getLineInfo, isNewLine, lineBreak, lineBreakG, Node, SourceLocation, Token,tokTypes} from './package/dist/acorn.mjs';
 
 export const Parser = acorn.Parser;
 export const tokenizer = acorn.Parser.tokenizer.bind(acorn.Parser);

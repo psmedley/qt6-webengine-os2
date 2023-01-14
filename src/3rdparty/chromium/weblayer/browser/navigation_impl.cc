@@ -57,12 +57,6 @@ NavigationImpl::TakeParamsToLoadWhenSafe() {
 }
 
 #if defined(OS_ANDROID)
-void NavigationImpl::SetJavaNavigation(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& java_navigation) {
-  java_navigation_ = java_navigation;
-}
-
 ScopedJavaLocalRef<jstring> NavigationImpl::GetUri(JNIEnv* env) {
   return ScopedJavaLocalRef<jstring>(
       base::android::ConvertUTF8ToJavaString(env, GetURL().spec()));
@@ -73,6 +67,23 @@ ScopedJavaLocalRef<jobjectArray> NavigationImpl::GetRedirectChain(JNIEnv* env) {
   for (const GURL& redirect : GetRedirectChain())
     jni_redirects.push_back(redirect.spec());
   return base::android::ToJavaArrayOfStrings(env, jni_redirects);
+}
+
+ScopedJavaLocalRef<jobjectArray> NavigationImpl::GetResponseHeaders(
+    JNIEnv* env) {
+  std::vector<std::string> jni_headers;
+  auto* headers = GetResponseHeaders();
+  if (headers) {
+    size_t iterator = 0;
+    std::string name;
+    std::string value;
+    while (headers->EnumerateHeaderLines(&iterator, &name, &value)) {
+      jni_headers.push_back(name);
+      jni_headers.push_back(value);
+    }
+  }
+
+  return base::android::ToJavaArrayOfStrings(env, jni_headers);
 }
 
 jboolean NavigationImpl::SetRequestHeader(
@@ -125,6 +136,10 @@ jlong NavigationImpl::GetPage(JNIEnv* env) {
   return reinterpret_cast<intptr_t>(GetPage());
 }
 
+jint NavigationImpl::GetNavigationEntryOffset(JNIEnv* env) {
+  return GetNavigationEntryOffset();
+}
+
 void NavigationImpl::SetResponse(
     std::unique_ptr<embedder_support::WebResourceResponse> response) {
   response_ = std::move(response);
@@ -133,6 +148,13 @@ void NavigationImpl::SetResponse(
 std::unique_ptr<embedder_support::WebResourceResponse>
 NavigationImpl::TakeResponse() {
   return std::move(response_);
+}
+
+void NavigationImpl::SetJavaNavigation(
+    const base::android::ScopedJavaGlobalRef<jobject>& java_navigation) {
+  // SetJavaNavigation() should only be called once.
+  DCHECK(!java_navigation_);
+  java_navigation_ = java_navigation;
 }
 
 #endif
@@ -153,8 +175,12 @@ Page* NavigationImpl::GetPage() {
   if (!safe_to_get_page_)
     return nullptr;
 
-  return PageImpl::GetForCurrentDocument(
-      navigation_handle_->GetRenderFrameHost());
+  return PageImpl::GetForPage(
+      navigation_handle_->GetRenderFrameHost()->GetPage());
+}
+
+int NavigationImpl::GetNavigationEntryOffset() {
+  return navigation_handle_->GetNavigationEntryOffset();
 }
 
 GURL NavigationImpl::GetURL() {
@@ -178,6 +204,10 @@ NavigationState NavigationImpl::GetState() {
 int NavigationImpl::GetHttpStatusCode() {
   auto* response_headers = navigation_handle_->GetResponseHeaders();
   return response_headers ? response_headers->response_code() : 0;
+}
+
+const net::HttpResponseHeaders* NavigationImpl::GetResponseHeaders() {
+  return navigation_handle_->GetResponseHeaders();
 }
 
 bool NavigationImpl::IsSameDocument() {

@@ -6,7 +6,6 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -26,7 +25,7 @@ ShowDetailsAction::ShowDetailsAction(ActionDelegate* delegate,
 ShowDetailsAction::~ShowDetailsAction() {}
 
 void ShowDetailsAction::InternalProcessAction(ProcessActionCallback callback) {
-  std::unique_ptr<Details> details = nullptr;
+  std::unique_ptr<Details> details;
   bool details_valid = true;
 
   switch (proto_.show_details().data_to_show_case()) {

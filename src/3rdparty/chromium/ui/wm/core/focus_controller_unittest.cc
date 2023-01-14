@@ -7,6 +7,7 @@
 #include <map>
 
 #include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -16,6 +17,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tracker.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_handler.h"
@@ -560,7 +562,7 @@ class FocusControllerTestBase : public aura::test::AuraTestBase {
   }
   int GetFocusedWindowId() {
     aura::Window* focused_window = GetFocusedWindow();
-    return focused_window ? focused_window->id() : -1;
+    return focused_window ? focused_window->GetId() : -1;
   }
   void ActivateWindow(aura::Window* window) {
     GetActivationClient(root_window())->ActivateWindow(window);
@@ -573,7 +575,7 @@ class FocusControllerTestBase : public aura::test::AuraTestBase {
   }
   int GetActiveWindowId() {
     aura::Window* active_window = GetActiveWindow();
-    return active_window ? active_window->id() : -1;
+    return active_window ? active_window->GetId() : -1;
   }
 
   TestFocusRules* test_focus_rules() { return test_focus_rules_; }
@@ -1220,6 +1222,28 @@ class FocusControllerMouseEventTest : public FocusControllerDirectTestBase {
   DISALLOW_COPY_AND_ASSIGN(FocusControllerMouseEventTest);
 };
 
+class FocusControllerMouseEnterEventTest
+    : public FocusControllerMouseEventTest {
+ public:
+  FocusControllerMouseEnterEventTest() {
+    scoped_feature_list_.InitAndEnableFeature(features::kFocusFollowsCursor);
+  }
+
+  void MouseEnteredEvent() {
+    aura::Window::Windows children_before = root_window()->children();
+    aura::Window* w2 = root_window()->GetChildById(2);
+
+    ui::test::EventGenerator generator(root_window(), w2);
+    generator.SendMouseEnter();
+
+    // The enter event should activate the window, but not stack the window.
+    EXPECT_EQ(w2, GetActiveWindow());
+    EXPECT_EQ(children_before, root_window()->children());
+  }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
 class FocusControllerGestureEventTest : public FocusControllerDirectTestBase {
  public:
   FocusControllerGestureEventTest() {}
@@ -1497,10 +1521,11 @@ class FocusControllerParentRemovalTest : public FocusControllerRemovalTest {
     TEST_F(TESTCLASS, TESTNAME) { TESTNAME(); }
 
 // Runs direct focus change tests (input events and API calls).
-#define DIRECT_FOCUS_CHANGE_TESTS(TESTNAME) \
-    FOCUS_CONTROLLER_TEST(FocusControllerApiTest, TESTNAME) \
-    FOCUS_CONTROLLER_TEST(FocusControllerMouseEventTest, TESTNAME) \
-    FOCUS_CONTROLLER_TEST(FocusControllerGestureEventTest, TESTNAME)
+#define DIRECT_FOCUS_CHANGE_TESTS(TESTNAME)                           \
+  FOCUS_CONTROLLER_TEST(FocusControllerApiTest, TESTNAME)             \
+  FOCUS_CONTROLLER_TEST(FocusControllerMouseEventTest, TESTNAME)      \
+  FOCUS_CONTROLLER_TEST(FocusControllerMouseEnterEventTest, TESTNAME) \
+  FOCUS_CONTROLLER_TEST(FocusControllerGestureEventTest, TESTNAME)
 
 // Runs implicit focus change tests for disposition changes to target.
 #define IMPLICIT_FOCUS_CHANGE_TARGET_TESTS(TESTNAME) \
@@ -1601,5 +1626,8 @@ FOCUS_CONTROLLER_TEST(FocusControllerParentHideTest,
 
 // If a mouse event was handled, it should not activate a window.
 FOCUS_CONTROLLER_TEST(FocusControllerMouseEventTest, IgnoreHandledEvent)
+
+// Mouse over window should activate it.
+FOCUS_CONTROLLER_TEST(FocusControllerMouseEnterEventTest, MouseEnteredEvent)
 
 }  // namespace wm

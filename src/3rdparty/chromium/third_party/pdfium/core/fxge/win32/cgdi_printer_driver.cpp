@@ -6,12 +6,14 @@
 
 #include "core/fxge/win32/cgdi_printer_driver.h"
 
+#include <math.h>
 #include <windows.h>
 
 #include <algorithm>
 #include <memory>
 #include <vector>
 
+#include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/cfx_font.h"
@@ -21,12 +23,19 @@
 #include "core/fxge/render_defines.h"
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
+
+#if defined(PDFIUM_PRINT_TEXT_WITH_GDI)
+#include "core/fxcrt/widestring.h"
+#endif
 
 #if defined(PDFIUM_PRINT_TEXT_WITH_GDI)
 namespace {
 
 class ScopedState {
  public:
+  FX_STACK_ALLOCATED();
+
   ScopedState(HDC hDC, HFONT hFont)
       : m_hDC(hDC),
         m_iState(SaveDC(m_hDC)),
@@ -76,7 +85,7 @@ bool CGdiPrinterDriver::SetDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                   int left,
                                   int top,
                                   BlendMode blend_type) {
-  if (pSource->IsMask()) {
+  if (pSource->IsMaskFormat()) {
     FX_RECT clip_rect(left, top, left + src_rect.Width(),
                       top + src_rect.Height());
     return StretchDIBits(pSource, color, left - src_rect.left,
@@ -85,9 +94,9 @@ bool CGdiPrinterDriver::SetDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                          FXDIB_ResampleOptions(), BlendMode::kNormal);
   }
   DCHECK(pSource);
-  DCHECK(!pSource->IsMask());
-  DCHECK(blend_type == BlendMode::kNormal);
-  if (pSource->HasAlpha())
+  DCHECK(!pSource->IsMaskFormat());
+  DCHECK_EQ(blend_type, BlendMode::kNormal);
+  if (pSource->IsAlphaFormat())
     return false;
 
   CFX_DIBExtractor temp(pSource);
@@ -107,7 +116,7 @@ bool CGdiPrinterDriver::StretchDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                       const FX_RECT* pClipRect,
                                       const FXDIB_ResampleOptions& options,
                                       BlendMode blend_type) {
-  if (pSource->IsMask()) {
+  if (pSource->IsMaskFormat()) {
     int alpha = FXARGB_A(color);
     if (pSource->GetBPP() != 1 || alpha != 255)
       return false;
@@ -135,7 +144,7 @@ bool CGdiPrinterDriver::StretchDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                               dest_height, color);
   }
 
-  if (pSource->HasAlpha())
+  if (pSource->IsAlphaFormat())
     return false;
 
   if (dest_width < 0 || dest_height < 0) {
@@ -168,8 +177,8 @@ bool CGdiPrinterDriver::StartDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                     const FXDIB_ResampleOptions& options,
                                     std::unique_ptr<CFX_ImageRenderer>* handle,
                                     BlendMode blend_type) {
-  if (bitmap_alpha < 255 || pSource->HasAlpha() ||
-      (pSource->IsMask() && (pSource->GetBPP() != 1))) {
+  if (bitmap_alpha < 255 || pSource->IsAlphaFormat() ||
+      (pSource->IsMaskFormat() && (pSource->GetBPP() != 1))) {
     return false;
   }
   CFX_FloatRect unit_rect = matrix.GetUnitRect();
@@ -297,11 +306,11 @@ bool CGdiPrinterDriver::DrawDeviceText(
     // Only works with PDFs from Skia's PDF generator. Cannot handle arbitrary
     // values from PDFs.
     const TextCharPos& charpos = pCharPos[i];
-    DCHECK(charpos.m_AdjustMatrix[0] == 0);
-    DCHECK(charpos.m_AdjustMatrix[1] == 0);
-    DCHECK(charpos.m_AdjustMatrix[2] == 0);
-    DCHECK(charpos.m_AdjustMatrix[3] == 0);
-    DCHECK(charpos.m_Origin.y == 0);
+    DCHECK_EQ(charpos.m_AdjustMatrix[0], 0);
+    DCHECK_EQ(charpos.m_AdjustMatrix[1], 0);
+    DCHECK_EQ(charpos.m_AdjustMatrix[2], 0);
+    DCHECK_EQ(charpos.m_AdjustMatrix[3], 0);
+    DCHECK_EQ(charpos.m_Origin.y, 0);
 
     // Round the spacing to the nearest integer, but keep track of the rounding
     // error for calculating the next spacing value.

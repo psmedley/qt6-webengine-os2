@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/bind.h"
@@ -108,7 +109,7 @@ void SetDiscardPadding(AVPacket* packet,
   }
 
   // If the timestamp is positive, try to use FFmpeg's discard data.
-  int skip_samples_size = 0;
+  size_t skip_samples_size = 0;
   const uint32_t* skip_samples_ptr =
       reinterpret_cast<const uint32_t*>(av_packet_get_side_data(
           packet, AV_PKT_DATA_SKIP_SAMPLES, &skip_samples_size));
@@ -133,13 +134,13 @@ class AudioDecoderTest
         last_decode_status_(DecodeStatus::DECODE_ERROR) {
     switch (decoder_type_) {
       case FFMPEG:
-        decoder_.reset(new FFmpegAudioDecoder(
-            task_environment_.GetMainThreadTaskRunner(), &media_log_));
+        decoder_ = std::make_unique<FFmpegAudioDecoder>(
+            task_environment_.GetMainThreadTaskRunner(), &media_log_);
         break;
 #if defined(OS_ANDROID)
       case MEDIA_CODEC:
-        decoder_.reset(new MediaCodecAudioDecoder(
-            task_environment_.GetMainThreadTaskRunner()));
+        decoder_ = std::make_unique<MediaCodecAudioDecoder>(
+            task_environment_.GetMainThreadTaskRunner());
         break;
 #endif
     }
@@ -192,9 +193,9 @@ class AudioDecoderTest
   void Initialize() {
     // Load the test data file.
     data_ = ReadTestDataFile(params_.filename);
-    protocol_.reset(
-        new InMemoryUrlProtocol(data_->data(), data_->data_size(), false));
-    reader_.reset(new AudioFileReader(protocol_.get()));
+    protocol_ = std::make_unique<InMemoryUrlProtocol>(
+        data_->data(), data_->data_size(), false);
+    reader_ = std::make_unique<AudioFileReader>(protocol_.get());
     ASSERT_TRUE(reader_->OpenDemuxerForTesting());
 
     // Load the first packet and check its timestamp.

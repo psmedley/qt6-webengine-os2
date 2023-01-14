@@ -33,10 +33,12 @@ void PostMessageSender::Post(base::Value message) {
   if (!container_)
     return;
 
+  v8::Isolate::Scope isolate_scope(isolate_);
   v8::HandleScope handle_scope(isolate_);
   v8::Local<v8::Context> context =
       container_->GetDocument().GetFrame()->MainWorldScriptContext();
   DCHECK_EQ(isolate_, context->GetIsolate());
+  v8::Context::Scope context_scope(context);
 
   if (!v8_value_converter_)
     v8_value_converter_ = content::V8ValueConverter::Create();

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/credentialmanager/password_credential.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_file_usvstring.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_password_credential_data.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
@@ -64,10 +65,11 @@ PasswordCredential* PasswordCredential::Create(
     // https://html.spec.whatwg.org/C/#constructing-the-form-data-set
     DCHECK(!submittable_element->GetName().IsEmpty());
 
-    FileOrUSVString value;
-    form_data->get(submittable_element->GetName(), value);
-    if (!value.IsUSVString())
+    V8FormDataEntryValue* value =
+        form_data->get(submittable_element->GetName());
+    if (!value || !value->IsUSVString())
       continue;
+    const String& usv_string_value = value->GetAsUSVString();
 
     Vector<String> autofill_tokens;
     submittable_element->ToHTMLElement()
@@ -77,14 +79,14 @@ PasswordCredential* PasswordCredential::Create(
         .Split(' ', autofill_tokens);
     for (const auto& token : autofill_tokens) {
       if (token == "current-password" || token == "new-password") {
-        data->setPassword(value.GetAsUSVString());
+        data->setPassword(usv_string_value);
         is_password_set = true;
       } else if (token == "photo") {
-        data->setIconURL(value.GetAsUSVString());
+        data->setIconURL(usv_string_value);
       } else if (token == "name" || token == "nickname") {
-        data->setName(value.GetAsUSVString());
+        data->setName(usv_string_value);
       } else if (token == "username") {
-        data->setId(value.GetAsUSVString());
+        data->setId(usv_string_value);
         is_id_set = true;
       }
     }

@@ -9,9 +9,8 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/time/clock.h"
 #include "components/password_manager/core/browser/password_form.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace password_manager {
 
@@ -32,7 +31,7 @@ class PasswordGenerationManager {
   // Returns true iff the generated password was presaved.
   bool HasGeneratedPassword() const { return presaved_.has_value(); }
 
-  const base::string16& generated_password() const {
+  const std::u16string& generated_password() const {
     return presaved_->password_value;
   }
 
@@ -65,14 +64,8 @@ class PasswordGenerationManager {
   // |matches| and |old_password| have the same meaning as in FormSaver.
   void CommitGeneratedPassword(PasswordForm generated,
                                const std::vector<const PasswordForm*>& matches,
-                               const base::string16& old_password,
+                               const std::u16string& old_password,
                                FormSaver* form_saver);
-
-#if defined(UNIT_TEST)
-  void set_clock(std::unique_ptr<base::Clock> clock) {
-    clock_ = std::move(clock);
-  }
-#endif
 
  private:
   void OnPresaveBubbleResult(const base::WeakPtr<PasswordManagerDriver>& driver,
@@ -82,9 +75,7 @@ class PasswordGenerationManager {
   // The client for the password form.
   PasswordManagerClient* const client_;
   // Stores the pre-saved credential.
-  base::Optional<PasswordForm> presaved_;
-  // Interface to get current time.
-  std::unique_ptr<base::Clock> clock_;
+  absl::optional<PasswordForm> presaved_;
   // Used to produce callbacks.
   base::WeakPtrFactory<PasswordGenerationManager> weak_factory_{this};
 };

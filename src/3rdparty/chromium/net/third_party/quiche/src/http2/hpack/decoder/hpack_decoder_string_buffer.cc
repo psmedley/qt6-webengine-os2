@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "http2/platform/api/http2_bug_tracker.h"
-#include "http2/platform/api/http2_estimate_memory_usage.h"
 #include "http2/platform/api/http2_logging.h"
 
 namespace http2 {
@@ -25,7 +24,8 @@ std::ostream& operator<<(std::ostream& out,
   // Since the value doesn't come over the wire, only a programming bug should
   // result in reaching this point.
   int unknown = static_cast<int>(v);
-  HTTP2_BUG << "Invalid HpackDecoderStringBuffer::State: " << unknown;
+  HTTP2_BUG(http2_bug_50_1)
+      << "Invalid HpackDecoderStringBuffer::State: " << unknown;
   return out << "HpackDecoderStringBuffer::State(" << unknown << ")";
 }
 
@@ -44,7 +44,8 @@ std::ostream& operator<<(std::ostream& out,
   // Since the value doesn't come over the wire, only a programming bug should
   // result in reaching this point.
   auto v2 = static_cast<int>(v);
-  HTTP2_BUG << "Invalid HpackDecoderStringBuffer::Backing: " << v2;
+  HTTP2_BUG(http2_bug_50_2)
+      << "Invalid HpackDecoderStringBuffer::Backing: " << v2;
   return out << "HpackDecoderStringBuffer::Backing(" << v2 << ")";
 }
 
@@ -228,10 +229,6 @@ void HpackDecoderStringBuffer::OutputDebugStringTo(std::ostream& out) const {
     }
   }
   out << "}";
-}
-
-size_t HpackDecoderStringBuffer::EstimateMemoryUsage() const {
-  return Http2EstimateMemoryUsage(buffer_);
 }
 
 std::ostream& operator<<(std::ostream& out, const HpackDecoderStringBuffer& v) {

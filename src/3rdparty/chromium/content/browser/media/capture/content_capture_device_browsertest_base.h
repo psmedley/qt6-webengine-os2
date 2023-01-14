@@ -6,15 +6,14 @@
 #define CONTENT_BROWSER_MEDIA_CAPTURE_CONTENT_CAPTURE_DEVICE_BROWSERTEST_BASE_H_
 
 #include <memory>
-#include <string>
 
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/media/capture/fake_video_capture_stack.h"
 #include "content/public/test/content_browser_test.h"
 #include "media/capture/video_capture_types.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -118,7 +117,7 @@ class ContentCaptureDeviceBrowserTestBase : public ContentBrowserTest {
       const net::test_server::HttpRequest& request);
 
   FakeVideoCaptureStack capture_stack_;
-  base::Optional<gfx::Size> expected_source_size_;
+  absl::optional<gfx::Size> expected_source_size_;
   std::unique_ptr<FrameSinkVideoCaptureDevice> device_;
 
   // Arbitrary string constants used to refer to each document by

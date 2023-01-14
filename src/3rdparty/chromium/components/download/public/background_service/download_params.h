@@ -10,6 +10,7 @@
 #include "components/download/public/background_service/clients.h"
 #include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "url/gurl.h"
 
 namespace download {
@@ -110,6 +111,15 @@ struct RequestParams {
 
   // Whether the download is not trustworthy and requires safe browsing checks.
   bool require_safety_checks;
+
+  // The credentials mode of the request.
+  ::network::mojom::CredentialsMode credentials_mode;
+
+  // First-party URL redirect policy: During server redirects, whether the
+  // first-party URL for cookies will need to be changed. Download is normally
+  // considered a main frame navigation. However, this is not true for
+  // background fetch.
+  bool update_first_party_url_on_redirect = true;
 };
 
 // The parameters that describe a download request made to the DownloadService.
@@ -143,11 +153,13 @@ struct DownloadParams {
   };
 
   using StartCallback =
-      base::RepeatingCallback<void(const std::string&, StartResult)>;
+      base::OnceCallback<void(const std::string&, StartResult)>;
 
   DownloadParams();
-  DownloadParams(const DownloadParams& other);
   ~DownloadParams();
+
+  DownloadParams(DownloadParams&& other);
+  DownloadParams& operator=(DownloadParams&& other);
 
   // The feature that is requesting this download.
   DownloadClient client;

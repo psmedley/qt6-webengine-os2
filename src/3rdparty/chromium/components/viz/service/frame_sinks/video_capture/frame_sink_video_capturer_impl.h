@@ -12,11 +12,9 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -37,6 +35,7 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -66,7 +65,7 @@ class FrameSinkVideoCapturerManager;
 // known to it.
 //
 // Once the target is resolved, this capturer attaches to it to receive events
-// of interest regarding the frame flow, display timiming, and changes to the
+// of interest regarding the frame flow, display timing, and changes to the
 // frame sink's surface. For some subset of frames, decided by
 // media::VideoCaptureOracle, this capturer will make a CopyOutputRequest on the
 // surface. Successful CopyOutputResults are then copied into pooled shared
@@ -113,7 +112,7 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
                                 const gfx::Size& max_size,
                                 bool use_fixed_aspect_ratio) final;
   void SetAutoThrottlingEnabled(bool enabled) final;
-  void ChangeTarget(const base::Optional<FrameSinkId>& frame_sink_id,
+  void ChangeTarget(const absl::optional<FrameSinkId>& frame_sink_id,
                     const SubtreeCaptureId& subtree_capture_id) final;
   void Start(mojo::PendingRemote<mojom::FrameSinkVideoConsumer> consumer) final;
   void Stop() final;
@@ -178,6 +177,7 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
                       const gfx::Rect& damage_rect,
                       base::TimeTicks target_display_time,
                       const CompositorFrameMetadata& frame_metadata) final;
+  bool IsVideoCaptureStarted() final;
 
   // VideoCaptureOverlay::FrameSource implementation:
   gfx::Size GetSourceSize() final;
@@ -203,7 +203,6 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
                     OracleFrameNumber oracle_frame_number,
                     int64_t content_version,
                     const gfx::Rect& content_rect,
-                    VideoCaptureOverlay::OnceRenderer overlay_renderer,
                     scoped_refptr<media::VideoFrame> frame,
                     base::TimeTicks request_time,
                     std::unique_ptr<CopyOutputResult> result);
@@ -284,6 +283,9 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
   // captured frame.
   gfx::Rect last_frame_visible_rect_;
 
+  // True after Start() and false after Stop().
+  bool video_capture_started_ = false;
+
   // These are sequence counters used to ensure that the frames are being
   // delivered in the same order they are captured.
   int64_t next_capture_frame_number_ = 0;
@@ -296,7 +298,7 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
   // frame, when RequestRefreshFrame() has been called.
   //
   // Note: This is always set, but the instance is overridden for unit testing.
-  base::Optional<base::OneShotTimer> refresh_frame_retry_timer_;
+  absl::optional<base::OneShotTimer> refresh_frame_retry_timer_;
 
   // Provides a pool of VideoFrames that can be efficiently delivered across
   // processes. The size of this pool is used to limit the maximum number of
@@ -330,7 +332,7 @@ class VIZ_SERVICE_EXPORT FrameSinkVideoCapturerImpl final
 
   // The Oracle-provided media timestamp of the first frame. This is used to
   // compute the relative media stream timestamps for each successive frame.
-  base::Optional<base::TimeTicks> first_frame_media_ticks_;
+  absl::optional<base::TimeTicks> first_frame_media_ticks_;
 
   // Zero or more overlays to be rendered over each captured video frame. The
   // order of the entries in this map determines the order in which each overlay

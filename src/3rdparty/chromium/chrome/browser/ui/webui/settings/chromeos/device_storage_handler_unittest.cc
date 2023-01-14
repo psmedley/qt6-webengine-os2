@@ -13,16 +13,17 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/test/scoped_running_on_chromeos.h"
-#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
-#include "chrome/browser/chromeos/arc/test/test_arc_session_manager.h"
-#include "chrome/browser/chromeos/file_manager/fake_disk_mount_manager.h"
-#include "chrome/browser/chromeos/file_manager/path_util.h"
+#include "chrome/browser/ash/arc/session/arc_session_manager.h"
+#include "chrome/browser/ash/arc/test/test_arc_session_manager.h"
+#include "chrome/browser/ash/file_manager/fake_disk_mount_manager.h"
+#include "chrome/browser/ash/file_manager/path_util.h"
 #include "chrome/browser/ui/webui/settings/chromeos/calculator/size_calculator_test_api.h"
 #include "chrome/browser/ui/webui/settings/chromeos/device_storage_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "chromeos/dbus/concierge/concierge_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/test/fake_arc_session.h"
@@ -58,6 +59,8 @@ class StorageHandlerTest : public testing::Test {
     // Need to initialize DBusThreadManager before ArcSessionManager's
     // constructor calls DBusThreadManager::Get().
     chromeos::DBusThreadManager::Initialize();
+    chromeos::ConciergeClient::InitializeFake(/*fake_cicerone_client=*/nullptr);
+
     // The storage handler requires an instance of DiskMountManager,
     // ArcServiceManager and ArcSessionManager.
     chromeos::disks::DiskMountManager::InitializeForTesting(
@@ -122,6 +125,7 @@ class StorageHandlerTest : public testing::Test {
     arc_service_manager_.reset();
     chromeos::disks::DiskMountManager::Shutdown();
     storage::ExternalMountPoints::GetSystemInstance()->RevokeAllFileSystems();
+    chromeos::ConciergeClient::Shutdown();
     chromeos::DBusThreadManager::Shutdown();
   }
 
@@ -145,12 +149,11 @@ class StorageHandlerTest : public testing::Test {
     for (auto it = web_ui_.call_data().rbegin();
          it != web_ui_.call_data().rend(); ++it) {
       const content::TestWebUI::CallData* data = it->get();
-      std::string name;
-      if (data->function_name() != "cr.webUIListenerCallback" ||
-          !data->arg1()->GetAsString(&name)) {
+      const std::string* name = data->arg1()->GetIfString();
+      if (data->function_name() != "cr.webUIListenerCallback" || !name) {
         continue;
       }
-      if (name == event_name)
+      if (*name == event_name)
         return data->arg2();
     }
     return nullptr;
@@ -463,12 +466,9 @@ TEST_F(StorageHandlerTest, SystemSize) {
       std::vector<int64_t>{200 * GB, 50 * GB, 50 * GB};
   other_users_size_test_api_->InitializeOtherUserSize(other_user_sizes.size());
   for (std::size_t i = 0; i < other_user_sizes.size(); i++) {
-    cryptohome::BaseReply result;
-    result.set_error(cryptohome::CRYPTOHOME_ERROR_NOT_SET);
-    cryptohome::GetAccountDiskUsageReply* usage_reply =
-        result.MutableExtension(cryptohome::GetAccountDiskUsageReply::reply);
-    usage_reply->set_size(other_user_sizes[i]);
-    base::Optional<cryptohome::BaseReply> reply = std::move(result);
+    absl::optional<::user_data_auth::GetAccountDiskUsageReply> reply =
+        ::user_data_auth::GetAccountDiskUsageReply();
+    reply->set_size(other_user_sizes[i]);
     other_users_size_test_api_->SimulateOnGetOtherUserSize(reply);
     if (i < other_user_sizes.size() - 1) {
       ASSERT_FALSE(GetWebUICallbackMessage("storage-other-users-size-changed"));

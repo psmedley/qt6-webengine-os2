@@ -21,6 +21,8 @@ class CORE_EXPORT LayoutNGFieldset final : public LayoutNGBlockFlow {
 
   bool CreatesNewFormattingContext() const final { return true; }
 
+  LayoutBlock* FindAnonymousFieldsetContentBox() const;
+
  protected:
   bool IsOfType(LayoutObjectType) const override;
   void UpdateAnonymousChildStyle(const LayoutObject* child,
@@ -36,6 +38,13 @@ class CORE_EXPORT LayoutNGFieldset final : public LayoutNGBlockFlow {
   // Override to forward to the anonymous fieldset content box.
   LayoutUnit ScrollWidth() const override;
   LayoutUnit ScrollHeight() const override;
+};
+
+template <>
+struct DowncastTraits<LayoutNGFieldset> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutNGFieldset();
+  }
 };
 
 }  // namespace blink

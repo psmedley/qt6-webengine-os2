@@ -26,6 +26,27 @@ function updatePageWithProperties() {
     $('load-stream-status').textContent = properties.loadStreamStatus;
     $('feed-fetch-url').textContent = properties.feedFetchUrl.url;
     $('feed-actions-url').textContent = properties.feedActionsUrl.url;
+    $('enable-webfeed-follow-intro-debug').checked =
+        properties.isWebFeedFollowIntroDebugEnabled;
+    $('enable-webfeed-follow-intro-debug').disabled = false;
+    $('use-feed-query-requests-for-web-feeds').checked =
+        properties.useFeedQueryRequestsForWebFeeds;
+
+    switch (properties.followingFeedOrder) {
+      case feedInternals.mojom.FeedOrder.kUnspecified:
+        $('following-feed-order-unset').checked = true;
+        break;
+      case feedInternals.mojom.FeedOrder.kGrouped:
+        $('following-feed-order-grouped').checked = true;
+        break;
+      case feedInternals.mojom.FeedOrder.kReverseChron:
+        $('following-feed-order-reverse-chron').checked = true;
+        break;
+    }
+    $('following-feed-order-grouped').disabled = false;
+    $('following-feed-order-reverse-chron').disabled = false;
+    $('following-feed-order-unset').disabled = false;
+
   });
 }
 
@@ -151,8 +172,8 @@ function setupEventListeners() {
     pageHandler.overrideFeedHost({url: $('feed-host-override').value});
   });
 
-  $('actions-endpoint-override-apply').addEventListener('click', function() {
-    pageHandler.overrideFeedHost({url: $('actions-endpoint-override').value});
+  $('discover-api-override-apply').addEventListener('click', function() {
+    pageHandler.overrideFeedHost({url: $('discover-api-override').value});
   });
 
   $('feed-stream-data-override').addEventListener('click', function() {
@@ -166,6 +187,40 @@ function setupEventListeners() {
       };
     }
   });
+
+  $('enable-webfeed-follow-intro-debug').addEventListener('click', function() {
+    pageHandler.setWebFeedFollowIntroDebugEnabled(
+        $('enable-webfeed-follow-intro-debug').checked);
+    $('enable-webfeed-follow-intro-debug').disabled = true;
+  });
+
+  $('use-feed-query-requests-for-web-feeds')
+      .addEventListener('click', function() {
+        pageHandler.setUseFeedQueryRequestsForWebFeeds(
+            $('use-feed-query-requests-for-web-feeds').checked);
+      });
+
+  const orderRadioClickListener = function(order) {
+    $('following-feed-order-grouped').disabled = true;
+    $('following-feed-order-reverse-chron').disabled = true;
+    $('following-feed-order-unset').disabled = true;
+    pageHandler.setFollowingFeedOrder(order);
+  };
+  $('following-feed-order-unset')
+      .addEventListener(
+          'click',
+          () => orderRadioClickListener(
+              feedInternals.mojom.FeedOrder.kUnspecified));
+  $('following-feed-order-grouped')
+      .addEventListener(
+          'click',
+          () =>
+              orderRadioClickListener(feedInternals.mojom.FeedOrder.kGrouped));
+  $('following-feed-order-reverse-chron')
+      .addEventListener(
+          'click',
+          () => orderRadioClickListener(
+              feedInternals.mojom.FeedOrder.kReverseChron));
 }
 
 function updatePage() {

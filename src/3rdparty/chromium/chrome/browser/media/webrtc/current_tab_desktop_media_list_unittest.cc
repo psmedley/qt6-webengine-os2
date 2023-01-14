@@ -9,13 +9,13 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/media/webrtc/desktop_media_list.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/test/base/fake_profile_manager.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -30,8 +30,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
-#include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 using content::WebContents;
@@ -42,20 +42,6 @@ using testing::StrictMock;
 namespace {
 
 const base::TimeDelta kUpdatePeriod = base::TimeDelta::FromMilliseconds(1000);
-
-class UnittestProfileManager : public ::ProfileManagerWithoutInit {
- public:
-  explicit UnittestProfileManager(const base::FilePath& user_data_dir)
-      : ::ProfileManagerWithoutInit(user_data_dir) {}
-
- protected:
-  std::unique_ptr<Profile> CreateProfileHelper(
-      const base::FilePath& path) override {
-    if (!base::PathExists(path) && !base::CreateDirectory(path))
-      return nullptr;
-    return std::make_unique<TestingProfile>(path);
-  }
-};
 
 class MockObserver : public DesktopMediaListObserver {
  public:
@@ -85,7 +71,7 @@ class CurrentTabDesktopMediaListTest : public testing::Test {
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     TestingBrowserProcess::GetGlobal()->SetProfileManager(
-        new UnittestProfileManager(temp_dir_.GetPath()));
+        std::make_unique<FakeProfileManager>(temp_dir_.GetPath()));
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
@@ -114,7 +100,7 @@ class CurrentTabDesktopMediaListTest : public testing::Test {
     // necessary.
     TabStripModel* tab_strip_model = browser_->tab_strip_model();
     for (WebContents* contents : all_web_contents_) {
-      tab_strip_model->DetachWebContentsAt(
+      tab_strip_model->DetachAndDeleteWebContentsAt(
           tab_strip_model->GetIndexOfWebContents(contents));
     }
     all_web_contents_.clear();
@@ -151,7 +137,7 @@ class CurrentTabDesktopMediaListTest : public testing::Test {
 
   void RemoveWebContents(WebContents* web_contents) {
     TabStripModel* tab_strip_model = browser_->tab_strip_model();
-    tab_strip_model->DetachWebContentsAt(
+    tab_strip_model->DetachAndDeleteWebContentsAt(
         tab_strip_model->GetIndexOfWebContents(web_contents));
     all_web_contents_.erase(std::remove(all_web_contents_.begin(),
                                         all_web_contents_.end(), web_contents),
@@ -186,8 +172,8 @@ class CurrentTabDesktopMediaListTest : public testing::Test {
   std::unique_ptr<base::RunLoop> run_loop_;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
-  chromeos::ScopedTestUserManager test_user_manager_;
+  ash::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
+  ash::ScopedTestUserManager test_user_manager_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(CurrentTabDesktopMediaListTest);

@@ -19,6 +19,7 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
@@ -43,6 +44,7 @@
 #include "gpu/vulkan/buildflags.h"
 #include "ui/gfx/extension_set.h"
 #include "ui/gl/buildflags.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 
 #if defined(OS_ANDROID)
@@ -498,6 +500,8 @@ GpuFeatureInfo ComputeGpuFeatureInfo(const GPUInfo& gpu_info,
             command_line->GetSwitchValueASCII(switches::kUseANGLE);
         if (use_angle == gl::kANGLEImplementationSwiftShaderName)
           use_swift_shader = true;
+        else if (use_angle == gl::kANGLEImplementationSwiftShaderForWebGLName)
+          return ComputeGpuFeatureInfoForSwiftShader();
       }
     } else if (use_gl == gl::kGLImplementationSwiftShaderForWebGLName)
       return ComputeGpuFeatureInfoForSwiftShader();
@@ -735,8 +739,12 @@ bool EnableSwiftShaderIfNeeded(base::CommandLine* command_line,
           kGpuFeatureStatusEnabled ||
       gpu_feature_info.status_values[GPU_FEATURE_TYPE_ACCELERATED_GL] !=
           kGpuFeatureStatusEnabled) {
-    command_line->AppendSwitchASCII(
-        switches::kUseGL, gl::kGLImplementationSwiftShaderForWebGLName);
+    bool legacy_software_gl = true;
+#if defined(OS_LINUX) || defined(OS_WIN)
+    // This setting makes WebGL run on SwANGLE instead of SwiftShader GL.
+    legacy_software_gl = false;
+#endif
+    gl::SetSoftwareWebGLCommandLineSwitches(command_line, legacy_software_gl);
     return true;
   }
   return false;
@@ -921,7 +929,7 @@ void CollectDevicePerfInfo(DevicePerfInfo* device_perf_info,
 }
 
 void RecordDevicePerfInfoHistograms() {
-  base::Optional<DevicePerfInfo> device_perf_info = GetDevicePerfInfo();
+  absl::optional<DevicePerfInfo> device_perf_info = GetDevicePerfInfo();
   if (!device_perf_info.has_value())
     return;
   UMA_HISTOGRAM_COUNTS_1000("Hardware.TotalDiskSpace",

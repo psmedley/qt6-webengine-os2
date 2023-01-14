@@ -4,6 +4,9 @@
 
 #include "device/udev_linux/udev0_loader.h"
 
+#include <memory>
+
+#include "base/debug/dump_without_crashing.h"
 #include "library_loaders/libudev0.h"
 
 namespace device {
@@ -15,7 +18,10 @@ Udev0Loader::~Udev0Loader() = default;
 bool Udev0Loader::Init() {
   if (lib_loader_)
     return lib_loader_->loaded();
-  lib_loader_.reset(new LibUdev0Loader);
+  lib_loader_ = std::make_unique<LibUdev0Loader>();
+  // TODO(crbug.com/1237497): Remove the next line if it triggers. Remove this
+  // entire file if it does not.
+  base::debug::DumpWithoutCrashing();
   return lib_loader_->Load("libudev.so.0");
 }
 

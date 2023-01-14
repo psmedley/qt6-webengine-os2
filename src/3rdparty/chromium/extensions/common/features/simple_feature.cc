@@ -11,9 +11,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/crx_file/id_util.h"
@@ -26,6 +27,7 @@
 #include "extensions/common/switches.h"
 
 using crx_file::id_util::HashedIdInHex;
+using extensions::mojom::ManifestLocation;
 
 namespace extensions {
 
@@ -46,7 +48,7 @@ base::LazyInstance<AllowlistInfo>::Leaky g_allowlist_info =
 Feature::Availability IsAvailableToManifestForBind(
     const HashedExtensionId& hashed_id,
     Manifest::Type type,
-    Manifest::Location location,
+    ManifestLocation location,
     int manifest_version,
     Feature::Platform platform,
     const Feature* feature) {
@@ -88,6 +90,8 @@ std::string GetDisplayName(Manifest::Type type) {
       return "shared module";
     case Manifest::TYPE_LOGIN_SCREEN_EXTENSION:
       return "login screen extension";
+    case Manifest::TYPE_CHROMEOS_SYSTEM_EXTENSION:
+      return "chromeos system extension";
     case Manifest::NUM_LOAD_TYPES:
       NOTREACHED();
   }
@@ -218,7 +222,7 @@ SimpleFeature::~SimpleFeature() {}
 Feature::Availability SimpleFeature::IsAvailableToManifest(
     const HashedExtensionId& hashed_id,
     Manifest::Type type,
-    Manifest::Location location,
+    ManifestLocation location,
     int manifest_version,
     Platform platform) const {
   Availability environment_availability = GetEnvironmentAvailability(
@@ -459,16 +463,16 @@ bool SimpleFeature::IsIdInList(const HashedExtensionId& hashed_id,
 }
 
 bool SimpleFeature::MatchesManifestLocation(
-    Manifest::Location manifest_location) const {
+    ManifestLocation manifest_location) const {
   DCHECK(location_);
   switch (*location_) {
     case SimpleFeature::COMPONENT_LOCATION:
-      return manifest_location == Manifest::COMPONENT;
+      return manifest_location == ManifestLocation::kComponent;
     case SimpleFeature::EXTERNAL_COMPONENT_LOCATION:
-      return manifest_location == Manifest::EXTERNAL_COMPONENT;
+      return manifest_location == ManifestLocation::kExternalComponent;
     case SimpleFeature::POLICY_LOCATION:
-      return manifest_location == Manifest::EXTERNAL_POLICY ||
-             manifest_location == Manifest::EXTERNAL_POLICY_DOWNLOAD;
+      return manifest_location == ManifestLocation::kExternalPolicy ||
+             manifest_location == ManifestLocation::kExternalPolicyDownload;
     case SimpleFeature::UNPACKED_LOCATION:
       return Manifest::IsUnpackedLocation(manifest_location);
   }
@@ -530,7 +534,7 @@ void SimpleFeature::set_blocklist(
 
 void SimpleFeature::set_command_line_switch(
     base::StringPiece command_line_switch) {
-  command_line_switch_ = command_line_switch.as_string();
+  command_line_switch_ = std::string(command_line_switch);
 }
 
 void SimpleFeature::set_contexts(std::initializer_list<Context> contexts) {
@@ -548,7 +552,7 @@ void SimpleFeature::set_extension_types(
 }
 
 void SimpleFeature::set_feature_flag(base::StringPiece feature_flag) {
-  feature_flag_ = feature_flag.as_string();
+  feature_flag_ = std::string(feature_flag);
 }
 
 void SimpleFeature::set_session_types(
@@ -608,7 +612,7 @@ Feature::Availability SimpleFeature::GetEnvironmentAvailability(
 Feature::Availability SimpleFeature::GetManifestAvailability(
     const HashedExtensionId& hashed_id,
     Manifest::Type type,
-    Manifest::Location location,
+    ManifestLocation location,
     int manifest_version) const {
   // Check extension type first to avoid granting platform app permissions
   // to component extensions.
@@ -628,7 +632,8 @@ Feature::Availability SimpleFeature::GetManifestAvailability(
   // See http://crbug.com/370375 for more details.
   // Component extensions can access any feature.
   // NOTE: Deliberately does not match EXTERNAL_COMPONENT.
-  if (component_extensions_auto_granted_ && location == Manifest::COMPONENT)
+  if (component_extensions_auto_granted_ &&
+      location == ManifestLocation::kComponent)
     return CreateAvailability(IS_AVAILABLE);
 
   if (!allowlist_.empty() && !IsIdInAllowlist(hashed_id) &&

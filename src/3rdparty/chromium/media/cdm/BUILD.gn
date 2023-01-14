@@ -4,10 +4,31 @@
 
 import("//media/media_options.gni")
 
-if (enable_library_cdms) {
-  source_set("cdm_api") {
-    sources = [ "api/content_decryption_module.h" ]
+source_set("cdm_api") {
+  sources = [ "api/content_decryption_module.h" ]
+}
+
+source_set("cdm_type_conversion") {
+  if (enable_library_cdms || is_win) {
+    # This target is a subcomponent.
+    visibility = [
+      "//media",
+      "//media/cdm",
+    ]
+    configs += [ "//media:subcomponent_config" ]
+  } else {
+    visibility = [ "//media/cdm/library_cdm/clear_key_cdm:clear_key_cdm" ]
   }
+
+  sources = [
+    "cdm_type_conversion.cc",
+    "cdm_type_conversion.h",
+  ]
+
+  deps = [
+    ":cdm_api",
+    "//media/base",
+  ]
 }
 
 source_set("cdm") {
@@ -30,6 +51,8 @@ source_set("cdm") {
     "aes_decryptor.h",
     "cbcs_decryptor.cc",
     "cbcs_decryptor.h",
+    "cdm_capability.cc",
+    "cdm_capability.h",
     "cdm_context_ref_impl.cc",
     "cdm_context_ref_impl.h",
     "cenc_decryptor.cc",
@@ -40,10 +63,9 @@ source_set("cdm") {
     "default_cdm_factory.h",
     "json_web_key.cc",
     "json_web_key.h",
+    "supported_audio_codecs.cc",
+    "supported_audio_codecs.h",
   ]
-
-  # TODO(crbug.com/167187): Fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     "//crypto",
@@ -67,19 +89,10 @@ source_set("cdm") {
       "cdm_adapter.h",
       "cdm_adapter_factory.cc",
       "cdm_adapter_factory.h",
-      "cdm_allocator.cc",
-      "cdm_allocator.h",
-      "cdm_auxiliary_helper.cc",
-      "cdm_auxiliary_helper.h",
-      "cdm_helpers.cc",
-      "cdm_helpers.h",
       "cdm_module.cc",
       "cdm_module.h",
-      "cdm_type_conversion.cc",
-      "cdm_type_conversion.h",
       "cdm_wrapper.h",
       "output_protection.h",
-      "platform_verification.h",
       "supported_cdm_versions.cc",
       "supported_cdm_versions.h",
     ]
@@ -94,19 +107,42 @@ source_set("cdm") {
     }
   }
 
-  if (is_win && !use_qt) {
+  if (is_win || enable_library_cdms) {
     sources += [
+      "cdm_allocator.cc",
+      "cdm_allocator.h",
+      "cdm_auxiliary_helper.cc",
+      "cdm_auxiliary_helper.h",
+      "cdm_document_service.h",
+      "cdm_helpers.cc",
+      "cdm_helpers.h",
+    ]
+    deps += [
+      ":cdm_api",
+      ":cdm_type_conversion",
+    ]
+  }
+
+  if (is_win) {
+    sources += [
+      "cdm_preference_data.cc",
+      "cdm_preference_data.h",
       "win/media_foundation_cdm.cc",
       "win/media_foundation_cdm.h",
       "win/media_foundation_cdm_factory.cc",
       "win/media_foundation_cdm_factory.h",
+      "win/media_foundation_cdm_module.cc",
+      "win/media_foundation_cdm_module.h",
       "win/media_foundation_cdm_session.cc",
       "win/media_foundation_cdm_session.h",
     ]
 
     libs = [ "Propsys.lib" ]
 
-    deps += [ "//media/base/win:media_foundation_util" ]
+    deps += [
+      ":cdm_paths",
+      "//media/base/win:media_foundation_util",
+    ]
   }
 }
 
@@ -144,8 +180,6 @@ source_set("unit_tests") {
   ]
 
   configs += [
-    # TODO(crbug.com/167187): Fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
     "//media:media_config",
   ]
 
@@ -165,6 +199,7 @@ source_set("unit_tests") {
       "simple_cdm_buffer.cc",
       "simple_cdm_buffer.h",
     ]
+
     data_deps += [ "//media/cdm/library_cdm/clear_key_cdm" ]
 
     deps += [

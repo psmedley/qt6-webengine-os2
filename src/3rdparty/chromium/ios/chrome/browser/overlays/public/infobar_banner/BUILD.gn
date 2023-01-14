@@ -4,12 +4,16 @@
 
 source_set("infobar_banner") {
   sources = [
+    "add_to_reading_list_infobar_banner_overlay_request_config.h",
+    "add_to_reading_list_infobar_banner_overlay_request_config.mm",
     "confirm_infobar_banner_overlay_request_config.h",
     "confirm_infobar_banner_overlay_request_config.mm",
     "infobar_banner_overlay_responses.cc",
     "infobar_banner_overlay_responses.h",
     "infobar_banner_placeholder_request_config.h",
     "infobar_banner_placeholder_request_config.mm",
+    "save_address_profile_infobar_banner_overlay_request_config.h",
+    "save_address_profile_infobar_banner_overlay_request_config.mm",
     "save_card_infobar_banner_overlay_request_config.h",
     "save_card_infobar_banner_overlay_request_config.mm",
     "save_password_infobar_banner_overlay.h",
@@ -35,7 +39,7 @@ source_set("infobar_banner") {
     "//ios/chrome/browser/overlays/public/common/infobars",
     "//ios/chrome/browser/passwords:infobar_delegates",
     "//ios/chrome/browser/ui/authentication",
-    "//ios/chrome/browser/ui/infobars:infobars_ui",
+    "//ios/chrome/browser/ui/reading_list:infobar",
     "//ui/base",
   ]
 }

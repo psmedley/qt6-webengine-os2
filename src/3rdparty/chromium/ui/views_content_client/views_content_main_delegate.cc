@@ -12,6 +12,7 @@
 #include "base/path_service.h"
 #include "build/build_config.h"
 #include "content/public/common/content_switches.h"
+#include "content/shell/browser/shell_paths.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/views_content_client/views_content_browser_client.h"
@@ -57,6 +58,8 @@ bool ViewsContentMainDelegate::BasicStartupComplete(int* exit_code) {
   logging::LogEventProvider::Initialize(kViewsContentClientProviderName);
 #endif
 
+  content::RegisterShellPathProvider();
+
   return false;
 }
 
@@ -82,9 +85,9 @@ void ViewsContentMainDelegate::PreSandboxStartup() {
   views_content_client_->OnResourcesLoaded();
 }
 
-void ViewsContentMainDelegate::PreCreateMainMessageLoop() {
-  content::ContentMainDelegate::PreCreateMainMessageLoop();
-  ViewsContentClientMainParts::PreCreateMainMessageLoop();
+void ViewsContentMainDelegate::PreBrowserMain() {
+  content::ContentMainDelegate::PreBrowserMain();
+  ViewsContentClientMainParts::PreBrowserMain();
 }
 
 content::ContentClient* ViewsContentMainDelegate::CreateContentClient() {

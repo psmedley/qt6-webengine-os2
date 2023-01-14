@@ -169,7 +169,7 @@ bool VulkanRenderer::Initialize() {
            VK_SUCCESS);
 
   command_pool_ = std::make_unique<gpu::VulkanCommandPool>(device_queue_.get());
-  CHECK(command_pool_->Initialize(false /* use_protected_memory */));
+  CHECK(command_pool_->Initialize());
 
   RecreateFramebuffers();
 
@@ -281,8 +281,10 @@ void VulkanRenderer::RenderFrame() {
               },
               /* .extent = */
               {
-                  /* .width = */ vulkan_swap_chain->size().width(),
-                  /* .height = */ vulkan_swap_chain->size().height(),
+                  /* .width = */ static_cast<uint32_t>(
+                      vulkan_swap_chain->size().width()),
+                  /* .height = */
+                  static_cast<uint32_t>(vulkan_swap_chain->size().height()),
               },
           },
           /* .clearValueCount = */ 1,
@@ -397,8 +399,8 @@ VulkanRenderer::Framebuffer::Create(gpu::VulkanDeviceQueue* vulkan_device_queue,
       /* .renderPass = */ vk_render_pass,
       /* .attachmentCount = */ 1,
       /* .pAttachments = */ &vk_image_view,
-      /* .width = */ vulkan_swap_chain->size().width(),
-      /* .height = */ vulkan_swap_chain->size().height(),
+      /* .width = */ static_cast<uint32_t>(vulkan_swap_chain->size().width()),
+      /* .height = */ static_cast<uint32_t>(vulkan_swap_chain->size().height()),
       /* .layers = */ 1,
   };
 
@@ -410,8 +412,7 @@ VulkanRenderer::Framebuffer::Create(gpu::VulkanDeviceQueue* vulkan_device_queue,
   }
 
   auto command_buffer = std::make_unique<gpu::VulkanCommandBuffer>(
-      vulkan_device_queue, vulkan_command_pool, true /* primary */,
-      false /* use_protected_memory */);
+      vulkan_device_queue, vulkan_command_pool, true /* primary */);
   CHECK(command_buffer->Initialize());
 
   return std::make_unique<VulkanRenderer::Framebuffer>(

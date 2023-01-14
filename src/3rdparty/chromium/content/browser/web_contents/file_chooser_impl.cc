@@ -6,6 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/renderer_host/back_forward_cache_disable.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -128,8 +129,10 @@ void FileChooserImpl::OpenFileChooser(blink::mojom::FileChooserParamsPtr params,
 
   // Don't allow page with open FileChooser to enter BackForwardCache to avoid
   // any unexpected behaviour from BackForwardCache.
-  BackForwardCache::DisableForRenderFrameHost(render_frame_host_,
-                                              "FileChooser");
+  BackForwardCache::DisableForRenderFrameHost(
+      render_frame_host_,
+      BackForwardCacheDisable::DisabledReason(
+          BackForwardCacheDisable::DisabledReasonId::kFileChooser));
 
   static_cast<WebContentsImpl*>(web_contents())
       ->RunFileChooser(render_frame_host_, std::move(listener), *params);
@@ -178,13 +181,11 @@ void FileChooserImpl::FileSelected(
       if (file->is_file_system()) {
         if (!file_system_context) {
           file_system_context =
-              BrowserContext::GetStoragePartition(
-                  render_frame_host_->GetProcess()->GetBrowserContext(),
-                  render_frame_host_->GetSiteInstance())
-                  ->GetFileSystemContext();
+              render_frame_host_->GetStoragePartition()->GetFileSystemContext();
         }
         policy->GrantReadFileSystem(
-            pid, file_system_context->CrackURL(file->get_file_system()->url)
+            pid, file_system_context
+                     ->CrackURLInFirstPartyContext(file->get_file_system()->url)
                      .mount_filesystem_id());
       } else {
         policy->GrantReadFile(pid, file->get_native_file()->file_path);

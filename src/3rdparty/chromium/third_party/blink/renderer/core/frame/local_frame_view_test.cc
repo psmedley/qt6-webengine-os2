@@ -8,6 +8,7 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
+#include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
@@ -21,7 +22,6 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_artifact.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 using blink::test::RunPendingTasks;
@@ -38,11 +38,12 @@ class AnimationMockChromeClient : public RenderingTestChromeClient {
   // ChromeClient
   MOCK_METHOD2(AttachRootGraphicsLayer,
                void(GraphicsLayer*, LocalFrame* localRoot));
-  MOCK_METHOD3(MockSetToolTip, void(LocalFrame*, const String&, TextDirection));
-  void SetToolTip(LocalFrame& frame,
-                  const String& tooltip_text,
-                  TextDirection dir) override {
-    MockSetToolTip(&frame, tooltip_text, dir);
+  MOCK_METHOD3(MockUpdateTooltipUnderCursor,
+               void(LocalFrame*, const String&, TextDirection));
+  void UpdateTooltipUnderCursor(LocalFrame& frame,
+                                const String& tooltip_text,
+                                TextDirection dir) override {
+    MockUpdateTooltipUnderCursor(&frame, tooltip_text, dir);
   }
 
   void ScheduleAnimation(const LocalFrameView*,
@@ -127,15 +128,17 @@ TEST_F(LocalFrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases) {
 TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
   SetBodyInnerHTML("<div style='width:1000px;height:1000px'></div>");
 
-  EXPECT_CALL(GetAnimationMockChromeClient(),
-              MockSetToolTip(GetDocument().GetFrame(), String(), _));
+  EXPECT_CALL(
+      GetAnimationMockChromeClient(),
+      MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _));
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(1, 1), mojom::blink::ScrollType::kUser);
 
-  // Programmatic scrolling should not dismiss the tooltip, so setToolTip
-  // should not be called for this invocation.
-  EXPECT_CALL(GetAnimationMockChromeClient(),
-              MockSetToolTip(GetDocument().GetFrame(), String(), _))
+  // Programmatic scrolling should not dismiss the tooltip, so
+  // MockUpdateTooltipUnderCursor should not be called for this invocation.
+  EXPECT_CALL(
+      GetAnimationMockChromeClient(),
+      MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _))
       .Times(0);
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(2, 2), mojom::blink::ScrollType::kProgrammatic);
@@ -347,10 +350,6 @@ TEST_F(LocalFrameViewTest,
 // activate synchronously while rendering is blocked waiting on a stylesheet.
 // See https://crbug.com/851338.
 TEST_F(SimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
-  // Style-sheets are parser-blocking, not render-blocking when
-  // BlockHTMLParserOnStyleSheets is enabled.
-  ScopedBlockHTMLParserOnStyleSheetsForTest scope(false);
-
   SimRequest main_resource("https://example.com/test.html", "text/html");
   SimSubresourceRequest css_resource("https://example.com/sheet.css",
                                      "text/css");

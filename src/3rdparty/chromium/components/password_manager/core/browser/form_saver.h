@@ -7,11 +7,10 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "components/password_manager/core/browser/password_store.h"
 
 namespace password_manager {
@@ -28,11 +27,11 @@ class FormSaver {
 
   // Blocklist the origin described by |digest|. Returns the PasswordForm pushed
   // to the store.
-  virtual PasswordForm Blocklist(PasswordStore::FormDigest digest) = 0;
+  virtual PasswordForm Blocklist(PasswordFormDigest digest) = 0;
 
   // Unblocklist the origin described by |digest| by deleting all corresponding
   // blocklisted entries.
-  virtual void Unblocklist(const PasswordStore::FormDigest& digest) = 0;
+  virtual void Unblocklist(const PasswordFormDigest& digest) = 0;
 
   // Saves the |pending| form.
   // |matches| are relevant credentials for the site. After saving |pending|,
@@ -43,7 +42,7 @@ class FormSaver {
   //   and the old password are updated to the new password.
   virtual void Save(PasswordForm pending,
                     const std::vector<const PasswordForm*>& matches,
-                    const base::string16& old_password) = 0;
+                    const std::u16string& old_password) = 0;
 
   // Updates the saved credential in the password store sharing the same key as
   // the |pending| form.
@@ -51,7 +50,7 @@ class FormSaver {
   // above.
   virtual void Update(PasswordForm pending,
                       const std::vector<const PasswordForm*>& matches,
-                      const base::string16& old_password) = 0;
+                      const std::u16string& old_password) = 0;
 
   // If any of the unique key fields (signon_realm, origin, username_element,
   // username_value, password_element) are updated, then the this version of
@@ -61,7 +60,7 @@ class FormSaver {
   // above.
   virtual void UpdateReplace(PasswordForm pending,
                              const std::vector<const PasswordForm*>& matches,
-                             const base::string16& old_password,
+                             const std::u16string& old_password,
                              const PasswordForm& old_unique_key) = 0;
 
   // Removes |form| from the password store.

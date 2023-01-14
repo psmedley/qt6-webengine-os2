@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_popup_menu_element.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -33,6 +34,9 @@ class MediaControlPopupMenuElement::EventListener final
     popup_menu_->addEventListener(event_type_names::kKeydown, this, false);
 
     LocalDOMWindow* window = popup_menu_->GetDocument().domWindow();
+    if (!window)
+      return;
+
     window->addEventListener(event_type_names::kScroll, this, true);
     if (DOMWindow* outer_window = window->top()) {
       if (outer_window != window)
@@ -45,6 +49,9 @@ class MediaControlPopupMenuElement::EventListener final
     popup_menu_->removeEventListener(event_type_names::kKeydown, this, false);
 
     LocalDOMWindow* window = popup_menu_->GetDocument().domWindow();
+    if (!window)
+      return;
+
     window->removeEventListener(event_type_names::kScroll, this, true);
     if (DOMWindow* outer_window = window->top()) {
       if (outer_window != window) {
@@ -143,11 +150,15 @@ void MediaControlPopupMenuElement::DefaultEventHandler(Event& event) {
 
     event.stopPropagation();
     event.SetDefaultHandled();
-  } else if (event.type() == event_type_names::kFocus) {
-    // When popup menu gain focus from scrolling, switch focus
-    // back to the last focused item in the menu
-    DCHECK(last_focused_element_);
-    last_focused_element_->focus();
+  } else if (event.type() == event_type_names::kFocus &&
+             event.target() == this) {
+    // When the popup menu gains focus from scrolling, switch focus
+    // back to the last focused item in the menu.
+    if (last_focused_element_) {
+      FocusOptions* focus_options = FocusOptions::Create();
+      focus_options->setPreventScroll(true);
+      last_focused_element_->focus(focus_options);
+    }
   }
 
   MediaControlDivElement::DefaultEventHandler(event);

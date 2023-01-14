@@ -9,9 +9,10 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/optional.h"
 #include "chromeos/ui/base/window_state_type.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
@@ -57,8 +58,19 @@ struct COMPONENT_EXPORT(FULL_RESTORE) AppRestoreData {
   // }
   base::Value ConvertToValue() const;
 
-  // Modify the window's information based on |window_info|.
+  // Modifies the window's information based on |window_info|.
   void ModifyWindowInfo(const WindowInfo& window_info);
+
+  // Modifies the window's theme colors.
+  void ModifyThemeColor(uint32_t window_primary_color,
+                        uint32_t window_status_bar_color);
+
+  // Clears the window's information.
+  void ClearWindowInfo();
+
+  // Gets the app launch information.
+  std::unique_ptr<AppLaunchInfo> GetAppLaunchInfo(const std::string& app_id,
+                                                  int window_id) const;
 
   // Gets the window information.
   std::unique_ptr<WindowInfo> GetWindowInfo() const;
@@ -67,21 +79,34 @@ struct COMPONENT_EXPORT(FULL_RESTORE) AppRestoreData {
   apps::mojom::WindowInfoPtr GetAppWindowInfo() const;
 
   // App launch parameters.
-  base::Optional<int32_t> event_flag;
-  base::Optional<int32_t> container;
-  base::Optional<int32_t> disposition;
-  base::Optional<int64_t> display_id;
-  base::Optional<GURL> url;
-  base::Optional<apps::mojom::IntentPtr> intent;
-  base::Optional<std::vector<base::FilePath>> file_paths;
+  absl::optional<int32_t> event_flag;
+  absl::optional<int32_t> container;
+  absl::optional<int32_t> disposition;
+  absl::optional<int64_t> display_id;
+  absl::optional<std::string> handler_id;
+  absl::optional<std::vector<GURL>> urls;
+  absl::optional<int32_t> active_tab_index;
+  absl::optional<apps::mojom::IntentPtr> intent;
+  absl::optional<std::vector<base::FilePath>> file_paths;
+  absl::optional<bool> app_type_browser;
+  absl::optional<std::string> app_name;
 
   // Window's information.
-  base::Optional<int32_t> activation_index;
-  base::Optional<int32_t> desk_id;
-  base::Optional<bool> visible_on_all_workspaces;
-  base::Optional<gfx::Rect> restore_bounds;
-  base::Optional<gfx::Rect> current_bounds;
-  base::Optional<chromeos::WindowStateType> window_state_type;
+  absl::optional<int32_t> activation_index;
+  absl::optional<int32_t> desk_id;
+  absl::optional<bool> visible_on_all_workspaces;
+  absl::optional<gfx::Rect> restore_bounds;
+  absl::optional<gfx::Rect> current_bounds;
+  absl::optional<chromeos::WindowStateType> window_state_type;
+  absl::optional<ui::WindowShowState> pre_minimized_show_state_type;
+
+  // Extra ARC window's information.
+  absl::optional<gfx::Size> minimum_size;
+  absl::optional<gfx::Size> maximum_size;
+  absl::optional<std::u16string> title;
+  absl::optional<gfx::Rect> bounds_in_root;
+  absl::optional<uint32_t> primary_color;
+  absl::optional<uint32_t> status_bar_color;
 };
 
 }  // namespace full_restore

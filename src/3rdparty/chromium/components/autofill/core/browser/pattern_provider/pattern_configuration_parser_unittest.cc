@@ -61,13 +61,13 @@ TEST(PatternConfigurationParserTest, WellFormedParsedCorrectly) {
         ]
       }
     })";
-  base::Optional<base::Value> json_object =
+  absl::optional<base::Value> json_object =
       base::JSONReader::Read(json_message);
 
   ASSERT_TRUE(json_object) << "Incorrectly formatted JSON string.";
 
   base::Version version = ExtractVersionFromJsonObject(json_object.value());
-  base::Optional<PatternProvider::Map> optional_patterns =
+  absl::optional<PatternProvider::Map> optional_patterns =
       GetConfigurationFromJsonObject(json_object.value());
 
   ASSERT_TRUE(version.IsValid());
@@ -90,8 +90,8 @@ TEST(PatternConfigurationParserTest, WellFormedParsedCorrectly) {
   // Test one |MatchingPattern| to check that they are parsed correctly.
   MatchingPattern* pattern = &patterns["FULL_NAME"][LanguageCode("fr")][0];
 
-  ASSERT_EQ("nom|prenom", pattern->positive_pattern);
-  ASSERT_EQ("compagne", pattern->negative_pattern);
+  ASSERT_EQ(u"nom|prenom", pattern->positive_pattern);
+  ASSERT_EQ(u"compagne", pattern->negative_pattern);
   ASSERT_EQ(LanguageCode("fr"), pattern->language);
   ASSERT_NEAR(2.0, pattern->positive_score, 1e-6);
   ASSERT_EQ(2, pattern->match_field_attributes);
@@ -126,12 +126,12 @@ TEST(PatternConfigurationParserTest, MalformedMissingProperty) {
         ]
       }
     })";
-  base::Optional<base::Value> json_object =
+  absl::optional<base::Value> json_object =
       base::JSONReader::Read(json_message);
 
   ASSERT_TRUE(json_object) << "Incorrectly formatted JSON string.";
 
-  base::Optional<PatternProvider::Map> optional_patterns =
+  absl::optional<PatternProvider::Map> optional_patterns =
       GetConfigurationFromJsonObject(json_object.value());
 
   ASSERT_FALSE(optional_patterns);
@@ -154,7 +154,7 @@ TEST(PatternConfigurationParserTest, MalformedMissingVersion) {
         ]
       }
     })";
-  base::Optional<base::Value> json_object =
+  absl::optional<base::Value> json_object =
       base::JSONReader::Read(json_message);
 
   ASSERT_TRUE(json_object) << "Incorrectly formatted JSON string.";
@@ -179,12 +179,12 @@ TEST(PatternConfigurationParserTest, MalformedNotList) {
         }
       }
     })";
-  base::Optional<base::Value> json_object =
+  absl::optional<base::Value> json_object =
       base::JSONReader::Read(json_message);
 
   ASSERT_TRUE(json_object) << "Incorrectly formatted JSON string.";
 
-  base::Optional<PatternProvider::Map> optional_patterns =
+  absl::optional<PatternProvider::Map> optional_patterns =
       GetConfigurationFromJsonObject(json_object.value());
 
   ASSERT_FALSE(optional_patterns);

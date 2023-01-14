@@ -7,7 +7,6 @@
 
 #include <list>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include "base/containers/flat_map.h"
@@ -80,6 +79,10 @@ class DesktopCaptureAccessHandler : public CaptureAccessHandlerBase,
   // Currently component extensions and some external extensions are default
   // approved.
   static bool IsDefaultApproved(const extensions::Extension* extension);
+
+  // Returns whether desktop capture is always approved for |url|.
+  // Currently chrome://feedback/ is default approved.
+  static bool IsDefaultApproved(const GURL& url);
 
   // WebContentsCollection::Observer:
   void WebContentsDestroyed(content::WebContents* web_contents) override;

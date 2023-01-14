@@ -10,7 +10,7 @@ load("//lib/branches.star", "branches")
 load("//project.star", "settings")
 
 lucicfg.check_version(
-    min = "1.22.1",
+    min = "1.29.1",
     message = "Update depot_tools",
 )
 
@@ -21,19 +21,22 @@ lucicfg.enable_experiment("crbug.com/1085650")
 lucicfg.config(
     config_dir = "generated",
     tracked_files = [
-        "commit-queue.cfg",
+        "builders/*/*/*",
         "cq-builders.md",
-        "cr-buildbucket.cfg",
-        "luci-logdog.cfg",
-        "luci-milo.cfg",
-        "luci-notify.cfg",
-        "luci-notify/email-templates/*.template",
-        "luci-scheduler.cfg",
+        "cq-usage/default.cfg",
+        "cq-usage/full.cfg",
+        "luci/commit-queue.cfg",
+        "luci/cr-buildbucket.cfg",
+        "luci/luci-logdog.cfg",
+        "luci/luci-milo.cfg",
+        "luci/luci-notify.cfg",
+        "luci/luci-notify/email-templates/*.template",
+        "luci/luci-scheduler.cfg",
+        "luci/project.cfg",
+        "luci/realms.cfg",
+        "luci/tricium-prod.cfg",
         "outages.pyl",
-        "project.cfg",
         "project.pyl",
-        "realms.cfg",
-        "tricium-prod.cfg",
     ],
     fail_on_warnings = True,
     lint_checks = [
@@ -49,12 +52,13 @@ lucicfg.config(
 
 # Just copy tricium-prod.cfg to the generated outputs
 lucicfg.emit(
-    dest = "tricium-prod.cfg",
+    dest = "luci/tricium-prod.cfg",
     data = io.read_file("tricium-prod.cfg"),
 )
 
 luci.project(
     name = settings.project,
+    config_dir = "luci",
     buildbucket = "cr-buildbucket.appspot.com",
     logdog = "luci-logdog.appspot.com",
     milo = "luci-milo.appspot.com",
@@ -77,6 +81,12 @@ luci.project(
         acl.entry(
             roles = acl.SCHEDULER_OWNER,
             groups = "project-chromium-admins",
+        ),
+    ],
+    bindings = [
+        luci.binding(
+            roles = "role/configs.validator",
+            groups = "project-chromium-try-task-accounts",
         ),
     ],
 )
@@ -115,8 +125,42 @@ luci.realm(
     ],
 )
 
+luci.realm(
+    name = "ci",
+    bindings = [
+        # Allow CI builders to create invocations in their own builds.
+        luci.binding(
+            roles = "role/resultdb.invocationCreator",
+            groups = "project-chromium-ci-task-accounts",
+        ),
+    ],
+)
+
+luci.realm(
+    name = "try",
+    bindings = [
+        # Allow try builders to create invocations in their own builds.
+        luci.binding(
+            roles = "role/resultdb.invocationCreator",
+            groups = "project-chromium-try-task-accounts",
+        ),
+    ],
+)
+
+luci.realm(
+    name = "webrtc",
+    bindings = [
+        # Allow WebRTC builders to create invocations in their own builds.
+        luci.binding(
+            roles = "role/resultdb.invocationCreator",
+            groups = "project-chromium-ci-task-accounts",
+        ),
+    ],
+)
+
 # Launch Swarming tasks in "realms-aware mode", crbug.com/1136313.
 luci.builder.defaults.experiments.set({"luci.use_realms": 100})
+luci.builder.defaults.test_presentation.set(resultdb.test_presentation(grouping_keys = ["status", "v.test_suite"]))
 
 exec("//swarming.star")
 
@@ -128,8 +172,10 @@ exec("//subprojects/chromium/subproject.star")
 branches.exec("//subprojects/codesearch/subproject.star")
 branches.exec("//subprojects/findit/subproject.star")
 branches.exec("//subprojects/goma/subproject.star")
+branches.exec("//subprojects/reclient/subproject.star")
 branches.exec("//subprojects/webrtc/subproject.star")
 
+exec("//generators/cq-usage.star")
 branches.exec("//generators/cq-builders-md.star")
 
 exec("//generators/scheduler-noop-jobs.star")

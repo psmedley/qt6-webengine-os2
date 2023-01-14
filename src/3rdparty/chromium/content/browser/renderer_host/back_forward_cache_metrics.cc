@@ -4,19 +4,23 @@
 
 #include "content/browser/renderer_host/back_forward_cache_metrics.h"
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/sparse_histogram.h"
+#include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/should_swap_browsing_instance.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/common/debug_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/reload_type.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
+#include "third_party/blink/public/common/scheduler/web_scheduler_tracked_feature.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -110,35 +114,72 @@ void BackForwardCacheMetrics::MainFrameDidStartNavigationToDocument() {
 void BackForwardCacheMetrics::DidCommitNavigation(
     NavigationRequest* navigation,
     bool back_forward_cache_allowed) {
-  if (navigation->IsInMainFrame() && !navigation->IsSameDocument()) {
-    {
-      bool is_reload = navigation->GetReloadType() != ReloadType::NONE;
-      RecordHistogramForReloadsAndHistoryNavigations(
-          is_reload, back_forward_cache_allowed);
-    }
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (!navigation->IsInPrimaryMainFrame() || navigation->IsSameDocument())
+    return;
 
-    if (IsHistoryNavigation(navigation)) {
-      UpdateNotRestoredReasonsForNavigation(navigation);
-      TRACE_EVENT1("navigation", "HistoryNavigationOutcome", "outcome",
-                   page_store_result_->ToString());
-      RecordMetricsForHistoryNavigationCommit(navigation,
-                                              back_forward_cache_allowed);
-      RecordHistoryNavigationUkm(navigation);
-    }
-
-    page_store_result_ =
-        std::make_unique<BackForwardCacheCanStoreDocumentResult>();
-    previous_navigation_is_served_from_bfcache_ =
-        navigation->IsServedFromBackForwardCache();
-    previous_navigation_is_history_ = IsHistoryNavigation(navigation);
-    last_committed_cross_document_main_frame_navigation_id_ =
-        navigation->GetNavigationId();
+  {
+    bool is_reload = navigation->GetReloadType() != ReloadType::NONE;
+    RecordHistogramForReloadsAndHistoryNavigations(is_reload,
+                                                   back_forward_cache_allowed);
   }
-  last_committed_navigation_entry_id_ = navigation->nav_entry_id();
 
-  navigated_away_from_main_document_timestamp_ = base::nullopt;
-  started_navigation_timestamp_ = base::nullopt;
-  renderer_killed_timestamp_ = base::nullopt;
+  if (IsHistoryNavigation(navigation)) {
+    UpdateNotRestoredReasonsForNavigation(navigation);
+
+    // If a navigation serves the result from back/forward cache, then it must
+    // not have logged any NotRestoredReasons. Also if it is not restored from
+    // back/forward cache, the logged reasons must match the actual condition of
+    // the navigation and other logged data.
+    bool served_from_bfcache_not_match =
+        navigation->IsServedFromBackForwardCache() &&
+        !page_store_result_->not_stored_reasons().Empty();
+    bool browsing_instance_not_swapped_not_match =
+        page_store_result_->HasNotStoredReason(
+            NotRestoredReason::kBrowsingInstanceNotSwapped) &&
+        DidSwapBrowsingInstance();
+    bool disable_for_rfh_not_match =
+        page_store_result_->HasNotStoredReason(
+            NotRestoredReason::kDisableForRenderFrameHostCalled) &&
+        page_store_result_->disabled_reasons().size() == 0;
+    bool blocklisted_features_not_match =
+        page_store_result_->HasNotStoredReason(
+            NotRestoredReason::kBlocklistedFeatures) &&
+        page_store_result_->blocklisted_features().Empty();
+    if (served_from_bfcache_not_match ||
+        browsing_instance_not_swapped_not_match || disable_for_rfh_not_match ||
+        blocklisted_features_not_match) {
+      CaptureTraceForNavigationDebugScenario(
+          DebugScenario::kDebugBackForwardCacheMetricsMismatch);
+    }
+
+    TRACE_EVENT1("navigation", "HistoryNavigationOutcome", "outcome",
+                 page_store_result_->ToString());
+    RecordMetricsForHistoryNavigationCommit(navigation,
+                                            back_forward_cache_allowed);
+    RecordHistoryNavigationUkm(navigation);
+    if (!navigation->IsServedFromBackForwardCache()) {
+      devtools_instrumentation::BackForwardCacheNotUsed(
+          navigation, page_store_result_.get());
+    }
+  }
+
+  page_store_result_ =
+      std::make_unique<BackForwardCacheCanStoreDocumentResult>();
+  previous_navigation_is_served_from_bfcache_ =
+      navigation->IsServedFromBackForwardCache();
+  previous_navigation_is_history_ = IsHistoryNavigation(navigation);
+  last_committed_cross_document_main_frame_navigation_id_ =
+      navigation->GetNavigationId();
+
+  // BackForwardCacheMetrics can be reused when reloading. Reset fields for UKM
+  // for the next navigation.
+  navigated_away_from_main_document_timestamp_ = absl::nullopt;
+  started_navigation_timestamp_ = absl::nullopt;
+  renderer_killed_timestamp_ = absl::nullopt;
+  browsing_instance_swap_result_ = absl::nullopt;
 }
 
 void BackForwardCacheMetrics::RecordHistoryNavigationUkm(
@@ -166,11 +207,11 @@ void BackForwardCacheMetrics::RecordHistoryNavigationUkm(
       ukm::ConvertToSourceId(
           last_committed_cross_document_main_frame_navigation_id_,
           ukm::SourceIdType::NAVIGATION_ID));
-  builder.SetNavigatedToTheMostRecentEntryForDocument(
-      navigation->nav_entry_id() == last_committed_navigation_entry_id_);
-  builder.SetMainFrameFeatures(main_frame_features_);
-  builder.SetSameOriginSubframesFeatures(same_origin_frames_features_);
-  builder.SetCrossOriginSubframesFeatures(cross_origin_frames_features_);
+  builder.SetMainFrameFeatures(main_frame_features_.ToEnumBitmask());
+  builder.SetSameOriginSubframesFeatures(
+      same_origin_frames_features_.ToEnumBitmask());
+  builder.SetCrossOriginSubframesFeatures(
+      cross_origin_frames_features_.ToEnumBitmask());
   // DidStart notification might be missing for some same-document
   // navigations. It's good that we don't care about the time in the cache
   // in that case.
@@ -185,17 +226,14 @@ void BackForwardCacheMetrics::RecordHistoryNavigationUkm(
   builder.SetBackForwardCache_IsServedFromBackForwardCache(
       navigation->IsServedFromBackForwardCache());
   builder.SetBackForwardCache_NotRestoredReasons(
-      page_store_result_->not_stored_reasons().to_ullong());
+      page_store_result_->not_stored_reasons().ToEnumBitmask());
 
   builder.SetBackForwardCache_BlocklistedFeatures(
-      static_cast<int64_t>(page_store_result_->blocklisted_features()));
+      page_store_result_->blocklisted_features().ToEnumBitmask());
 
-  if (ShouldRecordBrowsingInstanceNotSwappedReason() &&
-      page_store_result_->browsing_instance_not_swapped_reason()) {
+  if (browsing_instance_swap_result_) {
     builder.SetBackForwardCache_BrowsingInstanceNotSwappedReason(
-        static_cast<int64_t>(
-            page_store_result_->browsing_instance_not_swapped_reason()
-                .value()));
+        static_cast<int64_t>(browsing_instance_swap_result_.value()));
   }
 
   builder.SetBackForwardCache_DisabledForRenderFrameHostReasonCount(
@@ -203,57 +241,31 @@ void BackForwardCacheMetrics::RecordHistoryNavigationUkm(
 
   builder.Record(ukm::UkmRecorder::Get());
 
-  for (const std::string& reason : page_store_result_->disabled_reasons()) {
+  for (const BackForwardCache::DisabledReason& reason :
+       page_store_result_->disabled_reasons()) {
     ukm::builders::BackForwardCacheDisabledForRenderFrameHostReason
         rfh_reason_builder(source_id);
-    rfh_reason_builder.SetReason(
-        static_cast<int64_t>(base::HashMetricName(reason) & ((1 << 16) - 1)));
+    rfh_reason_builder.SetReason2(MetricValue(reason));
     rfh_reason_builder.Record(ukm::UkmRecorder::Get());
   }
 }
 
 void BackForwardCacheMetrics::MainFrameDidNavigateAwayFromDocument(
     RenderFrameHostImpl* new_main_frame,
-    LoadCommittedDetails* details,
     NavigationRequest* navigation) {
   // MainFrameDidNavigateAwayFromDocument is called when we commit a navigation
   // to another main frame document and the current document loses its "last
   // committed" status.
   navigated_away_from_main_document_timestamp_ = Now();
-
-  GlobalFrameRoutingId new_main_frame_id{new_main_frame->GetProcess()->GetID(),
-                                         new_main_frame->GetRoutingID()};
-
-  // If the navigation used the same RenderFrameHost, we would not be able to
-  // use back-forward cache.
-  if (navigation->GetPreviousRenderFrameHostId() == new_main_frame_id) {
-    // Converting URLs to origins is generally discouraged [1], but here we are
-    // doing this only for metrics and are not making any decisions based on
-    // that.
-    //
-    // [1]
-    // https://chromium.googlesource.com/chromium/src/+/HEAD/docs/security/origin-vs-url.md#avoid-converting-urls-to-origins
-    GURL previous_site = SiteInfo::GetSiteForOrigin(
-        url::Origin::Create(details->previous_main_frame_url));
-    GURL new_site =
-        SiteInfo::GetSiteForOrigin(url::Origin::Create(navigation->GetURL()));
-    if (previous_site == new_site) {
-      page_store_result_->No(
-          NotRestoredReason::kRenderFrameHostReused_SameSite);
-    } else {
-      page_store_result_->No(
-          NotRestoredReason::kRenderFrameHostReused_CrossSite);
-    }
-  }
 }
 
 void BackForwardCacheMetrics::RecordFeatureUsage(
     RenderFrameHostImpl* main_frame) {
   DCHECK(!main_frame->GetParent());
 
-  main_frame_features_ = 0;
-  same_origin_frames_features_ = 0;
-  cross_origin_frames_features_ = 0;
+  main_frame_features_.Clear();
+  same_origin_frames_features_.Clear();
+  cross_origin_frames_features_.Clear();
 
   CollectFeatureUsageFromSubtree(main_frame,
                                  main_frame->GetLastCommittedOrigin());
@@ -262,14 +274,15 @@ void BackForwardCacheMetrics::RecordFeatureUsage(
 void BackForwardCacheMetrics::CollectFeatureUsageFromSubtree(
     RenderFrameHostImpl* rfh,
     const url::Origin& main_frame_origin) {
-  uint64_t features = rfh->scheduler_tracked_features();
+  blink::scheduler::WebSchedulerTrackedFeatures features =
+      rfh->scheduler_tracked_features();
   if (!rfh->GetParent()) {
-    main_frame_features_ |= features;
+    main_frame_features_.PutAll(features);
   } else if (rfh->GetLastCommittedOrigin().IsSameOriginWith(
                  main_frame_origin)) {
-    same_origin_frames_features_ |= features;
+    same_origin_frames_features_.PutAll(features);
   } else {
-    cross_origin_frames_features_ |= features;
+    cross_origin_frames_features_.PutAll(features);
   }
 
   for (size_t i = 0; i < rfh->child_count(); ++i) {
@@ -282,10 +295,18 @@ void BackForwardCacheMetrics::MarkNotRestoredWithReason(
     const BackForwardCacheCanStoreDocumentResult& can_store) {
   page_store_result_->AddReasonsFrom(can_store);
 
-  if (can_store.not_stored_reasons().test(
-          static_cast<size_t>(BackForwardCacheMetrics::NotRestoredReason::
-                                  kRendererProcessKilled))) {
+  const BackForwardCacheCanStoreDocumentResult::NotStoredReasons&
+      not_stored_reasons = can_store.not_stored_reasons();
+
+  if (not_stored_reasons.Has(NotRestoredReason::kRendererProcessKilled)) {
     renderer_killed_timestamp_ = Now();
+  }
+  if (!not_stored_reasons.Has(NotRestoredReason::kHTTPStatusNotOK) &&
+      !not_stored_reasons.Has(NotRestoredReason::kSchemeNotHTTPOrHTTPS) &&
+      not_stored_reasons.Has(NotRestoredReason::kNoResponseHead)) {
+    CaptureTraceForNavigationDebugScenario(
+        DebugScenario::kDebugNoResponseHeadForHttpOrHttps);
+    base::debug::DumpWithoutCrashing();
   }
 }
 
@@ -298,9 +319,13 @@ void BackForwardCacheMetrics::UpdateNotRestoredReasonsForNavigation(
     page_store_result_->No(NotRestoredReason::kSessionRestored);
   }
 
+  if (!DidSwapBrowsingInstance()) {
+    page_store_result_->No(NotRestoredReason::kBrowsingInstanceNotSwapped);
+  }
+
   // This should not happen, but record this as an 'unknown' reason just in
   // case.
-  if (page_store_result_->not_stored_reasons().none() &&
+  if (page_store_result_->not_stored_reasons().Empty() &&
       !navigation->IsServedFromBackForwardCache()) {
     page_store_result_->No(NotRestoredReason::kUnknown);
     // TODO(altimin): Add a (D)CHECK here, but this code is reached in
@@ -312,10 +337,6 @@ void BackForwardCacheMetrics::UpdateNotRestoredReasonsForNavigation(
 void BackForwardCacheMetrics::RecordMetricsForHistoryNavigationCommit(
     NavigationRequest* navigation,
     bool back_forward_cache_allowed) const {
-  DCHECK(!navigation->IsServedFromBackForwardCache() ||
-         page_store_result_->not_stored_reasons().none())
-      << "If the navigation is served from bfcache, no not restored reasons "
-         "should be recorded";
   HistoryNavigationOutcome outcome = HistoryNavigationOutcome::kNotRestored;
   if (navigation->IsServedFromBackForwardCache()) {
     outcome = HistoryNavigationOutcome::kRestored;
@@ -323,12 +344,11 @@ void BackForwardCacheMetrics::RecordMetricsForHistoryNavigationCommit(
     if (back_forward_cache_allowed) {
       UMA_HISTOGRAM_ENUMERATION(
           "BackForwardCache.EvictedAfterDocumentRestoredReason",
-          BackForwardCacheMetrics::EvictedAfterDocumentRestoredReason::
-              kRestored);
+          EvictedAfterDocumentRestoredReason::kRestored);
     }
     UMA_HISTOGRAM_ENUMERATION(
         "BackForwardCache.AllSites.EvictedAfterDocumentRestoredReason",
-        BackForwardCacheMetrics::EvictedAfterDocumentRestoredReason::kRestored);
+        EvictedAfterDocumentRestoredReason::kRestored);
   }
 
   if (back_forward_cache_allowed) {
@@ -344,11 +364,8 @@ void BackForwardCacheMetrics::RecordMetricsForHistoryNavigationCommit(
   UMA_HISTOGRAM_ENUMERATION(
       "BackForwardCache.AllSites.HistoryNavigationOutcome", outcome);
 
-  for (int i = 0; i <= static_cast<int>(NotRestoredReason::kMaxValue); i++) {
-    if (!page_store_result_->not_stored_reasons().test(static_cast<size_t>(i)))
-      continue;
+  for (NotRestoredReason reason : page_store_result_->not_stored_reasons()) {
     DCHECK(!navigation->IsServedFromBackForwardCache());
-    NotRestoredReason reason = static_cast<NotRestoredReason>(i);
     if (back_forward_cache_allowed) {
       UMA_HISTOGRAM_ENUMERATION(
           "BackForwardCache.HistoryNavigationOutcome.NotRestoredReason",
@@ -357,8 +374,7 @@ void BackForwardCacheMetrics::RecordMetricsForHistoryNavigationCommit(
     UMA_HISTOGRAM_ENUMERATION(
         "BackForwardCache.AllSites.HistoryNavigationOutcome.NotRestoredReason",
         reason);
-    if (reason ==
-        BackForwardCacheMetrics::NotRestoredReason::kRendererProcessKilled) {
+    if (reason == NotRestoredReason::kRendererProcessKilled) {
       DCHECK(renderer_killed_timestamp_);
       DCHECK(navigated_away_from_main_document_timestamp_);
       base::TimeDelta time =
@@ -369,52 +385,45 @@ void BackForwardCacheMetrics::RecordMetricsForHistoryNavigationCommit(
     }
   }
 
-  for (int i = 0;
-       i <= static_cast<int>(
-                blink::scheduler::WebSchedulerTrackedFeature::kMaxValue);
-       i++) {
-    blink::scheduler::WebSchedulerTrackedFeature feature =
-        static_cast<blink::scheduler::WebSchedulerTrackedFeature>(i);
-    if (page_store_result_->blocklisted_features() &
-        blink::scheduler::FeatureToBit(feature)) {
-      if (back_forward_cache_allowed) {
-        UMA_HISTOGRAM_ENUMERATION(
-            "BackForwardCache.HistoryNavigationOutcome.BlocklistedFeature",
-            feature);
-      }
+  for (blink::scheduler::WebSchedulerTrackedFeature feature :
+       page_store_result_->blocklisted_features()) {
+    if (back_forward_cache_allowed) {
       UMA_HISTOGRAM_ENUMERATION(
-          "BackForwardCache.AllSites.HistoryNavigationOutcome."
-          "BlocklistedFeature",
+          "BackForwardCache.HistoryNavigationOutcome.BlocklistedFeature",
           feature);
     }
+    UMA_HISTOGRAM_ENUMERATION(
+        "BackForwardCache.AllSites.HistoryNavigationOutcome."
+        "BlocklistedFeature",
+        feature);
   }
 
-  for (const std::string& reason : page_store_result_->disabled_reasons()) {
-    // Use SparseHistogram instead of other simple macros for metrics. It is
-    // because the reasons are represented as strings, and it was impossible to
-    // define an enum values.
-    base::HistogramBase* histogram = base::SparseHistogram::FactoryGet(
+  for (const BackForwardCache::DisabledReason& reason :
+       page_store_result_->disabled_reasons()) {
+    // Use SparseHistogram instead of other simple macros for metrics. The
+    // reasons cannot be represented as a unified enum because they come from
+    // multiple sources. At first they were represented as strings but that
+    // makes it hard to track new additions. Now they are represented by
+    // a combination of source and source-specific enum.
+    base::UmaHistogramSparse(
         "BackForwardCache.HistoryNavigationOutcome."
-        "DisabledForRenderFrameHostReason",
-        base::HistogramBase::kUmaTargetedHistogramFlag);
-    // Adopts the lower 32 bits as a signed integer from unsigned 64 bits
-    // integer.
-    histogram->Add(base::HistogramBase::Sample(
-        static_cast<int32_t>(base::HashMetricName(reason))));
+        "DisabledForRenderFrameHostReason2",
+        MetricValue(reason));
   }
 
-  if (ShouldRecordBrowsingInstanceNotSwappedReason() &&
-      page_store_result_->browsing_instance_not_swapped_reason()) {
+  if (!DidSwapBrowsingInstance()) {
+    DCHECK(!navigation->IsServedFromBackForwardCache());
+
     if (back_forward_cache_allowed) {
       UMA_HISTOGRAM_ENUMERATION(
           "BackForwardCache.HistoryNavigationOutcome."
           "BrowsingInstanceNotSwappedReason",
-          page_store_result_->browsing_instance_not_swapped_reason().value());
+          browsing_instance_swap_result_.value());
     }
     UMA_HISTOGRAM_ENUMERATION(
         "BackForwardCache.AllSites.HistoryNavigationOutcome."
         "BrowsingInstanceNotSwappedReason",
-        page_store_result_->browsing_instance_not_swapped_reason().value());
+        browsing_instance_swap_result_.value());
   }
 }
 
@@ -424,19 +433,6 @@ void BackForwardCacheMetrics::RecordEvictedAfterDocumentRestored(
       "BackForwardCache.EvictedAfterDocumentRestoredReason", reason);
   UMA_HISTOGRAM_ENUMERATION(
       "BackForwardCache.AllSites.EvictedAfterDocumentRestoredReason", reason);
-}
-
-bool BackForwardCacheMetrics::ShouldRecordBrowsingInstanceNotSwappedReason()
-    const {
-  for (NotRestoredReason reason :
-       {NotRestoredReason::kRelatedActiveContentsExist,
-        NotRestoredReason::kRenderFrameHostReused_SameSite,
-        NotRestoredReason::kRenderFrameHostReused_CrossSite}) {
-    if (page_store_result_->not_stored_reasons().test(
-            static_cast<size_t>(reason)))
-      return true;
-  }
-  return false;
 }
 
 void BackForwardCacheMetrics::RecordHistogramForReloadsAndHistoryNavigations(
@@ -461,6 +457,50 @@ void BackForwardCacheMetrics::RecordHistogramForReloadsAndHistoryNavigations(
       previous_navigation_is_served_from_bfcache_
           ? ReloadsAfterHistoryNavigation::kServedFromBackForwardCache
           : ReloadsAfterHistoryNavigation::kNotServedFromBackForwardCache);
+}
+
+// static
+uint64_t BackForwardCacheMetrics::MetricValue(
+    BackForwardCache::DisabledReason reason) {
+  return static_cast<BackForwardCache::DisabledReasonType>(reason.source)
+             << BackForwardCache::kDisabledReasonTypeBits |
+         reason.id;
+}
+
+void BackForwardCacheMetrics::SetBrowsingInstanceSwapResult(
+    absl::optional<ShouldSwapBrowsingInstance> reason) {
+  browsing_instance_swap_result_ = reason;
+}
+
+bool BackForwardCacheMetrics::DidSwapBrowsingInstance() const {
+  if (!browsing_instance_swap_result_)
+    return true;
+
+  switch (browsing_instance_swap_result_.value()) {
+    case ShouldSwapBrowsingInstance::kNo_ProactiveSwapDisabled:
+    case ShouldSwapBrowsingInstance::kNo_NotMainFrame:
+    case ShouldSwapBrowsingInstance::kNo_HasRelatedActiveContents:
+    case ShouldSwapBrowsingInstance::kNo_DoesNotHaveSite:
+    case ShouldSwapBrowsingInstance::kNo_SourceURLSchemeIsNotHTTPOrHTTPS:
+    case ShouldSwapBrowsingInstance::kNo_SameSiteNavigation:
+    case ShouldSwapBrowsingInstance::kNo_ReloadingErrorPage:
+    case ShouldSwapBrowsingInstance::kNo_AlreadyHasMatchingBrowsingInstance:
+    case ShouldSwapBrowsingInstance::kNo_RendererDebugURL:
+    case ShouldSwapBrowsingInstance::kNo_NotNeededForBackForwardCache:
+    case ShouldSwapBrowsingInstance::kNo_SameDocumentNavigation:
+    case ShouldSwapBrowsingInstance::kNo_SameUrlNavigation:
+    case ShouldSwapBrowsingInstance::kNo_WillReplaceEntry:
+    case ShouldSwapBrowsingInstance::kNo_Reload:
+    case ShouldSwapBrowsingInstance::kNo_Guest:
+    case ShouldSwapBrowsingInstance::kNo_HasNotComittedAnyNavigation:
+    case ShouldSwapBrowsingInstance::
+        kNo_UnloadHandlerExistsOnSameSiteNavigation:
+      return false;
+    case ShouldSwapBrowsingInstance::kYes_ForceSwap:
+    case ShouldSwapBrowsingInstance::kYes_CrossSiteProactiveSwap:
+    case ShouldSwapBrowsingInstance::kYes_SameSiteProactiveSwap:
+      return true;
+  }
 }
 
 }  // namespace content

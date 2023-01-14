@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/display/types/display_mode.h"
 #include "ui/display/types/display_snapshot.h"
@@ -90,7 +91,7 @@ void DrmThread::Start(base::OnceClosure receiver_completer,
   thread_options.message_pump_type = base::MessagePumpType::IO;
   thread_options.priority = base::ThreadPriority::DISPLAY;
 
-  if (!StartWithOptions(thread_options))
+  if (!StartWithOptions(std::move(thread_options)))
     LOG(FATAL) << "Failed to create DRM thread";
 }
 
@@ -153,7 +154,8 @@ void DrmThread::CreateBuffer(gfx::AcceleratedWidget widget,
   // allocation should fail if it's not possible to allocate a BO_USE_SCANOUT
   // buffer in that case.
   if (!*buffer && usage != gfx::BufferUsage::SCANOUT &&
-      usage != gfx::BufferUsage::PROTECTED_SCANOUT_VDA_WRITE) {
+      usage != gfx::BufferUsage::PROTECTED_SCANOUT_VDA_WRITE &&
+      usage != gfx::BufferUsage::SCANOUT_FRONT_RENDERING) {
     flags &= ~GBM_BO_USE_SCANOUT;
     CreateBufferWithGbmFlags(drm, fourcc_format, size, framebuffer_size, flags,
                              modifiers, buffer, framebuffer);
@@ -233,7 +235,9 @@ void DrmThread::OnPlanesReadyForPageFlip(
     window->SchedulePageFlip(std::move(planes), std::move(submission_callback),
                              std::move(presentation_callback));
   } else {
-    std::move(submission_callback).Run(gfx::SwapResult::SWAP_ACK, nullptr);
+    std::move(submission_callback)
+        .Run(gfx::SwapResult::SWAP_ACK,
+             /*release_fence=*/gfx::GpuFenceHandle());
     std::move(presentation_callback).Run(gfx::PresentationFeedback::Failure());
   }
 }
@@ -277,10 +281,9 @@ void DrmThread::SetWindowBounds(gfx::AcceleratedWidget widget,
 void DrmThread::SetCursor(gfx::AcceleratedWidget widget,
                           const std::vector<SkBitmap>& bitmaps,
                           const gfx::Point& location,
-                          int32_t frame_delay_ms) {
+                          base::TimeDelta frame_delay) {
   TRACE_EVENT0("drm", "DrmThread::SetCursor");
-  screen_manager_->GetWindow(widget)->SetCursor(bitmaps, location,
-                                                frame_delay_ms);
+  screen_manager_->GetWindow(widget)->SetCursor(bitmaps, location, frame_delay);
 }
 
 void DrmThread::MoveCursor(gfx::AcceleratedWidget widget,

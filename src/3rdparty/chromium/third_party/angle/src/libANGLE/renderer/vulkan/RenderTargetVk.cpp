@@ -46,9 +46,6 @@ void RenderTargetVk::init(vk::ImageHelper *image,
                           uint32_t layerCount,
                           RenderTargetTransience transience)
 {
-    // Either single-layered, or includes all layers.
-    ASSERT(layerCount == 1 || layerIndex == 0);
-
     mImage             = image;
     mImageViews        = imageViews;
     mResolveImage      = resolveImage;
@@ -79,8 +76,7 @@ vk::ImageOrBufferViewSubresourceSerial RenderTargetVk::getSubresourceSerialImpl(
     ASSERT(mLevelIndexGL.get() < std::numeric_limits<uint16_t>::max());
 
     vk::ImageOrBufferViewSubresourceSerial imageViewSerial = imageViews->getSubresourceSerial(
-        mLevelIndexGL, 1, mLayerIndex,
-        mLayerCount == 1 ? vk::LayerMode::Single : vk::LayerMode::All,
+        mLevelIndexGL, 1, mLayerIndex, vk::GetLayerMode(*mImage, mLayerCount),
         vk::SrgbDecodeMode::SkipDecode, gl::SrgbOverride::Default);
     return imageViewSerial;
 }
@@ -95,23 +91,35 @@ vk::ImageOrBufferViewSubresourceSerial RenderTargetVk::getResolveSubresourceSeri
     return getSubresourceSerialImpl(mResolveImageViews);
 }
 
-void RenderTargetVk::onColorDraw(ContextVk *contextVk, uint32_t framebufferLayerCount)
+void RenderTargetVk::onColorDraw(ContextVk *contextVk,
+                                 uint32_t framebufferLayerCount,
+                                 vk::PackedAttachmentIndex packedAttachmentIndex)
 {
     ASSERT(!mImage->getFormat().actualImageFormat().hasDepthOrStencilBits());
     ASSERT(framebufferLayerCount <= mLayerCount);
 
-    contextVk->onImageRenderPassWrite(mLevelIndexGL, mLayerIndex, framebufferLayerCount,
-                                      VK_IMAGE_ASPECT_COLOR_BIT, vk::ImageLayout::ColorAttachment,
-                                      mImage);
+    contextVk->onColorDraw(mImage, mResolveImage, packedAttachmentIndex);
+    mImage->onWrite(mLevelIndexGL, 1, mLayerIndex, framebufferLayerCount,
+                    VK_IMAGE_ASPECT_COLOR_BIT);
     if (mResolveImage)
     {
         // Multisampled render to texture framebuffers cannot be layered.
         ASSERT(framebufferLayerCount == 1);
-
-        contextVk->onImageRenderPassWrite(mLevelIndexGL, mLayerIndex, framebufferLayerCount,
-                                          VK_IMAGE_ASPECT_COLOR_BIT,
-                                          vk::ImageLayout::ColorAttachment, mResolveImage);
+        mResolveImage->onWrite(mLevelIndexGL, 1, mLayerIndex, framebufferLayerCount,
+                               VK_IMAGE_ASPECT_COLOR_BIT);
     }
+    retainImageViews(contextVk);
+}
+
+void RenderTargetVk::onColorResolve(ContextVk *contextVk, uint32_t framebufferLayerCount)
+{
+    ASSERT(!mImage->getFormat().actualImageFormat().hasDepthOrStencilBits());
+    ASSERT(framebufferLayerCount <= mLayerCount);
+    ASSERT(mResolveImage == nullptr);
+
+    contextVk->onImageRenderPassWrite(mLevelIndexGL, mLayerIndex, framebufferLayerCount,
+                                      VK_IMAGE_ASPECT_COLOR_BIT, vk::ImageLayout::ColorAttachment,
+                                      mImage);
     retainImageViews(contextVk);
 }
 
@@ -152,6 +160,7 @@ const vk::ImageHelper &RenderTargetVk::getResolveImageForRenderPass() const
 
 angle::Result RenderTargetVk::getImageViewImpl(ContextVk *contextVk,
                                                const vk::ImageHelper &image,
+                                               gl::SrgbWriteControlMode mode,
                                                vk::ImageViewHelper *imageViews,
                                                const vk::ImageView **imageViewOut) const
 {
@@ -159,26 +168,37 @@ angle::Result RenderTargetVk::getImageViewImpl(ContextVk *contextVk,
     vk::LevelIndex levelVk = mImage->toVkLevel(mLevelIndexGL);
     if (mLayerCount == 1)
     {
-        return imageViews->getLevelLayerDrawImageView(contextVk, image, levelVk, mLayerIndex,
+        return imageViews->getLevelLayerDrawImageView(contextVk, image, levelVk, mLayerIndex, mode,
                                                       imageViewOut);
     }
 
-    // Layered render targets view the whole level
-    return imageViews->getLevelDrawImageView(contextVk, image, levelVk, imageViewOut);
+    // Layered render targets view the whole level or a handful of layers in case of multiview.
+    return imageViews->getLevelDrawImageView(contextVk, image, levelVk, mLayerIndex, mLayerCount,
+                                             mode, imageViewOut);
 }
 
 angle::Result RenderTargetVk::getImageView(ContextVk *contextVk,
                                            const vk::ImageView **imageViewOut) const
 {
     ASSERT(mImage);
-    return getImageViewImpl(contextVk, *mImage, mImageViews, imageViewOut);
+    return getImageViewImpl(contextVk, *mImage, gl::SrgbWriteControlMode::Default, mImageViews,
+                            imageViewOut);
+}
+
+angle::Result RenderTargetVk::getImageViewWithColorspace(ContextVk *contextVk,
+                                                         gl::SrgbWriteControlMode mode,
+                                                         const vk::ImageView **imageViewOut) const
+{
+    ASSERT(mImage);
+    return getImageViewImpl(contextVk, *mImage, mode, mImageViews, imageViewOut);
 }
 
 angle::Result RenderTargetVk::getResolveImageView(ContextVk *contextVk,
                                                   const vk::ImageView **imageViewOut) const
 {
     ASSERT(mResolveImage);
-    return getImageViewImpl(contextVk, *mResolveImage, mResolveImageViews, imageViewOut);
+    return getImageViewImpl(contextVk, *mResolveImage, gl::SrgbWriteControlMode::Default,
+                            mResolveImageViews, imageViewOut);
 }
 
 bool RenderTargetVk::isResolveImageOwnerOfData() const
@@ -269,11 +289,15 @@ angle::Result RenderTargetVk::flushStagedUpdates(ContextVk *contextVk,
     ASSERT(mImage->valid() && (!isResolveImageOwnerOfData() || mResolveImage->valid()));
     ASSERT(framebufferLayerCount != 0);
 
-    // Note that the layer index for 3D textures is always zero according to Vulkan.
+    // It's impossible to defer clears to slices of a 3D images, as the clear applies to all the
+    // slices, while deferred clears only clear a single slice (where the framebuffer is attached).
+    // Additionally, the layer index for 3D textures is always zero according to Vulkan.
     uint32_t layerIndex = mLayerIndex;
     if (mImage->getType() == VK_IMAGE_TYPE_3D)
     {
-        layerIndex = 0;
+        layerIndex         = 0;
+        deferredClears     = nullptr;
+        deferredClearIndex = 0;
     }
 
     vk::ImageHelper *image = getOwnerOfData();

@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 find_package(Ninja 1.7.2 REQUIRED)
-find_package(Python2 2.7.5 REQUIRED)
-#find_package(Nodejs 10.19 REQUIRED)
+find_package(Nodejs 12 REQUIRED)
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
     pkg_check_modules(XSCRNSAVER xscrnsaver)
@@ -184,6 +183,7 @@ foreach(arch ${archs})
                 web_engine_library_info.cpp web_engine_library_info.h
                 web_engine_settings.cpp web_engine_settings.h
                 web_event_factory.cpp web_event_factory.h
+                web_usb_detector_qt.cpp web_usb_detector_qt.h
         )
 
         extend_gn_target(${buildGn} CONDITION QT_FEATURE_webengine_ozone_x11
@@ -273,6 +273,7 @@ foreach(arch ${archs})
 
         list(APPEND gnArgArg
             qtwebengine_target="${buildDir}/${config}/${arch}:QtWebEngineCore"
+            enable_ipc_fuzzer=false
             enable_media_remoting=false
             enable_message_center=false
             enable_nacl=false
@@ -284,6 +285,7 @@ foreach(arch ${archs})
             angle_enable_swiftshader=false
             enable_web_speech=false
             enable_widevine=true
+            fatal_linker_warnings=false
             has_native_accessibility=false
             safe_browsing_mode=0
             skia_use_dawn=false
@@ -299,6 +301,10 @@ foreach(arch ${archs})
         extend_gn_list(gnArgArg
             ARGS enable_basic_printing enable_print_preview enable_pdf
             CONDITION QT_FEATURE_webengine_printing_and_pdf
+        )
+        extend_gn_list(gnArgArg
+            ARGS use_cups
+            CONDITION QT_FEATURE_webengine_printing_and_pdf AND NOT WIN32
         )
         extend_gn_list(gnArgArg
             ARGS enable_plugins
@@ -412,6 +418,12 @@ foreach(arch ${archs})
                 CONDITION QT_FEATURE_webengine_ozone_x11 AND XSCRNSAVER_FOUND
             )
 
+            if(QT_FEATURE_webengine_kerberos)
+                list(APPEND gnArgArg
+                     external_gssapi_include_dir="${GSSAPI_INCLUDE_DIRS}/gssapi"
+                )
+            endif()
+
             if(CMAKE_CROSSCOMPILING AND cpu STREQUAL "arm")
                 check_thumb(armThumb)
                 if(NOT armThumb AND NOT QT_FEATURE_system_ffmpeg)
@@ -427,9 +439,13 @@ foreach(arch ${archs})
             )
         endif()
 
+        if(NOT CLANG)
+            list(APPEND gnArgArg
+                enable_location_source=false)
+        endif()
+
         if(WIN32)
             list(APPEND gnArgArg
-                enable_location_source=false
                 enable_session_service=false
                 ninja_use_custom_environment_files=false
                 com_init_check_hook_disabled=true
@@ -456,7 +472,7 @@ endforeach()
 #  WEBENGINECORE SETUP
 ##
 
-set(arch ${CMAKE_SYSTEM_PROCESSOR})
+list(GET archs 0 arch)
 target_include_directories(WebEngineCore PRIVATE
     ${buildDir}/$<CONFIG>/${arch}/gen
     ${buildDir}/$<CONFIG>/${arch}/gen/third_party/perfetto
@@ -498,7 +514,7 @@ endif()
 #  WEBENGINECORE DICT TOOL SETUP
 ##
 
-if(QT_FEATURE_webengine_spellchecker)
+if(QT_FEATURE_webengine_spellchecker AND NOT CMAKE_CROSSCOMPILING)
     qt_get_tool_target_name(dict_target_name qwebengine_convert_dict)
     target_include_directories(${dict_target_name} PRIVATE
         ../3rdparty/chromium

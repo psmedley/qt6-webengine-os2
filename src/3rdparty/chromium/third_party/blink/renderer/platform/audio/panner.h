@@ -31,7 +31,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -56,8 +55,11 @@ class PLATFORM_EXPORT Panner {
 
   static std::unique_ptr<Panner> Create(PanningModel,
                                         float sample_rate,
+                                        unsigned render_quantum_frames,
                                         HRTFDatabaseLoader*);
 
+  Panner(const Panner&) = delete;
+  Panner& operator=(const Panner&) = delete;
   virtual ~Panner() = default;
 
   virtual void Pan(double azimuth,
@@ -81,9 +83,6 @@ class PLATFORM_EXPORT Panner {
 
  protected:
   Panner() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Panner);
 };
 
 }  // namespace blink

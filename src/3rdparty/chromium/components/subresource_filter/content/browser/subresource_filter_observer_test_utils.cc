@@ -5,6 +5,7 @@
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
 
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -43,10 +44,13 @@ void TestSubresourceFilterObserver::OnSubframeNavigationEvaluated(
   subframe_load_evaluations_[navigation_handle->GetURL()] = load_policy;
 }
 
-void TestSubresourceFilterObserver::OnAdSubframeDetected(
+void TestSubresourceFilterObserver::OnIsAdSubframeChanged(
     content::RenderFrameHost* render_frame_host,
-    const FrameAdEvidence& ad_evidence) {
-  ad_evidence_.emplace(render_frame_host->GetFrameTreeNodeId(), ad_evidence);
+    bool is_ad_subframe) {
+  if (is_ad_subframe)
+    ad_frames_.insert(render_frame_host->GetFrameTreeNodeId());
+  else
+    ad_frames_.erase(render_frame_host->GetFrameTreeNodeId());
 }
 
 void TestSubresourceFilterObserver::DidFinishNavigation(
@@ -68,58 +72,38 @@ void TestSubresourceFilterObserver::DidFinishNavigation(
   }
 }
 
-base::Optional<mojom::ActivationLevel>
+absl::optional<mojom::ActivationLevel>
 TestSubresourceFilterObserver::GetPageActivation(const GURL& url) const {
   auto it = page_activations_.find(url);
   if (it != page_activations_.end())
     return it->second;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool TestSubresourceFilterObserver::GetIsAdSubframe(
     int frame_tree_node_id) const {
-  return base::Contains(ad_evidence_, frame_tree_node_id);
+  return base::Contains(ad_frames_, frame_tree_node_id);
 }
 
-const FrameAdEvidence& TestSubresourceFilterObserver::GetEvidenceForAdSubframe(
-    int frame_tree_node_id) const {
-  auto it = ad_evidence_.find(frame_tree_node_id);
-  DCHECK(it != ad_evidence_.end());
-  return it->second;
-}
-
-base::Optional<LoadPolicy> TestSubresourceFilterObserver::GetSubframeLoadPolicy(
+absl::optional<LoadPolicy> TestSubresourceFilterObserver::GetSubframeLoadPolicy(
     const GURL& url) const {
   auto it = subframe_load_evaluations_.find(url);
   if (it != subframe_load_evaluations_.end())
     return it->second;
-  return base::Optional<LoadPolicy>();
+  return absl::optional<LoadPolicy>();
 }
 
-base::Optional<mojom::ActivationLevel>
+absl::optional<mojom::ActivationLevel>
 TestSubresourceFilterObserver::GetPageActivationForLastCommittedLoad() const {
   return last_committed_activation_;
 }
 
-base::Optional<TestSubresourceFilterObserver::SafeBrowsingCheck>
+absl::optional<TestSubresourceFilterObserver::SafeBrowsingCheck>
 TestSubresourceFilterObserver::GetSafeBrowsingResult(const GURL& url) const {
   auto it = safe_browsing_checks_.find(url);
   if (it != safe_browsing_checks_.end())
     return it->second;
-  return base::Optional<SafeBrowsingCheck>();
-}
-
-void TestSubresourceFilterObserver::VerifyEvidenceForAdSubframe(
-    content::RenderFrameHost* frame_host,
-    bool parent_is_ad,
-    FilterListEvidence filter_list_result,
-    ScriptHeuristicEvidence created_by_ad_script) const {
-  const FrameAdEvidence& ad_evidence =
-      GetEvidenceForAdSubframe(frame_host->GetFrameTreeNodeId());
-  EXPECT_TRUE(ad_evidence.is_complete());
-  EXPECT_EQ(ad_evidence.parent_is_ad(), parent_is_ad);
-  EXPECT_EQ(ad_evidence.filter_list_result(), filter_list_result);
-  EXPECT_EQ(ad_evidence.created_by_ad_script(), created_by_ad_script);
+  return absl::optional<SafeBrowsingCheck>();
 }
 
 }  // namespace subresource_filter

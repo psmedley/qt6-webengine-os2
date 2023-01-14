@@ -5,12 +5,13 @@
 #include "components/dom_distiller/core/task_tracker.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/auto_reset.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/dom_distiller/core/distilled_content_store.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
@@ -193,7 +194,7 @@ void TaskTracker::ContentSourceFinished() {
   if (content_ready_) {
     CancelPendingSources();
   } else if (!IsAnySourceRunning()) {
-    distilled_article_.reset(new DistilledArticleProto());
+    distilled_article_ = std::make_unique<DistilledArticleProto>();
     NotifyViewersAndCallbacks();
   }
 }

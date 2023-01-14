@@ -13,6 +13,7 @@
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/json/json_writer.h"
 #include "base/time/tick_clock.h"
 #include "base/timer/timer.h"
@@ -135,7 +136,7 @@ class Delivery {
                                          group_name_and_count.second, success);
     }
     if (success) {
-      cache->RemoveReports(reports_, ReportingReport::Outcome::DELIVERED);
+      cache->RemoveReports(reports_);
     } else {
       cache->IncrementReportsAttempts(reports_);
     }

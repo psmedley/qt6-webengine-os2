@@ -25,7 +25,6 @@
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 
 #include "third_party/blink/renderer/core/layout/geometry/transform_state.h"
-#include "third_party/blink/renderer/core/layout/layout_geometry_map.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_inline_text.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_clipper.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_masker.h"
@@ -194,31 +193,6 @@ void SVGLayoutSupport::MapAncestorToLocal(const LayoutObject& object,
   transform_state.ApplyTransform(local_to_svg_root);
 }
 
-const LayoutObject* SVGLayoutSupport::PushMappingToContainer(
-    const LayoutObject* object,
-    const LayoutBoxModelObject* ancestor_to_stop_at,
-    LayoutGeometryMap& geometry_map) {
-  DCHECK_NE(ancestor_to_stop_at, object);
-
-  LayoutObject* parent = object->Parent();
-
-  // At the SVG/HTML boundary (aka LayoutSVGRoot), we apply the
-  // localToBorderBoxTransform to map an element from SVG viewport coordinates
-  // to CSS box coordinates.
-  // LayoutSVGRoot's mapLocalToAncestor method expects CSS box coordinates.
-  if (parent->IsSVGRoot()) {
-    TransformationMatrix matrix(
-        To<LayoutSVGRoot>(parent)->LocalToBorderBoxTransform());
-    matrix.Multiply(TransformationMatrix(object->LocalToSVGParentTransform()));
-    geometry_map.Push(object, matrix);
-  } else {
-    geometry_map.Push(
-        object, TransformationMatrix(object->LocalToSVGParentTransform()));
-  }
-
-  return parent;
-}
-
 bool SVGLayoutSupport::LayoutSizeOfNearestViewportChanged(
     const LayoutObject* start) {
   for (; start; start = start->Parent()) {
@@ -277,7 +251,8 @@ void SVGLayoutSupport::AdjustWithClipPathAndMask(
 FloatRect SVGLayoutSupport::ExtendTextBBoxWithStroke(
     const LayoutObject& layout_object,
     const FloatRect& text_bounds) {
-  DCHECK(layout_object.IsSVGText() || layout_object.IsSVGInline());
+  DCHECK(layout_object.IsSVGText() || layout_object.IsNGSVGText() ||
+         layout_object.IsSVGInline());
   FloatRect bounds = text_bounds;
   const ComputedStyle& style = layout_object.StyleRef();
   if (style.HasStroke()) {
@@ -293,7 +268,8 @@ FloatRect SVGLayoutSupport::ExtendTextBBoxWithStroke(
 FloatRect SVGLayoutSupport::ComputeVisualRectForText(
     const LayoutObject& layout_object,
     const FloatRect& text_bounds) {
-  DCHECK(layout_object.IsSVGText() || layout_object.IsSVGInline());
+  DCHECK(layout_object.IsSVGText() || layout_object.IsNGSVGText() ||
+         layout_object.IsSVGInline());
   FloatRect visual_rect = ExtendTextBBoxWithStroke(layout_object, text_bounds);
   if (const ShadowList* text_shadow = layout_object.StyleRef().TextShadow())
     text_shadow->AdjustRectForShadow(visual_rect);
@@ -479,7 +455,7 @@ static SearchCandidate SearchTreeForFindClosestLayoutSVGText(
   // containers that could contain LayoutSVGTexts that are closer.
   for (LayoutObject* child = layout_object->SlowLastChild(); child;
        child = child->PreviousSibling()) {
-    if (child->IsSVGText()) {
+    if (child->IsSVGText() || child->IsNGSVGText()) {
       float distance = DistanceToChildLayoutObject(child, point);
       if (distance >= closest_text.distance)
         continue;

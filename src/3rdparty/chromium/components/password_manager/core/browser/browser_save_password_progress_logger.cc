@@ -157,7 +157,7 @@ void BrowserSavePasswordProgressLogger::LogSuccessiveOrigins(
 std::string
 BrowserSavePasswordProgressLogger::FormStructurePasswordAttributesLogString(
     const FormStructure& form) {
-  const base::Optional<std::pair<PasswordAttribute, bool>> attribute_vote =
+  const absl::optional<std::pair<PasswordAttribute, bool>> attribute_vote =
       form.get_password_attributes_vote();
   if (!attribute_vote.has_value())
     return std::string();
@@ -331,6 +331,22 @@ void BrowserSavePasswordProgressLogger::LogPasswordForm(
   log.SetBoolean(GetStringFromID(STRING_PSL_MATCH),
                  form.is_public_suffix_match);
   LogValue(label, log);
+}
+
+void BrowserSavePasswordProgressLogger::LogPasswordRequirements(
+    const GURL& origin,
+    autofill::FormSignature form_signature,
+    autofill::FieldSignature field_signature,
+    const autofill::PasswordRequirementsSpec& spec) {
+  std::ostringstream s;
+  s << "Joint password requirements: {\n"
+    << GetStringFromID(STRING_ORIGIN) << ": " << ScrubURL(origin) << "\n"
+    << GetStringFromID(STRING_FORM_SIGNATURE) << ": "
+    << FormSignatureToDebugString(form_signature) << "\n"
+    << "Field signature: " << NumberToString(field_signature.value()) << "\n"
+    << "Requirements:" << spec << "\n"
+    << "}";
+  SendLog(s.str());
 }
 
 void BrowserSavePasswordProgressLogger::SendLog(const std::string& log) {

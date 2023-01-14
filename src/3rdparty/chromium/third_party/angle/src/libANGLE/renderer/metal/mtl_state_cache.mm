@@ -17,6 +17,7 @@
 #include "libANGLE/renderer/metal/ContextMtl.h"
 #include "libANGLE/renderer/metal/mtl_resources.h"
 #include "libANGLE/renderer/metal/mtl_utils.h"
+#include "platform/FeaturesMtl.h"
 
 #define ANGLE_OBJC_CP_PROPERTY(DST, SRC, PROPERTY) \
     (DST).PROPERTY = static_cast<__typeof__((DST).PROPERTY)>(ToObjC((SRC).PROPERTY))
@@ -535,44 +536,33 @@ void BlendDesc::reset(MTLColorWriteMask _writeMask)
     sourceAlphaBlendFactor = sourceRGBBlendFactor = MTLBlendFactorOne;
 }
 
-void BlendDesc::updateWriteMask(const gl::BlendState &blendState)
+void BlendDesc::updateWriteMask(const uint8_t angleMask)
 {
-    writeMask = MTLColorWriteMaskNone;
-    if (blendState.colorMaskRed)
-    {
-        writeMask |= MTLColorWriteMaskRed;
-    }
-    if (blendState.colorMaskGreen)
-    {
-        writeMask |= MTLColorWriteMaskGreen;
-    }
-    if (blendState.colorMaskBlue)
-    {
-        writeMask |= MTLColorWriteMaskBlue;
-    }
-    if (blendState.colorMaskAlpha)
-    {
-        writeMask |= MTLColorWriteMaskAlpha;
-    }
-}
+    ASSERT(angleMask == (angleMask & 0xF));
 
-void BlendDesc::updateBlendFactors(const gl::BlendState &blendState)
-{
-    sourceRGBBlendFactor        = GetBlendFactor(blendState.sourceBlendRGB);
-    sourceAlphaBlendFactor      = GetBlendFactor(blendState.sourceBlendAlpha);
-    destinationRGBBlendFactor   = GetBlendFactor(blendState.destBlendRGB);
-    destinationAlphaBlendFactor = GetBlendFactor(blendState.destBlendAlpha);
-}
+// ANGLE's packed color mask is abgr (matches Vulkan & D3D11), while Metal expects rgba.
+#if defined(__aarch64__)
+    // ARM64 can reverse bits in a single instruction
+    writeMask = __builtin_bitreverse8(angleMask) >> 4;
+#else
+    /* On other architectures, Clang generates a polyfill that uses more
+       instructions than the following expression optimized for a 4-bit value.
 
-void BlendDesc::updateBlendOps(const gl::BlendState &blendState)
-{
-    rgbBlendOperation   = GetBlendOp(blendState.blendEquationRGB);
-    alphaBlendOperation = GetBlendOp(blendState.blendEquationAlpha);
-}
+       (abgr * 0x41) & 0x14A:
+        .......abgr +
+        .abgr...... &
+        00101001010 =
+        ..b.r..a.g.
 
-void BlendDesc::updateBlendEnabled(const gl::BlendState &blendState)
-{
-    blendingEnabled = blendState.blend;
+       (b.r..a.g.) * 0x111:
+                b.r..a.g. +
+            b.r..a.g..... +
+        b.r..a.g......... =
+        b.r.bargbarg.a.g.
+              ^^^^
+    */
+    writeMask = ((((angleMask * 0x41) & 0x14A) * 0x111) >> 7) & 0xF;
+#endif
 }
 
 // RenderPipelineColorAttachmentDesc implementation
@@ -603,16 +593,16 @@ void RenderPipelineColorAttachmentDesc::reset(MTLPixelFormat format, MTLColorWri
     BlendDesc::reset(_writeMask);
 }
 
-void RenderPipelineColorAttachmentDesc::reset(MTLPixelFormat format, const BlendDesc &blendState)
+void RenderPipelineColorAttachmentDesc::reset(MTLPixelFormat format, const BlendDesc &blendDesc)
 {
     this->pixelFormat = format;
 
-    BlendDesc::operator=(blendState);
+    BlendDesc::operator=(blendDesc);
 }
 
-void RenderPipelineColorAttachmentDesc::update(const BlendDesc &blendState)
+void RenderPipelineColorAttachmentDesc::update(const BlendDesc &blendDesc)
 {
-    BlendDesc::operator=(blendState);
+    BlendDesc::operator=(blendDesc);
 }
 
 // RenderPipelineOutputDesc implementation
@@ -726,20 +716,24 @@ bool RenderPassAttachmentDesc::operator==(const RenderPassAttachmentDesc &other)
 
 void RenderPassDesc::populateRenderPipelineOutputDesc(RenderPipelineOutputDesc *outDesc) const
 {
-    populateRenderPipelineOutputDesc(MTLColorWriteMaskAll, outDesc);
+    WriteMaskArray writeMaskArray;
+    writeMaskArray.fill(MTLColorWriteMaskAll);
+    populateRenderPipelineOutputDesc(writeMaskArray, outDesc);
 }
 
-void RenderPassDesc::populateRenderPipelineOutputDesc(MTLColorWriteMask colorWriteMask,
+void RenderPassDesc::populateRenderPipelineOutputDesc(const WriteMaskArray &writeMaskArray,
                                                       RenderPipelineOutputDesc *outDesc) const
 {
-    // Default blend state.
-    BlendDesc blendState;
-    blendState.reset(colorWriteMask);
-
-    populateRenderPipelineOutputDesc(blendState, outDesc);
+    // Default blend state with replaced color write masks.
+    BlendDescArray blendDescArray;
+    for (size_t i = 0; i < blendDescArray.size(); i++)
+    {
+        blendDescArray[i].reset(writeMaskArray[i]);
+    }
+    populateRenderPipelineOutputDesc(blendDescArray, outDesc);
 }
 
-void RenderPassDesc::populateRenderPipelineOutputDesc(const BlendDesc &blendState,
+void RenderPassDesc::populateRenderPipelineOutputDesc(const BlendDescArray &blendDescArray,
                                                       RenderPipelineOutputDesc *outDesc) const
 {
     RenderPipelineOutputDesc &outputDescriptor = *outDesc;
@@ -752,15 +746,19 @@ void RenderPassDesc::populateRenderPipelineOutputDesc(const BlendDesc &blendStat
 
         if (texture)
         {
-            // Copy parameters from blend state
-            outputDescriptor.colorAttachments[i].update(blendState);
-            if (!renderPassColorAttachment.blendable)
+            if (renderPassColorAttachment.blendable)
+            {
+                // Copy parameters from blend state
+                outputDescriptor.colorAttachments[i].reset(texture->pixelFormat(),
+                                                           blendDescArray[i]);
+            }
+            else
             {
                 // Disable blending if the attachment's render target doesn't support blending.
-                outputDescriptor.colorAttachments[i].blendingEnabled = false;
+                // Force default blending state to reduce the number of unique states.
+                outputDescriptor.colorAttachments[i].reset(texture->pixelFormat(),
+                                                           blendDescArray[i].writeMask);
             }
-
-            outputDescriptor.colorAttachments[i].pixelFormat = texture->pixelFormat();
 
             // Combine the masks. This is useful when the texture is not supposed to have alpha
             // channel such as GL_RGB8, however, Metal doesn't natively support 24 bit RGB, so
@@ -1062,7 +1060,7 @@ void RenderPipelineCache::clearPipelineStates()
 }
 
 // StateCache implementation
-StateCache::StateCache() {}
+StateCache::StateCache(const angle::FeaturesMtl &features) : mFeatures(features) {}
 
 StateCache::~StateCache() {}
 
@@ -1113,6 +1111,11 @@ AutoObjCPtr<id<MTLSamplerState>> StateCache::getSamplerState(id<MTLDevice> metal
         if (ite == mSamplerStates.end())
         {
             AutoObjCObj<MTLSamplerDescriptor> objCDesc = ToObjC(desc);
+            if (!mFeatures.allowRuntimeSamplerCompareMode.enabled)
+            {
+                // Runtime sampler compare mode is not supported, fallback to never.
+                objCDesc.get().compareFunction = MTLCompareFunctionNever;
+            }
             AutoObjCPtr<id<MTLSamplerState>> newState =
                 [[metalDevice newSamplerStateWithDescriptor:objCDesc] ANGLE_MTL_AUTORELEASE];
 

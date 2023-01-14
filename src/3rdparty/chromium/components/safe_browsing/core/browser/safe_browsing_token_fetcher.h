@@ -9,9 +9,6 @@
 
 namespace safe_browsing {
 
-constexpr char kAPIScope[] =
-    "https://www.googleapis.com/auth/chrome-safe-browsing";
-
 // This interface is used to fetch access tokens for communcations with Safe
 // Browsing. It asynchronously returns an access token for the current account
 // (as determined in concrete implementations), or the empty string if no access
@@ -26,6 +23,11 @@ class SafeBrowsingTokenFetcher {
   // Begin fetching a token for the account. The
   // result will be returned in |callback|. Must be called on the UI thread.
   virtual void Start(Callback callback) = 0;
+
+  // Called when the access token is identified as invalid, so the embedders can
+  // perform extra actions on it. Must be called on the UI thread.
+  virtual void OnInvalidAccessToken(
+      const std::string& invalid_access_token) = 0;
 };
 
 }  // namespace safe_browsing

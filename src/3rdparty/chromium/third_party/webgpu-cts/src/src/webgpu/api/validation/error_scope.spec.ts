@@ -17,7 +17,7 @@ TODO: consider slightly revising these tests to make sure they're complete. {
 
 import { Fixture } from '../../../common/framework/fixture.js';
 import { makeTestGroup } from '../../../common/framework/test_group.js';
-import { assert, raceWithRejectOnTimeout } from '../../../common/framework/util/util.js';
+import { assert, raceWithRejectOnTimeout } from '../../../common/util/util.js';
 import { getGPU } from '../../util/navigator_gpu.js';
 
 class F extends Fixture {
@@ -44,7 +44,7 @@ class F extends Fixture {
       usage: 0xffff, // Invalid GPUBufferUsage
     });
     // TODO: Remove when chrome does it automatically.
-    this.device.defaultQueue.submit([]);
+    this.device.queue.submit([]);
   }
 
   // Expect an uncapturederror event to occur. Note: this MUST be awaited, because

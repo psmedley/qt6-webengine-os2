@@ -30,12 +30,12 @@ namespace declarative_net_request {
 DNRManifestHandler::DNRManifestHandler() = default;
 DNRManifestHandler::~DNRManifestHandler() = default;
 
-bool DNRManifestHandler::Parse(Extension* extension, base::string16* error) {
+bool DNRManifestHandler::Parse(Extension* extension, std::u16string* error) {
   DCHECK(extension->manifest()->HasKey(
       dnr_api::ManifestKeys::kDeclarativeNetRequest));
 
   if (!PermissionsParser::HasAPIPermission(
-          extension, APIPermission::kDeclarativeNetRequest)) {
+          extension, mojom::APIPermissionID::kDeclarativeNetRequest)) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kDeclarativeNetRequestPermissionNeeded, kAPIPermission,
         dnr_api::ManifestKeys::kDeclarativeNetRequest);
@@ -104,6 +104,8 @@ bool DNRManifestHandler::Parse(Extension* extension, base::string16* error) {
   std::vector<DNRManifestData::RulesetInfo> rulesets_info;
   rulesets_info.reserve(rulesets.size());
 
+  int enabled_ruleset_count = 0;
+
   // Note: the static_cast<int> below is safe because we did already verify that
   // |rulesets.size()| <= dnr_api::MAX_NUMBER_OF_STATIC_RULESETS, which is an
   // integer.
@@ -112,7 +114,19 @@ bool DNRManifestHandler::Parse(Extension* extension, base::string16* error) {
     if (!get_ruleset_info(i, &info))
       return false;
 
+    if (info.enabled)
+      enabled_ruleset_count++;
+
     rulesets_info.push_back(std::move(info));
+  }
+
+  if (enabled_ruleset_count > dnr_api::MAX_NUMBER_OF_ENABLED_STATIC_RULESETS) {
+    *error = ErrorUtils::FormatErrorMessageUTF16(
+        errors::kEnabledRulesetCountExceeded,
+        dnr_api::ManifestKeys::kDeclarativeNetRequest,
+        dnr_api::DNRInfo::kRuleResources,
+        base::NumberToString(dnr_api::MAX_NUMBER_OF_ENABLED_STATIC_RULESETS));
+    return false;
   }
 
   extension->SetManifestData(

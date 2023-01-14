@@ -7,11 +7,11 @@
 #ifndef FXBARCODE_CBC_CODE128_H_
 #define FXBARCODE_CBC_CODE128_H_
 
-#include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/fx_string.h"
 #include "fxbarcode/cbc_onecode.h"
 
 class CBC_OnedCode128Writer;
+class CFX_Matrix;
 
 class CBC_Code128 final : public CBC_OneCode {
  public:
@@ -22,7 +22,7 @@ class CBC_Code128 final : public CBC_OneCode {
   BC_TYPE GetType() override;
   bool Encode(WideStringView contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
-                    const CFX_Matrix* matrix) override;
+                    const CFX_Matrix& matrix) override;
 
  private:
   CBC_OnedCode128Writer* GetOnedCode128Writer();

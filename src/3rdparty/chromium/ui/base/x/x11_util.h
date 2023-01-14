@@ -8,6 +8,7 @@
 // This file declares utility functions for X11 (Linux only).
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -19,18 +20,14 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/lock.h"
-#include "base/values.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/x/x11_cursor.h"
-#include "ui/events/event_constants.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/events/platform_event.h"
 #include "ui/gfx/icc_profile.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/x/connection.h"
-#include "ui/gfx/x/event.h"
 #include "ui/gfx/x/future.h"
 #include "ui/gfx/x/xproto.h"
-#include "ui/gfx/x/xproto_types.h"
 
 typedef unsigned long Cursor;
 class SkPixmap;
@@ -41,9 +38,7 @@ struct DefaultSingletonTraits;
 }
 
 namespace gfx {
-class Insets;
 class Point;
-class Rect;
 }  // namespace gfx
 
 namespace ui {
@@ -208,21 +203,6 @@ void SetHideTitlebarWhenMaximizedProperty(x11::Window window,
 // Returns true if |window| is visible.
 COMPONENT_EXPORT(UI_BASE_X) bool IsWindowVisible(x11::Window window);
 
-// Returns the inner bounds of |window| (excluding the non-client area).
-COMPONENT_EXPORT(UI_BASE_X)
-bool GetInnerWindowBounds(x11::Window window, gfx::Rect* rect);
-
-// Returns the non-client area extents of |window|. This is a negative inset; it
-// represents the negative size of the window border on all sides.
-// InnerWindowBounds.Inset(WindowExtents) = OuterWindowBounds.
-// Returns false if the window manager does not provide extents information.
-COMPONENT_EXPORT(UI_BASE_X)
-bool GetWindowExtents(x11::Window window, gfx::Insets* extents);
-
-// Returns the outer bounds of |window| (including the non-client area).
-COMPONENT_EXPORT(UI_BASE_X)
-bool GetOuterWindowBounds(x11::Window window, gfx::Rect* rect);
-
 // Returns true if |window| contains the point |screen_loc|.
 COMPONENT_EXPORT(UI_BASE_X)
 bool WindowContainsPoint(x11::Window window, gfx::Point screen_loc);
@@ -284,27 +264,6 @@ static const int32_t kAllDesktops = -1;
 // property not found.
 COMPONENT_EXPORT(UI_BASE_X)
 bool GetWindowDesktop(x11::Window window, int32_t* desktop);
-
-// Implementers of this interface receive a notification for every X window of
-// the main display.
-class EnumerateWindowsDelegate {
- public:
-  // |window| is the X Window ID of the enumerated window.  Return true to stop
-  // further iteration.
-  virtual bool ShouldStopIterating(x11::Window window) = 0;
-
- protected:
-  virtual ~EnumerateWindowsDelegate() = default;
-};
-
-// Enumerates all windows in the current display.  Will recurse into child
-// windows up to a depth of |max_depth|.
-COMPONENT_EXPORT(UI_BASE_X)
-bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate, int max_depth);
-
-// Enumerates the top-level windows of the current display.
-COMPONENT_EXPORT(UI_BASE_X)
-void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate);
 
 // Returns all children windows of a given window in top-to-bottom stacking
 // order.
@@ -396,12 +355,6 @@ COMPONENT_EXPORT(UI_BASE_X) bool IsX11WindowFullScreen(x11::Window window);
 // Suspends or resumes the X screen saver.  Must be called on the UI thread.
 COMPONENT_EXPORT(UI_BASE_X) void SuspendX11ScreenSaver(bool suspend);
 
-// Returns human readable description of the window manager, desktop, and
-// other system properties related to the compositing.
-COMPONENT_EXPORT(UI_BASE_X)
-base::Value GpuExtraInfoAsListValue(x11::VisualId system_visual,
-                                    x11::VisualId rgba_visual);
-
 // Returns true if the window manager supports the given hint.
 COMPONENT_EXPORT(UI_BASE_X) bool WmSupportsHint(x11::Atom atom);
 
@@ -429,9 +382,13 @@ x11::Future<void> SendClientMessage(
 // Return true if VulkanSurface is supported.
 COMPONENT_EXPORT(UI_BASE_X) bool IsVulkanSurfaceSupported();
 
-// Returns whether the visual supports alpha.
-// The function examines the _CHROMIUM_INSIDE_XVFB environment variable.
+// Returns whether ARGB visuals are supported.
 COMPONENT_EXPORT(UI_BASE_X) bool DoesVisualHaveAlphaForTest();
+
+// Returns an icon for a native window referred by |target_window_id|. Can be
+// any window on screen.
+COMPONENT_EXPORT(UI_BASE_X)
+gfx::ImageSkia GetNativeWindowIcon(intptr_t target_window_id);
 
 // --------------------------------------------------------------------------
 // Selects a visual with a preference for alpha support on compositing window
@@ -451,14 +408,6 @@ class COMPONENT_EXPORT(UI_BASE_X) XVisualManager {
                      uint8_t* depth,
                      x11::ColorMap* colormap,
                      bool* visual_has_alpha);
-
-  // Called by GpuDataManagerImplPrivate when GPUInfo becomes available.  It is
-  // necessary for the GPU process to find out which visuals are best for GL
-  // because we don't want to load GL in the browser process.  Returns false iff
-  // |default_visual_id| or |transparent_visual_id| are invalid.
-  bool UpdateVisualsOnGpuInfoChanged(bool software_rendering,
-                                     x11::VisualId default_visual_id,
-                                     x11::VisualId transparent_visual_id);
 
   // Are all of the system requirements met for using transparent visuals?
   bool ArgbVisualAvailable() const;
@@ -482,31 +431,14 @@ class COMPONENT_EXPORT(UI_BASE_X) XVisualManager {
 
    private:
     x11::ColorMap colormap_{};
-    x11::Connection* const connection_;
   };
 
   XVisualManager();
 
-  bool GetVisualInfoImpl(x11::VisualId visual_id,
-                         uint8_t* depth,
-                         x11::ColorMap* colormap,
-                         bool* visual_has_alpha);
-
-  mutable base::Lock lock_;
-
   std::unordered_map<x11::VisualId, std::unique_ptr<XVisualData>> visuals_;
 
-  x11::Connection* const connection_;
-
-  x11::VisualId default_visual_id_{};
-
-  // The system visual is usually the same as the default visual, but
-  // may not be in general.
-  x11::VisualId system_visual_id_{};
+  x11::VisualId opaque_visual_id_{};
   x11::VisualId transparent_visual_id_{};
-
-  bool using_software_rendering_ = false;
-  bool have_gpu_argb_visual_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(XVisualManager);
 };
@@ -517,7 +449,7 @@ class COMPONENT_EXPORT(UI_BASE_X) ScopedUnsetDisplay {
   ~ScopedUnsetDisplay();
 
  private:
-  base::Optional<std::string> display_;
+  absl::optional<std::string> display_;
   DISALLOW_COPY_AND_ASSIGN(ScopedUnsetDisplay);
 };
 

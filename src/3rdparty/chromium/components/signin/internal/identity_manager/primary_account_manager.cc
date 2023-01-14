@@ -56,6 +56,7 @@ void PrimaryAccountManager::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAutologinEnabled, true);
   registry->RegisterListPref(prefs::kReverseAutologinRejectedEmailList);
   registry->RegisterBooleanPref(prefs::kSigninAllowed, true);
+  registry->RegisterBooleanPref(prefs::kSigninAllowedByPolicy, true);
   registry->RegisterBooleanPref(prefs::kSignedInWithCredentialProvider, false);
 }
 
@@ -126,7 +127,7 @@ void PrimaryAccountManager::Initialize(PrefService* local_state) {
   // token service.
   token_service_->AddObserver(this);
   token_service_->LoadCredentials(
-      GetPrimaryAccountId(signin::ConsentLevel::kSync));
+      GetPrimaryAccountId(signin::ConsentLevel::kSignin));
 }
 
 bool PrimaryAccountManager::IsInitialized() const {
@@ -219,7 +220,7 @@ bool PrimaryAccountManager::HasPrimaryAccount(
     return false;
   }
   switch (consent_level) {
-    case signin::ConsentLevel::kNotRequired:
+    case signin::ConsentLevel::kSignin:
       return true;
     case signin::ConsentLevel::kSync:
       return consented_pref;
@@ -294,20 +295,12 @@ void PrimaryAccountManager::StartSignOut(
   VLOG(1) << "StartSignOut: " << static_cast<int>(signout_source_metric) << ", "
           << static_cast<int>(signout_delete_metric) << ", "
           << static_cast<int>(remove_option);
-  if (HasPrimaryAccount(signin::ConsentLevel::kSync)) {
-    client_->PreSignOut(
-        base::BindOnce(&PrimaryAccountManager::OnSignoutDecisionReached,
-                       base::Unretained(this), signout_source_metric,
-                       signout_delete_metric, remove_option,
-                       assert_signout_allowed),
-        signout_source_metric);
-  } else {
-    // Sign-out is always allowed if there's only unconsented primary account
-    // without sync consent, so skip calling PreSignOut.
-    OnSignoutDecisionReached(signout_source_metric, signout_delete_metric,
-                             remove_option, assert_signout_allowed,
-                             SigninClient::SignoutDecision::ALLOW_SIGNOUT);
-  }
+  client_->PreSignOut(
+      base::BindOnce(&PrimaryAccountManager::OnSignoutDecisionReached,
+                     base::Unretained(this), signout_source_metric,
+                     signout_delete_metric, remove_option,
+                     assert_signout_allowed),
+      signout_source_metric);
 }
 
 void PrimaryAccountManager::OnSignoutDecisionReached(
@@ -347,8 +340,8 @@ void PrimaryAccountManager::OnSignoutDecisionReached(
               kPrimaryAccountManager_ClearAccount);
       break;
     case RemoveAccountsOption::kKeepAllAccounts:
-      if (previous_state.consent_level == signin::ConsentLevel::kNotRequired) {
-        // Nothing to update as the primary account is already at kNotRequired
+      if (previous_state.consent_level == signin::ConsentLevel::kSignin) {
+        // Nothing to update as the primary account is already at kSignin
         // consent level. Prefer returning to avoid firing useless
         // OnPrimaryAccountChanged() notifications.
         return;
@@ -365,7 +358,7 @@ void PrimaryAccountManager::OnSignoutDecisionReached(
 PrimaryAccountChangeEvent::State PrimaryAccountManager::GetPrimaryAccountState()
     const {
   PrimaryAccountChangeEvent::State state(primary_account_info(),
-                                         signin::ConsentLevel::kNotRequired);
+                                         signin::ConsentLevel::kSignin);
   if (HasPrimaryAccount(signin::ConsentLevel::kSync))
     state.consent_level = signin::ConsentLevel::kSync;
   return state;
@@ -378,7 +371,7 @@ void PrimaryAccountManager::FirePrimaryAccountChanged(
 
   DCHECK(event_details.GetEventTypeFor(signin::ConsentLevel::kSync) !=
              PrimaryAccountChangeEvent::Type::kNone ||
-         event_details.GetEventTypeFor(signin::ConsentLevel::kNotRequired) !=
+         event_details.GetEventTypeFor(signin::ConsentLevel::kSignin) !=
              PrimaryAccountChangeEvent::Type::kNone)
       << "PrimaryAccountChangeEvent with no change: " << event_details;
 
@@ -398,10 +391,10 @@ void PrimaryAccountManager::OnRefreshTokensLoaded() {
   if (token_service_->HasLoadCredentialsFinishedWithNoErrors()) {
     std::vector<AccountInfo> accounts_in_tracker_service =
         account_tracker_service_->GetAccounts();
-    const CoreAccountId sync_account_id =
-        GetPrimaryAccountId(signin::ConsentLevel::kSync);
+    const CoreAccountId primary_account_id_ =
+        GetPrimaryAccountId(signin::ConsentLevel::kSignin);
     for (const auto& account : accounts_in_tracker_service) {
-      if (sync_account_id != account.account_id &&
+      if (primary_account_id_ != account.account_id &&
           !token_service_->RefreshTokenIsAvailable(account.account_id)) {
         VLOG(0) << "Removed account from account tracker service: "
                 << account.account_id;
@@ -411,20 +404,17 @@ void PrimaryAccountManager::OnRefreshTokensLoaded() {
   }
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
-  // TODO(msarda): This code should be removed once migration finishes.
-  // Use histogram Signin.AccountTracker.GaiaIdMigrationState to verify the
-  // migration state.
-  if (!base::FeatureList::IsEnabled(switches::kForceAccountIdMigration))
-    return;
-
   // On non-ChromeOS platforms, account ID migration started in 2015. Data is
   // most probably corrupted for profiles that were not migrated. Clear all
   // accounts to fix this state.
+
+  // TODO(crbug.com/1224899): This code should be removed once migration
+  // finishes.
   if (account_tracker_service_->GetMigrationState() ==
       AccountTrackerService::MIGRATION_NOT_STARTED) {
     // Clear the primary account if any.
     ClearPrimaryAccount(signin_metrics::ACCOUNT_ID_MIGRATION,
-                        signin_metrics::SignoutDelete::IGNORE_METRIC);
+                        signin_metrics::SignoutDelete::kIgnoreMetric);
     // Clean all remaining account information from the account tracker.
     for (const auto& account : account_tracker_service_->GetAccounts())
       account_tracker_service_->RemoveAccount(account.account_id);

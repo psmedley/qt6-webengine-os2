@@ -28,20 +28,28 @@ LOCAL_SRC_FILES += $(SRC_DIR)/layers/vk_layer_utils.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/vk_format_utils.cpp
 LOCAL_C_INCLUDES += $(VULKAN_INCLUDE) \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers/generated \
-                    $(LOCAL_PATH)/$(SRC_DIR)/layers
+                    $(LOCAL_PATH)/$(SRC_DIR)/layers \
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/robin-hood-hashing/src/include
 LOCAL_CPPFLAGS += -std=c++11 -Wall -Werror -Wno-unused-function -Wno-unused-const-variable
-LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DVK_PROTOTYPES -fvisibility=hidden
+LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DVK_PROTOTYPES -DUSE_ROBIN_HOOD_HASHING -fvisibility=hidden
 include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_khronos_validation
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/state_tracker.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/device_memory_state.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/cmd_buffer_state.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/image_state.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/pipeline_state.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/render_pass_state.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/core_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/drawdispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/descriptor_sets.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/buffer_validation.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/shader_module.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/shader_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/spirv_validation_helper.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/command_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/gpu_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/gpu_utils.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/debug_printf.cpp
@@ -62,7 +70,6 @@ LOCAL_SRC_FILES += $(SRC_DIR)/layers/parameter_validation_utils.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/object_tracker.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/object_tracker_utils.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/thread_safety.cpp
-LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/command_counter_helper.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/vk_safe_struct.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/image_layout_map.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/subresource_adapter.cpp
@@ -70,10 +77,11 @@ LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/corechecks_optick_instrumentation
 LOCAL_C_INCLUDES += $(VULKAN_INCLUDE) \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers/generated \
-                    $(LOCAL_PATH)/$(THIRD_PARTY)/shaderc/third_party/spirv-tools/external/spirv-headers/include
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/shaderc/third_party/spirv-tools/external/spirv-headers/include \
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/robin-hood-hashing/src/include
 LOCAL_STATIC_LIBRARIES += layer_utils glslang SPIRV-Tools SPIRV-Tools-opt
 LOCAL_CPPFLAGS += -std=c++11 -Wall -Werror -Wno-unused-function -Wno-unused-const-variable -frtti
-LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DVK_PROTOTYPES -fvisibility=hidden
+LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DVK_PROTOTYPES -DUSE_ROBIN_HOOD_HASHING -fvisibility=hidden
 LOCAL_LDLIBS    := -llog -landroid
 LOCAL_LDFLAGS   += -Wl,-Bsymbolic
 LOCAL_LDFLAGS   += -Wl,--exclude-libs,ALL
@@ -91,6 +99,7 @@ LOCAL_SRC_FILES += $(SRC_DIR)/tests/layer_validation_tests.cpp \
                    $(SRC_DIR)/tests/vklayertests_gpu.cpp \
                    $(SRC_DIR)/tests/vklayertests_best_practices.cpp \
                    $(SRC_DIR)/tests/vklayertests_arm_best_practices.cpp \
+                   $(SRC_DIR)/tests/vklayertests_wsi.cpp \
                    $(SRC_DIR)/tests/vkpositivelayertests.cpp \
                    $(SRC_DIR)/tests/vksyncvaltests.cpp \
                    $(SRC_DIR)/tests/vktestbinding.cpp \
@@ -103,11 +112,12 @@ LOCAL_C_INCLUDES += $(VULKAN_INCLUDE) \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers/generated \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers \
                     $(LOCAL_PATH)/$(SRC_DIR)/libs \
-                    $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Tools/common
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Tools/common \
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/robin-hood-hashing/src/include
 
 LOCAL_STATIC_LIBRARIES := googletest_main layer_utils shaderc
 LOCAL_CPPFLAGS += -std=c++11 -DVK_PROTOTYPES -Wall -Werror -Wno-unused-function -Wno-unused-const-variable
-LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DNV_EXTENSIONS -DAMD_EXTENSIONS -fvisibility=hidden
+LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DNV_EXTENSIONS -DAMD_EXTENSIONS -DUSE_ROBIN_HOOD_HASHING -fvisibility=hidden
 LOCAL_LDLIBS := -llog -landroid -ldl
 LOCAL_LDFLAGS   += -Wl,-Bsymbolic
 LOCAL_LDFLAGS   += -Wl,--exclude-libs,ALL
@@ -126,6 +136,7 @@ LOCAL_SRC_FILES += $(SRC_DIR)/tests/layer_validation_tests.cpp \
                    $(SRC_DIR)/tests/vklayertests_gpu.cpp \
                    $(SRC_DIR)/tests/vklayertests_best_practices.cpp \
                    $(SRC_DIR)/tests/vklayertests_arm_best_practices.cpp \
+                   $(SRC_DIR)/tests/vklayertests_wsi.cpp \
                    $(SRC_DIR)/tests/vkpositivelayertests.cpp \
                    $(SRC_DIR)/tests/vksyncvaltests.cpp \
                    $(SRC_DIR)/tests/vktestbinding.cpp \
@@ -138,11 +149,12 @@ LOCAL_C_INCLUDES += $(VULKAN_INCLUDE) \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers/generated \
                     $(LOCAL_PATH)/$(SRC_DIR)/layers \
                     $(LOCAL_PATH)/$(SRC_DIR)/libs \
-                    $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Tools/common
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Tools/common \
+                    $(LOCAL_PATH)/$(THIRD_PARTY)/robin-hood-hashing/src/include
 
 LOCAL_STATIC_LIBRARIES := googletest_main layer_utils shaderc
 LOCAL_CPPFLAGS += -std=c++11 -DVK_PROTOTYPES -Wall -Werror -Wno-unused-function -Wno-unused-const-variable
-LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DNV_EXTENSIONS -DAMD_EXTENSIONS -fvisibility=hidden -DVALIDATION_APK
+LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DNV_EXTENSIONS -DAMD_EXTENSIONS -fvisibility=hidden -DVALIDATION_APK -DUSE_ROBIN_HOOD_HASHING
 LOCAL_WHOLE_STATIC_LIBRARIES += android_native_app_glue
 LOCAL_LDLIBS := -llog -landroid -ldl
 LOCAL_LDFLAGS := -u ANativeActivity_onCreate

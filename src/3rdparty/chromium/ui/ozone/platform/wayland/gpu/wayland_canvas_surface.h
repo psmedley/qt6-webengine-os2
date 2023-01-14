@@ -6,6 +6,7 @@
 #define UI_OZONE_PLATFORM_WAYLAND_GPU_WAYLAND_CANVAS_SURFACE_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -50,7 +51,7 @@ class WaylandCanvasSurface : public SurfaceOzoneCanvas,
   // GetCanvas() returns an SkCanvas whose shared memory region is not being
   // used by Wayland. If no such SkCanvas is available, a new one is created.
   SkCanvas* GetCanvas() override;
-  void ResizeCanvas(const gfx::Size& viewport_size) override;
+  void ResizeCanvas(const gfx::Size& viewport_size, float scale) override;
   void PresentCanvas(const gfx::Rect& damage) override;
   std::unique_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
 
@@ -64,7 +65,8 @@ class WaylandCanvasSurface : public SurfaceOzoneCanvas,
 
   // WaylandSurfaceGpu overrides:
   void OnSubmission(uint32_t buffer_id,
-                    const gfx::SwapResult& swap_result) override;
+                    const gfx::SwapResult& swap_result,
+                    gfx::GpuFenceHandle release_fence) override;
   void OnPresentation(uint32_t buffer_id,
                       const gfx::PresentationFeedback& feedback) override;
 

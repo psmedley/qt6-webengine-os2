@@ -8,11 +8,14 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace ws {
 namespace mojom {
@@ -34,11 +37,6 @@ constexpr int kResizeBehaviorCanMinimize = 1 << 2;
 constexpr int kUnassignedWorkspace = -1;
 
 // Alphabetical sort.
-
-// A property key to store whether accessibility focus falls back to widget or
-// not.
-AURA_EXPORT extern const WindowProperty<bool>* const
-    kAccessibilityFocusFallsbackToWidgetKey;
 
 // A property key to store whether accessibility touch exploration gets handled
 // by the window and all touches pass through directly.
@@ -91,6 +89,10 @@ AURA_EXPORT extern const WindowProperty<FocusClient*>* const kFocusClientKey;
 // WebContentsViews find the windows that should constrain NPAPI plugins.
 AURA_EXPORT extern const WindowProperty<Window*>* const kHostWindowKey;
 
+// A property key to store menu type of the window. Valid only for the menu
+// windows.
+AURA_EXPORT extern const WindowProperty<ui::MenuType>* const kMenuType;
+
 // The modal parent of a child modal window.
 AURA_EXPORT extern const WindowProperty<Window*>* const kChildModalParentKey;
 
@@ -140,7 +142,7 @@ AURA_EXPORT extern const WindowProperty<ui::WindowShowState>* const
 AURA_EXPORT extern const WindowProperty<bool>* const kSkipImeProcessing;
 
 // A property key to store the title of the window; sometimes shown to users.
-AURA_EXPORT extern const WindowProperty<base::string16*>* const kTitleKey;
+AURA_EXPORT extern const WindowProperty<std::u16string*>* const kTitleKey;
 
 // The inset of the topmost view in the client view from the top of the
 // non-client view. The topmost view depends on the window type. The topmost

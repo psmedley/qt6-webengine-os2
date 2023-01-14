@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
 
 #include "base/trace_event/trace_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -40,31 +41,32 @@ bool CompareAnimations(const Member<Animation>& left,
       Animation::CompareAnimationsOrdering::kPointerOrder);
 }
 
-void AnimationTimeline::currentTime(CSSNumberish& currentTime) {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  currentTime = result ? CSSNumberish::FromDouble(result->InMillisecondsF())
-                       : CSSNumberish();
+V8CSSNumberish* AnimationTimeline::currentTime() {
+  const absl::optional<base::TimeDelta>& result = CurrentPhaseAndTime().time;
+  if (result)
+    return MakeGarbageCollected<V8CSSNumberish>(result->InMillisecondsF());
+  return nullptr;
 }
 
-base::Optional<AnimationTimeDelta> AnimationTimeline::CurrentTime() {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  return result ? base::make_optional(AnimationTimeDelta(result.value()))
-                : base::nullopt;
+absl::optional<AnimationTimeDelta> AnimationTimeline::CurrentTime() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(AnimationTimeDelta(result.value()))
+                : absl::nullopt;
 }
 
-base::Optional<double> AnimationTimeline::CurrentTimeMilliseconds() {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  return result ? base::make_optional(result->InMillisecondsF())
-                : base::nullopt;
+absl::optional<double> AnimationTimeline::CurrentTimeMilliseconds() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(result->InMillisecondsF())
+                : absl::nullopt;
 }
 
-base::Optional<double> AnimationTimeline::CurrentTimeSeconds() {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  return result ? base::make_optional(result->InSecondsF()) : base::nullopt;
+absl::optional<double> AnimationTimeline::CurrentTimeSeconds() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(result->InSecondsF()) : absl::nullopt;
 }
 
-void AnimationTimeline::duration(CSSNumberish& duration) {
-  duration = CSSNumberish();
+V8CSSNumberish* AnimationTimeline::duration() {
+  return nullptr;
 }
 
 String AnimationTimeline::phase() {
@@ -83,6 +85,17 @@ String AnimationTimeline::phase() {
 void AnimationTimeline::ClearOutdatedAnimation(Animation* animation) {
   DCHECK(!animation->Outdated());
   outdated_animation_count_--;
+}
+
+wtf_size_t AnimationTimeline::AnimationsNeedingUpdateCount() const {
+  wtf_size_t count = 0;
+  for (const auto& animation : animations_needing_update_) {
+    // This function is for frame sequence tracking for animations. Exclude
+    // no-effect animations which don't generate frames.
+    if (!animation->AnimationHasNoEffect())
+      count++;
+  }
+  return count;
 }
 
 bool AnimationTimeline::NeedsAnimationTimingUpdate() {
@@ -186,6 +199,14 @@ Animation* AnimationTimeline::Play(AnimationEffect* child) {
 void AnimationTimeline::MarkAnimationsCompositorPending(bool source_changed) {
   for (const auto& animation : animations_) {
     animation->SetCompositorPending(source_changed);
+  }
+}
+
+void AnimationTimeline::MarkPendingIfCompositorPropertyAnimationChanges(
+    const PaintArtifactCompositor* paint_artifact_compositor) {
+  for (const auto& animation : animations_) {
+    animation->MarkPendingIfCompositorPropertyAnimationChanges(
+        paint_artifact_compositor);
   }
 }
 

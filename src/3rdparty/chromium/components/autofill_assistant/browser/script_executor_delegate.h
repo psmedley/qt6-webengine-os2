@@ -37,7 +37,6 @@ class TriggerContext;
 class WebsiteLoginManager;
 class EventHandler;
 class UserModel;
-class ElementStore;
 
 class ScriptExecutorDelegate {
  public:
@@ -61,7 +60,6 @@ class ScriptExecutorDelegate {
   virtual const GURL& GetScriptURL() = 0;
   virtual Service* GetService() = 0;
   virtual WebController* GetWebController() = 0;
-  virtual ElementStore* GetElementStore() const = 0;
   virtual const TriggerContext* GetTriggerContext() = 0;
   virtual autofill::PersonalDataManager* GetPersonalDataManager() = 0;
   virtual WebsiteLoginManager* GetWebsiteLoginManager() = 0;
@@ -186,8 +184,17 @@ class ScriptExecutorDelegate {
       base::OnceCallback<void(const ClientStatus&)>
           view_inflation_finished_callback) = 0;
 
+  // Sets the persistent generic UI to show to the user.
+  virtual void SetPersistentGenericUi(
+      std::unique_ptr<GenericUserInterfaceProto> generic_ui,
+      base::OnceCallback<void(const ClientStatus&)>
+          view_inflation_finished_callback) = 0;
+
   // Clears the generic UI.
   virtual void ClearGenericUi() = 0;
+
+  // Clears the persistent generic UI.
+  virtual void ClearPersistentGenericUi() = 0;
 
   // Sets whether browse mode should be invisible or not. Must be set before
   // calling |EnterState(BROWSE)| to take effect.

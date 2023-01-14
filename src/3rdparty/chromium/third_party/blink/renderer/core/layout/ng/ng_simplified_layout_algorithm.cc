@@ -23,16 +23,30 @@ namespace blink {
 
 NGSimplifiedLayoutAlgorithm::NGSimplifiedLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params,
-    const NGLayoutResult& result)
+    const NGLayoutResult& result,
+    bool keep_old_size)
     : NGLayoutAlgorithm(params),
       previous_result_(result),
       writing_direction_(Style().GetWritingDirection()) {
+  DCHECK(!Node().IsReplaced());
+
   const bool is_block_flow = Node().IsBlockFlow();
   const NGPhysicalBoxFragment& physical_fragment =
       To<NGPhysicalBoxFragment>(result.PhysicalFragment());
 
   container_builder_.SetIsNewFormattingContext(
       physical_fragment.IsFormattingContextRoot());
+
+  container_builder_.SetIsFirstForNode(physical_fragment.IsFirstForNode());
+
+  if (physical_fragment.IsFragmentationContextRoot())
+    container_builder_.SetIsBlockFragmentationContextRoot();
+
+  if (keep_old_size) {
+    // When we're cloning a fragment to insert additional fragmentainers to hold
+    // OOFs, re-use the old break token. This may not be the last fragment.
+    container_builder_.PresetNextBreakToken(physical_fragment.BreakToken());
+  }
 
   if (is_block_flow && !physical_fragment.IsFieldsetContainer()) {
     container_builder_.SetIsInlineFormattingContext(
@@ -61,8 +75,6 @@ NGSimplifiedLayoutAlgorithm::NGSimplifiedLayoutAlgorithm(
     if (result.IsPushedByFloats())
       container_builder_.SetIsPushedByFloats();
     container_builder_.SetAdjoiningObjectTypes(result.AdjoiningObjectTypes());
-    container_builder_.SetUnpositionedListMarker(
-        result.UnpositionedListMarker());
 
     if (physical_fragment.LastBaseline())
       container_builder_.SetLastBaseline(*physical_fragment.LastBaseline());
@@ -98,7 +110,6 @@ NGSimplifiedLayoutAlgorithm::NGSimplifiedLayoutAlgorithm(
     DCHECK(!result.IsSelfCollapsing());
     DCHECK(!result.IsPushedByFloats());
     DCHECK_EQ(result.AdjoiningObjectTypes(), kAdjoiningNone);
-    DCHECK(!result.UnpositionedListMarker());
 
     DCHECK(!physical_fragment.LastBaseline());
 
@@ -134,6 +145,11 @@ NGSimplifiedLayoutAlgorithm::NGSimplifiedLayoutAlgorithm(
     }
   }
 
+  if (physical_fragment.IsGridNG()) {
+    container_builder_.TransferGridData(
+        std::make_unique<NGGridData>(*result.GridData()));
+  }
+
   if (physical_fragment.IsHiddenForPaint())
     container_builder_.SetIsHiddenForPaint(true);
 
@@ -142,32 +158,59 @@ NGSimplifiedLayoutAlgorithm::NGSimplifiedLayoutAlgorithm(
   if (physical_fragment.IsTableNGPart())
     container_builder_.SetIsTableNGPart();
 
-  container_builder_.SetIntrinsicBlockSize(result.IntrinsicBlockSize());
-  container_builder_.SetOverflowBlockSize(result.OverflowBlockSize());
-
-  LayoutUnit new_block_size = ComputeBlockSizeForFragment(
-      ConstraintSpace(), Style(), BorderPadding(), result.IntrinsicBlockSize(),
-      container_builder_.InitialBorderBoxSize().inline_size,
-      Node().ShouldBeConsideredAsReplaced());
-
-  // Only block-flow is allowed to change its block-size during "simplified"
-  // layout, all other layout types must remain the same size.
-  if (is_block_flow) {
-    container_builder_.SetFragmentBlockSize(new_block_size);
-  } else {
+  if (keep_old_size) {
     LayoutUnit old_block_size =
         NGFragment(writing_direction_, physical_fragment).BlockSize();
-#if DCHECK_IS_ON()
-    // Tables don't respect the typical block-sizing rules.
-    if (!physical_fragment.IsTableNG())
-      DCHECK_EQ(old_block_size, new_block_size);
-#endif
     container_builder_.SetFragmentBlockSize(old_block_size);
+  } else {
+    container_builder_.SetIntrinsicBlockSize(result.IntrinsicBlockSize());
+
+    LayoutUnit new_block_size = ComputeBlockSizeForFragment(
+        ConstraintSpace(), Style(), BorderPadding(),
+        result.IntrinsicBlockSize(),
+        container_builder_.InitialBorderBoxSize().inline_size);
+
+    // Only block-flow is allowed to change its block-size during "simplified"
+    // layout, all other layout types must remain the same size.
+    if (is_block_flow) {
+      container_builder_.SetFragmentBlockSize(new_block_size);
+    } else {
+      LayoutUnit old_block_size =
+          NGFragment(writing_direction_, physical_fragment).BlockSize();
+#if DCHECK_IS_ON()
+      // Tables, sections, rows don't respect the typical block-sizing rules.
+      if (!physical_fragment.IsTableNG() &&
+          !physical_fragment.IsTableNGSection() &&
+          !physical_fragment.IsTableNGRow())
+        DCHECK_EQ(old_block_size, new_block_size);
+#endif
+      container_builder_.SetFragmentBlockSize(old_block_size);
+    }
   }
 
   // We need the previous physical container size to calculate the position of
   // any child fragments.
   previous_physical_container_size_ = physical_fragment.Size();
+}
+
+void NGSimplifiedLayoutAlgorithm::CloneOldChildren() {
+  const auto& previous_fragment =
+      To<NGPhysicalBoxFragment>(previous_result_.PhysicalFragment());
+  for (const auto& child_link : previous_fragment.Children()) {
+    const auto& child_fragment = *child_link.get();
+    AddChildFragment(child_link, child_fragment);
+  }
+}
+
+void NGSimplifiedLayoutAlgorithm::AppendNewChildFragment(
+    const NGPhysicalFragment& fragment,
+    LogicalOffset offset) {
+  container_builder_.AddChild(fragment, offset);
+}
+
+scoped_refptr<const NGLayoutResult>
+NGSimplifiedLayoutAlgorithm::CreateResultAfterManualChildLayout() {
+  return container_builder_.ToBoxFragment();
 }
 
 scoped_refptr<const NGLayoutResult> NGSimplifiedLayoutAlgorithm::Layout() {
@@ -180,8 +223,7 @@ scoped_refptr<const NGLayoutResult> NGSimplifiedLayoutAlgorithm::Layout() {
       To<NGPhysicalBoxFragment>(previous_result_.PhysicalFragment());
 
   for (const auto& child_link : previous_fragment.Children()) {
-    const auto& child_fragment =
-        *To<NGPhysicalContainerFragment>(child_link.get());
+    const auto& child_fragment = *child_link.get();
 
     // We'll add OOF-positioned candidates below.
     if (child_fragment.IsOutOfFlowPositioned())
@@ -224,7 +266,6 @@ scoped_refptr<const NGLayoutResult> NGSimplifiedLayoutAlgorithm::Layout() {
     // calculated it.
     const auto* layer = child.GetLayoutBox()->Layer();
     NGLogicalStaticPosition position = layer->GetStaticPosition();
-
     container_builder_.AddOutOfFlowChildCandidate(
         To<NGBlockNode>(child), position.offset, position.inline_edge,
         position.block_edge, /* needs_block_offset_adjustment */ false);
@@ -238,6 +279,21 @@ scoped_refptr<const NGLayoutResult> NGSimplifiedLayoutAlgorithm::Layout() {
     DCHECK_EQ(items_builder->GetWritingDirection(), writing_direction_);
     items_builder->AddPreviousItems(previous_fragment, *previous_items);
   }
+
+  // Some layout types (grid) manually calculate their inflow-bounds rather
+  // than use the value determined inside the builder. Just explicitly set this
+  // from the previous fragment for all types.
+  if (previous_fragment.InflowBounds()) {
+    LogicalRect inflow_bounds =
+        WritingModeConverter(writing_direction_,
+                             previous_physical_container_size_)
+            .ToLogical(*previous_fragment.InflowBounds());
+    container_builder_.SetInflowBounds(inflow_bounds);
+  }
+  container_builder_.SetMayHaveDescendantAboveBlockStart(
+      previous_fragment.MayHaveDescendantAboveBlockStart());
+  container_builder_.SetHasDescendantThatDependsOnPercentageBlockSize(
+      previous_result_.HasDescendantThatDependsOnPercentageBlockSize());
 
   NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), &container_builder_).Run();
 
@@ -265,7 +321,7 @@ NGSimplifiedLayoutAlgorithm::LayoutWithItemsBuilder() {
 
 void NGSimplifiedLayoutAlgorithm::AddChildFragment(
     const NGLink& old_fragment,
-    const NGPhysicalContainerFragment& new_fragment,
+    const NGPhysicalFragment& new_fragment,
     const NGMarginStrut* margin_strut,
     bool is_self_collapsing) {
   DCHECK_EQ(old_fragment->Size(), new_fragment.Size());
@@ -275,13 +331,13 @@ void NGSimplifiedLayoutAlgorithm::AddChildFragment(
       WritingModeConverter(writing_direction_,
                            previous_physical_container_size_)
           .ToLogical(old_fragment.Offset(), new_fragment.Size());
-
-  RemoveRelativeOffset(container_builder_, *old_fragment, &child_offset);
+  // Any relative offset will have already been applied, avoid re-adding one.
+  absl::optional<LogicalOffset> relative_offset = LogicalOffset();
 
   // Add the new fragment to the builder.
   container_builder_.AddChild(new_fragment, child_offset,
                               /* inline_container */ nullptr, margin_strut,
-                              is_self_collapsing);
+                              is_self_collapsing, relative_offset);
 }
 
 }  // namespace blink

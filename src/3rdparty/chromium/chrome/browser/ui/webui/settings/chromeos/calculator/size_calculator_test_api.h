@@ -9,6 +9,7 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/calculator/size_calculator.h"
 #include "chrome/browser/ui/webui/settings/chromeos/device_storage_handler.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace chromeos {
 namespace settings {
@@ -141,7 +142,8 @@ class OtherUsersSizeTestAPI {
         user_manager::UserList(user_count);
   }
 
-  void SimulateOnGetOtherUserSize(base::Optional<cryptohome::BaseReply> reply) {
+  void SimulateOnGetOtherUserSize(
+      absl::optional<user_data_auth::GetAccountDiskUsageReply> reply) {
     other_users_size_calculator_->OnGetOtherUserSize(reply);
   }
 

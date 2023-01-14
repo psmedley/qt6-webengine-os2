@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "media/base/media_export.h"
 #include "media/base/video_encoder.h"
 #include "media/base/video_frame_pool.h"
@@ -37,12 +36,14 @@ class MEDIA_EXPORT OpenH264VideoEncoder : public VideoEncoder {
   void Flush(StatusCB done_cb) override;
 
  private:
-  void DrainOutputs();
+  Status DrainOutputs(const SFrameBSInfo& frame_info,
+                      base::TimeDelta timestamp);
 
   class ISVCEncoderDeleter {
    public:
     ISVCEncoderDeleter();
     ISVCEncoderDeleter(const ISVCEncoderDeleter&);
+    ISVCEncoderDeleter& operator=(const ISVCEncoderDeleter&);
     void operator()(ISVCEncoder* coder);
     void MarkInitialized();
 

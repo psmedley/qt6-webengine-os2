@@ -31,7 +31,6 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_AX_OBJECT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_AX_OBJECT_H_
 
-#include <memory>
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
 #include "third_party/blink/public/platform/web_vector.h"
@@ -39,7 +38,9 @@
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_mode.h"
 
-class SkMatrix44;
+namespace skia {
+class Matrix44;
+}
 
 namespace gfx {
 class Point;
@@ -89,6 +90,7 @@ class WebAXObject {
   BLINK_EXPORT static bool MaybeUpdateLayoutAndCheckValidity(
       const WebDocument&);
   BLINK_EXPORT static void UpdateLayout(const WebDocument&);
+  BLINK_EXPORT static bool IsDirty(const WebDocument&);
   // A Freeze() occurs during a serialization run.
   // Used here as a hint for DCHECKS to enforce the following behavior:
   // objects in the ax hierarchy should not be destroyed during serialization.
@@ -133,7 +135,6 @@ class WebAXObject {
   BLINK_EXPORT void Serialize(ui::AXNodeData* node_data,
                               ui::AXMode accessibility_mode) const;
 
-  BLINK_EXPORT bool IsAnchor() const;
   BLINK_EXPORT ax::mojom::CheckedState CheckedState() const;
   BLINK_EXPORT bool IsCheckable() const;
   BLINK_EXPORT bool IsClickable() const;
@@ -144,12 +145,11 @@ class WebAXObject {
   BLINK_EXPORT bool IsModal() const;
   // Returns true if this object is an input element of a text field type, such
   // as type="text" or type="tel", or a textarea.
-  BLINK_EXPORT bool IsNativeTextControl() const;
+  BLINK_EXPORT bool IsAtomicTextField() const;
   BLINK_EXPORT bool IsOffScreen() const;
   BLINK_EXPORT bool IsSelectedOptionActive() const;
   BLINK_EXPORT bool IsVisited() const;
 
-  BLINK_EXPORT bool HasAriaAttribute() const;
   BLINK_EXPORT WebString AccessKey() const;
   BLINK_EXPORT bool CanPress() const;
   BLINK_EXPORT bool CanSetValueAttribute() const;
@@ -178,7 +178,7 @@ class WebAXObject {
   BLINK_EXPORT WebAXObject InPageLinkTarget() const;
   BLINK_EXPORT WebVector<WebAXObject> RadioButtonsInGroup() const;
   BLINK_EXPORT ax::mojom::Role Role() const;
-  BLINK_EXPORT WebString StringValue() const;
+  BLINK_EXPORT WebString GetValueForControl() const;
   BLINK_EXPORT ax::mojom::WritingDirection GetTextDirection() const;
   BLINK_EXPORT WebURL Url() const;
 
@@ -347,7 +347,7 @@ class WebAXObject {
   // or similar, set |clips_children| to true.
   BLINK_EXPORT void GetRelativeBounds(WebAXObject& offset_container,
                                       gfx::RectF& bounds_in_container,
-                                      SkMatrix44& container_transform,
+                                      skia::Matrix44& container_transform,
                                       bool* clips_children = nullptr) const;
 
   // Retrieves a vector of all WebAXObjects in this document whose
@@ -365,6 +365,10 @@ class WebAXObject {
 
   BLINK_EXPORT void HandleAutofillStateChanged(
       const WebAXAutofillState state) const;
+
+  // For testing only, returns whether or not we have the permission to
+  // call AOM event listeners.
+  BLINK_EXPORT bool CanCallAOMEventListenersForTesting() const;
 
 #if INSIDE_BLINK
   BLINK_EXPORT WebAXObject(AXObject*);

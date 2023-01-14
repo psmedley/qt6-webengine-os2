@@ -79,11 +79,18 @@ class BuilderList(object):
     def all_cq_try_builder_names(self):
         return self.filter_builders(is_cq=True)
 
+    def all_flag_specific_try_builder_names(self, flag_specific):
+        return self.filter_builders(is_try=True, flag_specific=flag_specific)
+
     def all_continuous_builder_names(self):
         return self.filter_builders(is_try=False)
 
-    def filter_builders(self, exclude_specifiers=None, include_specifiers=None,
-                        is_try=False, is_cq=False):
+    def filter_builders(self,
+                        exclude_specifiers=None,
+                        include_specifiers=None,
+                        is_try=False,
+                        is_cq=False,
+                        flag_specific=None):
         _lower_specifiers = lambda specifiers: {s.lower() for s in specifiers}
         exclude_specifiers = _lower_specifiers(exclude_specifiers or {})
         include_specifiers = _lower_specifiers(include_specifiers or {})
@@ -91,6 +98,9 @@ class BuilderList(object):
         for b in self._builders:
             builder_specifiers = _lower_specifiers(
                 self._builders[b].get('specifiers', {}))
+            if flag_specific and self._builders[b].get('flag_specific',
+                                                       None) != flag_specific:
+                continue
             if is_try and self._builders[b].get('is_try_builder', False) != is_try:
                 continue
             if is_cq and self._builders[b].get('is_cq_builder', False) != is_cq:
@@ -129,6 +139,12 @@ class BuilderList(object):
     def is_wpt_builder(self, builder_name):
         return 'wpt' in builder_name
 
+    def is_flag_specific_builder(self, builder_name):
+        return self._builders[builder_name].get('flag_specific', None) != None
+
+    def flag_specific_option(self, builder_name):
+        return self._builders[builder_name].get('flag_specific', None)
+
     def platform_specifier_for_builder(self, builder_name):
         return self.specifiers_for_builder(builder_name)[0]
 
@@ -140,7 +156,7 @@ class BuilderList(object):
         to non-debug builders. If no builder is found, None is returned.
         """
         debug_builder_name = None
-        for builder_name, builder_info in self._builders.iteritems():
+        for builder_name, builder_info in list(self._builders.items()):
             if builder_info.get('is_try_builder'):
                 continue
             if builder_info['port_name'] == target_port_name:
@@ -157,7 +173,7 @@ class BuilderList(object):
         the version specifier for the first builder that matches, even
         if it's a try bot builder.
         """
-        for _, builder_info in sorted(self._builders.iteritems()):
+        for _, builder_info in sorted(self._builders.items()):
             if builder_info['port_name'] == target_port_name:
                 return builder_info['specifiers'][0]
         return None

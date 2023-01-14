@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/check.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
@@ -17,6 +18,7 @@
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/page_node_impl.h"
 #include "components/performance_manager/graph/process_node_impl.h"
+#include "components/performance_manager/public/features.h"
 #include "components/performance_manager/public/mojom/v8_contexts.mojom.h"
 #include "components/performance_manager/public/performance_manager.h"
 #include "components/performance_manager/v8_memory/v8_context_tracker.h"
@@ -175,18 +177,20 @@ V8MemoryPerformanceManagerTestHarness::
 void V8MemoryPerformanceManagerTestHarness::SetUp() {
   PerformanceManagerTestHarness::SetUp();
 
-  // Precondition: CallOnGraph must run on a different sequence. Note that
-  // all tasks passed to CallOnGraph will only run when run_loop.Run() is
-  // called.
-  ASSERT_TRUE(GetMainThreadTaskRunner()->RunsTasksInCurrentSequence());
-  base::RunLoop run_loop;
-  PerformanceManager::CallOnGraph(
-      FROM_HERE, base::BindLambdaForTesting([&] {
-        EXPECT_FALSE(
-            this->GetMainThreadTaskRunner()->RunsTasksInCurrentSequence());
-        run_loop.Quit();
-      }));
-  run_loop.Run();
+  if (!base::FeatureList::IsEnabled(features::kRunOnMainThread)) {
+    // Precondition: CallOnGraph must run on a different sequence. Note that
+    // all tasks passed to CallOnGraph will only run when run_loop.Run() is
+    // called.
+    ASSERT_TRUE(GetMainThreadTaskRunner()->RunsTasksInCurrentSequence());
+    base::RunLoop run_loop;
+    PerformanceManager::CallOnGraph(
+        FROM_HERE, base::BindLambdaForTesting([&] {
+          EXPECT_FALSE(
+              this->GetMainThreadTaskRunner()->RunsTasksInCurrentSequence());
+          run_loop.Quit();
+        }));
+    run_loop.Run();
+  }
 
   // Set the active contents and simulate a navigation, which adds nodes to
   // the graph.
@@ -237,34 +241,38 @@ int WebMemoryTestHarness::GetNextUniqueId() {
 }
 
 FrameNodeImpl* WebMemoryTestHarness::AddFrameNodeImpl(
-    base::Optional<std::string> url,
+    absl::optional<std::string> url,
     int browsing_instance_id,
     Bytes memory_usage,
     FrameNodeImpl* parent,
     FrameNodeImpl* opener,
     ProcessNodeImpl* process,
-    base::Optional<std::string> id_attribute,
-    base::Optional<std::string> src_attribute) {
+    absl::optional<std::string> id_attribute,
+    absl::optional<std::string> src_attribute,
+    Bytes canvas_memory_usage) {
   // If there's an opener, the new frame is also a new page.
   auto* page = pages_.front().get();
   if (opener) {
     pages_.push_back(CreateNode<PageNodeImpl>());
     page = pages_.back().get();
-    page->SetOpenerFrameNodeAndOpenedType(opener, PageNode::OpenedType::kPopup);
+    page->SetOpenerFrameNode(opener);
   }
 
-  int frame_tree_node_id = GetNextUniqueId();
   int frame_routing_id = GetNextUniqueId();
   auto frame_token = blink::LocalFrameToken();
-  auto frame = CreateNode<FrameNodeImpl>(process, page, parent,
-                                         frame_tree_node_id, frame_routing_id,
-                                         frame_token, browsing_instance_id);
+  auto frame = CreateNode<FrameNodeImpl>(
+      process, page, parent, frame_routing_id, frame_token,
+      content::BrowsingInstanceId(browsing_instance_id));
   if (url) {
     frame->OnNavigationCommitted(GURL(*url), /*same document*/ true);
   }
-  if (memory_usage) {
-    V8DetailedMemoryExecutionContextData::CreateForTesting(frame.get())
-        ->set_v8_bytes_used(memory_usage.value());
+  if (memory_usage || canvas_memory_usage) {
+    auto* data =
+        V8DetailedMemoryExecutionContextData::CreateForTesting(frame.get());
+    if (memory_usage)
+      data->set_v8_bytes_used(memory_usage.value());
+    if (canvas_memory_usage)
+      data->set_canvas_bytes_used(canvas_memory_usage.value());
   }
   frames_.push_back(std::move(frame));
   FrameNodeImpl* frame_impl = frames_.back().get();
@@ -382,6 +390,23 @@ void AddIsolateMemoryUsage(blink::ExecutionContextToken token,
   context->token = token;
   context->bytes_used = bytes_used;
   isolate->contexts.push_back(std::move(context));
+}
+
+void AddIsolateCanvasMemoryUsage(
+    blink::ExecutionContextToken token,
+    uint64_t bytes_used,
+    blink::mojom::PerIsolateV8MemoryUsage* isolate) {
+  for (auto& entry : isolate->canvas_contexts) {
+    if (entry->token == token) {
+      entry->bytes_used = bytes_used;
+      return;
+    }
+  }
+
+  auto context = blink::mojom::PerContextCanvasMemoryUsage::New();
+  context->token = token;
+  context->bytes_used = bytes_used;
+  isolate->canvas_contexts.push_back(std::move(context));
 }
 
 }  // namespace v8_memory

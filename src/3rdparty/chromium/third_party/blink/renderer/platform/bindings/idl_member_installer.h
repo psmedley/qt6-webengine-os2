@@ -138,7 +138,8 @@ class PLATFORM_EXPORT IDLMemberInstaller final {
 
   struct NoAllocDirectCallOperationConfig {
     OperationConfig operation_config;
-    v8::CFunction v8_c_function;
+    const v8::CFunction* v8_cfunction_table_data;
+    uint32_t v8_cfunction_table_size;
   };
   static void InstallOperations(
       v8::Isolate* isolate,
@@ -146,6 +147,14 @@ class PLATFORM_EXPORT IDLMemberInstaller final {
       v8::Local<v8::Template> instance_template,
       v8::Local<v8::Template> prototype_template,
       v8::Local<v8::Template> interface_template,
+      v8::Local<v8::Signature> signature,
+      base::span<const NoAllocDirectCallOperationConfig> configs);
+  static void InstallOperations(
+      v8::Isolate* isolate,
+      const DOMWrapperWorld& world,
+      v8::Local<v8::Object> instance_object,
+      v8::Local<v8::Object> prototype_object,
+      v8::Local<v8::Object> interface_object,
       v8::Local<v8::Signature> signature,
       base::span<const NoAllocDirectCallOperationConfig> configs);
 

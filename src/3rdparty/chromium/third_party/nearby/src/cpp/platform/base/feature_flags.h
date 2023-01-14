@@ -16,6 +16,7 @@
 #define PLATFORM_BASE_FEATURE_FLAGS_H_
 
 #include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
 
 namespace location {
 namespace nearby {
@@ -28,12 +29,19 @@ class FeatureFlags {
   struct Flags {
     bool enable_cancellation_flag = false;
     bool enable_async_bandwidth_upgrade = true;
-    // Let endpoint_manager erase deleted endpoint from endpoints_ inside
-    // function RemoveEndpoint.
-    bool endpoint_manager_ensure_workers_terminated_inside_remove = true;
     // If a scheduled runnable is already running, Cancel() will synchronously
     // wait for the task to complete.
     bool cancel_waits_for_running_tasks = true;
+    // Keep Alive frame interval and timeout in millis.
+    std::int32_t keep_alive_interval_millis = 5000;
+    std::int32_t keep_alive_timeout_millis = 30000;
+    bool use_exp_backoff_in_bwu_retry = true;
+    // without the exp backoff, retry intervals in seconds: 5, 10, 10, 10...
+    // with the exp backoff, retry intervals in seconds: 3, 6, 12, 24...
+    absl::Duration bwu_retry_exp_backoff_initial_delay = absl::Seconds(3);
+    absl::Duration bwu_retry_exp_backoff_maximum_delay = absl::Seconds(300);
+    // Support sending file and stream payloads starting from a non-zero offset.
+    bool enable_send_payload_offset = true;
   };
 
   static const FeatureFlags& GetInstance() {

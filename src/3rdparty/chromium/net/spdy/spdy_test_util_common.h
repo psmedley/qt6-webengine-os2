@@ -13,11 +13,11 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "crypto/ec_private_key.h"
-#include "crypto/ec_signature_creator.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/proxy_server.h"
 #include "net/base/request_priority.h"
@@ -141,38 +141,6 @@ class StreamReleaserCallback : public TestCompletionCallbackBase {
   void OnComplete(SpdyStreamRequest* request, int result);
 };
 
-// An ECSignatureCreator that returns deterministic signatures.
-class MockECSignatureCreator : public crypto::ECSignatureCreator {
- public:
-  explicit MockECSignatureCreator(crypto::ECPrivateKey* key);
-
-  // crypto::ECSignatureCreator
-  bool Sign(const uint8_t* data,
-            int data_len,
-            std::vector<uint8_t>* signature) override;
-  bool DecodeSignature(const std::vector<uint8_t>& signature,
-                       std::vector<uint8_t>* out_raw_sig) override;
-
- private:
-  crypto::ECPrivateKey* key_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreator);
-};
-
-// An ECSignatureCreatorFactory creates MockECSignatureCreator.
-class MockECSignatureCreatorFactory : public crypto::ECSignatureCreatorFactory {
- public:
-  MockECSignatureCreatorFactory();
-  ~MockECSignatureCreatorFactory() override;
-
-  // crypto::ECSignatureCreatorFactory
-  std::unique_ptr<crypto::ECSignatureCreator> Create(
-      crypto::ECPrivateKey* key) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreatorFactory);
-};
-
 // Helper to manage the lifetimes of the dependencies for a
 // HttpNetworkTransaction.
 struct SpdySessionDependencies {
@@ -198,9 +166,9 @@ struct SpdySessionDependencies {
   static std::unique_ptr<HttpNetworkSession> SpdyCreateSessionWithSocketFactory(
       SpdySessionDependencies* session_deps,
       ClientSocketFactory* factory);
-  static HttpNetworkSession::Params CreateSessionParams(
+  static HttpNetworkSessionParams CreateSessionParams(
       SpdySessionDependencies* session_deps);
-  static HttpNetworkSession::Context CreateSessionContext(
+  static HttpNetworkSessionContext CreateSessionContext(
       SpdySessionDependencies* session_deps);
 
   // NOTE: host_resolver must be ordered before http_auth_handler_factory.
@@ -232,7 +200,7 @@ struct SpdySessionDependencies {
   SpdySession::TimeFunc time_func;
   bool enable_http2_alternative_service;
   bool enable_websocket_over_http2;
-  base::Optional<SpdySessionPool::GreasedHttp2Frame> greased_http2_frame;
+  absl::optional<SpdySessionPool::GreasedHttp2Frame> greased_http2_frame;
   bool http2_end_stream_with_data_frame;
   NetLog* net_log;
   bool disable_idle_sockets_close_on_memory_pressure;
@@ -264,13 +232,6 @@ base::WeakPtr<SpdySession> CreateSpdySession(HttpNetworkSession* http_session,
                                              const SpdySessionKey& key,
                                              const NetLogWithSource& net_log);
 
-// Like CreateSpdySession(), but the host is considered a trusted proxy and
-// allowed to push cross-origin resources.
-base::WeakPtr<SpdySession> CreateTrustedSpdySession(
-    HttpNetworkSession* http_session,
-    const SpdySessionKey& key,
-    const NetLogWithSource& net_log);
-
 // Like CreateSpdySession(), but does not fail if there is already an IP
 // pooled session for |key|.
 base::WeakPtr<SpdySession> CreateSpdySessionWithIpBasedPoolingDisabled(
@@ -278,21 +239,11 @@ base::WeakPtr<SpdySession> CreateSpdySessionWithIpBasedPoolingDisabled(
     const SpdySessionKey& key,
     const NetLogWithSource& net_log);
 
-// Creates an insecure SPDY session for the given key and puts it in
-// |pool|. The returned session will neither receive nor send any
-// data. A SPDY session for |key| must not already exist.
+// Creates a SPDY session for the given key and puts it in |pool|.
+// The returned session will neither receive nor send any data.
+// A SPDY session for |key| must not already exist.
 base::WeakPtr<SpdySession> CreateFakeSpdySession(SpdySessionPool* pool,
                                                  const SpdySessionKey& key);
-
-// Tries to create an insecure SPDY session for the given key but
-// expects the attempt to fail with the given error. The session will
-// neither receive nor send any data. A SPDY session for |key| must
-// not already exist. The session will be created but close in the
-// next event loop iteration.
-base::WeakPtr<SpdySession> TryCreateFakeSpdySessionExpectingFailure(
-    SpdySessionPool* pool,
-    const SpdySessionKey& key,
-    Error expected_status);
 
 class SpdySessionPoolPeer {
  public:

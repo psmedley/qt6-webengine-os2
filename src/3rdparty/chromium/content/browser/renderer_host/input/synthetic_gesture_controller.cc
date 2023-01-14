@@ -7,10 +7,13 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/renderer_host/input/synthetic_gesture_target.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host.h"
 
 namespace content {
@@ -66,9 +69,7 @@ void SyntheticGestureController::QueueSyntheticGesture(
 
 void SyntheticGestureController::QueueSyntheticGestureCompleteImmediately(
     std::unique_ptr<SyntheticGesture> synthetic_gesture) {
-  QueueSyntheticGesture(std::move(synthetic_gesture),
-                        base::BindOnce([](SyntheticGesture::Result result) {}),
-                        true);
+  QueueSyntheticGesture(std::move(synthetic_gesture), base::DoNothing(), true);
 }
 
 void SyntheticGestureController::QueueSyntheticGesture(
@@ -148,6 +149,8 @@ void SyntheticGestureController::StartGesture() {
     EnsureRendererInitialized(std::move(on_initialized));
     return;
   }
+  dispatch_timer_.SetTaskRunner(
+      content::GetUIThreadTaskRunner({BrowserTaskType::kUserInput}));
 
   if (!dispatch_timer_.IsRunning()) {
     DCHECK(!pending_gesture_queue_.IsEmpty());

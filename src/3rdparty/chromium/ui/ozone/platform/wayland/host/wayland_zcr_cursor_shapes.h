@@ -5,7 +5,7 @@
 #ifndef UI_OZONE_PLATFORM_WAYLAND_HOST_WAYLAND_ZCR_CURSOR_SHAPES_H_
 #define UI_OZONE_PLATFORM_WAYLAND_HOST_WAYLAND_ZCR_CURSOR_SHAPES_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-forward.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
 
@@ -16,8 +16,15 @@ class WaylandConnection;
 // Wraps the zcr_cursor_shapes interface for Wayland (exo) server-side cursor
 // support. Exists to support Lacros, which uses server-side cursors for
 // consistency with ARC++ and for accessibility support.
-class WaylandZcrCursorShapes {
+class WaylandZcrCursorShapes
+    : public wl::GlobalObjectRegistrar<WaylandZcrCursorShapes> {
  public:
+  static void Register(WaylandConnection* connection);
+  static void Instantiate(WaylandConnection* connection,
+                          wl_registry* registry,
+                          uint32_t name,
+                          uint32_t version);
+
   WaylandZcrCursorShapes(zcr_cursor_shapes_v1* zcr_cursor_shapes,
                          WaylandConnection* connection);
   WaylandZcrCursorShapes(const WaylandZcrCursorShapes&) = delete;
@@ -26,7 +33,7 @@ class WaylandZcrCursorShapes {
 
   // Returns the cursor shape value for a cursor |type|, or nullopt if the
   // type isn't supported by the cursor API.
-  static base::Optional<int32_t> ShapeFromType(mojom::CursorType type);
+  static absl::optional<int32_t> ShapeFromType(mojom::CursorType type);
 
   // Calls zcr_cursor_shapes_v1_set_cursor_shape(). See interface description
   // for values for |shape|. Virtual for testing.

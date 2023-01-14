@@ -4,8 +4,6 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/printing_section.h"
 
-#include "ash/constants/ash_features.h"
-#include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/ui/webui/settings/chromeos/cups_printers_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
@@ -80,10 +78,6 @@ const std::vector<SearchConcept>& GetScanningAppSearchConcepts() {
   return *tags;
 }
 
-bool IsScanningAppEnabled() {
-  return base::FeatureList::IsEnabled(chromeos::features::kScanningUI);
-}
-
 }  // namespace
 
 PrintingSection::PrintingSection(Profile* profile,
@@ -94,9 +88,7 @@ PrintingSection::PrintingSection(Profile* profile,
   SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
   updater.AddSearchTags(GetPrintingSearchConcepts());
   updater.AddSearchTags(GetPrintingManagementSearchConcepts());
-
-  if (IsScanningAppEnabled())
-    updater.AddSearchTags(GetScanningAppSearchConcepts());
+  updater.AddSearchTags(GetScanningAppSearchConcepts());
 
   // Saved Printers search tags are added/removed dynamically.
   if (printers_manager_) {
@@ -119,6 +111,7 @@ void PrintingSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_SETTINGS_PRINTING_CUPS_PRINTERS_LEARN_MORE_LABEL},
       {"addCupsPrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTERS_ADD_PRINTER},
       {"editPrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTERS_EDIT},
+      {"viewPrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTERS_VIEW},
       {"removePrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTERS_REMOVE},
       {"setupPrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTER_SETUP_BUTTON},
       {"setupPrinterAria",
@@ -159,6 +152,14 @@ void PrintingSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_ONE},
       {"nearbyPrintersCountNone",
        IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_NONE},
+      {"enterprisePrintersTitle",
+       IDS_SETTINGS_PRINTING_ENTERPRISE_PRINTERS_TITLE},
+      {"enterprisePrintersCountMany",
+       IDS_SETTINGS_PRINTING_ENTERPRISE_PRINTERS_AVAILABLE_PRINTERS_COUNT_MANY},
+      {"enterprisePrintersCountOne",
+       IDS_SETTINGS_PRINTING_ENTERPRISE_PRINTERS_AVAILABLE_PRINTER_COUNT_ONE},
+      {"enterprisePrintersCountNone",
+       IDS_SETTINGS_PRINTING_ENTERPRISE_PRINTERS_AVAILABLE_PRINTER_COUNT_NONE},
       {"nearbyPrintersListDescription",
        IDS_SETTINGS_PRINTING_CUPS_PRINTERS_ADD_DETECTED_OR_NEW_PRINTER},
       {"manufacturerAndModelAdditionalInformation",
@@ -234,6 +235,8 @@ void PrintingSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_SETTINGS_PRINTING_CUPS_PRINTER_CONNECT_TO_NETWORK_SUBTEXT},
       {"editPrinterDialogTitle",
        IDS_SETTINGS_PRINTING_CUPS_EDIT_PRINTER_DIALOG_TITLE},
+      {"viewPrinterDialogTitle",
+       IDS_SETTINGS_PRINTING_CUPS_VIEW_PRINTER_DIALOG_TITLE},
       {"editPrinterButtonText", IDS_SETTINGS_PRINTING_CUPS_EDIT_PRINTER_BUTTON},
       {"currentPpdMessage",
        IDS_SETTINGS_PRINTING_CUPS_EDIT_PRINTER_CURRENT_PPD_MESSAGE},
@@ -265,7 +268,6 @@ void PrintingSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
   html_source->AddString(
       "printingCUPSPrintPpdLearnMoreUrl",
       GetHelpUrlWithBoard(chrome::kCupsPrintPPDLearnMoreURL));
-  html_source->AddBoolean("scanningAppEnabled", IsScanningAppEnabled());
 }
 
 void PrintingSection::AddHandlers(content::WebUI* web_ui) {

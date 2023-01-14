@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/python.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//third_party/jinja2/jinja2.gni")
 
@@ -53,9 +52,6 @@ action("precompile_templates") {
     "$mojom_generator_root/generators/cpp_templates/wrapper_union_class_definition.tmpl",
     "$mojom_generator_root/generators/cpp_templates/wrapper_union_class_template_definition.tmpl",
     "$mojom_generator_root/generators/js_templates/enum_definition.tmpl",
-    "$mojom_generator_root/generators/js_templates/externs/interface_definition.tmpl",
-    "$mojom_generator_root/generators/js_templates/externs/module.externs.tmpl",
-    "$mojom_generator_root/generators/js_templates/externs/struct_definition.tmpl",
     "$mojom_generator_root/generators/js_templates/fuzzing.tmpl",
     "$mojom_generator_root/generators/js_templates/interface_definition.tmpl",
     "$mojom_generator_root/generators/js_templates/lite/enum_definition.tmpl",

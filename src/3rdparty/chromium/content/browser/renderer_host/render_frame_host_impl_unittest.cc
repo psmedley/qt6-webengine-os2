@@ -13,6 +13,8 @@
 #include "net/cookies/site_for_cookies.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/favicon/favicon_url.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -35,7 +37,7 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
         static_cast<RenderFrameHostImpl*>(rfh)
             ->FindLatestNavigationRequestThatIsStillCommitting();
 
-    return in_flight_request ? in_flight_request->GetOriginForURLLoaderFactory()
+    return in_flight_request ? in_flight_request->GetOriginToCommit()
                              : rfh->GetLastCommittedOrigin();
   };
 
@@ -46,7 +48,7 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
     simulator->Start();
     simulator->Commit();
   }
-  RenderFrameHost* initial_rfh = main_rfh();
+  RenderFrameHostImpl* initial_rfh = main_test_rfh();
   // This test is for a bug that only happens when there is no RFH swap on
   // same-site navigations, so we should disable same-site proactive
   // BrowsingInstance for |initial_rfh| before continiung.
@@ -60,6 +62,8 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
             get_expected_main_world_origin(main_rfh()));
   EXPECT_EQ(url::Origin::Create(initial_url),
             main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(blink::StorageKey(url::Origin::Create(initial_url)),
+            main_test_rfh()->storage_key());
 
   // Verify expected main world origin when a pending navigation was started but
   // hasn't yet reached the ready-to-commit state.
@@ -78,6 +82,8 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
             get_expected_main_world_origin(main_rfh()));
   EXPECT_EQ(url::Origin::Create(initial_url),
             main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(blink::StorageKey(url::Origin::Create(initial_url)),
+            main_test_rfh()->storage_key());
 
   // Verify expected main world origin once we are again in a steady state -
   // after a commit.
@@ -86,6 +92,8 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
             get_expected_main_world_origin(main_rfh()));
   EXPECT_EQ(url::Origin::Create(final_url),
             main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(blink::StorageKey(url::Origin::Create(final_url)),
+            main_test_rfh()->storage_key());
 
   // As a test correctness check, verify that there was no RFH swap (the bug
   // this test protects against would only happen if there is no swap).  In
@@ -100,6 +108,8 @@ TEST_F(RenderFrameHostImplTest, ExpectedMainWorldOrigin) {
 TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
   GURL initial_url = GURL("https://initial.example.test/");
   url::Origin expected_initial_origin = url::Origin::Create(initial_url);
+  blink::StorageKey expected_initial_storage_key =
+      blink::StorageKey(expected_initial_origin);
   net::IsolationInfo expected_initial_isolation_info =
       net::IsolationInfo::Create(
           net::IsolationInfo::RequestType::kOther, expected_initial_origin,
@@ -109,6 +119,8 @@ TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
 
   GURL final_url = GURL("https://final.example.test/");
   url::Origin expected_final_origin = url::Origin::Create(final_url);
+  blink::StorageKey expected_final_storage_key =
+      blink::StorageKey(expected_final_origin);
   net::IsolationInfo expected_final_isolation_info = net::IsolationInfo::Create(
       net::IsolationInfo::RequestType::kOther, expected_final_origin,
       expected_final_origin,
@@ -129,6 +141,7 @@ TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
 
   // Check values for the initial commit.
   EXPECT_EQ(expected_initial_origin, main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(expected_initial_storage_key, main_test_rfh()->storage_key());
   EXPECT_TRUE(expected_initial_isolation_info.IsEqualForTesting(
       main_rfh()->GetIsolationInfoForSubresources()));
   EXPECT_EQ(expected_initial_isolation_info.network_isolation_key(),
@@ -144,6 +157,7 @@ TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
       NavigationSimulator::CreateRendererInitiated(final_url, main_rfh());
   simulator2->Start();
   EXPECT_EQ(expected_initial_origin, main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(expected_initial_storage_key, main_test_rfh()->storage_key());
   EXPECT_TRUE(expected_initial_isolation_info.IsEqualForTesting(
       main_rfh()->GetIsolationInfoForSubresources()));
   EXPECT_EQ(expected_initial_isolation_info.network_isolation_key(),
@@ -158,6 +172,7 @@ TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
   simulator2->ReadyToCommit();
   simulator2->Wait();
   EXPECT_EQ(expected_initial_origin, main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(expected_initial_storage_key, main_test_rfh()->storage_key());
   EXPECT_TRUE(expected_initial_isolation_info.IsEqualForTesting(
       main_rfh()->GetIsolationInfoForSubresources()));
   EXPECT_EQ(expected_initial_isolation_info.network_isolation_key(),
@@ -171,6 +186,7 @@ TEST_F(RenderFrameHostImplTest, IsolationInfoDuringCommit) {
   // after a commit.
   simulator2->Commit();
   EXPECT_EQ(expected_final_origin, main_rfh()->GetLastCommittedOrigin());
+  EXPECT_EQ(expected_final_storage_key, main_test_rfh()->storage_key());
   EXPECT_TRUE(expected_final_isolation_info.IsEqualForTesting(
       main_rfh()->GetIsolationInfoForSubresources()));
   EXPECT_EQ(expected_final_isolation_info.network_isolation_key(),
@@ -221,6 +237,96 @@ TEST_F(RenderFrameHostImplTest, PolicyContainerLifecycle) {
   ASSERT_NE(new_frame->policy_container_host(), nullptr);
   EXPECT_EQ(new_frame->policy_container_host()->referrer_policy(),
             network::mojom::ReferrerPolicy::kNever);
+}
+
+TEST_F(RenderFrameHostImplTest, FaviconURLsSet) {
+  TestRenderFrameHost* main_rfh = contents()->GetMainFrame();
+  const auto kFavicon =
+      blink::mojom::FaviconURL(GURL("https://example.com/favicon.ico"),
+                               blink::mojom::FaviconIconType::kFavicon, {});
+  std::unique_ptr<NavigationSimulator> navigation =
+      NavigationSimulator::CreateBrowserInitiated(GURL("https://example.com"),
+                                                  contents());
+  ui::PageTransition transition = ui::PAGE_TRANSITION_LINK;
+  navigation->SetTransition(transition);
+  navigation->Commit();
+  EXPECT_EQ(0u, contents()->GetFaviconURLs().size());
+
+  std::vector<blink::mojom::FaviconURLPtr> one_favicon_url;
+  one_favicon_url.push_back(blink::mojom::FaviconURL::New(kFavicon));
+  main_rfh->UpdateFaviconURL(std::move(one_favicon_url));
+  EXPECT_EQ(1u, contents()->GetFaviconURLs().size());
+
+  std::vector<blink::mojom::FaviconURLPtr> two_favicon_urls;
+  two_favicon_urls.push_back(blink::mojom::FaviconURL::New(kFavicon));
+  two_favicon_urls.push_back(blink::mojom::FaviconURL::New(kFavicon));
+  main_rfh->UpdateFaviconURL(std::move(two_favicon_urls));
+  EXPECT_EQ(2u, contents()->GetFaviconURLs().size());
+
+  std::vector<blink::mojom::FaviconURLPtr> another_one_favicon_url;
+  another_one_favicon_url.push_back(blink::mojom::FaviconURL::New(kFavicon));
+  main_rfh->UpdateFaviconURL(std::move(another_one_favicon_url));
+  EXPECT_EQ(1u, contents()->GetFaviconURLs().size());
+}
+
+TEST_F(RenderFrameHostImplTest, FaviconURLsResetWithNavigation) {
+  TestRenderFrameHost* main_rfh = contents()->GetMainFrame();
+  std::vector<blink::mojom::FaviconURLPtr> favicon_urls;
+  favicon_urls.push_back(blink::mojom::FaviconURL::New(
+      GURL("https://example.com/favicon.ico"),
+      blink::mojom::FaviconIconType::kFavicon, std::vector<gfx::Size>()));
+
+  std::unique_ptr<NavigationSimulator> navigation =
+      NavigationSimulator::CreateBrowserInitiated(GURL("https://example.com"),
+                                                  contents());
+  ui::PageTransition transition = ui::PAGE_TRANSITION_LINK;
+  navigation->SetTransition(transition);
+  navigation->Commit();
+
+  EXPECT_EQ(0u, contents()->GetFaviconURLs().size());
+  main_rfh->UpdateFaviconURL(std::move(favicon_urls));
+  EXPECT_EQ(1u, contents()->GetFaviconURLs().size());
+
+  navigation = NavigationSimulator::CreateBrowserInitiated(
+      GURL("https://example.com/navigation.html"), contents());
+  navigation->SetTransition(transition);
+  navigation->Commit();
+  EXPECT_EQ(0u, contents()->GetFaviconURLs().size());
+}
+
+TEST_F(RenderFrameHostImplTest, ChildOfAnonymousIsAnonymous) {
+  EXPECT_FALSE(main_test_rfh()->anonymous());
+
+  auto* child_frame = static_cast<TestRenderFrameHost*>(
+      content::RenderFrameHostTester::For(main_test_rfh())
+          ->AppendChild("child"));
+  EXPECT_FALSE(child_frame->anonymous());
+  EXPECT_FALSE(child_frame->storage_key().nonce().has_value());
+
+  child_frame->frame_tree_node()->set_anonymous(true);
+  EXPECT_FALSE(child_frame->anonymous());
+  EXPECT_FALSE(child_frame->storage_key().nonce().has_value());
+
+  // A navigation in the anonymous iframe commits an anonymous RFH.
+  std::unique_ptr<NavigationSimulator> navigation =
+      NavigationSimulator::CreateRendererInitiated(
+          GURL("https://example.com/navigation.html"), child_frame);
+  navigation->Commit();
+  child_frame =
+      static_cast<TestRenderFrameHost*>(navigation->GetFinalRenderFrameHost());
+  EXPECT_TRUE(child_frame->anonymous());
+  EXPECT_TRUE(child_frame->storage_key().nonce().has_value());
+
+  // A child of an anonymous RFH is anonymous.
+  auto* grandchild_frame = static_cast<TestRenderFrameHost*>(
+      content::RenderFrameHostTester::For(child_frame)
+          ->AppendChild("grandchild"));
+  EXPECT_TRUE(grandchild_frame->anonymous());
+  EXPECT_TRUE(child_frame->storage_key().nonce().has_value());
+
+  // The two anonymous RFH's storage keys should have the same nonce.
+  EXPECT_EQ(child_frame->storage_key().nonce().value(),
+            grandchild_frame->storage_key().nonce().value());
 }
 
 }  // namespace content

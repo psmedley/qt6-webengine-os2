@@ -45,7 +45,7 @@ class TestDataSourceDelegate : public DataSourceDelegate {
 
   // Overridden from DataSourceDelegate:
   void OnDataSourceDestroying(DataSource* device) override { delete this; }
-  void OnTarget(const base::Optional<std::string>& mime_type) override {}
+  void OnTarget(const absl::optional<std::string>& mime_type) override {}
   void OnSend(const std::string& mime_type, base::ScopedFD fd) override {}
   void OnCancelled() override { cancelled_ = true; }
   void OnDndDropPerformed() override {}
@@ -135,7 +135,7 @@ class ExtendedDragSourceTest : public test::ExoTestBase {
                                 int operation,
                                 ui::mojom::DragEventSource source) {
     auto data = std::make_unique<ui::OSExchangeData>();
-    data->SetString(base::UTF8ToUTF16("I am being dragged"));
+    data->SetString(u"I am being dragged");
     drag_drop_controller_->set_toplevel_window_drag_delegate(
         extended_drag_source_.get());
     drag_drop_controller_->StartDragAndDrop(std::move(data),

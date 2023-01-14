@@ -11,13 +11,16 @@
 #include "base/json/json_reader.h"
 #include "base/path_service.h"
 #include "base/values.h"
+#include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/compositor_render_pass_draw_quad.h"
 #include "components/viz/common/quads/solid_color_draw_quad.h"
 #include "components/viz/common/quads/stream_video_draw_quad.h"
+#include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/quads/tile_draw_quad.h"
 #include "components/viz/common/quads/video_hole_draw_quad.h"
 #include "components/viz/common/quads/yuv_video_draw_quad.h"
 #include "components/viz/test/paths.h"
+#include "components/viz/test/test_surface_id_allocator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gl {
@@ -124,8 +127,7 @@ TEST(RenderPassIOTest, SharedQuadStateList) {
     sqs1->SetAll(
         transform, gfx::Rect(0, 0, 640, 480), gfx::Rect(10, 10, 600, 400),
         gfx::MaskFilterInfo(gfx::RRectF(gfx::RectF(2.f, 3.f, 4.f, 5.f), 1.5f)),
-        gfx::Rect(5, 20, 1000, 200), true, false, 0.5f, SkBlendMode::kDstOver,
-        101);
+        gfx::Rect(5, 20, 1000, 200), false, 0.5f, SkBlendMode::kDstOver, 101);
     sqs1->is_fast_rounded_corner = true;
     sqs1->de_jelly_delta_y = 0.7f;
   }
@@ -142,8 +144,7 @@ TEST(RenderPassIOTest, SharedQuadStateList) {
     EXPECT_EQ(gfx::Rect(), sqs0->quad_layer_rect);
     EXPECT_EQ(gfx::Rect(), sqs0->visible_quad_layer_rect);
     EXPECT_FALSE(sqs0->mask_filter_info.HasRoundedCorners());
-    EXPECT_EQ(gfx::Rect(), sqs0->clip_rect);
-    EXPECT_FALSE(sqs0->is_clipped);
+    EXPECT_EQ(absl::nullopt, sqs0->clip_rect);
     EXPECT_TRUE(sqs0->are_contents_opaque);
     EXPECT_EQ(1.0f, sqs0->opacity);
     EXPECT_EQ(SkBlendMode::kSrcOver, sqs0->blend_mode);
@@ -163,7 +164,6 @@ TEST(RenderPassIOTest, SharedQuadStateList) {
               sqs1->mask_filter_info.rounded_corner_bounds().GetSimpleRadius());
     EXPECT_EQ(gfx::RectF(2.f, 3.f, 4.f, 5.f), sqs1->mask_filter_info.bounds());
     EXPECT_EQ(gfx::Rect(5, 20, 1000, 200), sqs1->clip_rect);
-    EXPECT_TRUE(sqs1->is_clipped);
     EXPECT_FALSE(sqs1->are_contents_opaque);
     EXPECT_EQ(0.5f, sqs1->opacity);
     EXPECT_EQ(SkBlendMode::kDstOver, sqs1->blend_mode);
@@ -186,7 +186,11 @@ TEST(RenderPassIOTest, QuadList) {
       DrawQuad::Material::kTextureContent,
       DrawQuad::Material::kCompositorRenderPass,
       DrawQuad::Material::kTiledContent,
+      DrawQuad::Material::kSurfaceContent,
+      DrawQuad::Material::kSurfaceContent,
   };
+  TestSurfaceIdAllocator kSurfaceId1(FrameSinkId(1, 1));
+  TestSurfaceIdAllocator kSurfaceId2(FrameSinkId(2, 2));
   auto render_pass0 = CompositorRenderPass::Create();
   {
     // Add to shared_quad_state_list.
@@ -284,6 +288,26 @@ TEST(RenderPassIOTest, QuadList) {
                    gfx::Size(256, 512), true, true, true);
       ++quad_count;
     }
+    {
+      // 8. SurfaceDrawQuad
+      SurfaceDrawQuad* quad =
+          render_pass0->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
+      quad->SetAll(render_pass0->shared_quad_state_list.ElementAt(sqs_index),
+                   gfx::Rect(0, 0, 512, 256), gfx::Rect(2, 2, 500, 250), true,
+                   SurfaceRange(kSurfaceId1, kSurfaceId2), SK_ColorWHITE, false,
+                   false, true);
+      ++quad_count;
+    }
+    {
+      // 9. SurfaceDrawQuad with no starting SurfaceId
+      SurfaceDrawQuad* quad =
+          render_pass0->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
+      quad->SetAll(render_pass0->shared_quad_state_list.ElementAt(sqs_index),
+                   gfx::Rect(10, 10, 512, 256), gfx::Rect(12, 12, 500, 250),
+                   true, SurfaceRange(absl::nullopt, kSurfaceId1),
+                   SK_ColorBLACK, true, true, false);
+      ++quad_count;
+    }
     DCHECK_EQ(kSharedQuadStateCount, sqs_index + 1);
   }
   base::Value dict0 = CompositorRenderPassToDict(*render_pass0);
@@ -312,7 +336,7 @@ TEST(RenderPassIOTest, CompositorRenderPassList) {
   std::string json_text;
   ASSERT_TRUE(base::ReadFileToString(json_path, &json_text));
 
-  base::Optional<base::Value> dict0 = base::JSONReader::Read(json_text);
+  absl::optional<base::Value> dict0 = base::JSONReader::Read(json_text);
   EXPECT_TRUE(dict0.has_value());
   CompositorRenderPassList render_pass_list;
   EXPECT_TRUE(
@@ -336,6 +360,29 @@ TEST(RenderPassIOTest, CompositorRenderPassList) {
   }
 
   EXPECT_EQ(dict0, dict1);
+}
+
+TEST(RenderPassIOTest, CompositorFrameData) {
+  // Validate recorded multi-surface compositor frame data from a tab with
+  // https://www.youtube.com/ focused, and 4 other tabs in the background.
+  base::FilePath test_data_dir;
+  ASSERT_TRUE(base::PathService::Get(Paths::DIR_TEST_DATA, &test_data_dir));
+  base::FilePath json_path =
+      test_data_dir.Append(FILE_PATH_LITERAL("render_pass_data"))
+          .Append(FILE_PATH_LITERAL("multi_surface_test"))
+          .Append(FILE_PATH_LITERAL("youtube_tab_focused"))
+          .Append(FILE_PATH_LITERAL("1641.json"));
+  ASSERT_TRUE(base::PathExists(json_path));
+  std::string json_text;
+  ASSERT_TRUE(base::ReadFileToString(json_path, &json_text));
+
+  absl::optional<base::Value> list0 = base::JSONReader::Read(json_text);
+  EXPECT_TRUE(list0.has_value());
+  std::vector<FrameData> frame_data_list;
+  EXPECT_TRUE(FrameDataFromList(list0.value(), &frame_data_list));
+  base::Value list1 = FrameDataToList(frame_data_list);
+
+  EXPECT_EQ(list0, list1);
 }
 
 }  // namespace

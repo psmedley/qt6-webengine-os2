@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/synchronization/waitable_event.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink.h"
@@ -110,6 +109,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
   // Returns a token uniquely identifying this fake worker.
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final { return false; }
+  bool DirectSocketCapability() const final { return false; }
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }

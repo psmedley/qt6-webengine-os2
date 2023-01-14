@@ -43,6 +43,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace autofill {
 namespace payments {
@@ -134,7 +135,7 @@ void SetStringIfNotEmpty(const AutofillDataModel& profile,
                          const std::string& app_locale,
                          const std::string& path,
                          base::Value& dictionary) {
-  const base::string16 value = profile.GetInfo(AutofillType(type), app_locale);
+  const std::u16string value = profile.GetInfo(AutofillType(type), app_locale);
   if (!value.empty())
     dictionary.SetKey(path, base::Value(value));
 }
@@ -143,7 +144,7 @@ void AppendStringIfNotEmpty(const AutofillProfile& profile,
                             const ServerFieldType& type,
                             const std::string& app_locale,
                             base::Value& list) {
-  const base::string16 value = profile.GetInfo(type, app_locale);
+  const std::u16string value = profile.GetInfo(type, app_locale);
   if (!value.empty())
     list.Append(value);
 }
@@ -180,7 +181,7 @@ base::Value BuildAddressDictionary(const AutofillProfile& profile,
                       "postal_code_number", postal_address);
 
   // Use GetRawInfo to get a country code instead of the country name:
-  const base::string16 country_code = profile.GetRawInfo(ADDRESS_HOME_COUNTRY);
+  const std::u16string country_code = profile.GetRawInfo(ADDRESS_HOME_COUNTRY);
   if (!country_code.empty())
     postal_address.SetKey("country_name_code", base::Value(country_code));
 
@@ -206,9 +207,9 @@ base::Value BuildCreditCardDictionary(const CreditCard& credit_card,
   base::Value card(base::Value::Type::DICTIONARY);
   card.SetKey("unique_id", base::Value(credit_card.guid()));
 
-  const base::string16 exp_month =
+  const std::u16string exp_month =
       credit_card.GetInfo(AutofillType(CREDIT_CARD_EXP_MONTH), app_locale);
-  const base::string16 exp_year = credit_card.GetInfo(
+  const std::u16string exp_year = credit_card.GetInfo(
       AutofillType(CREDIT_CARD_EXP_4_DIGIT_YEAR), app_locale);
   int value = 0;
   if (base::StringToInt(exp_month, &value))
@@ -340,9 +341,7 @@ class UnmaskCardRequest : public PaymentsRequest {
       : request_details_(request_details),
         full_sync_enabled_(full_sync_enabled),
         callback_(std::move(callback)) {
-    DCHECK(
-        CreditCard::MASKED_SERVER_CARD == request_details.card.record_type() ||
-        CreditCard::FULL_SERVER_CARD == request_details.card.record_type());
+    DCHECK_NE(CreditCard::LOCAL_CARD, request_details.card.record_type());
   }
   ~UnmaskCardRequest() override {}
 
@@ -402,6 +401,16 @@ class UnmaskCardRequest : public PaymentsRequest {
           std::move(request_details_.fido_assertion_info.value()));
     }
 
+    if (request_details_.last_committed_url_origin.has_value()) {
+      base::Value virtual_card_request_info(base::Value::Type::DICTIONARY);
+      virtual_card_request_info.SetKey(
+          "merchant_domain",
+          base::Value(
+              request_details_.last_committed_url_origin.value().spec()));
+      request_dict.SetKey("virtual_card_request_info",
+                          std::move(virtual_card_request_info));
+    }
+
     std::string json_request;
     base::JSONWriter::Write(request_dict, &json_request);
     std::string request_content;
@@ -435,28 +444,62 @@ class UnmaskCardRequest : public PaymentsRequest {
   }
 
   void ParseResponse(const base::Value& response) override {
-    const auto* pan = response.FindStringKey("pan");
+    const std::string* pan = response.FindStringKey("pan");
     response_details_.real_pan = pan ? *pan : std::string();
 
-    const auto* dcvv = response.FindStringKey("dcvv");
+    const std::string* dcvv = response.FindStringKey("dcvv");
     response_details_.dcvv = dcvv ? *dcvv : std::string();
 
-    const auto* creation_options = response.FindKeyOfType(
+    const base::Value* expiration =
+        response.FindKeyOfType("expiration", base::Value::Type::DICTIONARY);
+    if (expiration) {
+      if (absl::optional<int> month = expiration->FindIntKey("month")) {
+        response_details_.expiration_month =
+            base::NumberToString(month.value());
+      }
+
+      if (absl::optional<int> year = expiration->FindIntKey("year"))
+        response_details_.expiration_year = base::NumberToString(year.value());
+    }
+
+    const base::Value* creation_options = response.FindKeyOfType(
         "fido_creation_options", base::Value::Type::DICTIONARY);
     if (creation_options)
       response_details_.fido_creation_options = creation_options->Clone();
 
-    const auto* request_options = response.FindKeyOfType(
+    const base::Value* request_options = response.FindKeyOfType(
         "fido_request_options", base::Value::Type::DICTIONARY);
     if (request_options)
       response_details_.fido_request_options = request_options->Clone();
 
-    const auto* token = response.FindStringKey("card_authorization_token");
+    const std::string* token =
+        response.FindStringKey("card_authorization_token");
     response_details_.card_authorization_token = token ? *token : std::string();
+
+    if (request_details_.card.record_type() == CreditCard::VIRTUAL_CARD) {
+      response_details_.card_type =
+          AutofillClient::PaymentsRpcCardType::VIRTUAL_CARD;
+    } else if (request_details_.card.record_type() ==
+               CreditCard::MASKED_SERVER_CARD) {
+      response_details_.card_type =
+          AutofillClient::PaymentsRpcCardType::SERVER_CARD;
+    } else {
+      NOTREACHED();
+    }
   }
 
   bool IsResponseComplete() override {
-    return !response_details_.real_pan.empty();
+    switch (response_details_.card_type) {
+      case AutofillClient::PaymentsRpcCardType::UNKNOWN_TYPE:
+        return false;
+      case AutofillClient::PaymentsRpcCardType::SERVER_CARD:
+        return !response_details_.real_pan.empty();
+      case AutofillClient::PaymentsRpcCardType::VIRTUAL_CARD:
+        return !response_details_.real_pan.empty() &&
+               !response_details_.expiration_month.empty() &&
+               !response_details_.expiration_year.empty() &&
+               !response_details_.dcvv.empty();
+    }
   }
 
   void RespondToDelegate(AutofillClient::PaymentsRpcResult result) override {
@@ -595,7 +638,7 @@ class GetUploadDetailsRequest : public PaymentsRequest {
       const bool full_sync_enabled,
       const std::string& app_locale,
       base::OnceCallback<void(AutofillClient::PaymentsRpcResult,
-                              const base::string16&,
+                              const std::u16string&,
                               std::unique_ptr<base::Value>,
                               std::vector<std::pair<int, int>>)> callback,
       const int billable_service_number,
@@ -686,7 +729,7 @@ class GetUploadDetailsRequest : public PaymentsRequest {
   void ParseResponse(const base::Value& response) override {
     const auto* context_token = response.FindStringKey("context_token");
     context_token_ =
-        context_token ? base::UTF8ToUTF16(*context_token) : base::string16();
+        context_token ? base::UTF8ToUTF16(*context_token) : std::u16string();
 
     const base::Value* dictionary_value =
         response.FindKeyOfType("legal_message", base::Value::Type::DICTIONARY);
@@ -745,11 +788,11 @@ class GetUploadDetailsRequest : public PaymentsRequest {
   const bool full_sync_enabled_;
   std::string app_locale_;
   base::OnceCallback<void(AutofillClient::PaymentsRpcResult,
-                          const base::string16&,
+                          const std::u16string&,
                           std::unique_ptr<base::Value>,
                           std::vector<std::pair<int, int>>)>
       callback_;
-  base::string16 context_token_;
+  std::u16string context_token_;
   std::unique_ptr<base::Value> legal_message_;
   std::vector<std::pair<int, int>> supported_card_bin_ranges_;
   const int billable_service_number_;
@@ -813,9 +856,9 @@ class UploadCardRequest : public PaymentsRequest {
                         base::Value(request_details_.context_token));
 
     int value = 0;
-    const base::string16 exp_month = request_details_.card.GetInfo(
+    const std::u16string exp_month = request_details_.card.GetInfo(
         AutofillType(CREDIT_CARD_EXP_MONTH), app_locale);
-    const base::string16 exp_year = request_details_.card.GetInfo(
+    const std::u16string exp_year = request_details_.card.GetInfo(
         AutofillType(CREDIT_CARD_EXP_4_DIGIT_YEAR), app_locale);
     if (base::StringToInt(exp_month, &value))
       request_dict.SetKey("expiration_month", base::Value(value));
@@ -829,7 +872,7 @@ class UploadCardRequest : public PaymentsRequest {
 
     SetActiveExperiments(request_details_.active_experiments, request_dict);
 
-    const base::string16 pan = request_details_.card.GetInfo(
+    const std::u16string pan = request_details_.card.GetInfo(
         AutofillType(CREDIT_CARD_NUMBER), app_locale);
     std::string json_request;
     base::JSONWriter::Write(request_dict, &json_request);
@@ -985,7 +1028,7 @@ class MigrateCardsRequest : public PaymentsRequest {
   std::string GetAppendPan(const CreditCard& credit_card,
                            const std::string& app_locale,
                            const std::string& pan_field_name) {
-    const base::string16 pan =
+    const std::u16string pan =
         credit_card.GetInfo(AutofillType(CREDIT_CARD_NUMBER), app_locale);
     std::string pan_str =
         net::EscapeUrlEncodedData(base::UTF16ToASCII(pan), true).c_str();
@@ -1036,6 +1079,7 @@ PaymentsClient::UnmaskRequestDetails::UnmaskRequestDetails(
   } else {
     fido_assertion_info.reset();
   }
+  last_committed_url_origin = other.last_committed_url_origin;
 }
 PaymentsClient::UnmaskRequestDetails::~UnmaskRequestDetails() = default;
 
@@ -1160,7 +1204,7 @@ void PaymentsClient::GetUploadDetails(
     const std::vector<const char*>& active_experiments,
     const std::string& app_locale,
     base::OnceCallback<void(AutofillClient::PaymentsRpcResult,
-                            const base::string16&,
+                            const std::u16string&,
                             std::unique_ptr<base::Value>,
                             std::vector<std::pair<int, int>>)> callback,
     const int billable_service_number,
@@ -1269,19 +1313,33 @@ void PaymentsClient::OnSimpleLoaderCompleteInternal(int response_code,
     // Valid response.
     case net::HTTP_OK: {
       std::string error_code;
-      base::Optional<base::Value> message_value = base::JSONReader::Read(data);
+      std::string error_api_error_reason;
+      absl::optional<base::Value> message_value = base::JSONReader::Read(data);
       if (message_value && message_value->is_dict()) {
-        const auto* found = message_value->FindPathOfType(
+        const auto* found_error_code = message_value->FindPathOfType(
             {"error", "code"}, base::Value::Type::STRING);
-        if (found)
-          error_code = found->GetString();
+        if (found_error_code)
+          error_code = found_error_code->GetString();
+
+        const auto* found_error_reason = message_value->FindPathOfType(
+            {"error", "api_error_reason"}, base::Value::Type::STRING);
+        if (found_error_reason)
+          error_api_error_reason = found_error_reason->GetString();
+
         request_->ParseResponse(*message_value);
       }
 
-      if (base::LowerCaseEqualsASCII(error_code, "internal"))
+      if (base::LowerCaseEqualsASCII(error_api_error_reason,
+                                     "virtual_card_temporary_error")) {
+        result = AutofillClient::VCN_RETRIEVAL_TRY_AGAIN_FAILURE;
+      } else if (base::LowerCaseEqualsASCII(error_api_error_reason,
+                                            "virtual_card_permanent_error")) {
+        result = AutofillClient::VCN_RETRIEVAL_PERMANENT_FAILURE;
+      } else if (base::LowerCaseEqualsASCII(error_code, "internal")) {
         result = AutofillClient::TRY_AGAIN_FAILURE;
-      else if (!error_code.empty() || !request_->IsResponseComplete())
+      } else if (!error_code.empty() || !request_->IsResponseComplete()) {
         result = AutofillClient::PERMANENT_FAILURE;
+      }
 
       break;
     }

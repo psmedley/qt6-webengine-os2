@@ -8,6 +8,7 @@
 #include <string>
 
 #include "absl/strings/escaping.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "quic/core/crypto/crypto_framer.h"
@@ -15,8 +16,6 @@
 #include "quic/core/crypto/crypto_utils.h"
 #include "quic/core/quic_socket_address_coder.h"
 #include "quic/core/quic_utils.h"
-#include "quic/platform/api/quic_map_util.h"
-#include "common/platform/api/quiche_text_utils.h"
 #include "common/quiche_endian.h"
 
 namespace quic {
@@ -171,7 +170,7 @@ bool CryptoHandshakeMessage::GetStringPiece(QuicTag tag,
 }
 
 bool CryptoHandshakeMessage::HasStringPiece(QuicTag tag) const {
-  return QuicContainsKey(tag_value_map_, tag);
+  return tag_value_map_.find(tag) != tag_value_map_.end();
 }
 
 QuicErrorCode CryptoHandshakeMessage::GetNthValue24(
@@ -221,9 +220,10 @@ QuicErrorCode CryptoHandshakeMessage::GetUint64(QuicTag tag,
   return GetPOD(tag, out, sizeof(uint64_t));
 }
 
-QuicErrorCode CryptoHandshakeMessage::GetUint128(QuicTag tag,
-                                                 QuicUint128* out) const {
-  return GetPOD(tag, out, sizeof(QuicUint128));
+QuicErrorCode CryptoHandshakeMessage::GetStatelessResetToken(
+    QuicTag tag,
+    StatelessResetToken* out) const {
+  return GetPOD(tag, out, kStatelessResetTokenLength);
 }
 
 size_t CryptoHandshakeMessage::size() const {
@@ -296,7 +296,7 @@ std::string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
         if (it->second.size() == 4) {
           uint32_t value;
           memcpy(&value, it->second.data(), sizeof(value));
-          ret += quiche::QuicheTextUtils::Uint64ToString(value);
+          absl::StrAppend(&ret, value);
           done = true;
         }
         break;

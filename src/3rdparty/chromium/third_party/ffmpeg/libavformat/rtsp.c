@@ -89,21 +89,14 @@ const AVOption ff_rtsp_options[] = {
     RTSP_FLAG_OPTS("rtsp_flags", "set RTSP flags"),
     { "listen", "wait for incoming connections", 0, AV_OPT_TYPE_CONST, {.i64 = RTSP_FLAG_LISTEN}, 0, 0, DEC, "rtsp_flags" },
     { "prefer_tcp", "try RTP via TCP first, if available", 0, AV_OPT_TYPE_CONST, {.i64 = RTSP_FLAG_PREFER_TCP}, 0, 0, DEC|ENC, "rtsp_flags" },
+    { "satip_raw", "export raw MPEG-TS stream instead of demuxing", 0, AV_OPT_TYPE_CONST, {.i64 = RTSP_FLAG_SATIP_RAW}, 0, 0, DEC, "rtsp_flags" },
     RTSP_MEDIATYPE_OPTS("allowed_media_types", "set media types to accept from the server"),
     { "min_port", "set minimum local UDP port", OFFSET(rtp_port_min), AV_OPT_TYPE_INT, {.i64 = RTSP_RTP_PORT_MIN}, 0, 65535, DEC|ENC },
     { "max_port", "set maximum local UDP port", OFFSET(rtp_port_max), AV_OPT_TYPE_INT, {.i64 = RTSP_RTP_PORT_MAX}, 0, 65535, DEC|ENC },
     { "listen_timeout", "set maximum timeout (in seconds) to wait for incoming connections (-1 is infinite, imply flag listen)", OFFSET(initial_timeout), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, DEC },
-#if FF_API_OLD_RTSP_OPTIONS
-    { "timeout", "set maximum timeout (in seconds) to wait for incoming connections (-1 is infinite, imply flag listen) (deprecated, use listen_timeout)", OFFSET(initial_timeout), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, DEC },
-    { "stimeout", "set timeout (in microseconds) of socket TCP I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, DEC },
-#else
-    { "timeout", "set timeout (in microseconds) of socket TCP I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, DEC },
-#endif
+    { "timeout", "set timeout (in microseconds) of socket I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT64, {.i64 = 0}, INT_MIN, INT64_MAX, DEC },
     COMMON_OPTS(),
     { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = LIBAVFORMAT_IDENT}, 0, 0, DEC },
-#if FF_API_OLD_RTSP_OPTIONS
-    { "user-agent", "override User-Agent header (deprecated, use user_agent)", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = LIBAVFORMAT_IDENT}, 0, 0, DEC },
-#endif
     { NULL },
 };
 
@@ -111,7 +104,7 @@ static const AVOption sdp_options[] = {
     RTSP_FLAG_OPTS("sdp_flags", "SDP flags"),
     { "custom_io", "use custom I/O", 0, AV_OPT_TYPE_CONST, {.i64 = RTSP_FLAG_CUSTOM_IO}, 0, 0, DEC, "rtsp_flags" },
     { "rtcp_to_source", "send RTCP packets to the source address of received packets", 0, AV_OPT_TYPE_CONST, {.i64 = RTSP_FLAG_RTCP_TO_SOURCE}, 0, 0, DEC, "rtsp_flags" },
-    { "listen_timeout", "set maximum timeout (in seconds) to wait for incoming connections", OFFSET(initial_timeout), AV_OPT_TYPE_INT, {.i64 = READ_PACKET_TIMEOUT_S}, INT_MIN, INT_MAX, DEC },
+    { "listen_timeout", "set maximum timeout (in seconds) to wait for incoming connections", OFFSET(stimeout), AV_OPT_TYPE_DURATION, {.i64 = READ_PACKET_TIMEOUT_S*1000000}, INT_MIN, INT64_MAX, DEC },
     RTSP_MEDIATYPE_OPTS("allowed_media_types", "set media types to accept from the server"),
     COMMON_OPTS(),
     { NULL },
@@ -119,7 +112,7 @@ static const AVOption sdp_options[] = {
 
 static const AVOption rtp_options[] = {
     RTSP_FLAG_OPTS("rtp_flags", "set RTP flags"),
-    { "listen_timeout", "set maximum timeout (in seconds) to wait for incoming connections", OFFSET(initial_timeout), AV_OPT_TYPE_INT, {.i64 = READ_PACKET_TIMEOUT_S}, INT_MIN, INT_MAX, DEC },
+    { "listen_timeout", "set maximum timeout (in seconds) to wait for incoming connections", OFFSET(stimeout), AV_OPT_TYPE_DURATION, {.i64 = READ_PACKET_TIMEOUT_S*1000000}, INT_MIN, INT64_MAX, DEC },
     RTSP_MEDIATYPE_OPTS("allowed_media_types", "set media types to accept from the server"),
     COMMON_OPTS(),
     { NULL },
@@ -225,7 +218,7 @@ static void init_rtp_handler(const RTPDynamicProtocolHandler *handler,
         par->codec_id          = handler->codec_id;
     rtsp_st->dynamic_handler = handler;
     if (st)
-        st->need_parsing = handler->need_parsing;
+        st->internal->need_parsing = handler->need_parsing;
     if (handler->priv_data_size) {
         rtsp_st->dynamic_protocol_context = av_mallocz(handler->priv_data_size);
         if (!rtsp_st->dynamic_protocol_context)
@@ -250,6 +243,35 @@ static void finalize_rtp_handler_init(AVFormatContext *s, RTSPStream *rtsp_st,
             rtsp_st->dynamic_handler = NULL;
         }
     }
+}
+
+static int init_satip_stream(AVFormatContext *s)
+{
+    RTSPState *rt = s->priv_data;
+    RTSPStream *rtsp_st = av_mallocz(sizeof(RTSPStream));
+    if (!rtsp_st)
+        return AVERROR(ENOMEM);
+    dynarray_add(&rt->rtsp_streams,
+                 &rt->nb_rtsp_streams, rtsp_st);
+
+    rtsp_st->sdp_payload_type = 33; // MP2T
+    av_strlcpy(rtsp_st->control_url,
+               rt->control_uri, sizeof(rtsp_st->control_url));
+
+    if (rt->rtsp_flags & RTSP_FLAG_SATIP_RAW) {
+        AVStream *st = avformat_new_stream(s, NULL);
+        if (!st)
+            return AVERROR(ENOMEM);
+        st->id = rt->nb_rtsp_streams - 1;
+        rtsp_st->stream_index = st->index;
+        st->codecpar->codec_type = AVMEDIA_TYPE_DATA;
+        st->codecpar->codec_id   = AV_CODEC_ID_MPEG2TS;
+    } else {
+        rtsp_st->stream_index = -1;
+        init_rtp_handler(&ff_mpegts_dynamic_handler, rtsp_st, NULL);
+        finalize_rtp_handler_init(s, rtsp_st, NULL);
+    }
+    return 0;
 }
 
 /* parse the rtpmap description: <codec_name>/<clock_rate>[/<other params>] */
@@ -541,7 +563,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
         break;
     case 'a':
         if (av_strstart(p, "control:", &p)) {
-            if (s->nb_streams == 0) {
+            if (rt->nb_rtsp_streams == 0) {
                 if (!strncmp(p, "rtsp://", 7))
                     av_strlcpy(rt->control_uri, p,
                                sizeof(rt->control_uri));
@@ -1116,6 +1138,9 @@ void ff_rtsp_parse_line(AVFormatContext *s,
     } else if (av_stristart(p, "Content-Type:", &p)) {
         p += strspn(p, SPACE_CHARS);
         av_strlcpy(reply->content_type, p, sizeof(reply->content_type));
+    } else if (av_stristart(p, "com.ses.streamID:", &p)) {
+        p += strspn(p, SPACE_CHARS);
+        av_strlcpy(reply->stream_id, p, sizeof(reply->stream_id));
     }
 }
 
@@ -1234,7 +1259,8 @@ start:
         char base64buf[AV_BASE64_SIZE(sizeof(buf))];
         const char* ptr = buf;
 
-        if (!strcmp(reply->reason, "OPTIONS")) {
+        if (!strcmp(reply->reason, "OPTIONS") ||
+            !strcmp(reply->reason, "GET_PARAMETER")) {
             snprintf(buf, sizeof(buf), "RTSP/1.0 200 OK\r\n");
             if (reply->seq)
                 av_strlcatf(buf, sizeof(buf), "CSeq: %d\r\n", reply->seq);
@@ -1413,7 +1439,7 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
                               int lower_transport, const char *real_challenge)
 {
     RTSPState *rt = s->priv_data;
-    int rtx = 0, j, i, err, interleave = 0, port_off;
+    int rtx = 0, j, i, err, interleave = 0, port_off = 0;
     RTSPStream *rtsp_st;
     RTSPMessageHeader reply1, *reply = &reply1;
     char cmd[MAX_URL_SIZE];
@@ -1432,9 +1458,11 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
     /* Choose a random starting offset within the first half of the
      * port range, to allow for a number of ports to try even if the offset
      * happens to be at the end of the random range. */
-    port_off = av_get_random_seed() % ((rt->rtp_port_max - rt->rtp_port_min)/2);
-    /* even random offset */
-    port_off -= port_off & 0x01;
+    if (rt->rtp_port_max - rt->rtp_port_min >= 4) {
+        port_off = av_get_random_seed() % ((rt->rtp_port_max - rt->rtp_port_min)/2);
+        /* even random offset */
+        port_off -= port_off & 0x01;
+    }
 
     for (j = rt->rtp_port_min + port_off, i = 0; i < rt->nb_rtsp_streams; ++i) {
         char transport[MAX_URL_SIZE];
@@ -1473,7 +1501,7 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
             }
 
             /* first try in specified port range */
-            while (j <= rt->rtp_port_max) {
+            while (j + 1 <= rt->rtp_port_max) {
                 AVDictionary *opts = map_to_opts(rt);
 
                 ff_url_join(buf, sizeof(buf), "rtp", NULL, host, -1,
@@ -1495,8 +1523,10 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
         rtp_opened:
             port = ff_rtp_get_local_rtp_port(rtsp_st->rtp_handle);
         have_port:
-            snprintf(transport, sizeof(transport) - 1,
-                     "%s/UDP;", trans_pref);
+            av_strlcpy(transport, trans_pref, sizeof(transport));
+            av_strlcat(transport,
+                       rt->server_type == RTSP_SERVER_SATIP ? ";" : "/UDP;",
+                       sizeof(transport));
             if (rt->server_type != RTSP_SERVER_REAL)
                 av_strlcat(transport, "unicast;", sizeof(transport));
             av_strlcatf(transport, sizeof(transport),
@@ -1557,6 +1587,15 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
                    reply->nb_transports != 1) {
             err = ff_rtsp_averror(reply->status_code, AVERROR_INVALIDDATA);
             goto fail;
+        }
+
+        if (rt->server_type == RTSP_SERVER_SATIP && reply->stream_id[0]) {
+            char proto[128], host[128], path[512], auth[128];
+            int port;
+            av_url_split(proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host),
+                        &port, path, sizeof(path), rt->control_uri);
+            ff_url_join(rt->control_uri, sizeof(rt->control_uri), proto, NULL, host,
+                        port, "/stream=%s", reply->stream_id);
         }
 
         /* XXX: same protocol for all streams is required */
@@ -1710,6 +1749,9 @@ redirect:
         lower_rtsp_proto         = "tls";
         default_port             = RTSPS_DEFAULT_PORT;
         rt->lower_transport_mask = 1 << RTSP_LOWER_TRANSPORT_TCP;
+    } else if (!strcmp(proto, "satip")) {
+        av_strlcpy(proto, "rtsp", sizeof(proto));
+        rt->server_type = RTSP_SERVER_SATIP;
     }
 
     if (*auth) {
@@ -1835,7 +1877,7 @@ redirect:
         /* open the tcp connection */
         ff_url_join(tcpname, sizeof(tcpname), lower_rtsp_proto, NULL,
                     host, port,
-                    "?timeout=%d", rt->stimeout);
+                    "?timeout=%"PRId64, rt->stimeout);
         if ((ret = ffurl_open_whitelist(&rt->rtsp_hd, tcpname, AVIO_FLAG_READ_WRITE,
                        &s->interrupt_callback, NULL, s->protocol_whitelist, s->protocol_blacklist, NULL)) < 0) {
             err = ret;
@@ -1857,7 +1899,9 @@ redirect:
 
     /* request options supported by the server; this also detects server
      * type */
-    for (rt->server_type = RTSP_SERVER_RTP;;) {
+    if (rt->server_type != RTSP_SERVER_SATIP)
+        rt->server_type = RTSP_SERVER_RTP;
+    for (;;) {
         cmd[0] = 0;
         if (rt->server_type == RTSP_SERVER_REAL)
             av_strlcat(cmd,
@@ -1892,9 +1936,15 @@ redirect:
         break;
     }
 
-    if (CONFIG_RTSP_DEMUXER && s->iformat)
-        err = ff_rtsp_setup_input_streams(s, reply);
-    else if (CONFIG_RTSP_MUXER)
+#if CONFIG_RTSP_DEMUXER
+    if (s->iformat) {
+        if (rt->server_type == RTSP_SERVER_SATIP)
+            err = init_satip_stream(s);
+        else
+            err = ff_rtsp_setup_input_streams(s, reply);
+    } else
+#endif
+           if (CONFIG_RTSP_MUXER)
         err = ff_rtsp_setup_output_streams(s, host);
     else
         av_assert0(0);
@@ -1980,7 +2030,7 @@ static int udp_read_packet(AVFormatContext *s, RTSPStream **prtsp_st,
     int n, i, ret;
     struct pollfd *p = rt->p;
     int *fds = NULL, fdsnum, fdsidx;
-    int runs = rt->initial_timeout * 1000LL / POLLING_TIME;
+    int64_t runs = rt->stimeout / POLLING_TIME / 1000;
 
     if (!p) {
         p = rt->p = av_malloc_array(2 * rt->nb_rtsp_streams + 1, sizeof(*p));
@@ -2041,7 +2091,7 @@ static int udp_read_packet(AVFormatContext *s, RTSPStream **prtsp_st,
                 }
             }
 #endif
-        } else if (n == 0 && rt->initial_timeout > 0 && --runs <= 0) {
+        } else if (n == 0 && rt->stimeout > 0 && --runs <= 0) {
             return AVERROR(ETIMEDOUT);
         } else if (n < 0 && errno != EINTR)
             return AVERROR(errno);
@@ -2417,7 +2467,7 @@ static const AVClass sdp_demuxer_class = {
     .version        = LIBAVUTIL_VERSION_INT,
 };
 
-AVInputFormat ff_sdp_demuxer = {
+const AVInputFormat ff_sdp_demuxer = {
     .name           = "sdp",
     .long_name      = NULL_IF_CONFIG_SMALL("SDP"),
     .priv_data_size = sizeof(RTSPState),
@@ -2451,12 +2501,15 @@ static int rtp_read_header(AVFormatContext *s)
     RTSPState *rt = s->priv_data;
     const char *p;
     AVBPrint sdp;
+    AVDictionary *opts = NULL;
 
     if (!ff_network_init())
         return AVERROR(EIO);
 
+    opts = map_to_opts(rt);
     ret = ffurl_open_whitelist(&in, s->url, AVIO_FLAG_READ,
-                     &s->interrupt_callback, NULL, s->protocol_whitelist, s->protocol_blacklist, NULL);
+                     &s->interrupt_callback, &opts, s->protocol_whitelist, s->protocol_blacklist, NULL);
+    av_dict_free(&opts);
     if (ret)
         goto fail;
 
@@ -2573,7 +2626,7 @@ static const AVClass rtp_demuxer_class = {
     .version        = LIBAVUTIL_VERSION_INT,
 };
 
-AVInputFormat ff_rtp_demuxer = {
+const AVInputFormat ff_rtp_demuxer = {
     .name           = "rtp",
     .long_name      = NULL_IF_CONFIG_SMALL("RTP input"),
     .priv_data_size = sizeof(RTSPState),

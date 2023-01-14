@@ -21,7 +21,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom.h"
-#include "components/safe_browsing/core/proto/csd.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/security_interstitials/core/unsafe_resource.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_routing_id.h"
@@ -107,7 +107,7 @@ class ThreatDetails : public content::WebContentsObserver {
   void OnRedirectionCollectionReady();
 
   // WebContentsObserver implementation:
-  void FrameDeleted(content::RenderFrameHost* render_frame_host) override;
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameHostChanged(content::RenderFrameHost* old_host,
                               content::RenderFrameHost* new_host) override;
 
@@ -170,7 +170,7 @@ class ThreatDetails : public content::WebContentsObserver {
 
   void OnReceivedThreatDOMDetails(
       mojo::Remote<mojom::ThreatReporter> threat_reporter,
-      content::GlobalFrameRoutingId sender_id,
+      content::GlobalRenderFrameHostId sender_id,
       std::vector<mojom::ThreatDOMDetailsNodePtr> params);
 
   void AddRedirectUrlList(const std::vector<GURL>& urls);

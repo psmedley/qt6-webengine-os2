@@ -8,6 +8,7 @@ import "mojo/public/mojom/base/file_path.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "ui/gfx/mojom/accelerated_widget.mojom";
 import "ui/gfx/mojom/buffer_types.mojom";
+import "ui/gfx/mojom/gpu_fence_handle.mojom";
 import "ui/gfx/mojom/presentation_feedback.mojom";
 import "ui/gfx/mojom/swap_result.mojom";
 import "ui/ozone/public/mojom/wayland/wayland_overlay_config.mojom";
@@ -87,6 +88,8 @@ interface WaylandBufferManagerGpu {
   // instance to avoid using zwp_linux_dmabuf protocol by setting
   // |supports_dma_buf| to false, which results in using wl_egl_surface in a
   // single process mode, and software rendering in a multiple process mode.
+  // |supports_viewporter| indicates whether the Wayland server implements
+  // wp_viewporter extension to support cropping and scaling buffers.
   // |supports_acquire_fence| indicates whether acquire fences can be submitted
   // with buffers for wayland servers to wait on before accessing buffer
   // contents.
@@ -94,12 +97,14 @@ interface WaylandBufferManagerGpu {
              map<gfx.mojom.BufferFormat,
                  array<uint64>> buffer_formats_with_modifiers,
              bool supports_dma_buf,
+             bool supports_viewporter,
              bool supports_acquire_fence);
 
   // Signals about swap completion.
   OnSubmission(gfx.mojom.AcceleratedWidget widget,
                uint32 buffer_id,
-               gfx.mojom.SwapResult swap_result);
+               gfx.mojom.SwapResult swap_result,
+               gfx.mojom.GpuFenceHandle? release_fence_handle);
 
   // Signals about presentation.
   OnPresentation(gfx.mojom.AcceleratedWidget widget,

@@ -5,12 +5,10 @@
 #include "components/optimization_guide/core/hint_cache.h"
 
 #include <string>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -22,6 +20,7 @@
 #include "components/optimization_guide/proto/hint_cache.pb.h"
 #include "components/optimization_guide/proto/hints.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace optimization_guide {
@@ -129,15 +128,15 @@ class HintCacheTest : public ProtoDatabaseProviderTestBase,
   const proto::Hint* GetLoadedHint() const { return loaded_hint_; }
 
   proto::Hint CreateHintForURL(
-      const GURL url,
-      base::Optional<int> cache_duration_in_secs = base::Optional<int>()) {
+      const GURL& url,
+      absl::optional<int> cache_duration_in_secs = absl::optional<int>()) {
     proto::Hint hint;
     hint.set_key(url.spec());
     hint.set_key_representation(proto::FULL_URL);
     if (cache_duration_in_secs)
       hint.mutable_max_cache_duration()->set_seconds(*cache_duration_in_secs);
     proto::PageHint* page_hint = hint.add_page_hints();
-    page_hint->add_whitelisted_optimizations()->set_optimization_type(
+    page_hint->add_allowlisted_optimizations()->set_optimization_type(
         optimization_guide::proto::PERFORMANCE_HINTS);
     page_hint->set_page_pattern("whatever/*");
 
@@ -936,7 +935,7 @@ TEST_P(HintCacheTest, ProcessHintsNoUpdateData) {
 }
 
 TEST_P(HintCacheTest,
-       ProcessHintsWithNoPageHintsOrWhitelistedOptimizationsAndUpdateData) {
+       ProcessHintsWithNoPageHintsOrAllowlistedOptimizationsAndUpdateData) {
   const int kMemoryCacheSize = 5;
   CreateAndInitializeHintCache(kMemoryCacheSize);
 
@@ -958,14 +957,14 @@ TEST_P(HintCacheTest,
 }
 
 TEST_P(HintCacheTest,
-       ProcessHintsWithNoPageHintsButHasWhitelistedOptimizationsAndUpdateData) {
+       ProcessHintsWithNoPageHintsButHasAllowlistedOptimizationsAndUpdateData) {
   const int kMemoryCacheSize = 5;
   CreateAndInitializeHintCache(kMemoryCacheSize);
 
   proto::Hint hint;
   hint.set_key("whatever.com");
   hint.set_key_representation(proto::HOST);
-  hint.add_whitelisted_optimizations()->set_optimization_type(
+  hint.add_allowlisted_optimizations()->set_optimization_type(
       optimization_guide::proto::DEFER_ALL_SCRIPT);
 
   google::protobuf::RepeatedPtrField<proto::Hint> hints;
@@ -1009,6 +1008,72 @@ TEST_P(HintCacheTest, ProcessHintsWithPageHintsAndUpdateData) {
     // the 1 added hint entry.
     EXPECT_EQ(2ul, update_data->TakeUpdateEntries()->size());
   }
+}
+
+TEST_P(HintCacheTest, RemoveHintsForURLs) {
+  const int kMemoryCacheSize = 5;
+  CreateAndInitializeHintCache(kMemoryCacheSize);
+
+  int cache_duration_in_secs = 60;
+  std::string host = "host.com";
+  GURL url("https://bar.com/r/baz");
+
+  std::unique_ptr<proto::GetHintsResponse> get_hints_response =
+      std::make_unique<proto::GetHintsResponse>();
+
+  *(get_hints_response->add_hints()) =
+      CreateHintForURL(url, cache_duration_in_secs);
+
+  proto::Hint* hint = get_hints_response->add_hints();
+  hint->set_key_representation(proto::HOST);
+  hint->set_key(host);
+  proto::PageHint* page_hint = hint->add_page_hints();
+  page_hint->set_page_pattern("page pattern");
+
+  UpdateFetchedHintsAndWait(std::move(get_hints_response), base::Time().Now(),
+                            {host}, {url});
+  EXPECT_TRUE(are_fetched_hints_updated());
+  EXPECT_TRUE(hint_cache()->HasHint(host));
+  EXPECT_TRUE(hint_cache()->HasURLKeyedEntryForURL(url));
+
+  hint_cache()->RemoveHintsForURLs({url, GURL(host)});
+  EXPECT_TRUE(hint_cache()->HasHint(host));
+  EXPECT_FALSE(hint_cache()->HasURLKeyedEntryForURL(url));
+}
+
+TEST_P(HintCacheTest, RemoveHintsForHosts) {
+  const int kMemoryCacheSize = 5;
+  CreateAndInitializeHintCache(kMemoryCacheSize);
+
+  int cache_duration_in_secs = 60;
+  std::string host = "host.com";
+  GURL url("https://bar.com/r/baz");
+
+  std::unique_ptr<proto::GetHintsResponse> get_hints_response =
+      std::make_unique<proto::GetHintsResponse>();
+
+  *(get_hints_response->add_hints()) =
+      CreateHintForURL(url, cache_duration_in_secs);
+
+  proto::Hint* hint = get_hints_response->add_hints();
+  hint->set_key_representation(proto::HOST);
+  hint->set_key(host);
+  proto::PageHint* page_hint = hint->add_page_hints();
+  page_hint->set_page_pattern("page pattern");
+
+  UpdateFetchedHintsAndWait(std::move(get_hints_response), base::Time().Now(),
+                            {host}, {url});
+  EXPECT_TRUE(are_fetched_hints_updated());
+  EXPECT_TRUE(hint_cache()->HasHint(host));
+  EXPECT_TRUE(hint_cache()->HasURLKeyedEntryForURL(url));
+
+  std::unique_ptr<base::RunLoop> run_loop = std::make_unique<base::RunLoop>();
+  hint_cache()->RemoveHintsForHosts(run_loop->QuitClosure(),
+                                    {url.spec(), host});
+  run_loop->Run();
+
+  EXPECT_FALSE(hint_cache()->HasHint(host));
+  EXPECT_TRUE(hint_cache()->HasURLKeyedEntryForURL(url));
 }
 
 }  // namespace

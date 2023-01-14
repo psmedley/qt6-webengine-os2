@@ -6,13 +6,15 @@
 
 #include <stddef.h>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/callback_helpers.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "ipc/ipc_message.h"
+#include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
+#include "third_party/blink/public/mojom/frame/text_autosizer_page_info.mojom.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -31,17 +33,13 @@ const GURL& RenderFrameHostDelegate::GetMainFrameLastCommittedURL() {
 }
 
 bool RenderFrameHostDelegate::DidAddMessageToConsole(
-    RenderFrameHost* source_frame,
+    RenderFrameHostImpl* source_frame,
     blink::mojom::ConsoleMessageLevel log_level,
-    const base::string16& message,
+    const std::u16string& message,
     int32_t line_no,
-    const base::string16& source_id,
-    const base::Optional<base::string16>& untrusted_stack_trace) {
+    const std::u16string& source_id,
+    const absl::optional<std::u16string>& untrusted_stack_trace) {
   return false;
-}
-
-WebContents* RenderFrameHostDelegate::GetAsWebContents() {
-  return nullptr;
 }
 
 void RenderFrameHostDelegate::RequestMediaAccessPermission(
@@ -55,7 +53,7 @@ void RenderFrameHostDelegate::RequestMediaAccessPermission(
 }
 
 bool RenderFrameHostDelegate::CheckMediaAccessPermission(
-    RenderFrameHost* render_frame_host,
+    RenderFrameHostImpl* render_frame_host,
     const url::Origin& security_origin,
     blink::mojom::MediaStreamType type) {
   LOG(ERROR) << "RenderFrameHostDelegate::CheckMediaAccessPermission: "
@@ -87,18 +85,23 @@ bool RenderFrameHostDelegate::CanEnterFullscreenMode() {
   return true;
 }
 
+bool RenderFrameHostDelegate::HasEnteredFullscreenMode() {
+  return false;
+}
+
+void RenderFrameHostDelegate::FullscreenStateChanged(
+    RenderFrameHostImpl* rfh,
+    bool is_fullscreen,
+    blink::mojom::FullscreenOptionsPtr options) {}
+
 bool RenderFrameHostDelegate::ShouldRouteMessageEvent(
-    RenderFrameHost* target_rfh,
+    RenderFrameHostImpl* target_rfh,
     SiteInstance* source_site_instance) const {
   return false;
 }
 
-RenderFrameHost*
+RenderFrameHostImpl*
 RenderFrameHostDelegate::GetFocusedFrameIncludingInnerWebContents() {
-  return nullptr;
-}
-
-RenderFrameHostImpl* RenderFrameHostDelegate::GetMainFrame() {
   return nullptr;
 }
 
@@ -109,8 +112,8 @@ RenderFrameHostDelegate::CreateWebUIForRenderFrameHost(
   return nullptr;
 }
 
-RenderFrameHostDelegate* RenderFrameHostDelegate::CreateNewWindow(
-    RenderFrameHost* opener,
+FrameTree* RenderFrameHostDelegate::CreateNewWindow(
+    RenderFrameHostImpl* opener,
     const mojom::CreateNewWindowParams& params,
     bool is_new_browsing_instance,
     bool has_user_gesture,
@@ -132,22 +135,13 @@ RenderFrameHostDelegate::GetJavaRenderFrameHostDelegate() {
 }
 #endif
 
-bool RenderFrameHostDelegate::IsBeingDestroyed() {
-  return false;
-}
-
 Visibility RenderFrameHostDelegate::GetVisibility() {
   return Visibility::HIDDEN;
 }
 
-ukm::SourceId RenderFrameHostDelegate::
-    GetUkmSourceIdForLastCommittedSourceIncludingSameDocument() const {
-  return ukm::kInvalidSourceId;
-}
-
-RenderFrameHostImpl* RenderFrameHostDelegate::GetMainFrameForInnerDelegate(
-    FrameTreeNode* frame_tree_node) {
-  return nullptr;
+std::vector<FrameTreeNode*> RenderFrameHostDelegate::GetUnattachedOwnedNodes(
+    RenderFrameHostImpl* owner) {
+  return {};
 }
 
 media::MediaMetricsProvider::RecordAggregateWatchTimeCallback
@@ -163,11 +157,19 @@ void RenderFrameHostDelegate::IsClipboardPasteContentAllowed(
   std::move(callback).Run(ClipboardPasteContentAllowed(true));
 }
 
+void RenderFrameHostDelegate::OnTextAutosizerPageInfoChanged(
+    RenderFrameHostImpl* source,
+    blink::mojom::TextAutosizerPageInfoPtr page_info) {}
+
 bool RenderFrameHostDelegate::HasSeenRecentScreenOrientationChange() {
   return false;
 }
 
 bool RenderFrameHostDelegate::IsTransientAllowFullscreenActive() const {
+  return false;
+}
+
+bool RenderFrameHostDelegate::IsBackForwardCacheSupported() {
   return false;
 }
 
@@ -198,6 +200,10 @@ std::vector<RenderFrameHostImpl*>
 RenderFrameHostDelegate::GetActiveTopLevelDocumentsInBrowsingContextGroup(
     RenderFrameHostImpl* render_frame_host) {
   return std::vector<RenderFrameHostImpl*>();
+}
+
+PrerenderHostRegistry* RenderFrameHostDelegate::GetPrerenderHostRegistry() {
+  return nullptr;
 }
 
 bool RenderFrameHostDelegate::IsAllowedToGoToEntryAtOffset(int32_t offset) {

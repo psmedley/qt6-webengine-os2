@@ -5,21 +5,22 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SANITIZER_API_SANITIZER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SANITIZER_API_SANITIZER_H_
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/modules/sanitizer_api/sanitizer_config_impl.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
+class ContainerNode;
 class Document;
 class DocumentFragment;
 class ExceptionState;
 class ExecutionContext;
 class SanitizerConfig;
 class ScriptState;
-class StringOrDocumentFragmentOrDocument;
-class StringOrTrustedHTMLOrDocumentFragmentOrDocument;
 
 enum ElementKind {
   kCustom,
@@ -34,67 +35,53 @@ class MODULES_EXPORT Sanitizer final : public ScriptWrappable {
   static Sanitizer* Create(ExecutionContext*,
                            const SanitizerConfig*,
                            ExceptionState&);
-  explicit Sanitizer(ExecutionContext*, const SanitizerConfig*);
+  Sanitizer(ExecutionContext*, const SanitizerConfig*);
   ~Sanitizer() override;
 
-  String sanitizeToString(ScriptState*,
-                          StringOrDocumentFragmentOrDocument&,
-                          ExceptionState&);
-  DocumentFragment* sanitize(ScriptState*,
-                             StringOrTrustedHTMLOrDocumentFragmentOrDocument&,
-                             ExceptionState&);
+  DocumentFragment* sanitize(ScriptState* script_state,
+                             const V8SanitizerInput* input,
+                             ExceptionState& exception_state);
+  Element* sanitizeFor(ScriptState* script_state,
+                       const String& element,
+                       const String& markup,
+                       ExceptionState& exception_state);
+
+  SanitizerConfig* getConfiguration() const;
+  static SanitizerConfig* getDefaultConfiguration();
+
+  // Implementation of ElementSanitizer::SetHTML, so that we have
+  // all the sanitizer logic in one place.
+  void ElementSetHTML(ScriptState* script_state,
+                      Element& element,
+                      const String& markup,
+                      ExceptionState& exception_state);
 
   void Trace(Visitor*) const override;
 
  private:
-  Node* DropElement(Node*, DocumentFragment*);
-  Node* BlockElement(Node*, DocumentFragment*, ExceptionState&);
-  Node* KeepElement(Node*, DocumentFragment*, String&, LocalDOMWindow*);
+  Node* DropElement(Node*, ContainerNode*);
+  Node* BlockElement(Node*, ContainerNode*, ExceptionState&);
+  Node* KeepElement(Node*, ContainerNode*, String&, LocalDOMWindow*);
 
   void ElementFormatter(HashSet<String>&, const Vector<String>&);
   void AttrFormatter(HashMap<String, Vector<String>>&,
                      const Vector<std::pair<String, Vector<String>>>&);
 
-  DocumentFragment* SanitizeImpl(ScriptState*,
-                                 StringOrDocumentFragmentOrDocument&,
-                                 ExceptionState&);
+  DocumentFragment* PrepareFragment(LocalDOMWindow* window,
+                                    ScriptState* script_state,
+                                    const V8SanitizerInput* input,
+                                    ExceptionState& exception_state);
+  void DoSanitizing(ContainerNode*, LocalDOMWindow*, ExceptionState&);
 
-  HashSet<String> allow_elements_ = {};
-  HashSet<String> block_elements_ = {};
-  HashSet<String> drop_elements_ = {};
-  HashMap<String, Vector<String>> allow_attributes_ = {};
-  HashMap<String, Vector<String>> drop_attributes_ = {};
+  SanitizerConfigImpl config_;
 
-  bool allow_custom_elements_ = false;
-
-  bool has_allow_elements_ = false;
-  bool has_allow_attributes_ = false;
-
-  // TODO(lyf): make it all-ailpan.
-  const HashSet<String> default_block_elements_ = {};
-  const HashSet<String> default_drop_elements_ = {};
-  const HashSet<String> default_allow_elements_ = {
-      "A",          "ABBR",    "ACRONYM", "ADDRESS",  "AREA",     "ARTICLE",
-      "ASIDE",      "AUDIO",   "B",       "BDI",      "BDO",      "BIG",
-      "BLOCKQUOTE", "BODY",    "BR",      "BUTTON",   "CANVAS",   "CAPTION",
-      "CENTER",     "CITE",    "CODE",    "COL",      "COLGROUP", "DATALIST",
-      "DD",         "DEL",     "DETAILS", "DIALOG",   "DFN",      "DIR",
-      "DIV",        "DL",      "DT",      "EM",       "FIELDSET", "FIGCAPTION",
-      "FIGURE",     "FONT",    "FOOTER",  "FORM",     "H1",       "H2",
-      "H3",         "H4",      "H5",      "H6",       "HEAD",     "HEADER",
-      "HGROUP",     "HR",      "HTML",    "I",        "IMG",      "INPUT",
-      "INS",        "KBD",     "KEYGEN",  "LABEL",    "LEGEND",   "LI",
-      "LINK",       "LISTING", "MAP",     "MARK",     "MENU",     "META",
-      "METER",      "NAV",     "NOBR",    "NOSCRIPT", "OL",       "OPTGROUP",
-      "OPTION",     "OUTPUT",  "P",       "PICTURE",  "PRE",      "PROGRESS",
-      "Q",          "RB",      "RP",      "RT",       "RTC",      "RUBY",
-      "S",          "SAMP",    "SECTION", "SELECT",   "SLOT",     "SMALL",
-      "SOURCE",     "SPAN",    "STRIKE",  "STRONG",   "SUB",      "SUMMARY",
-      "SUP",        "STYLE",   "TABLE",   "TBODY",    "TD",       "TEXTAREA",
-      "TFOOT",      "TH",      "THEAD",   "TIME",     "TR",       "TRACK",
-      "TT",         "U",       "UL",      "VAR",      "VIDEO",    "WBR"};
+  // TODO(lyf): make it all-oilpan.
   const Vector<String> kVectorStar = Vector<String>({"*"});
-  const HashMap<String, Vector<String>> default_drop_attributes_ = {
+  const HashSet<String> baseline_drop_elements_ = {
+      "applet",   "base",    "embed",    "iframe", "noembed",
+      "noframes", "nolayer", "noscript", "object", "frame",
+      "frameset", "param",   "script"};
+  const HashMap<String, Vector<String>> baseline_drop_attributes_ = {
       {"onabort", kVectorStar},
       {"onafterprint", kVectorStar},
       {"onanimationstart", kVectorStar},
@@ -212,8 +199,7 @@ class MODULES_EXPORT Sanitizer final : public ScriptWrappable {
       {"onwebkitfullscreenerror", kVectorStar},
       {"onwebkittransitionend", kVectorStar},
       {"onwheel", kVectorStar}};
-};
-
+  };
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_SANITIZER_API_SANITIZER_H_

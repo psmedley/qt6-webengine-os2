@@ -148,6 +148,9 @@ extern const char kPaymentEventTimeout[];
 // malicious content.
 extern const char kPaymentHandlerInsecureNavigation[];
 
+// Payment handler installation has failed.
+extern const char kPaymentHandlerInstallFailed[];
+
 // The payment handler is closed because the Android activity is destroyed.
 extern const char kPaymentHandlerActivityDied[];
 
@@ -250,6 +253,26 @@ extern const char kCredentialIdsRequired[];
 // Used when the timeout specified for the "secure-payment-confirmation" method
 // is too long.
 extern const char kTimeoutTooLong[];
+
+// Used when the challenge field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kChallengeRequired[];
+
+// Used when the instrument field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kInstrumentRequired[];
+
+// Used when the instrument.displayName field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kInstrumentDisplayNameRequired[];
+
+// Used when the instrument.icon field was not specified or was not a valid URL
+// in the "secure-payment-confirmation" method.
+extern const char kValidInstrumentIconRequired[];
+
+// Used when the icon that was either downloaded or read from user profile is
+// not valid.
+extern const char kInvalidIcon[];
 
 }  // namespace errors
 }  // namespace payments

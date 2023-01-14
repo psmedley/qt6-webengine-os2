@@ -8,7 +8,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/types/pass_key.h"
 #include "components/download/public/common/quarantine_connection.h"
-#include "components/download/quarantine/quarantine.h"
 #include "components/services/filesystem/public/mojom/types.mojom.h"
 #include "content/browser/file_system_access/file_system_access_file_handle_impl.h"
 #include "content/browser/file_system_access/file_system_access_handle_base.h"
@@ -51,6 +50,10 @@ class CONTENT_EXPORT FileSystemAccessFileWriterImpl
       bool has_transient_user_activation,
       bool auto_close,
       download::QuarantineConnectionCallback quarantine_connection_callback);
+  FileSystemAccessFileWriterImpl(const FileSystemAccessFileWriterImpl&) =
+      delete;
+  FileSystemAccessFileWriterImpl& operator=(
+      const FileSystemAccessFileWriterImpl&) = delete;
   ~FileSystemAccessFileWriterImpl() override;
 
   const storage::FileSystemURL& swap_url() const { return swap_url_; }
@@ -143,11 +146,14 @@ class CONTENT_EXPORT FileSystemAccessFileWriterImpl
   // explicitly closed.
   bool auto_close_ = false;
 
+  // The writer should not attempt to purge the swap file if the move operation
+  // to the target file is successful, since this may incidentally remove the
+  // active swap file of a different writer.
+  bool should_purge_swap_file_on_destruction_ = true;
+
   base::WeakPtr<FileSystemAccessHandleBase> AsWeakPtr() override;
 
   base::WeakPtrFactory<FileSystemAccessFileWriterImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FileSystemAccessFileWriterImpl);
 };
 
 }  // namespace content

@@ -99,6 +99,7 @@ jumbo_component("wtf") {
     "sanitizers.h",
     "scoped_logger.cc",
     "scoped_logger.h",
+    "sequence_bound.h",
     "shared_buffer.cc",
     "shared_buffer.h",
     "size_assertions.cc",
@@ -118,6 +119,7 @@ jumbo_component("wtf") {
     "text/atomic_string_table.h",
     "text/base64.cc",
     "text/base64.h",
+    "text/case_folding_hash.h",
     "text/case_map.cc",
     "text/case_map.h",
     "text/character_names.h",
@@ -173,17 +175,18 @@ jumbo_component("wtf") {
     "text/text_stream.cc",
     "text/text_stream.h",
     "text/unicode.h",
+    "text/unicode_string.h",
     "text/utf8.cc",
     "text/utf8.h",
     "text/wtf_string.cc",
     "text/wtf_string.h",
+    "text/wtf_uchar.h",
     "thread_restriction_verifier.h",
     "thread_safe_ref_counted.h",
     "thread_specific.h",
     "threading.cc",
     "threading.h",
     "threading_primitives.h",
-    "tree_node.h",
     "type_traits.h",
     "uuid.cc",
     "uuid.h",
@@ -206,14 +209,12 @@ jumbo_component("wtf") {
 
   public_configs = [
     ":wtf_config",
-
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
     "//third_party/blink/renderer:features",
   ]
 
   deps = [
     ":buildflags",
+    "//base/allocator:buildflags",
     "//build:chromeos_buildflags",
 
     # TODO(tkent): WTF should not depend on it.
@@ -320,6 +321,7 @@ jumbo_source_set("wtf_unittests_sources") {
     "pod_tree_test_helpers.cc",
     "pod_tree_test_helpers.h",
     "scoped_logger_test.cc",
+    "sequence_bound_test.cc",
     "shared_buffer_test.cc",
     "testing/run_all_tests.cc",
     "text/atomic_string_table_test.cc",
@@ -341,15 +343,11 @@ jumbo_source_set("wtf_unittests_sources") {
     "text/text_encoding_test.cc",
     "text/wtf_string_test.cc",
     "threading_primitives_test.cc",
-    "tree_node_test.cc",
     "type_traits_test.cc",
     "uuid_test.cc",
     "vector_backed_linked_list_test.cc",
     "vector_test.cc",
   ]
-
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   if (is_win) {
     cflags = [ "/wd4068" ]  # Unknown pragma.

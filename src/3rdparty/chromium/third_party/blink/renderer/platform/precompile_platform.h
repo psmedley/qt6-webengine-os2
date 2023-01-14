@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #ifdef THIRD_PARTY_BLINK_RENDERER_PLATFORM_PRECOMPILE_PLATFORM_H_
-#error You shouldn't include the precompiled header file more than once.
+#error "You shouldn't include the precompiled header file more than once."
 #endif
 
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PRECOMPILE_PLATFORM_H_
@@ -13,7 +13,7 @@
 #elif defined(__APPLE__)
 #include "third_party/blink/renderer/build/mac/prefix.h"
 #else
-#error implement
+#include "third_party/blink/renderer/build/linux/prefix.h"
 #endif
 
 // Include Oilpan's handle.h by default, as it is included by a significant

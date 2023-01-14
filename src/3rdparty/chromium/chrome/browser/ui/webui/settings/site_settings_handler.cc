@@ -20,12 +20,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/bluetooth/bluetooth_chooser_context.h"
 #include "chrome/browser/bluetooth/bluetooth_chooser_context_factory.h"
+#include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/hid/hid_chooser_context.h"
 #include "chrome/browser/hid/hid_chooser_context_factory.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/media/unified_autoplay_config.h"
 #include "chrome/browser/permissions/permission_decision_auto_blocker_factory.h"
 #include "chrome/browser/serial/serial_chooser_context.h"
@@ -50,7 +49,9 @@
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/crx_file/id_util.h"
-#include "components/permissions/chooser_context_base.h"
+#include "components/infobars/content/content_infobar_manager.h"
+#include "components/permissions/contexts/bluetooth_chooser_context.h"
+#include "components/permissions/object_permission_context_base.h"
 #include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
@@ -73,6 +74,8 @@
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "components/user_manager/user_manager.h"
 #endif
+
+using extensions::mojom::APIPermissionID;
 
 namespace settings {
 
@@ -107,35 +110,36 @@ enum class AllSitesAction2 {
 };
 
 // Return an appropriate API Permission ID for the given string name.
-extensions::APIPermission::APIPermission::ID APIPermissionFromGroupName(
-    std::string type) {
+APIPermissionID APIPermissionFromGroupName(std::string type) {
   // Once there are more than two groups to consider, this should be changed to
   // something better than if's.
 
   if (site_settings::ContentSettingsTypeFromGroupName(type) ==
-      ContentSettingsType::GEOLOCATION)
-    return extensions::APIPermission::APIPermission::kGeolocation;
+      ContentSettingsType::GEOLOCATION) {
+    return APIPermissionID::kGeolocation;
+  }
 
   if (site_settings::ContentSettingsTypeFromGroupName(type) ==
-      ContentSettingsType::NOTIFICATIONS)
-    return extensions::APIPermission::APIPermission::kNotifications;
+      ContentSettingsType::NOTIFICATIONS) {
+    return APIPermissionID::kNotifications;
+  }
 
-  return extensions::APIPermission::APIPermission::kInvalid;
+  return APIPermissionID::kInvalid;
 }
 
 // Asks the |profile| for hosted apps which have the |permission| set, and
 // adds their web extent and launch URL to the |exceptions| list.
-void AddExceptionsGrantedByHostedApps(
-    content::BrowserContext* context,
-    extensions::APIPermission::APIPermission::ID permission,
-    base::ListValue* exceptions) {
+void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
+                                      APIPermissionID permission,
+                                      base::ListValue* exceptions) {
   const extensions::ExtensionSet& extensions =
       extensions::ExtensionRegistry::Get(context)->enabled_extensions();
   for (extensions::ExtensionSet::const_iterator extension = extensions.begin();
        extension != extensions.end(); ++extension) {
     if (!(*extension)->is_hosted_app() ||
-        !(*extension)->permissions_data()->HasAPIPermission(permission))
+        !(*extension)->permissions_data()->HasAPIPermission(permission)) {
       continue;
+    }
 
     const extensions::URLPatternSet& web_extent = (*extension)->web_extent();
     // Add patterns from web extent.
@@ -157,7 +161,7 @@ void AddExceptionsGrantedByHostedApps(
 
 base::flat_set<std::string> GetInstalledAppOrigins(
     Profile* profile,
-    const web_app::AppRegistrar& registrar) {
+    const web_app::WebAppRegistrar& registrar) {
   base::flat_set<std::string> origins;
   for (const web_app::AppId& app : registrar.GetAppIds())
     origins.insert(registrar.GetAppScope(app).GetOrigin().spec());
@@ -230,7 +234,7 @@ void ConvertSiteGroupMapToListValue(
     const std::set<std::string>& origin_permission_set,
     base::Value* list_value,
     Profile* profile,
-    const web_app::AppRegistrar& registrar) {
+    const web_app::WebAppRegistrar& registrar) {
   DCHECK_EQ(base::Value::Type::LIST, list_value->type());
   DCHECK(profile);
   base::flat_set<std::string> installed_origins =
@@ -386,8 +390,9 @@ std::string GetCookieSettingDescription(Profile* profile) {
 
 }  // namespace
 
-SiteSettingsHandler::SiteSettingsHandler(Profile* profile,
-                                         web_app::AppRegistrar& app_registrar)
+SiteSettingsHandler::SiteSettingsHandler(
+    Profile* profile,
+    web_app::WebAppRegistrar& app_registrar)
     : profile_(profile), app_registrar_(app_registrar) {}
 
 SiteSettingsHandler::~SiteSettingsHandler() {
@@ -416,6 +421,10 @@ void SiteSettingsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "getAllSites",
       base::BindRepeating(&SiteSettingsHandler::HandleGetAllSites,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getCategoryList",
+      base::BindRepeating(&SiteSettingsHandler::HandleGetCategoryList,
                           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "getCookieSettingDescription",
@@ -503,7 +512,8 @@ void SiteSettingsHandler::RegisterMessages() {
 void SiteSettingsHandler::OnJavascriptAllowed() {
   ObserveSourcesForProfile(profile_);
   if (profile_->HasPrimaryOTRProfile())
-    ObserveSourcesForProfile(profile_->GetPrimaryOTRProfile());
+    ObserveSourcesForProfile(
+        profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true));
 
   // Here we only subscribe to the HostZoomMap for the default storage partition
   // since we don't allow the user to manage the zoom levels for apps.
@@ -529,13 +539,6 @@ void SiteSettingsHandler::OnJavascriptAllowed() {
       prefs::kCookieControlsMode,
       base::BindRepeating(&SiteSettingsHandler::SendCookieSettingDescription,
                           base::Unretained(this)));
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  pref_change_registrar_->Add(
-      prefs::kEnableDRM,
-      base::BindRepeating(&SiteSettingsHandler::OnPrefEnableDrmChanged,
-                          base::Unretained(this)));
-#endif
 }
 
 void SiteSettingsHandler::OnJavascriptDisallowed() {
@@ -544,9 +547,6 @@ void SiteSettingsHandler::OnJavascriptDisallowed() {
   host_zoom_map_subscription_ = {};
   pref_change_registrar_->Remove(prefs::kBlockAutoplayEnabled);
   pref_change_registrar_->Remove(prefs::kCookieControlsMode);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  pref_change_registrar_->Remove(prefs::kEnableDRM);
-#endif
   observed_profiles_.RemoveAllObservations();
 }
 
@@ -573,12 +573,6 @@ void SiteSettingsHandler::OnGetUsageInfo() {
   FireWebUIListener("usage-total-changed", base::Value(usage_host_),
                     base::Value(usage_string), base::Value(cookie_string));
 }
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-void SiteSettingsHandler::OnPrefEnableDrmChanged() {
-  FireWebUIListener("prefEnableDrmChanged");
-}
-#endif
 
 void SiteSettingsHandler::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
@@ -629,17 +623,18 @@ void SiteSettingsHandler::OnProfileWillBeDestroyed(Profile* profile) {
   StopObservingSourcesForProfile(profile);
 }
 
-void SiteSettingsHandler::OnChooserObjectPermissionChanged(
-    ContentSettingsType guard_content_settings_type,
+void SiteSettingsHandler::OnObjectPermissionChanged(
+    absl::optional<ContentSettingsType> guard_content_settings_type,
     ContentSettingsType data_content_settings_type) {
-  if (!site_settings::HasRegisteredGroupName(guard_content_settings_type) ||
+  if (!guard_content_settings_type ||
+      !site_settings::HasRegisteredGroupName(*guard_content_settings_type) ||
       !site_settings::HasRegisteredGroupName(data_content_settings_type)) {
     return;
   }
 
   FireWebUIListener("contentSettingChooserPermissionChanged",
                     base::Value(site_settings::ContentSettingsTypeToGroupName(
-                        guard_content_settings_type)),
+                        *guard_content_settings_type)),
                     base::Value(site_settings::ContentSettingsTypeToGroupName(
                         data_content_settings_type)));
 }
@@ -740,25 +735,28 @@ void SiteSettingsHandler::HandleGetDefaultValueForContentType(
 void SiteSettingsHandler::HandleGetAllSites(const base::ListValue* args) {
   AllowJavascript();
 
-  CHECK_EQ(2U, args->GetList().size());
+  CHECK_EQ(1U, args->GetList().size());
   std::string callback_id = args->GetList()[0].GetString();
-  auto types = args->GetList()[1].GetList();
 
   all_sites_map_.clear();
   origin_permission_set_.clear();
-
-  auto content_types = site_settings::ContentSettingsTypesFromGroupNames(types);
 
   // Incognito contains incognito content settings plus non-incognito content
   // settings. Thus if it exists, just get exceptions for the incognito profile.
   Profile* profile = profile_;
   if (profile_->HasPrimaryOTRProfile() &&
-      profile_->GetPrimaryOTRProfile() != profile_) {
-    profile = profile_->GetPrimaryOTRProfile();
+      profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true) != profile_) {
+    profile = profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true);
   }
   DCHECK(profile);
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
+
+  std::vector<ContentSettingsType> content_types =
+      site_settings::GetVisiblePermissionCategories();
+  // Make sure to include cookies, because All Sites handles data storage
+  // cookies as well as regular ContentSettingsTypes.
+  content_types.push_back(ContentSettingsType::COOKIES);
 
   // Retrieve a list of embargoed settings to check separately. This ensures
   // that only settings included in |content_types| will be listed in all sites.
@@ -802,6 +800,24 @@ void SiteSettingsHandler::HandleGetAllSites(const base::ListValue* args) {
   ResolveJavascriptCallback(base::Value(callback_id), result);
 }
 
+void SiteSettingsHandler::HandleGetCategoryList(const base::ListValue* args) {
+  AllowJavascript();
+
+  CHECK_EQ(2U, args->GetList().size());
+  std::string callback_id = args->GetList()[0].GetString();
+  GURL origin(args->GetList()[1].GetString());
+
+  std::vector<ContentSettingsType> content_types =
+      site_settings::GetVisiblePermissionCategoriesForOrigin(profile_, origin);
+
+  base::Value result(base::Value::Type::LIST);
+  for (ContentSettingsType content_type : content_types) {
+    result.Append(site_settings::ContentSettingsTypeToGroupName(content_type));
+  }
+
+  ResolveJavascriptCallback(base::Value(callback_id), result);
+}
+
 void SiteSettingsHandler::HandleGetCookieSettingDescription(
     const base::ListValue* args) {
   AllowJavascript();
@@ -815,12 +831,12 @@ void SiteSettingsHandler::HandleGetRecentSitePermissions(
     const base::ListValue* args) {
   AllowJavascript();
 
-  CHECK_EQ(3U, args->GetList().size());
+  CHECK_EQ(2U, args->GetList().size());
   std::string callback_id = args->GetList()[0].GetString();
-  auto types = args->GetList()[1].GetList();
-  size_t max_sources = base::checked_cast<size_t>(args->GetList()[2].GetInt());
+  size_t max_sources = base::checked_cast<size_t>(args->GetList()[1].GetInt());
 
-  auto content_types = site_settings::ContentSettingsTypesFromGroupNames(types);
+  const std::vector<ContentSettingsType>& content_types =
+      site_settings::GetVisiblePermissionCategories();
   auto recent_site_permissions = site_settings::GetRecentSitePermissions(
       profile_, content_types, max_sources);
 
@@ -910,15 +926,11 @@ void SiteSettingsHandler::OnStorageFetched() {
 
 void SiteSettingsHandler::HandleGetFormattedBytes(const base::ListValue* args) {
   AllowJavascript();
-
-  CHECK_EQ(2U, args->GetSize());
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
-  double num_bytes;
-  CHECK(args->GetDouble(1, &num_bytes));
-
-  const base::string16 string = ui::FormatBytes(int64_t(num_bytes));
-  ResolveJavascriptCallback(*callback_id, base::Value(string));
+  base::Value::ConstListView list = args->GetList();
+  CHECK_EQ(2U, list.size());
+  int64_t num_bytes = static_cast<int64_t>(list[1].GetDouble());
+  ResolveJavascriptCallback(/*callback_id=*/list[0],
+                            base::Value(ui::FormatBytes(num_bytes)));
 }
 
 void SiteSettingsHandler::HandleGetExceptionList(const base::ListValue* args) {
@@ -941,9 +953,10 @@ void SiteSettingsHandler::HandleGetExceptionList(const base::ListValue* args) {
       content_type, profile_, extension_registry, web_ui(), /*incognito=*/false,
       exceptions.get());
 
-  Profile* incognito = profile_->HasPrimaryOTRProfile()
-                           ? profile_->GetPrimaryOTRProfile()
-                           : nullptr;
+  Profile* incognito =
+      profile_->HasPrimaryOTRProfile()
+          ? profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true)
+          : nullptr;
   // On Chrome OS in Guest mode the incognito profile is the primary profile,
   // so do not fetch an extra copy of the same exceptions.
   if (incognito && incognito != profile_) {
@@ -978,20 +991,21 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
     const base::ListValue* args) {
   AllowJavascript();
 
-  CHECK_EQ(3U, args->GetSize());
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
-  std::string origin;
-  CHECK(args->GetString(1, &origin));
-  const base::ListValue* types;
-  CHECK(args->GetList(2, &types));
+  base::Value::ConstListView args_list = args->GetList();
+  CHECK_EQ(3U, args_list.size());
+  const base::Value& callback_id = args_list[0];
+  std::string origin = args_list[1].GetString();
+  base::Value::ConstListView types = args_list[2].GetList();
 
   // Note: Invalid URLs will just result in default settings being shown.
   const GURL origin_url(origin);
-  auto exceptions = std::make_unique<base::ListValue>();
-  for (size_t i = 0; i < types->GetSize(); ++i) {
+  base::Value exceptions(base::Value::Type::LIST);
+  for (const auto& type_val : types) {
     std::string type;
-    types->GetString(i, &type);
+    DCHECK(type_val.is_string());
+    const std::string* maybe_type = type_val.GetIfString();
+    if (maybe_type)
+      type = *maybe_type;
     ContentSettingsType content_type =
         site_settings::ContentSettingsTypeFromGroupName(type);
     HostContentSettingsMap* map =
@@ -1006,46 +1020,50 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
     std::string content_setting_string =
         content_settings::ContentSettingToString(content_setting);
 
-    auto raw_site_exception = std::make_unique<base::DictionaryValue>();
-    raw_site_exception->SetString(site_settings::kEmbeddingOrigin, origin);
-    raw_site_exception->SetBoolean(site_settings::kIncognito,
-                                   profile_->IsOffTheRecord());
-    raw_site_exception->SetString(site_settings::kOrigin, origin);
-    raw_site_exception->SetString(site_settings::kDisplayName, display_name);
-    raw_site_exception->SetString(site_settings::kSetting,
-                                  content_setting_string);
-    raw_site_exception->SetString(site_settings::kSource, source_string);
-    exceptions->Append(std::move(raw_site_exception));
+    base::Value raw_site_exception(base::Value::Type::DICTIONARY);
+    raw_site_exception.SetStringKey(site_settings::kEmbeddingOrigin, origin);
+    raw_site_exception.SetBoolKey(site_settings::kIncognito,
+                                  profile_->IsOffTheRecord());
+    raw_site_exception.SetStringKey(site_settings::kOrigin, origin);
+    raw_site_exception.SetStringKey(site_settings::kDisplayName, display_name);
+    raw_site_exception.SetStringKey(site_settings::kSetting,
+                                    content_setting_string);
+    raw_site_exception.SetStringKey(site_settings::kSettingDetail,
+                                    content_settings::GetPermissionDetailString(
+                                        profile_, content_type, origin_url));
+    raw_site_exception.SetStringKey(site_settings::kSource, source_string);
+
+    exceptions.Append(std::move(raw_site_exception));
   }
 
-  ResolveJavascriptCallback(*callback_id, *exceptions);
+  ResolveJavascriptCallback(callback_id, exceptions);
 }
 
 void SiteSettingsHandler::HandleSetOriginPermissions(
     const base::ListValue* args) {
   CHECK_EQ(3U, args->GetSize());
-  std::string origin_string;
-  CHECK(args->GetString(0, &origin_string));
-  const base::ListValue* types;
-  CHECK(args->GetList(1, &types));
-  std::string value;
-  CHECK(args->GetString(2, &value));
+  std::string origin_string = args->GetList()[0].GetString();
+  const std::string* type_string = args->GetList()[1].GetIfString();
+  std::string value = args->GetList()[2].GetString();
 
   const GURL origin(origin_string);
   if (!origin.is_valid())
     return;
 
+  std::vector<ContentSettingsType> types;
+  if (type_string) {
+    types.push_back(
+        site_settings::ContentSettingsTypeFromGroupName(*type_string));
+  } else {
+    types = site_settings::GetVisiblePermissionCategoriesForOrigin(profile_,
+                                                                   origin);
+  }
+
   ContentSetting setting;
   CHECK(content_settings::ContentSettingFromString(value, &setting));
-  for (size_t i = 0; i < types->GetSize(); ++i) {
-    std::string type;
-    types->GetString(i, &type);
-
-    ContentSettingsType content_type =
-        site_settings::ContentSettingsTypeFromGroupName(type);
-    HostContentSettingsMap* map =
-        HostContentSettingsMapFactory::GetForProfile(profile_);
-
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile_);
+  for (ContentSettingsType content_type : types) {
     permissions::PermissionUmaUtil::ScopedRevocationReporter
         scoped_revocation_reporter(
             profile_, origin, origin, content_type,
@@ -1082,9 +1100,9 @@ void SiteSettingsHandler::HandleSetOriginPermissions(
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(i);
       GURL tab_url = web_contents->GetLastCommittedURL();
       if (url::IsSameOriginWith(origin, tab_url)) {
-        InfoBarService* infobar_service =
-            InfoBarService::FromWebContents(web_contents);
-        PageInfoInfoBarDelegate::Create(infobar_service);
+        infobars::ContentInfoBarManager* infobar_manager =
+            infobars::ContentInfoBarManager::FromWebContents(web_contents);
+        PageInfoInfoBarDelegate::Create(infobar_manager);
       }
     }
   }
@@ -1109,7 +1127,7 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
   if (incognito) {
     if (!profile_->HasPrimaryOTRProfile())
       return;
-    profile = profile_->GetPrimaryOTRProfile();
+    profile = profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true);
   } else {
     profile = profile_;
   }
@@ -1144,8 +1162,11 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
   }
 
   // End embargo if currently active.
-  PermissionDecisionAutoBlockerFactory::GetForProfile(profile)
-      ->RemoveEmbargoAndResetCounts(GURL(primary_pattern_string), content_type);
+  auto url = GURL(primary_pattern_string);
+  if (url.is_valid()) {
+    PermissionDecisionAutoBlockerFactory::GetForProfile(profile)
+        ->RemoveEmbargoAndResetCounts(url, content_type);
+  }
 
   content_settings::LogWebSiteSettingsPermissionChange(
       content_type, ContentSetting::CONTENT_SETTING_DEFAULT);
@@ -1174,7 +1195,7 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
   if (incognito) {
     if (!profile_->HasPrimaryOTRProfile())
       return;
-    profile = profile_->GetPrimaryOTRProfile();
+    profile = profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true);
   } else {
     profile = profile_;
   }
@@ -1188,6 +1209,15 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
       secondary_pattern_string.empty()
           ? ContentSettingsPattern::Wildcard()
           : ContentSettingsPattern::FromString(secondary_pattern_string);
+
+  // Clear any existing embargo status if the new setting isn't block.
+  if (setting != CONTENT_SETTING_BLOCK) {
+    GURL url(primary_pattern.ToString());
+    if (url.is_valid()) {
+      PermissionDecisionAutoBlockerFactory::GetForProfile(profile_)
+          ->RemoveEmbargoAndResetCounts(url, content_type);
+    }
+  }
 
   permissions::PermissionUmaUtil::ScopedRevocationReporter
       scoped_revocation_reporter(
@@ -1234,10 +1264,9 @@ void SiteSettingsHandler::HandleResetChooserExceptionForSite(
   GURL embedding_origin(embedding_origin_str);
   CHECK(embedding_origin.is_valid());
 
-  permissions::ChooserContextBase* chooser_context =
+  permissions::ObjectPermissionContextBase* chooser_context =
       chooser_type->get_context(profile_);
   chooser_context->RevokeObjectPermission(
-      url::Origin::Create(requesting_origin),
       url::Origin::Create(embedding_origin), args->GetList()[3]);
 }
 
@@ -1566,9 +1595,9 @@ void SiteSettingsHandler::HandleClearEtldPlus1DataAndCookies(
 }
 
 void SiteSettingsHandler::HandleRecordAction(const base::ListValue* args) {
-  CHECK_EQ(1U, args->GetSize());
-  int action;
-  CHECK(args->GetInteger(0, &action));
+  const auto& list = args->GetList();
+  CHECK_EQ(1U, list.size());
+  int action = list[0].GetInt();
   DCHECK_LE(action, static_cast<int>(AllSitesAction2::kMaxValue));
   DCHECK_GE(action, static_cast<int>(AllSitesAction2::kLoadPage));
 

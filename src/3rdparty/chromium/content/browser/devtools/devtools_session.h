@@ -13,8 +13,6 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/span.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/values.h"
 #include "content/browser/devtools/protocol/forward.h"
 #include "content/public/browser/devtools_agent_host_client_channel.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
@@ -64,7 +62,7 @@ class DevToolsSession : public protocol::FrontendChannel,
   void DispatchProtocolMessage(base::span<const uint8_t> message);
   void SuspendSendingMessagesToAgent();
   void ResumeSendingMessagesToAgent();
-  void ClearPendingMessages();
+  void ClearPendingMessages(bool did_crash);
 
   using HandlersMap =
       base::flat_map<std::string,

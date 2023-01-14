@@ -20,6 +20,7 @@ jumbo_static_library("performance_manager") {
     "decorators/page_load_tracker_decorator.cc",
     "decorators/page_load_tracker_decorator.h",
     "decorators/page_load_tracker_decorator_helper.cc",
+    "decorators/process_metrics_decorator.cc",
     "decorators/tab_properties_decorator.cc",
     "embedder/binders.h",
     "embedder/graph_features_helper.h",
@@ -40,6 +41,8 @@ jumbo_static_library("performance_manager") {
     "execution_context_priority/frame_audible_voter.h",
     "execution_context_priority/frame_visibility_voter.cc",
     "execution_context_priority/frame_visibility_voter.h",
+    "execution_context_priority/inherit_client_priority_voter.cc",
+    "execution_context_priority/inherit_client_priority_voter.h",
     "execution_context_priority/max_vote_aggregator.cc",
     "execution_context_priority/max_vote_aggregator.h",
     "execution_context_priority/override_vote_aggregator.cc",
@@ -111,6 +114,7 @@ jumbo_static_library("performance_manager") {
     "process_node_source.h",
     "public/decorators/page_live_state_decorator.h",
     "public/decorators/page_load_tracker_decorator_helper.h",
+    "public/decorators/process_metrics_decorator.h",
     "public/decorators/tab_properties_decorator.h",
     "public/execution_context/execution_context.h",
     "public/execution_context/execution_context_attached_data.h",
@@ -128,6 +132,7 @@ jumbo_static_library("performance_manager") {
     "public/graph/node_data_describer_registry.h",
     "public/graph/node_data_describer_util.cc",
     "public/graph/node_data_describer_util.h",
+    "public/graph/node_state.h",
     "public/graph/page_node.h",
     "public/graph/policies/background_tab_loading_policy.h",
     "public/graph/policies/tab_loading_frame_navigation_policy.h",
@@ -144,6 +149,7 @@ jumbo_static_library("performance_manager") {
     "public/render_process_host_id.h",
     "public/render_process_host_proxy.h",
     "public/v8_memory/v8_detailed_memory.h",
+    "public/v8_memory/v8_detailed_memory_any_seq.h",
     "public/v8_memory/web_memory.h",
     "public/voting/voting.h",
     "public/web_contents_proxy.h",
@@ -165,10 +171,15 @@ jumbo_static_library("performance_manager") {
     "v8_memory/v8_context_tracker_internal.cc",
     "v8_memory/v8_context_tracker_internal.h",
     "v8_memory/v8_detailed_memory.cc",
+    "v8_memory/v8_detailed_memory_any_seq.cc",
+    "v8_memory/v8_detailed_memory_decorator.cc",
+    "v8_memory/v8_detailed_memory_decorator.h",
     "v8_memory/web_memory_aggregator.cc",
     "v8_memory/web_memory_aggregator.h",
     "v8_memory/web_memory_impl.cc",
     "v8_memory/web_memory_impl.h",
+    "v8_memory/web_memory_stress_tester.cc",
+    "v8_memory/web_memory_stress_tester.h",
     "web_contents_proxy.cc",
     "web_contents_proxy_impl.cc",
     "web_contents_proxy_impl.h",
@@ -218,6 +229,10 @@ jumbo_static_library("performance_manager") {
       "public/decorators/site_data_recorder.h",
       "public/persistence/site_data/feature_usage.h",
       "public/persistence/site_data/site_data_reader.h",
+
+      # TODO(crbug.com/1225070): Consider using this policy on Android.
+      "graph/policies/bfcache_policy.cc",
+      "graph/policies/bfcache_policy.h",
     ]
     jumbo_excluded_sources = [ "decorators/site_data_recorder.cc" ]
 
@@ -245,6 +260,7 @@ source_set("unit_tests") {
     "execution_context_priority/execution_context_priority_unittest.cc",
     "execution_context_priority/frame_audible_voter_unittest.cc",
     "execution_context_priority/frame_visibility_voter_unittest.cc",
+    "execution_context_priority/inherit_client_priority_voter_unittest.cc",
     "execution_context_priority/max_vote_aggregator_unittest.cc",
     "execution_context_priority/override_vote_aggregator_unittest.cc",
     "execution_context_priority/root_vote_observer_unittest.cc",
@@ -290,6 +306,8 @@ source_set("unit_tests") {
     "test_support:test_support",
     "test_support:test_support_common",
     "//base/test:test_support",
+    "//base/util/memory_pressure:test_support",
+    "//components/services/storage/public/cpp",
     "//content/test:test_support",
     "//testing/gmock",
     "//testing/gtest",
@@ -310,6 +328,9 @@ source_set("unit_tests") {
       "persistence/site_data/site_data_writer_unittest.cc",
       "persistence/site_data/unittest_utils.cc",
       "persistence/site_data/unittest_utils.h",
+
+      # TODO(crbug.com/1225070): Consider using this policy on Android.
+      "graph/policies/bfcache_policy_unittest.cc",
     ]
   }
 }
@@ -322,6 +343,7 @@ source_set("browser_tests") {
   sources = [
     "mechanisms/tab_loading_frame_navigation_scheduler_browsertest.cc",
     "performance_manager_browsertest.cc",
+    "prerendering_browsertest.cc",
     "render_process_host_proxy_browsertest.cc",
     "v8_memory/v8_context_tracker_browsertest.cc",
   ]

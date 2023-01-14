@@ -27,8 +27,17 @@
 #include "libANGLE/angletypes.h"
 
 #if TARGET_OS_IPHONE
+#    if !defined(__IPHONE_11_0)
+#        define __IPHONE_11_0 110000
+#    endif
 #    if !defined(ANGLE_IOS_DEPLOY_TARGET)
 #        define ANGLE_IOS_DEPLOY_TARGET __IPHONE_11_0
+#    endif
+#    if !defined(__IPHONE_OS_VERSION_MAX_ALLOWED)
+#        define __IPHONE_OS_VERSION_MAX_ALLOWED __IPHONE_11_0
+#    endif
+#    if !defined(__TV_OS_VERSION_MAX_ALLOWED)
+#        define __TV_OS_VERSION_MAX_ALLOWED __IPHONE_11_0
 #    endif
 #endif
 
@@ -66,6 +75,7 @@ namespace egl
 {
 class Display;
 class Image;
+class Surface;
 }  // namespace egl
 
 #define ANGLE_GL_OBJECTS_X(PROC) \
@@ -97,6 +107,7 @@ class DisplayMtl;
 class ContextMtl;
 class FramebufferMtl;
 class BufferMtl;
+class ImageMtl;
 class VertexArrayMtl;
 class TextureMtl;
 class ProgramMtl;
@@ -128,6 +139,7 @@ constexpr size_t kDefaultAttributeSize = 4 * sizeof(float);
 // Metal limits
 constexpr uint32_t kMaxShaderBuffers     = 31;
 constexpr uint32_t kMaxShaderSamplers    = 16;
+constexpr size_t kInlineConstDataMaxSize = 4 * 1024;
 constexpr size_t kDefaultUniformsMaxSize = 4 * 1024;
 constexpr uint32_t kMaxViewports         = 1;
 
@@ -155,10 +167,16 @@ constexpr uint32_t kDefaultAttribsBindingIndex = kVboBindingIndexStart + kMaxVer
 constexpr uint32_t kDriverUniformsBindingIndex = kDefaultAttribsBindingIndex + 1;
 // Binding index for default uniforms:
 constexpr uint32_t kDefaultUniformsBindingIndex = kDefaultAttribsBindingIndex + 3;
-// Binding index for UBO's argument buffer or starting discrete slot
-constexpr uint32_t kUBOArgumentBufferBindingIndex = kDefaultUniformsBindingIndex + 1;
+// Binding index for Transform Feedback Buffers (4)
+constexpr uint32_t kTransformFeedbackBindingIndex = kDefaultUniformsBindingIndex + 1;
+// Binding index for shadow samplers' compare modes
+constexpr uint32_t kShadowSamplerCompareModesBindingIndex = kTransformFeedbackBindingIndex + 4;
+// Binding index for UBO's argument buffer
+constexpr uint32_t kUBOArgumentBufferBindingIndex = kShadowSamplerCompareModesBindingIndex + 1;
 
 constexpr uint32_t kStencilMaskAll = 0xff;  // Only 8 bits stencil is supported
+
+static const char *kUnassignedAttributeString = " __unassigned_attribute__";
 
 // This special constant is used to indicate that a particular vertex descriptor's buffer layout
 // index is unused.
@@ -172,7 +190,7 @@ constexpr size_t kOcclusionQueryResultSize = sizeof(uint64_t);
 constexpr gl::Version kMaxSupportedGLVersion = gl::Version(3, 0);
 
 // Work-around the enum is not available on macOS
-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+#if (TARGET_OS_OSX && (__MAC_OS_X_VERSION_MAX_ALLOWED < 101600)) || TARGET_OS_MACCATALYST
 constexpr MTLBlitOption kBlitOptionRowLinearPVRTC = MTLBlitOptionNone;
 #else
 constexpr MTLBlitOption kBlitOptionRowLinearPVRTC          = MTLBlitOptionRowLinearPVRTC;
@@ -218,6 +236,12 @@ template <>
 struct ImplTypeHelper<egl::Display>
 {
     using ImplType = DisplayMtl;
+};
+
+template <>
+struct ImplTypeHelper<egl::Image>
+{
+    using ImplType = ImageMtl;
 };
 
 template <typename T>

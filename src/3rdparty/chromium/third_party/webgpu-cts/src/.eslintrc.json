@@ -1,4 +1,6 @@
 {
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": { "project": "./tsconfig.json" },
   "extends": [
     "./node_modules/gts",
     "plugin:import/errors",
@@ -9,17 +11,22 @@
     "browser": true,
     "node": true
   },
-  "plugins": ["node", "ban", "import"],
+  "plugins": ["node", "ban", "import", "deprecation"],
   "rules": {
+    // Core rules
     "linebreak-style": ["warn", "unix"],
     "no-console": "warn",
     "no-undef": "off",
     "no-useless-rename": "warn",
     "object-shorthand": "warn",
-    "quotes": ["warn",
-      "single", { "avoidEscape": true, "allowTemplateLiterals": true }
-    ],
+    "quotes": ["warn", "single", { "avoidEscape": true, "allowTemplateLiterals": true }],
 
+    // Plugin: @typescript-eslint
+    "@typescript-eslint/no-inferrable-types": "off",
+    "@typescript-eslint/no-unused-vars": ["warn", { "vars": "all", "args": "none" }],
+    "@typescript-eslint/consistent-type-assertions": "warn",
+
+    // Plugin: ban
     "ban/ban": [
       "warn",
       {
@@ -27,7 +34,11 @@
         "message": "WPT disallows setTimeout; use `framework/util/timeout.js`."
       }
     ],
-    "@typescript-eslint/no-inferrable-types": "off",
+
+    // Plugin: deprecation
+    //"deprecation/deprecation": "warn",
+
+    // Plugin: import
     "import/order": [
       "warn",
       {
@@ -45,13 +56,13 @@
           {
             "target": "./src/webgpu",
             "from": "./src/common",
-            "except": ["./framework", "./tools/crawl.ts", "./constants.ts"],
+            "except": ["./framework", "./util"],
             "message": "Non-framework common/ code imported from webgpu/ suite"
           },
           {
             "target": "./src/unittests",
             "from": "./src/common",
-            "except": ["./framework", "./tools/crawl.ts", "./constants.ts"],
+            "except": ["./framework", "./util", "./internal"],
             "message": "Non-framework common/ code imported from unittests/ suite"
           },
           {

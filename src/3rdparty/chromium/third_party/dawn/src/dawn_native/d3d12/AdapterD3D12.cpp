@@ -15,27 +15,16 @@
 #include "dawn_native/d3d12/AdapterD3D12.h"
 
 #include "common/Constants.h"
+#include "common/WindowsUtils.h"
 #include "dawn_native/Instance.h"
 #include "dawn_native/d3d12/BackendD3D12.h"
 #include "dawn_native/d3d12/D3D12Error.h"
 #include "dawn_native/d3d12/DeviceD3D12.h"
 #include "dawn_native/d3d12/PlatformFunctions.h"
 
-#include <locale>
 #include <sstream>
 
 namespace dawn_native { namespace d3d12 {
-
-    // utility wrapper to adapt locale-bound facets for wstring/wbuffer convert
-    template <class Facet>
-    struct DeletableFacet : Facet {
-        template <class... Args>
-        DeletableFacet(Args&&... args) : Facet(std::forward<Args>(args)...) {
-        }
-
-        ~DeletableFacet() {
-        }
-    };
 
     Adapter::Adapter(Backend* backend, ComPtr<IDXGIAdapter3> hardwareAdapter)
         : AdapterBase(backend->GetInstance(), wgpu::BackendType::D3D12),
@@ -45,6 +34,11 @@ namespace dawn_native { namespace d3d12 {
 
     Adapter::~Adapter() {
         CleanUpDebugLayerFilters();
+    }
+
+    bool Adapter::SupportsExternalImages() const {
+        // Via dawn_native::d3d12::ExternalImageDXGI::Create
+        return true;
     }
 
     const D3D12DeviceInfo& Adapter::GetDeviceInfo() const {
@@ -61,6 +55,10 @@ namespace dawn_native { namespace d3d12 {
 
     ComPtr<ID3D12Device> Adapter::GetDevice() const {
         return mD3d12Device;
+    }
+
+    const gpu_info::D3DDriverVersion& Adapter::GetDriverVersion() const {
+        return mDriverVersion;
     }
 
     MaybeError Adapter::Initialize() {
@@ -80,6 +78,7 @@ namespace dawn_native { namespace d3d12 {
 
         mPCIInfo.deviceId = adapterDesc.DeviceId;
         mPCIInfo.vendorId = adapterDesc.VendorId;
+        mPCIInfo.name = WCharToUTF8(adapterDesc.Description);
 
         DAWN_TRY_ASSIGN(mDeviceInfo, GatherDeviceInfo(*this));
 
@@ -90,11 +89,6 @@ namespace dawn_native { namespace d3d12 {
                                                : wgpu::AdapterType::DiscreteGPU;
         }
 
-        // Get the adapter's name as a UTF8 string.
-        std::wstring_convert<DeletableFacet<std::codecvt<wchar_t, char, std::mbstate_t>>> converter(
-            "Error converting");
-        mPCIInfo.name = converter.to_bytes(adapterDesc.Description);
-
         // Convert the adapter's D3D12 driver version to a readable string like "24.21.13.9793".
         LARGE_INTEGER umdVersion;
         if (mHardwareAdapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umdVersion) !=
@@ -103,10 +97,10 @@ namespace dawn_native { namespace d3d12 {
 
             std::ostringstream o;
             o << "D3D12 driver version ";
-            o << ((encodedVersion >> 48) & 0xFFFF) << ".";
-            o << ((encodedVersion >> 32) & 0xFFFF) << ".";
-            o << ((encodedVersion >> 16) & 0xFFFF) << ".";
-            o << (encodedVersion & 0xFFFF);
+            for (size_t i = 0; i < mDriverVersion.size(); ++i) {
+                mDriverVersion[i] = (encodedVersion >> (48 - 16 * i)) & 0xFFFF;
+                o << mDriverVersion[i] << ".";
+            }
             mDriverDescription = o.str();
         }
 
@@ -119,9 +113,6 @@ namespace dawn_native { namespace d3d12 {
         mSupportedExtensions.EnableExtension(Extension::TextureCompressionBC);
         mSupportedExtensions.EnableExtension(Extension::PipelineStatisticsQuery);
         mSupportedExtensions.EnableExtension(Extension::TimestampQuery);
-        if (mDeviceInfo.supportsShaderFloat16 && GetBackend()->GetFunctions()->IsDXCAvailable()) {
-            mSupportedExtensions.EnableExtension(Extension::ShaderFloat16);
-        }
         mSupportedExtensions.EnableExtension(Extension::MultiPlanarFormats);
     }
 
@@ -206,8 +197,18 @@ namespace dawn_native { namespace d3d12 {
         if (!GetInstance()->IsBackendValidationEnabled()) {
             return;
         }
+
+        // The device may not exist if this adapter failed to initialize.
+        if (mD3d12Device == nullptr) {
+            return;
+        }
+
+        // If the debug layer is not installed, return immediately to avoid crashing the process.
         ComPtr<ID3D12InfoQueue> infoQueue;
-        ASSERT_SUCCESS(mD3d12Device.As(&infoQueue));
+        if (FAILED(mD3d12Device.As(&infoQueue))) {
+            return;
+        }
+
         infoQueue->PopRetrievalFilter();
         infoQueue->PopStorageFilter();
     }

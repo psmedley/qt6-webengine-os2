@@ -2060,7 +2060,7 @@
     FT_Var_Axis*         a;
     FT_Fixed*            c;
     FT_Var_Named_Style*  ns;
-    GX_FVar_Head         fvar_head;
+    GX_FVar_Head         fvar_head  = { 0, 0, 0, 0, 0, 0 };
     FT_Bool              usePsName  = 0;
     FT_UInt              num_instances;
     FT_UInt              num_axes;
@@ -2663,9 +2663,10 @@
     }
 
     blend->num_axis = mmvar->num_axis;
-    FT_MEM_COPY( blend->normalizedcoords,
-                 coords,
-                 num_coords * sizeof ( FT_Fixed ) );
+    if ( coords )
+      FT_MEM_COPY( blend->normalizedcoords,
+                   coords,
+                   num_coords * sizeof ( FT_Fixed ) );
 
     if ( set_design_coords )
       ft_var_to_design( face,

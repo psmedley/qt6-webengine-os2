@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/css/css_id_selector_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -49,13 +50,15 @@ const cssvalue::CSSIdSelectorValue* GetIdSelectorValue(const CSSValue* value) {
   return nullptr;
 }
 
-Element* ComputeScrollSource(Document& document, const CSSValue* value) {
+absl::optional<Element*> ComputeScrollSource(Document& document,
+                                             const CSSValue* value) {
   if (const auto* id = GetIdSelectorValue(value))
     return document.getElementById(id->Id());
   if (IsNone(value))
     return nullptr;
   DCHECK(!value || IsAuto(value));
-  return document.scrollingElement();
+  // TODO(crbug.com/1189101): Respond when the scrolling element changes.
+  return absl::nullopt;
 }
 
 Element* ComputeElementOffsetTarget(Document& document, const CSSValue* value) {
@@ -143,11 +146,11 @@ HeapVector<Member<ScrollTimelineOffset>> ComputeScrollOffsets(
   return offsets;
 }
 
-base::Optional<double> ComputeTimeRange(const CSSValue* value) {
+absl::optional<double> ComputeTimeRange(const CSSValue* value) {
   if (auto* primitive = DynamicTo<CSSPrimitiveValue>(value))
     return primitive->ComputeSeconds() * 1000.0;
   // TODO(crbug.com/1097041): Support 'auto' value.
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 class ElementReferenceObserver : public IdTargetObserver {
@@ -156,18 +159,21 @@ class ElementReferenceObserver : public IdTargetObserver {
                            const AtomicString& id,
                            CSSScrollTimeline* timeline)
       : IdTargetObserver(document->GetIdTargetObserverRegistry(), id),
+        document_(document),
         timeline_(timeline) {}
 
   void Trace(Visitor* visitor) const override {
     visitor->Trace(timeline_);
+    visitor->Trace(document_);
     IdTargetObserver::Trace(visitor);
   }
 
  private:
   void IdTargetChanged() override {
     if (timeline_)
-      timeline_->InvalidateEffectTargetStyle();
+      document_->GetStyleEngine().ScrollTimelineInvalidated(*timeline_);
   }
+  Member<Document> document_;
   WeakMember<CSSScrollTimeline> timeline_;
 };
 
@@ -203,13 +209,11 @@ HeapVector<Member<IdTargetObserver>> CreateElementReferenceObservers(
 
 }  // anonymous namespace
 
-CSSScrollTimeline::Options::Options(Element* element,
+CSSScrollTimeline::Options::Options(Document& document,
                                     StyleRuleScrollTimeline& rule)
-    : source_(ComputeScrollSource(element->GetDocument(), rule.GetSource())),
+    : source_(ComputeScrollSource(document, rule.GetSource())),
       direction_(ComputeScrollDirection(rule.GetOrientation())),
-      offsets_(ComputeScrollOffsets(element->GetDocument(),
-                                    rule.GetStart(),
-                                    rule.GetEnd())),
+      offsets_(ComputeScrollOffsets(document, rule.GetStart(), rule.GetEnd())),
       time_range_(ComputeTimeRange(rule.GetTimeRange())),
       rule_(&rule) {}
 
@@ -218,11 +222,9 @@ CSSScrollTimeline::CSSScrollTimeline(Document* document, Options&& options)
                      options.source_,
                      options.direction_,
                      std::move(options.offsets_),
-                     *options.time_range_),
+                     options.time_range_),
       rule_(options.rule_) {
-  DCHECK(options.IsValid());
   DCHECK(rule_);
-  document->GetDocumentAnimations().CacheCSSScrollTimeline(*this);
 }
 
 const AtomicString& CSSScrollTimeline::Name() const {
@@ -237,14 +239,14 @@ bool CSSScrollTimeline::Matches(const Options& options) const {
 }
 
 void CSSScrollTimeline::AnimationAttached(Animation* animation) {
-  ScrollTimeline::AnimationAttached(animation);
-  if (AttachedAnimationsCount() == 1)
+  if (!HasAnimations())
     SetObservers(CreateElementReferenceObservers(GetDocument(), rule_, this));
+  ScrollTimeline::AnimationAttached(animation);
 }
 
 void CSSScrollTimeline::AnimationDetached(Animation* animation) {
   ScrollTimeline::AnimationDetached(animation);
-  if (AttachedAnimationsCount() == 0)
+  if (!HasAnimations())
     SetObservers(HeapVector<Member<IdTargetObserver>>());
 }
 

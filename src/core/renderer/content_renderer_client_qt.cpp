@@ -260,7 +260,8 @@ void ContentRendererClientQt::PrepareErrorPage(content::RenderFrame *renderFrame
 {
     GetNavigationErrorStringsInternal(
             renderFrame, httpMethod,
-            error_page::Error::NetError((GURL)web_error.url(), web_error.reason(), net::ResolveErrorInfo(), web_error.has_copy_in_cache()),
+            error_page::Error::NetError((GURL)web_error.url(), web_error.reason(), web_error.extended_reason(),
+                                        net::ResolveErrorInfo(), web_error.has_copy_in_cache()),
             errorHtml);
 }
 
@@ -295,7 +296,7 @@ void ContentRendererClientQt::GetNavigationErrorStringsInternal(content::RenderF
                 error_page::LocalizedError::GetPageState(
                         error.reason(), error.domain(), error.url(), isPost, false,
                         error.stale_copy_in_cache(), false,
-                        RenderConfiguration::is_incognito_process(), false, false, false, locale);
+                        RenderConfiguration::is_incognito_process(), false, false, false, locale, false);
 
         resourceId = IDR_NET_ERROR_HTML;
 
@@ -487,35 +488,69 @@ static void AddExternalClearKey(std::vector<std::unique_ptr<media::KeySystemProp
 }
 
 #if BUILDFLAG(ENABLE_WIDEVINE)
-static media::SupportedCodecs GetSupportedCodecs(const std::vector<media::VideoCodec> &supported_video_codecs,
+media::SupportedCodecs GetVP9Codecs(const std::vector<media::VideoCodecProfile> &profiles)
+{
+    if (profiles.empty()) {
+        // If no profiles are specified, then all are supported.
+        return media::EME_CODEC_VP9_PROFILE0 | media::EME_CODEC_VP9_PROFILE2;
+    }
+
+    media::SupportedCodecs supported_vp9_codecs = media::EME_CODEC_NONE;
+    for (const auto& profile : profiles) {
+        switch (profile) {
+        case media::VP9PROFILE_PROFILE0:
+            supported_vp9_codecs |= media::EME_CODEC_VP9_PROFILE0;
+            break;
+        case media::VP9PROFILE_PROFILE2:
+            supported_vp9_codecs |= media::EME_CODEC_VP9_PROFILE2;
+            break;
+        default:
+            DVLOG(1) << "Unexpected " << GetCodecName(media::VideoCodec::kCodecVP9)
+                     << " profile: " << GetProfileName(profile);
+            break;
+        }
+    }
+
+    return supported_vp9_codecs;
+}
+
+static media::SupportedCodecs GetSupportedCodecs(const media::CdmCapability& capability,
                                                  bool is_secure)
 {
     media::SupportedCodecs supported_codecs = media::EME_CODEC_NONE;
 
-    // Audio codecs are always supported because the CDM only does decrypt-only
-    // for audio. The only exception is when |is_secure| is true and there's no
-    // secure video decoder available, which is a signal that secure hardware
-    // decryption is not available either.
-    // TODO(sandersd): Distinguish these from those that are directly supported,
-    // as those may offer a higher level of protection.
-    if (!supported_video_codecs.empty() || !is_secure) {
-        supported_codecs |= media::EME_CODEC_OPUS;
-        supported_codecs |= media::EME_CODEC_VORBIS;
-        supported_codecs |= media::EME_CODEC_FLAC;
+    for (const auto& codec : capability.audio_codecs) {
+        switch (codec) {
+        case media::AudioCodec::kCodecOpus:
+            supported_codecs |= media::EME_CODEC_OPUS;
+            break;
+        case media::AudioCodec::kCodecVorbis:
+            supported_codecs |= media::EME_CODEC_VORBIS;
+            break;
+        case media::AudioCodec::kCodecFLAC:
+            supported_codecs |= media::EME_CODEC_FLAC;
+            break;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-        supported_codecs |= media::EME_CODEC_AAC;
-#endif // BUILDFLAG(USE_PROPRIETARY_CODECS)
+        case media::AudioCodec::kCodecAAC:
+            supported_codecs |= media::EME_CODEC_AAC;
+            break;
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+        default:
+            DVLOG(1) << "Unexpected supported codec: " << GetCodecName(codec);
+            break;
+        }
     }
 
-    // Video codecs are determined by what was registered for the CDM.
-    for (const auto &codec : supported_video_codecs) {
-        switch (codec) {
+    for (const auto &codec : capability.video_codecs) {
+        switch (codec.first) {
         case media::VideoCodec::kCodecVP8:
             supported_codecs |= media::EME_CODEC_VP8;
             break;
         case media::VideoCodec::kCodecVP9:
-            supported_codecs |= media::EME_CODEC_VP9_PROFILE0;
-            supported_codecs |= media::EME_CODEC_VP9_PROFILE2;
+            supported_codecs |= GetVP9Codecs(codec.second);
+            break;
+        case media::VideoCodec::kCodecAV1:
+            supported_codecs |= media::EME_CODEC_AV1;
             break;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
         case media::VideoCodec::kCodecH264:
@@ -523,7 +558,7 @@ static media::SupportedCodecs GetSupportedCodecs(const std::vector<media::VideoC
             break;
 #endif // BUILDFLAG(USE_PROPRIETARY_CODECS)
         default:
-            DVLOG(1) << "Unexpected supported codec: " << GetCodecName(codec);
+            DVLOG(1) << "Unexpected supported codec: " << GetCodecName(codec.first);
             break;
         }
     }
@@ -540,11 +575,27 @@ static void AddWidevine(std::vector<std::unique_ptr<media::KeySystemProperties>>
     }
 
     // Codecs and encryption schemes.
-    auto codecs = GetSupportedCodecs(capability->video_codecs, /*is_secure=*/false);
-    const auto &encryption_schemes = capability->encryption_schemes;
-    auto hw_secure_codecs = GetSupportedCodecs(capability->hw_secure_video_codecs,
-                                               /*is_secure=*/true);
-    const auto &hw_secure_encryption_schemes = capability->hw_secure_encryption_schemes;
+    media::SupportedCodecs codecs = media::EME_CODEC_NONE;
+    media::SupportedCodecs hw_secure_codecs = media::EME_CODEC_NONE;
+    base::flat_set<media::EncryptionScheme> encryption_schemes;
+    base::flat_set<media::EncryptionScheme> hw_secure_encryption_schemes;
+    if (capability->sw_secure_capability) {
+        codecs = GetSupportedCodecs(capability->sw_secure_capability.value(), /*is_secure=*/false);
+        encryption_schemes = capability->sw_secure_capability->encryption_schemes;
+        if (!base::Contains(capability->sw_secure_capability->session_types, media::CdmSessionType::kTemporary)) {
+            DVLOG(1) << "Temporary sessions must be supported.";
+            return;
+        }
+    }
+
+    if (capability->hw_secure_capability) {
+        hw_secure_codecs = GetSupportedCodecs(capability->hw_secure_capability.value(), /*is_secure=*/true);
+        hw_secure_encryption_schemes = capability->hw_secure_capability->encryption_schemes;
+        if (!base::Contains(capability->hw_secure_capability->session_types, media::CdmSessionType::kTemporary)) {
+            DVLOG(1) << "Temporary sessions must be supported.";
+            return;
+        }
+    }
 
     // Robustness.
     using Robustness = cdm::WidevineKeySystemProperties::Robustness;
@@ -556,15 +607,7 @@ static void AddWidevine(std::vector<std::unique_ptr<media::KeySystemProperties>>
         max_video_robustness = Robustness::HW_SECURE_ALL;
     }
 
-    // Session types.
-    bool cdm_supports_temporary_session = base::Contains(capability->session_types, media::CdmSessionType::kTemporary);
-    if (!cdm_supports_temporary_session) {
-        DVLOG(1) << "Temporary session must be supported.";
-        return;
-    }
-
     auto persistent_license_support = media::EmeSessionTypeSupport::NOT_SUPPORTED;
-    auto persistent_usage_record_support = media::EmeSessionTypeSupport::NOT_SUPPORTED;
 
     // Others.
     auto persistent_state_support = media::EmeFeatureSupport::REQUESTABLE;
@@ -573,8 +616,8 @@ static void AddWidevine(std::vector<std::unique_ptr<media::KeySystemProperties>>
     concrete_key_systems->emplace_back(new cdm::WidevineKeySystemProperties(
                                            codecs, encryption_schemes, hw_secure_codecs,
                                            hw_secure_encryption_schemes, max_audio_robustness, max_video_robustness,
-                                           persistent_license_support, persistent_usage_record_support,
-                                           persistent_state_support, distinctive_identifier_support));
+                                           persistent_license_support, persistent_state_support,
+                                           distinctive_identifier_support));
 }
 #endif // BUILDFLAG(ENABLE_WIDEVINE)
 #endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)

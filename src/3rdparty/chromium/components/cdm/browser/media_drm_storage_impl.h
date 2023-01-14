@@ -11,16 +11,16 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
-#include "content/public/browser/frame_service_base.h"
+#include "content/public/browser/document_service_base.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "media/mojo/mojom/media_drm_storage.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -43,11 +43,11 @@ extern const char kMediaDrmStorage[];
 // This file is located under components/ so that it can be shared by multiple
 // content embedders (e.g. chrome and chromecast).
 class MediaDrmStorageImpl final
-    : public content::FrameServiceBase<media::mojom::MediaDrmStorage> {
+    : public content::DocumentServiceBase<media::mojom::MediaDrmStorage> {
  public:
   // When using per-origin provisioning, this is the ID for the origin.
   // If not specified, the device specific origin ID is to be used.
-  using MediaDrmOriginId = base::Optional<base::UnguessableToken>;
+  using MediaDrmOriginId = absl::optional<base::UnguessableToken>;
 
   // |success| is true if an origin ID was obtained and |origin_id| is
   // specified, false otherwise.
@@ -125,7 +125,7 @@ class MediaDrmStorageImpl final
                                RemovePersistentSessionCallback callback) final;
 
  private:
-  // |this| can only be destructed as a FrameServiceBase.
+  // |this| can only be destructed as a DocumentServiceBase.
   ~MediaDrmStorageImpl() final;
 
   // Called when |get_origin_id_cb_| asynchronously returns a origin ID as part

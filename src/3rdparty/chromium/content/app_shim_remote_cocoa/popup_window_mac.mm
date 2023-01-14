@@ -16,10 +16,10 @@
 
 @implementation RenderWidgetPopupWindow
 
-- (id)initWithContentRect:(NSRect)contentRect
-                styleMask:(NSUInteger)windowStyle
-                  backing:(NSBackingStoreType)bufferingType
-                    defer:(BOOL)deferCreation {
+- (instancetype)initWithContentRect:(NSRect)contentRect
+                          styleMask:(NSUInteger)windowStyle
+                            backing:(NSBackingStoreType)bufferingType
+                              defer:(BOOL)deferCreation {
   if (self = [super initWithContentRect:contentRect
                               styleMask:windowStyle
                                 backing:bufferingType
@@ -28,6 +28,11 @@
     [self startObservingClicks];
   }
   return self;
+}
+
+- (void)dealloc {
+  [self stopObservingClicks];
+  [super dealloc];
 }
 
 - (void)close {
@@ -83,7 +88,6 @@
 namespace remote_cocoa {
 
 PopupWindowMac::PopupWindowMac(const gfx::Rect& content_rect,
-                               bool has_shadow,
                                RenderWidgetHostViewCocoa* cocoa_view)
     : cocoa_view_(cocoa_view) {
   [cocoa_view_ setCloseOnDeactivate:YES];
@@ -94,7 +98,7 @@ PopupWindowMac::PopupWindowMac(const gfx::Rect& content_rect,
                 styleMask:NSBorderlessWindowMask
                   backing:NSBackingStoreBuffered
                     defer:NO]);
-  [popup_window_ setHasShadow:has_shadow];
+  [popup_window_ setHasShadow:YES];
   [popup_window_ setLevel:NSPopUpMenuWindowLevel];
   [popup_window_ setReleasedWhenClosed:NO];
   [popup_window_ makeKeyAndOrderFront:nil];

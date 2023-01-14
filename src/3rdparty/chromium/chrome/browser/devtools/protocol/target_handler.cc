@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/devtools_agent_host.h"
 
 namespace {
@@ -74,7 +75,7 @@ protocol::Response TargetHandler::CreateTarget(
     protocol::Maybe<bool> new_window,
     protocol::Maybe<bool> background,
     std::string* out_target_id) {
-  Profile* profile = ProfileManager::GetActiveUserProfile();
+  Profile* profile = nullptr;
   if (browser_context_id.isJust()) {
     std::string profile_id = browser_context_id.fromJust();
     profile =
@@ -83,7 +84,11 @@ protocol::Response TargetHandler::CreateTarget(
       return protocol::Response::ServerError(
           "Failed to find browser context with id " + profile_id);
     }
+  } else {
+    profile = ProfileManager::GetLastUsedProfile();
+    DCHECK(profile);
   }
+
   bool create_new_window = new_window.fromMaybe(false);
   bool create_in_background = background.fromMaybe(false);
   Browser* target_browser = nullptr;
@@ -108,9 +113,14 @@ protocol::Response TargetHandler::CreateTarget(
         "no browser is open");
   }
 
+  GURL gurl(url);
+  if (gurl.is_empty()) {
+    gurl = GURL(url::kAboutBlankURL);
+  }
+
   create_new_window = !target_browser;
   NavigateParams params = CreateNavigateParams(
-      profile, GURL(url), ui::PAGE_TRANSITION_AUTO_TOPLEVEL, create_new_window,
+      profile, gurl, ui::PAGE_TRANSITION_AUTO_TOPLEVEL, create_new_window,
       create_in_background, target_browser);
   Navigate(&params);
   if (!params.navigated_or_inserted_contents)

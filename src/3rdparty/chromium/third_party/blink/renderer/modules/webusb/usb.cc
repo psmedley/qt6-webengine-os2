@@ -10,7 +10,7 @@
 #include "services/device/public/mojom/usb_device.mojom-blink.h"
 #include "services/device/public/mojom/usb_enumeration_options.mojom-blink.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_usb_device_filter.h"
@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/webusb/usb_connection_event.h"
 #include "third_party/blink/renderer/modules/webusb/usb_device.h"
@@ -199,15 +200,17 @@ void USB::ContextDestroyed() {
 }
 
 USBDevice* USB::GetOrCreateDevice(UsbDeviceInfoPtr device_info) {
-  USBDevice* device = device_cache_.at(device_info->guid);
-  if (!device) {
-    String guid = device_info->guid;
-    mojo::PendingRemote<UsbDevice> pipe;
-    service_->GetDevice(guid, pipe.InitWithNewPipeAndPassReceiver());
-    device = MakeGarbageCollected<USBDevice>(
-        std::move(device_info), std::move(pipe), GetExecutionContext());
-    device_cache_.insert(guid, device);
+  auto it = device_cache_.find(device_info->guid);
+  if (it != device_cache_.end()) {
+    return it->value;
   }
+
+  String guid = device_info->guid;
+  mojo::PendingRemote<UsbDevice> pipe;
+  service_->GetDevice(guid, pipe.InitWithNewPipeAndPassReceiver());
+  USBDevice* device = MakeGarbageCollected<USBDevice>(
+      std::move(device_info), std::move(pipe), GetExecutionContext());
+  device_cache_.insert(guid, device);
   return device;
 }
 
@@ -247,7 +250,7 @@ void USB::OnDeviceAdded(UsbDeviceInfoPtr device_info) {
 
 void USB::OnDeviceRemoved(UsbDeviceInfoPtr device_info) {
   String guid = device_info->guid;
-  USBDevice* device = device_cache_.at(guid);
+  USBDevice* device = device_cache_.DeprecatedAtOrEmptyValue(guid);
   if (!device) {
     device = MakeGarbageCollected<USBDevice>(
         std::move(device_info), mojo::NullRemote(), GetExecutionContext());
@@ -330,7 +333,7 @@ bool USB::IsContextSupported() const {
 
 bool USB::IsFeatureEnabled(ReportOptions report_options) const {
   return GetExecutionContext()->IsFeatureEnabled(
-      mojom::blink::FeaturePolicyFeature::kUsb, report_options);
+      mojom::blink::PermissionsPolicyFeature::kUsb, report_options);
 }
 
 void USB::Trace(Visitor* visitor) const {

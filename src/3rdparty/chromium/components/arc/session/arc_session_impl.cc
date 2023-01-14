@@ -13,16 +13,15 @@
 #include <vector>
 
 #include "ash/constants/ash_switches.h"
-#include "ash/public/cpp/default_scale_factor_retriever.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/process_metrics.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
@@ -99,13 +98,6 @@ bool WaitForSocketReadable(int raw_socket_fd, int raw_cancel_fd) {
 void ApplyDalvikMemoryProfile(
     ArcSessionImpl::SystemMemoryInfoCallback system_memory_info_callback,
     StartParams* params) {
-  // Check if enabled.
-  if (!base::FeatureList::IsEnabled(arc::kUseHighMemoryDalvikProfile)) {
-    VLOG(1) << "High-memory dalvik profile is not enabled, default low-memory "
-               "is used.";
-    return;
-  }
-
   base::SystemMemoryInfoKB mem_info;
   if (!system_memory_info_callback.Run(&mem_info)) {
     LOG(ERROR) << "Failed to get system memory info";
@@ -163,11 +155,16 @@ void ApplyUsapProfile(
   }
 }
 
+void ApplyDisableDownloadProvider(StartParams* params) {
+  params->disable_download_provider =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kArcDisableDownloadProvider);
+}
+
 // Real Delegate implementation to connect Mojo.
 class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
  public:
   ArcSessionDelegateImpl(ArcBridgeService* arc_bridge_service,
-                         ash::DefaultScaleFactorRetriever* retriever,
                          version_info::Channel channel);
   ~ArcSessionDelegateImpl() override = default;
 
@@ -176,7 +173,6 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
 
   base::ScopedFD ConnectMojo(base::ScopedFD socket_fd,
                              ConnectMojoCallback callback) override;
-  void GetLcdDensity(GetLcdDensityCallback callback) override;
   void GetFreeDiskSpace(GetFreeDiskSpaceCallback callback) override;
   version_info::Channel GetChannel() override;
   std::unique_ptr<ArcClientAdapter> CreateClient() override;
@@ -201,9 +197,6 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
   // Owned by ArcServiceManager.
   ArcBridgeService* const arc_bridge_service_;
 
-  // Owned by ArcServiceLauncher.
-  ash::DefaultScaleFactorRetriever* const default_scale_factor_retriever_;
-
   const version_info::Channel channel_;
 
   // WeakPtrFactory to use callbacks.
@@ -214,10 +207,8 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
 
 ArcSessionDelegateImpl::ArcSessionDelegateImpl(
     ArcBridgeService* arc_bridge_service,
-    ash::DefaultScaleFactorRetriever* retriever,
     version_info::Channel channel)
     : arc_bridge_service_(arc_bridge_service),
-      default_scale_factor_retriever_(retriever),
       channel_(channel) {}
 
 void ArcSessionDelegateImpl::CreateSocket(CreateSocketCallback callback) {
@@ -249,15 +240,6 @@ base::ScopedFD ArcSessionDelegateImpl::ConnectMojo(
       base::BindOnce(&ArcSessionDelegateImpl::OnMojoConnected,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
   return return_fd;
-}
-
-void ArcSessionDelegateImpl::GetLcdDensity(GetLcdDensityCallback callback) {
-  default_scale_factor_retriever_->GetDefaultScaleFactor(base::BindOnce(
-      [](GetLcdDensityCallback callback, float default_scale_factor) {
-        std::move(callback).Run(
-            GetLcdDensityForDeviceScaleFactor(default_scale_factor));
-      },
-      std::move(callback)));
 }
 
 void ArcSessionDelegateImpl::GetFreeDiskSpace(
@@ -415,10 +397,8 @@ void ArcSessionDelegateImpl::OnMojoConnected(
 // static
 std::unique_ptr<ArcSessionImpl::Delegate> ArcSessionImpl::CreateDelegate(
     ArcBridgeService* arc_bridge_service,
-    ash::DefaultScaleFactorRetriever* retriever,
     version_info::Channel channel) {
-  return std::make_unique<ArcSessionDelegateImpl>(arc_bridge_service, retriever,
-                                                  channel);
+  return std::make_unique<ArcSessionDelegateImpl>(arc_bridge_service, channel);
 }
 
 ArcSessionImpl::ArcSessionImpl(
@@ -449,19 +429,6 @@ void ArcSessionImpl::StartMiniInstance() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(state_, State::NOT_STARTED);
 
-  state_ = State::WAITING_FOR_LCD_DENSITY;
-
-  VLOG(2) << "Querying the lcd density to start ARC mini instance";
-
-  delegate_->GetLcdDensity(base::BindOnce(&ArcSessionImpl::OnLcdDensity,
-                                          weak_factory_.GetWeakPtr()));
-}
-
-void ArcSessionImpl::OnLcdDensity(int32_t lcd_density) {
-  DCHECK_GT(lcd_density, 0);
-  DCHECK(state_ == State::WAITING_FOR_LCD_DENSITY);
-
-  lcd_density_ = lcd_density;
   const auto& last_reply = scheduler_configuration_manager_->GetLastReply();
   if (last_reply) {
     state_ = State::STARTING_MINI_INSTANCE;
@@ -485,6 +452,11 @@ void ArcSessionImpl::DoStartMiniInstance(size_t num_cores_disabled) {
       delegate_->GetChannel() != version_info::Channel::STABLE &&
       delegate_->GetChannel() != version_info::Channel::BETA;
   params.arc_custom_tabs_experiment = is_custom_tab_enabled;
+  params.enable_image_copy_paste_compat =
+      base::FeatureList::IsEnabled(arc::kImageCopyPasteCompatFeature);
+  params.enable_keyboard_shortcut_helper_integration =
+      base::FeatureList::IsEnabled(
+          arc::kKeyboardShortcutHelperIntegrationFeature);
   params.lcd_density = lcd_density_;
   params.num_cores_disabled = num_cores_disabled;
 
@@ -529,6 +501,7 @@ void ArcSessionImpl::DoStartMiniInstance(size_t num_cores_disabled) {
 
   ApplyDalvikMemoryProfile(system_memory_info_callback_, &params);
   ApplyUsapProfile(system_memory_info_callback_, &params);
+  ApplyDisableDownloadProvider(&params);
 
   client_->StartMiniArc(std::move(params),
                         base::BindOnce(&ArcSessionImpl::OnMiniInstanceStarted,
@@ -553,7 +526,6 @@ void ArcSessionImpl::RequestUpgrade(UpgradeParams params) {
     case State::NOT_STARTED:
       NOTREACHED();
       break;
-    case State::WAITING_FOR_LCD_DENSITY:
     case State::WAITING_FOR_NUM_CORES:
     case State::STARTING_MINI_INSTANCE:
       // OnMiniInstanceStarted() will restart a full instance.
@@ -748,7 +720,6 @@ void ArcSessionImpl::Stop() {
         scheduler_configuration_manager_->RemoveObserver(this);
       FALLTHROUGH;
     case State::NOT_STARTED:
-    case State::WAITING_FOR_LCD_DENSITY:
       // If |Stop()| is called while waiting for LCD density or CPU cores
       // information, it can directly move to stopped state.
       VLOG(1) << "ARC session is not started. state: " << state_;
@@ -788,8 +759,7 @@ void ArcSessionImpl::Stop() {
 
 void ArcSessionImpl::StopArcInstance(bool on_shutdown, bool should_backup_log) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(state_ == State::WAITING_FOR_LCD_DENSITY ||
-         state_ == State::WAITING_FOR_NUM_CORES ||
+  DCHECK(state_ == State::WAITING_FOR_NUM_CORES ||
          state_ == State::STARTING_MINI_INSTANCE ||
          state_ == State::RUNNING_MINI_INSTANCE ||
          state_ == State::STARTING_FULL_INSTANCE ||
@@ -805,7 +775,7 @@ void ArcSessionImpl::StopArcInstance(bool on_shutdown, bool should_backup_log) {
   client_->StopArcInstance(on_shutdown, should_backup_log);
 }
 
-void ArcSessionImpl::ArcInstanceStopped() {
+void ArcSessionImpl::ArcInstanceStopped(bool is_system_shutdown) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(state_, State::STARTING_MINI_INSTANCE);
   VLOG(1) << "Notified that ARC instance is stopped";
@@ -815,9 +785,9 @@ void ArcSessionImpl::ArcInstanceStopped() {
   accept_cancel_pipe_.reset();
 
   ArcStopReason reason;
-  if (stop_requested_) {
-    // If the ARC instance is stopped after its explicit request,
-    // return SHUTDOWN.
+  if (stop_requested_ || is_system_shutdown) {
+    // If the ARC instance is stopped after its explicit request or as part of
+    // system shutdown, return SHUTDOWN.
     reason = ArcStopReason::SHUTDOWN;
   } else if (insufficient_disk_space_) {
     // ARC mini container is stopped because of upgarde failure due to low
@@ -895,6 +865,16 @@ void ArcSessionImpl::SetDemoModeDelegate(
   client_->SetDemoModeDelegate(delegate);
 }
 
+void ArcSessionImpl::TrimVmMemory(TrimVmMemoryCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  client_->TrimVmMemory(std::move(callback));
+}
+
+void ArcSessionImpl::SetDefaultDeviceScaleFactor(float scale_factor) {
+  lcd_density_ = GetLcdDensityForDeviceScaleFactor(scale_factor);
+  DCHECK_GT(lcd_density_, 0);
+}
+
 void ArcSessionImpl::OnConfigurationSet(bool success,
                                         size_t num_cores_disabled) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -917,7 +897,6 @@ std::ostream& operator<<(std::ostream& os, ArcSessionImpl::State state) {
 
   switch (state) {
     MAP_STATE(NOT_STARTED);
-    MAP_STATE(WAITING_FOR_LCD_DENSITY);
     MAP_STATE(WAITING_FOR_NUM_CORES);
     MAP_STATE(STARTING_MINI_INSTANCE);
     MAP_STATE(RUNNING_MINI_INSTANCE);

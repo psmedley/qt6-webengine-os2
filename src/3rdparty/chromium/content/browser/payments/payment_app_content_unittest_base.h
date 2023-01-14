@@ -6,7 +6,6 @@
 #define CONTENT_BROWSER_PAYMENTS_PAYMENT_APP_CONTENT_UNITTEST_BASE_H_
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/macros.h"
@@ -16,6 +15,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 #include "url/gurl.h"
+
+namespace blink {
+class StorageKey;
+}  // namespace blink
 
 namespace content {
 
@@ -32,7 +35,8 @@ class PaymentAppContentUnitTestBase : public testing::Test {
   BrowserContext* browser_context();
   PaymentManager* CreatePaymentManager(const GURL& scope_url,
                                        const GURL& sw_script_url);
-  void UnregisterServiceWorker(const GURL& scope_url);
+  void UnregisterServiceWorker(const GURL& scope_url,
+                               const blink::StorageKey& key);
 
   void ResetPaymentAppInvoked() const;
   int64_t last_sw_registration_id() const;

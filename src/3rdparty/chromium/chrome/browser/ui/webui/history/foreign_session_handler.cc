@@ -261,6 +261,13 @@ void ForeignSessionHandler::OnJavascriptAllowed() {
   }
 }
 
+void ForeignSessionHandler::OnJavascriptDisallowed() {
+  // Avoid notifying Javascript listeners due to foreign session changes, which
+  // is now disallowed and would otherwise run into CHECK failures in
+  // OnForeignSessionUpdated().
+  foreign_session_updated_subscription_ = base::CallbackListSubscription();
+}
+
 void ForeignSessionHandler::OnForeignSessionUpdated() {
   FireWebUIListener("foreign-sessions-changed",
                     std::move(GetForeignSessions()));
@@ -270,7 +277,7 @@ void ForeignSessionHandler::InitializeForeignSessions() {
   initial_session_list_ = GetForeignSessions();
 }
 
-base::string16 ForeignSessionHandler::FormatSessionTime(
+std::u16string ForeignSessionHandler::FormatSessionTime(
     const base::Time& time) {
   // Return a time like "1 hour ago", "2 days ago", etc.
   base::Time now = base::Time::Now();
@@ -445,7 +452,7 @@ void ForeignSessionHandler::HandleSetForeignSessionCollapsed(
   if (is_collapsed)
     update.Get()->SetBoolean(session_tag, true);
   else
-    update.Get()->Remove(session_tag, nullptr);
+    update.Get()->RemoveKey(session_tag);
 }
 
 }  // namespace browser_sync

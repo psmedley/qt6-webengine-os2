@@ -12,6 +12,7 @@
 #include "components/autofill_assistant/browser/script_parameters.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_data.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill_assistant {
 
@@ -62,7 +63,7 @@ class Details {
 
   const std::string title() const;
   const std::string imageUrl() const;
-  const base::Optional<std::string> imageAccessibilityHint() const;
+  const absl::optional<std::string> imageAccessibilityHint() const;
   bool imageAllowClickthrough() const;
   const std::string imageDescription() const;
   const std::string imagePositiveText() const;

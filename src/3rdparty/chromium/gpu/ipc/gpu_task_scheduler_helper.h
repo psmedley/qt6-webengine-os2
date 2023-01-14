@@ -5,10 +5,16 @@
 #ifndef GPU_IPC_GPU_TASK_SCHEDULER_HELPER_H_
 #define GPU_IPC_GPU_TASK_SCHEDULER_HELPER_H_
 
+#include <vector>
+
 #include "base/callback.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/sequence_id.h"
 #include "gpu/ipc/gl_in_process_context_export.h"
+
+namespace base {
+class TimeTicks;
+}
 
 namespace viz {
 class VizProcessContextProvider;
@@ -49,12 +55,16 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GpuTaskSchedulerHelper {
   // buffer, thus no need to be called when using SkiaRenderer.
   void Initialize(CommandBufferHelper* command_buffer_helper);
 
+  using ReportingCallback =
+      base::OnceCallback<void(base::TimeTicks task_ready)>;
+
   // This is called outside of CommandBuffer and would need to flush the command
   // buffer if the CommandBufferHelper is present. CommandBuffer is a friend of
   // this class and gets a direct pointer to the internal
   // |gpu::SingleTaskSequence|.
   void ScheduleGpuTask(base::OnceClosure task,
-                       std::vector<SyncToken> sync_tokens);
+                       std::vector<SyncToken> sync_tokens,
+                       ReportingCallback report_callback = ReportingCallback());
 
   // This is only called with SkiaOutputSurface, no need to flush command buffer
   // here.

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 
 #include "base/pickle.h"
 #include "components/sessions/core/session_command.h"

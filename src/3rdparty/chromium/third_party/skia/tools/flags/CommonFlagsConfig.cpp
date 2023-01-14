@@ -5,10 +5,13 @@
  * found in the LICENSE file.
  */
 
+#include "tools/flags/CommonFlagsConfig.h"
+
 #include "include/core/SkImageInfo.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/private/SkTHash.h"
 #include "src/core/SkColorSpacePriv.h"
-#include "tools/flags/CommonFlagsConfig.h"
+#include "src/core/SkSurfacePriv.h"
 
 #include <stdlib.h>
 
@@ -38,6 +41,8 @@ static const struct {
     { "gl",                    "gpu", "api=gl" },
     { "gles",                  "gpu", "api=gles" },
     { "glesfakev2",            "gpu", "api=glesfakev2" },
+    { "gldmsaa",               "gpu", "api=gl,dmsaa=true" },
+    { "glesdmsaa",             "gpu", "api=gles,dmsaa=true" },
     { "glmsaa4",               "gpu", "api=gl,samples=4" },
     { "glmsaa8" ,              "gpu", "api=gl,samples=8" },
     { "glesmsaa4",             "gpu", "api=gles,samples=4" },
@@ -74,18 +79,28 @@ static const struct {
     { "glestestprecompile",    "gpu", "api=gles,testPrecompile=true" },
     { "glddl",                 "gpu", "api=gl,useDDLSink=true" },
     { "glooprddl",             "gpu", "api=gl,OOPRish=true" },
+    { "glreducedshaders",      "gpu", "api=gl,reducedShaders=true" },
+    { "glesreducedshaders",    "gpu", "api=gles,reducedShaders=true" },
     { "angle_d3d11_es2",       "gpu", "api=angle_d3d11_es2" },
     { "angle_d3d11_es3",       "gpu", "api=angle_d3d11_es3" },
     { "angle_d3d9_es2",        "gpu", "api=angle_d3d9_es2" },
     { "angle_d3d11_es2_msaa4", "gpu", "api=angle_d3d11_es2,samples=4" },
     { "angle_d3d11_es2_msaa8", "gpu", "api=angle_d3d11_es2,samples=8" },
+    { "angle_d3d11_es2_dmsaa", "gpu", "api=angle_d3d11_es2,dmsaa=true" },
     { "angle_d3d11_es3_msaa4", "gpu", "api=angle_d3d11_es3,samples=4" },
     { "angle_d3d11_es3_msaa8", "gpu", "api=angle_d3d11_es3,samples=8" },
+    { "angle_d3d11_es3_dmsaa", "gpu", "api=angle_d3d11_es3,dmsaa=true" },
     { "angle_gl_es2",          "gpu", "api=angle_gl_es2" },
     { "angle_gl_es3",          "gpu", "api=angle_gl_es3" },
+    { "angle_gl_es2_msaa4",    "gpu", "api=angle_gl_es2,samples=4" },
     { "angle_gl_es2_msaa8",    "gpu", "api=angle_gl_es2,samples=8" },
+    { "angle_gl_es2_dmsaa",    "gpu", "api=angle_gl_es2,dmsaa=true" },
+    { "angle_gl_es3_msaa4",    "gpu", "api=angle_gl_es3,samples=4" },
     { "angle_gl_es3_msaa8",    "gpu", "api=angle_gl_es3,samples=8" },
-    { "commandbuffer",         "gpu", "api=commandbuffer" },
+    { "angle_gl_es3_dmsaa",    "gpu", "api=angle_gl_es3,dmsaa=true" },
+    { "cmdbuffer_es2",         "gpu", "api=cmdbuffer_es2" },
+    { "cmdbuffer_es2_dmsaa",   "gpu", "api=cmdbuffer_es2,dmsaa=true" },
+    { "cmdbuffer_es3",         "gpu", "api=cmdbuffer_es3" },
     { "mock",                  "gpu", "api=mock" },
 #ifdef SK_DAWN
     { "dawn",                  "gpu", "api=dawn" },
@@ -114,6 +129,8 @@ static const struct {
     { "mtlmsaa8",              "gpu", "api=metal,samples=8" },
     { "mtlddl",                "gpu", "api=metal,useDDLSink=true" },
     { "mtlooprddl",            "gpu", "api=metal,OOPRish=true" },
+    { "mtltestprecompile",     "gpu", "api=metal,testPrecompile=true" },
+    { "mtlreducedshaders",     "gpu", "api=metal,reducedShaders=true" },
 #endif
 #ifdef SK_DIRECT3D
     { "d3d",                   "gpu", "api=direct3d" },
@@ -140,7 +157,7 @@ static const char configExtendedHelp[] =
         "Extended form: 'backend(option=value,...)'\n\n"
         "Possible backends and options:\n"
         "\n"
-        "gpu[api=string,color=string,dit=bool,samples=int]\n"
+        "gpu[api=string,color=string,dit=bool,dmsaa=bool,samples=int]\n"
         "\tapi\ttype: string\trequired\n"
         "\t    Select graphics API to use with gpu backend.\n"
         "\t    Options:\n"
@@ -176,6 +193,8 @@ static const char configExtendedHelp[] =
         "\t\tf16\t\t\tLinearly blended 16-bit floating point.\n"
         "\tdit\ttype: bool\tdefault: false.\n"
         "\t    Use device independent text.\n"
+        "\tdmsaa\ttype: bool\tdefault: false.\n"
+        "\t    Use internal MSAA to render to non-MSAA surfaces.\n"
         "\tsamples\ttype: int\tdefault: 0.\n"
         "\t    Use multisampling with N samples.\n"
         "\tstencils\ttype: bool\tdefault: true.\n"
@@ -273,8 +292,12 @@ static bool parse_option_gpu_api(const SkString&                      value,
         *outContextType = GrContextFactory::kANGLE_GL_ES3_ContextType;
         return true;
     }
-    if (value.equals("commandbuffer")) {
-        *outContextType = GrContextFactory::kCommandBuffer_ContextType;
+    if (value.equals("cmdbuffer_es2")) {
+        *outContextType = GrContextFactory::kCommandBuffer_ES2_ContextType;
+        return true;
+    }
+    if (value.equals("cmdbuffer_es3")) {
+        *outContextType = GrContextFactory::kCommandBuffer_ES3_ContextType;
         return true;
     }
     if (value.equals("mock")) {
@@ -465,7 +488,7 @@ SkCommandLineConfigGpu::SkCommandLineConfigGpu(const SkString&           tag,
                                                const SkTArray<SkString>& viaParts,
                                                ContextType               contextType,
                                                bool                      fakeGLESVersion2,
-                                               bool                      useDIText,
+                                               uint32_t                  surfaceFlags,
                                                int                       samples,
                                                SkColorType               colorType,
                                                SkAlphaType               alphaType,
@@ -476,11 +499,12 @@ SkCommandLineConfigGpu::SkCommandLineConfigGpu(const SkString&           tag,
                                                bool                      testPrecompile,
                                                bool                      useDDLSink,
                                                bool                      OOPRish,
+                                               bool                      reducedShaders,
                                                SurfType                  surfType)
         : SkCommandLineConfig(tag, SkString("gpu"), viaParts)
         , fContextType(contextType)
         , fContextOverrides(ContextOverrides::kNone)
-        , fUseDIText(useDIText)
+        , fSurfaceFlags(surfaceFlags)
         , fSamples(samples)
         , fColorType(colorType)
         , fAlphaType(alphaType)
@@ -490,12 +514,16 @@ SkCommandLineConfigGpu::SkCommandLineConfigGpu(const SkString&           tag,
         , fTestPrecompile(testPrecompile)
         , fUseDDLSink(useDDLSink)
         , fOOPRish(OOPRish)
+        , fReducedShaders(reducedShaders)
         , fSurfType(surfType) {
     if (!useStencilBuffers) {
         fContextOverrides |= ContextOverrides::kAvoidStencilBuffers;
     }
     if (fakeGLESVersion2) {
         fContextOverrides |= ContextOverrides::kFakeGLESVersionAs2;
+    }
+    if (reducedShaders) {
+        fContextOverrides |= ContextOverrides ::kReducedShaders;
     }
 }
 
@@ -505,6 +533,7 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
     // Defaults for GPU backend.
     SkCommandLineConfigGpu::ContextType contextType         = GrContextFactory::kGL_ContextType;
     bool                                useDIText           = false;
+    bool                                useDMSAA            = false;
     int                                 samples             = 1;
     SkColorType                         colorType           = kRGBA_8888_SkColorType;
     SkAlphaType                         alphaType           = kPremul_SkAlphaType;
@@ -515,6 +544,7 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
     bool                                testPrecompile      = false;
     bool                                useDDLs             = false;
     bool                                ooprish             = false;
+    bool                                reducedShaders      = false;
     bool                                fakeGLESVersion2    = false;
     SkCommandLineConfigGpu::SurfType    surfType = SkCommandLineConfigGpu::SurfType::kDefault;
 
@@ -528,6 +558,7 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
             extendedOptions.get_option_gpu_api("api", &contextType, &fakeGLESVersion2, false) &&
             extendedOptions.get_option_bool("dit", &useDIText) &&
             extendedOptions.get_option_int("samples", &samples) &&
+            extendedOptions.get_option_bool("dmsaa", &useDMSAA) &&
             extendedOptions.get_option_gpu_color("color", &colorType, &alphaType, &colorSpace) &&
             extendedOptions.get_option_bool("stencils", &useStencils) &&
             extendedOptions.get_option_bool("testThreading", &testThreading) &&
@@ -535,6 +566,7 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
             extendedOptions.get_option_bool("testPrecompile", &testPrecompile) &&
             extendedOptions.get_option_bool("useDDLSink", &useDDLs) &&
             extendedOptions.get_option_bool("OOPRish", &ooprish) &&
+            extendedOptions.get_option_bool("reducedShaders", &reducedShaders) &&
             extendedOptions.get_option_gpu_surf_type("surf", &surfType);
 
     // testing threading and the persistent cache are mutually exclusive.
@@ -542,11 +574,19 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
         return nullptr;
     }
 
+    uint32_t surfaceFlags = 0;
+    if (useDIText) {
+        surfaceFlags |= SkSurfaceProps::kUseDeviceIndependentFonts_Flag;
+    }
+    if (useDMSAA) {
+        surfaceFlags |= SkSurfaceProps::kDynamicMSAA_Flag;
+    }
+
     return new SkCommandLineConfigGpu(tag,
                                       vias,
                                       contextType,
                                       fakeGLESVersion2,
-                                      useDIText,
+                                      surfaceFlags,
                                       samples,
                                       colorType,
                                       alphaType,
@@ -557,6 +597,7 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString&           
                                       testPrecompile,
                                       useDDLs,
                                       ooprish,
+                                      reducedShaders,
                                       surfType);
 }
 

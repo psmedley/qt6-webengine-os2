@@ -22,6 +22,8 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_inline.h"
 
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
+#include "third_party/blink/renderer/core/layout/svg/layout_svg_inline_text.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_container.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_text.h"
 #include "third_party/blink/renderer/core/layout/svg/line/svg_inline_flow_box.h"
@@ -62,9 +64,41 @@ InlineFlowBox* LayoutSVGInline::CreateInlineFlowBox() {
   return box;
 }
 
+bool LayoutSVGInline::IsObjectBoundingBoxValid() const {
+  if (IsInLayoutNGInlineFormattingContext()) {
+    NGInlineCursor cursor;
+    cursor.MoveToIncludingCulledInline(*this);
+    return cursor.IsNotNull();
+  }
+  return FirstLineBox();
+}
+
+// static
+void LayoutSVGInline::ObjectBoundingBoxForCursor(NGInlineCursor& cursor,
+                                                 FloatRect& bounds) {
+  for (; cursor; cursor.MoveToNextForSameLayoutObject()) {
+    const NGFragmentItem& item = *cursor.CurrentItem();
+    if (item.Type() == NGFragmentItem::kSvgText) {
+      bounds.Unite(item.ObjectBoundingBox());
+    } else if (NGInlineCursor descendants = cursor.CursorForDescendants()) {
+      for (; descendants; descendants.MoveToNext()) {
+        const NGFragmentItem& descendant_item = *descendants.CurrentItem();
+        if (descendant_item.Type() == NGFragmentItem::kSvgText)
+          bounds.Unite(descendant_item.ObjectBoundingBox());
+      }
+    }
+  }
+}
+
 FloatRect LayoutSVGInline::ObjectBoundingBox() const {
   NOT_DESTROYED();
   FloatRect bounds;
+  if (IsInLayoutNGInlineFormattingContext()) {
+    NGInlineCursor cursor;
+    cursor.MoveToIncludingCulledInline(*this);
+    ObjectBoundingBoxForCursor(cursor, bounds);
+    return bounds;
+  }
   for (InlineFlowBox* box : *LineBoxes())
     bounds.Unite(FloatRect(box->FrameRect()));
   return bounds;
@@ -72,14 +106,14 @@ FloatRect LayoutSVGInline::ObjectBoundingBox() const {
 
 FloatRect LayoutSVGInline::StrokeBoundingBox() const {
   NOT_DESTROYED();
-  if (!FirstLineBox())
+  if (!IsObjectBoundingBoxValid())
     return FloatRect();
   return SVGLayoutSupport::ExtendTextBBoxWithStroke(*this, ObjectBoundingBox());
 }
 
 FloatRect LayoutSVGInline::VisualRectInLocalSVGCoordinates() const {
   NOT_DESTROYED();
-  if (!FirstLineBox())
+  if (!IsObjectBoundingBoxValid())
     return FloatRect();
   return SVGLayoutSupport::ComputeVisualRectForText(*this, ObjectBoundingBox());
 }
@@ -97,17 +131,23 @@ void LayoutSVGInline::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
   SVGLayoutSupport::MapLocalToAncestor(this, ancestor, transform_state, flags);
 }
 
-const LayoutObject* LayoutSVGInline::PushMappingToContainer(
-    const LayoutBoxModelObject* ancestor_to_stop_at,
-    LayoutGeometryMap& geometry_map) const {
-  NOT_DESTROYED();
-  return SVGLayoutSupport::PushMappingToContainer(this, ancestor_to_stop_at,
-                                                  geometry_map);
-}
-
 void LayoutSVGInline::AbsoluteQuads(Vector<FloatQuad>& quads,
                                     MapCoordinatesFlags mode) const {
   NOT_DESTROYED();
+  if (IsInLayoutNGInlineFormattingContext()) {
+    NGInlineCursor cursor;
+    for (cursor.MoveToIncludingCulledInline(*this); cursor;
+         cursor.MoveToNextForSameLayoutObject()) {
+      const NGFragmentItem& item = *cursor.CurrentItem();
+      if (item.Type() == NGFragmentItem::kSvgText) {
+        quads.push_back(
+            LocalToAbsoluteQuad(SVGLayoutSupport::ExtendTextBBoxWithStroke(
+                                    *this, item.ObjectBoundingBox()),
+                                mode));
+      }
+    }
+    return;
+  }
   for (InlineFlowBox* box : *LineBoxes()) {
     FloatRect box_rect(box->FrameRect());
     quads.push_back(LocalToAbsoluteQuad(

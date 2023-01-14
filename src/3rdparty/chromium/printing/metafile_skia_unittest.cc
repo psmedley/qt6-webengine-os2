@@ -12,6 +12,7 @@
 #include "printing/mojom/print.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "third_party/skia/include/core/SkTextBlob.h"
 
 namespace printing {
 
@@ -128,7 +129,7 @@ TEST(MetafileSkiaTest, TestMultiPictureDocumentTypefaces) {
     // When the stream is serialized inside FinishFrameContent(), any typeface
     // which is used on any page will be serialized only once by the first
     // page's metafile which needed it.  Any subsequent page that reuses the
-    // same typeface will rely upon |serialize_typeface_ctx| which is used by
+    // same typeface will rely upon `serialize_typeface_ctx` which is used by
     // printing::SerializeOopTypeface() to optimize away the need to resend.
     metafile.UtilizeTypefaceContext(&serialize_typeface_ctx);
 
@@ -144,15 +145,18 @@ TEST(MetafileSkiaTest, TestMultiPictureDocumentTypefaces) {
     // Mark the page with some text using multiple fonts.
     // Use the first font.
     sk_sp<SkTextBlob> text_blob1 = SkTextBlob::MakeFromString("foo", font1);
-    record->push<cc::DrawTextBlobOp>(text_blob1, 0, 0, ++node_id, flags_text);
+    record->push<cc::DrawTextBlobOp>(text_blob1, 0.0f, 0.0f, ++node_id,
+                                     flags_text);
 
     // Use the second font.
     sk_sp<SkTextBlob> text_blob2 = SkTextBlob::MakeFromString("bar", font2);
-    record->push<cc::DrawTextBlobOp>(text_blob2, 0, 0, ++node_id, flags_text);
+    record->push<cc::DrawTextBlobOp>(text_blob2, 0.0f, 0.0f, ++node_id,
+                                     flags_text);
 
     // Reuse the first font again on same page.
     sk_sp<SkTextBlob> text_blob3 = SkTextBlob::MakeFromString("bar", font2);
-    record->push<cc::DrawTextBlobOp>(text_blob3, 0, 0, ++node_id, flags_text);
+    record->push<cc::DrawTextBlobOp>(text_blob3, 0.0f, 0.0f, ++node_id,
+                                     flags_text);
 
     metafile.AppendPage(page_size, std::move(record));
     metafile.AppendSubframeInfo(content_id, base::UnguessableToken::Create(),
@@ -162,8 +166,8 @@ TEST(MetafileSkiaTest, TestMultiPictureDocumentTypefaces) {
     ASSERT_TRUE(metafile_stream);
 
     // Deserialize the stream.  Any given typeface is expected to appear only
-    // once in the stream, so the deserialization context of |typefaces| bundled
-    // with |procs| should be empty the first time through, and afterwards
+    // once in the stream, so the deserialization context of `typefaces` bundled
+    // with `procs` should be empty the first time through, and afterwards
     // there should never be more than the number of unique typefaces we used,
     // regardless of number of pages.
     EXPECT_EQ(typefaces.size(), i ? kNumTypefaces : 0);

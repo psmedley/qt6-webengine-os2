@@ -67,8 +67,11 @@
 #ifdef ANGLE_ENABLE_WINDOWS_UWP
 #    include "libANGLE/renderer/d3d/d3d11/winrt/NativeWindow11WinRT.h"
 #else
-#    include "libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.h"
 #    include "libANGLE/renderer/d3d/d3d11/win32/NativeWindow11Win32.h"
+#endif
+
+#ifdef ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW
+#    include "libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.h"
 #endif
 
 // Enable ANGLE_SKIP_DXGI_1_2_CHECK if there is not a possibility of using cross-process
@@ -426,6 +429,7 @@ Renderer11::Renderer11(egl::Display *display)
     mRenderer11DeviceCaps.supportsConstantBufferOffsets          = false;
     mRenderer11DeviceCaps.supportsVpRtIndexWriteFromVertexShader = false;
     mRenderer11DeviceCaps.supportsDXGI1_2                        = false;
+    mRenderer11DeviceCaps.allowES3OnFL10_0                       = false;
     mRenderer11DeviceCaps.B5G6R5support                          = 0;
     mRenderer11DeviceCaps.B4G4R4A4support                        = 0;
     mRenderer11DeviceCaps.B5G5R5A1support                        = 0;
@@ -1072,6 +1076,11 @@ void Renderer11::populateRenderer11DeviceCaps()
                                  &mRenderer11DeviceCaps.B5G6R5maxSamples);
     }
 
+    if (getFeatures().allowES3OnFL10_0.enabled)
+    {
+        mRenderer11DeviceCaps.allowES3OnFL10_0 = true;
+    }
+
     PopulateFormatDeviceCaps(mDevice, DXGI_FORMAT_B4G4R4A4_UNORM,
                              &mRenderer11DeviceCaps.B4G4R4A4support,
                              &mRenderer11DeviceCaps.B4G4R4A4maxSamples);
@@ -1316,7 +1325,7 @@ void Renderer11::generateDisplayExtensions(egl::DisplayExtensions *outExtensions
     // All D3D feature levels support robust resource init
     outExtensions->robustResourceInitialization = true;
 
-#if !defined(ANGLE_ENABLE_WINDOWS_UWP)
+#ifdef ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW
     // Compositor Native Window capabilies require WinVer >= 1803
     if (CompositorNativeWindow11::IsSupportedWinRelease())
     {
@@ -1377,19 +1386,28 @@ angle::Result Renderer11::finish(Context11 *context11)
 
 bool Renderer11::isValidNativeWindow(EGLNativeWindowType window) const
 {
-    static_assert(sizeof(ABI::Windows::UI::Composition::SpriteVisual *) == sizeof(HWND),
-                  "Pointer size must match Window Handle size");
-
 #if defined(ANGLE_ENABLE_WINDOWS_UWP)
-    return NativeWindow11WinRT::IsValidNativeWindow(window);
+    if (NativeWindow11WinRT::IsValidNativeWindow(window))
+    {
+        return true;
+    }
 #else
     if (NativeWindow11Win32::IsValidNativeWindow(window))
     {
         return true;
     }
-
-    return CompositorNativeWindow11::IsValidNativeWindow(window);
 #endif
+
+#ifdef ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW
+    static_assert(sizeof(ABI::Windows::UI::Composition::SpriteVisual *) == sizeof(HWND),
+                  "Pointer size must match Window Handle size");
+    if (CompositorNativeWindow11::IsValidNativeWindow(window))
+    {
+        return true;
+    }
+#endif
+
+    return false;
 }
 
 NativeWindowD3D *Renderer11::createNativeWindow(EGLNativeWindowType window,
@@ -1397,21 +1415,28 @@ NativeWindowD3D *Renderer11::createNativeWindow(EGLNativeWindowType window,
                                                 const egl::AttributeMap &attribs) const
 {
 #if defined(ANGLE_ENABLE_WINDOWS_UWP)
-    return new NativeWindow11WinRT(window, config->alphaSize > 0);
-#else
-    auto useWinUiComp = window != nullptr && !NativeWindow11Win32::IsValidNativeWindow(window);
-
-    if (useWinUiComp)
+    if (window == nullptr || NativeWindow11WinRT::IsValidNativeWindow(window))
     {
-        return new CompositorNativeWindow11(window, config->alphaSize > 0);
+        return new NativeWindow11WinRT(window, config->alphaSize > 0);
     }
-    else
+#else
+    if (window == nullptr || NativeWindow11Win32::IsValidNativeWindow(window))
     {
         return new NativeWindow11Win32(
             window, config->alphaSize > 0,
             attribs.get(EGL_DIRECT_COMPOSITION_ANGLE, EGL_FALSE) == EGL_TRUE);
     }
 #endif
+
+#ifdef ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW
+    if (CompositorNativeWindow11::IsValidNativeWindow(window))
+    {
+        return new CompositorNativeWindow11(window, config->alphaSize > 0);
+    }
+#endif
+
+    UNREACHABLE();
+    return nullptr;
 }
 
 egl::Error Renderer11::getD3DTextureInfo(const egl::Config *configuration,
@@ -1490,20 +1515,9 @@ egl::Error Renderer11::getD3DTextureInfo(const egl::Config *configuration,
         {
             return egl::EglBadParameter() << "Invalid client buffer texture plane: " << plane;
         }
+
         ASSERT(textureAngleFormat);
-
         sizedInternalFormat = textureAngleFormat->glInternalFormat;
-
-        if (attribs.contains(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE))
-        {
-            const GLenum internalFormat =
-                static_cast<GLenum>(attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE));
-            if (internalFormat != sizedInternalFormat)
-            {
-                return egl::EglBadParameter()
-                       << "Invalid client buffer internal format: " << std::hex << internalFormat;
-            }
-        }
     }
     else
     {
@@ -2119,8 +2133,6 @@ void Renderer11::releaseDeviceResources()
 // set notify to true to broadcast a message to all contexts of the device loss
 bool Renderer11::testDeviceLost()
 {
-    bool isLost = false;
-
     if (!mDevice)
     {
         return true;
@@ -2128,7 +2140,7 @@ bool Renderer11::testDeviceLost()
 
     // GetRemovedReason is used to test if the device is removed
     HRESULT result = mDevice->GetDeviceRemovedReason();
-    isLost         = d3d11::isDeviceLostError(result);
+    bool isLost    = FAILED(result);
 
     if (isLost)
     {
@@ -3281,23 +3293,27 @@ angle::Result Renderer11::copyImage(const gl::Context *context,
                               unpackPremultiplyAlpha, unpackUnmultiplyAlpha, mRenderer11DeviceCaps);
 }
 
-TextureStorage *Renderer11::createTextureStorage2D(SwapChainD3D *swapChain)
+TextureStorage *Renderer11::createTextureStorage2D(SwapChainD3D *swapChain,
+                                                   const std::string &label)
 {
     SwapChain11 *swapChain11 = GetAs<SwapChain11>(swapChain);
-    return new TextureStorage11_2D(this, swapChain11);
+    return new TextureStorage11_2D(this, swapChain11, label);
 }
 
 TextureStorage *Renderer11::createTextureStorageEGLImage(EGLImageD3D *eglImage,
-                                                         RenderTargetD3D *renderTargetD3D)
+                                                         RenderTargetD3D *renderTargetD3D,
+                                                         const std::string &label)
 {
-    return new TextureStorage11_EGLImage(this, eglImage, GetAs<RenderTarget11>(renderTargetD3D));
+    return new TextureStorage11_EGLImage(this, eglImage, GetAs<RenderTarget11>(renderTargetD3D),
+                                         label);
 }
 
 TextureStorage *Renderer11::createTextureStorageExternal(
     egl::Stream *stream,
-    const egl::Stream::GLTextureDescription &desc)
+    const egl::Stream::GLTextureDescription &desc,
+    const std::string &label)
 {
-    return new TextureStorage11_External(this, stream, desc);
+    return new TextureStorage11_External(this, stream, desc, label);
 }
 
 TextureStorage *Renderer11::createTextureStorage2D(GLenum internalformat,
@@ -3305,9 +3321,10 @@ TextureStorage *Renderer11::createTextureStorage2D(GLenum internalformat,
                                                    GLsizei width,
                                                    GLsizei height,
                                                    int levels,
+                                                   const std::string &label,
                                                    bool hintLevelZeroOnly)
 {
-    return new TextureStorage11_2D(this, internalformat, renderTarget, width, height, levels,
+    return new TextureStorage11_2D(this, internalformat, renderTarget, width, height, levels, label,
                                    hintLevelZeroOnly);
 }
 
@@ -3315,10 +3332,11 @@ TextureStorage *Renderer11::createTextureStorageCube(GLenum internalformat,
                                                      bool renderTarget,
                                                      int size,
                                                      int levels,
-                                                     bool hintLevelZeroOnly)
+                                                     bool hintLevelZeroOnly,
+                                                     const std::string &label)
 {
     return new TextureStorage11_Cube(this, internalformat, renderTarget, size, levels,
-                                     hintLevelZeroOnly);
+                                     hintLevelZeroOnly, label);
 }
 
 TextureStorage *Renderer11::createTextureStorage3D(GLenum internalformat,
@@ -3326,10 +3344,11 @@ TextureStorage *Renderer11::createTextureStorage3D(GLenum internalformat,
                                                    GLsizei width,
                                                    GLsizei height,
                                                    GLsizei depth,
-                                                   int levels)
+                                                   int levels,
+                                                   const std::string &label)
 {
-    return new TextureStorage11_3D(this, internalformat, renderTarget, width, height, depth,
-                                   levels);
+    return new TextureStorage11_3D(this, internalformat, renderTarget, width, height, depth, levels,
+                                   label);
 }
 
 TextureStorage *Renderer11::createTextureStorage2DArray(GLenum internalformat,
@@ -3337,10 +3356,11 @@ TextureStorage *Renderer11::createTextureStorage2DArray(GLenum internalformat,
                                                         GLsizei width,
                                                         GLsizei height,
                                                         GLsizei depth,
-                                                        int levels)
+                                                        int levels,
+                                                        const std::string &label)
 {
     return new TextureStorage11_2DArray(this, internalformat, renderTarget, width, height, depth,
-                                        levels);
+                                        levels, label);
 }
 
 TextureStorage *Renderer11::createTextureStorage2DMultisample(GLenum internalformat,
@@ -3348,10 +3368,11 @@ TextureStorage *Renderer11::createTextureStorage2DMultisample(GLenum internalfor
                                                               GLsizei height,
                                                               int levels,
                                                               int samples,
-                                                              bool fixedSampleLocations)
+                                                              bool fixedSampleLocations,
+                                                              const std::string &label)
 {
     return new TextureStorage11_2DMultisample(this, internalformat, width, height, levels, samples,
-                                              fixedSampleLocations);
+                                              fixedSampleLocations, label);
 }
 
 TextureStorage *Renderer11::createTextureStorage2DMultisampleArray(GLenum internalformat,
@@ -3360,10 +3381,11 @@ TextureStorage *Renderer11::createTextureStorage2DMultisampleArray(GLenum intern
                                                                    GLsizei depth,
                                                                    int levels,
                                                                    int samples,
-                                                                   bool fixedSampleLocations)
+                                                                   bool fixedSampleLocations,
+                                                                   const std::string &label)
 {
     return new TextureStorage11_2DMultisampleArray(this, internalformat, width, height, depth,
-                                                   levels, samples, fixedSampleLocations);
+                                                   levels, samples, fixedSampleLocations, label);
 }
 
 angle::Result Renderer11::readFromAttachment(const gl::Context *context,
@@ -3776,7 +3798,7 @@ angle::Result Renderer11::blitRenderbufferRect(const gl::Context *context,
 
 bool Renderer11::isES3Capable() const
 {
-    return (d3d11_gl::GetMaximumClientVersion(mRenderer11DeviceCaps.featureLevel).major > 2);
+    return (d3d11_gl::GetMaximumClientVersion(mRenderer11DeviceCaps).major > 2);
 }
 
 RendererClass Renderer11::getRendererClass() const
@@ -3999,7 +4021,7 @@ angle::Result Renderer11::getScratchMemoryBuffer(Context11 *context11,
 
 gl::Version Renderer11::getMaxSupportedESVersion() const
 {
-    return d3d11_gl::GetMaximumClientVersion(mRenderer11DeviceCaps.featureLevel);
+    return d3d11_gl::GetMaximumClientVersion(mRenderer11DeviceCaps);
 }
 
 gl::Version Renderer11::getMaxConformantESVersion() const

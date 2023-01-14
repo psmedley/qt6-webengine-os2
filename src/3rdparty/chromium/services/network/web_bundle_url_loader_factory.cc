@@ -5,8 +5,8 @@
 #include "services/network/web_bundle_url_loader_factory.h"
 
 #include "base/metrics/histogram_functions.h"
-#include "base/optional.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "components/web_package/web_bundle_parser.h"
 #include "components/web_package/web_bundle_utils.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -16,8 +16,14 @@
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/cors/cors.h"
 #include "services/network/public/cpp/cross_origin_read_blocking.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
+#include "services/network/public/mojom/http_raw_headers.mojom.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/web_bundle_chunked_buffer.h"
 #include "services/network/web_bundle_memory_quota_consumer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace network {
 
@@ -66,6 +72,10 @@ class WebBundleURLLoaderClient : public network::mojom::URLLoaderClient {
 
  private:
   // network::mojom::URLLoaderClient implementation:
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
+    wrapped_->OnReceiveEarlyHints(std::move(early_hints));
+  }
+
   void OnReceiveResponse(
       network::mojom::URLResponseHeadPtr response_head) override {
     std::string error_message;
@@ -131,6 +141,12 @@ class WebBundleURLLoaderClient : public network::mojom::URLLoaderClient {
   }
 
   void OnComplete(const network::URLLoaderCompletionStatus& status) override {
+    if (status.error_code != net::OK) {
+      if (factory_)
+        factory_->OnWebBundleFetchFailed();
+      base::UmaHistogramSparse("SubresourceWebBundles.BundleFetchErrorCode",
+                               -status.error_code);
+    }
     if (completed_)
       return;
     wrapped_->OnComplete(status);
@@ -148,12 +164,13 @@ class WebBundleURLLoaderFactory::URLLoader : public mojom::URLLoader {
   URLLoader(mojo::PendingReceiver<mojom::URLLoader> loader,
             const ResourceRequest& request,
             mojo::PendingRemote<mojom::URLLoaderClient> client,
-            const base::Optional<url::Origin>& request_initiator_origin_lock,
-            mojo::Remote<mojom::TrustedHeaderClient> trusted_header_client)
+            mojo::Remote<mojom::TrustedHeaderClient> trusted_header_client,
+            base::Time request_start_time,
+            base::TimeTicks request_start_time_ticks)
       : url_(request.url),
         request_mode_(request.mode),
         request_initiator_(request.request_initiator),
-        request_initiator_origin_lock_(request_initiator_origin_lock),
+        devtools_request_id_(request.devtools_request_id),
         receiver_(this, std::move(loader)),
         client_(std::move(client)),
         trusted_header_client_(std::move(trusted_header_client)) {
@@ -163,19 +180,22 @@ class WebBundleURLLoaderFactory::URLLoader : public mojom::URLLoader {
       trusted_header_client_.set_disconnect_handler(
           base::BindOnce(&URLLoader::OnMojoDisconnect, GetWeakPtr()));
     }
+    load_timing_.request_start_time = request_start_time;
+    load_timing_.request_start = request_start_time_ticks;
+    load_timing_.send_start = request_start_time_ticks;
+    load_timing_.send_end = request_start_time_ticks;
   }
   URLLoader(const URLLoader&) = delete;
   URLLoader& operator=(const URLLoader&) = delete;
 
   const GURL& url() const { return url_; }
   const mojom::RequestMode& request_mode() const { return request_mode_; }
-
-  const base::Optional<url::Origin>& request_initiator() const {
-    return request_initiator_;
+  const absl::optional<std::string>& devtools_request_id() const {
+    return devtools_request_id_;
   }
 
-  const base::Optional<url::Origin>& request_initiator_origin_lock() const {
-    return request_initiator_origin_lock_;
+  const absl::optional<url::Origin>& request_initiator() const {
+    return request_initiator_;
   }
 
   base::WeakPtr<URLLoader> GetWeakPtr() {
@@ -198,6 +218,11 @@ class WebBundleURLLoaderFactory::URLLoader : public mojom::URLLoader {
   void OnWriteCompleted(MojoResult result) {
     URLLoaderCompletionStatus status(
         result == MOJO_RESULT_OK ? net::OK : net::ERR_INVALID_WEB_BUNDLE);
+    status.encoded_data_length = body_length_ + headers_bytes_;
+    // For these values we use the same `body_length_` as we don't currently
+    // provide encoding in WebBundles.
+    status.encoded_body_length = body_length_;
+    status.decoded_body_length = body_length_;
     client_->OnComplete(status);
     delete this;
   }
@@ -239,13 +264,21 @@ class WebBundleURLLoaderFactory::URLLoader : public mojom::URLLoader {
     return trusted_header_client_;
   }
 
+  net::LoadTimingInfo load_timing() { return load_timing_; }
+  void SetBodyLength(uint64_t body_length) { body_length_ = body_length; }
+  void SetHeadersBytes(size_t headers_bytes) { headers_bytes_ = headers_bytes; }
+  void SetResponseStartTime(base::TimeTicks response_start_time) {
+    load_timing_.receive_headers_start = response_start_time;
+    load_timing_.receive_headers_end = response_start_time;
+  }
+
  private:
   // mojom::URLLoader
   void FollowRedirect(
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override {
+      const absl::optional<GURL>& new_url) override {
     NOTREACHED();
   }
 
@@ -261,17 +294,16 @@ class WebBundleURLLoaderFactory::URLLoader : public mojom::URLLoader {
 
   const GURL url_;
   mojom::RequestMode request_mode_;
-  base::Optional<url::Origin> request_initiator_;
-  // It is safe to hold |request_initiator_origin_lock_| in this factory because
-  // 1). |request_initiator_origin_lock| is a property of |URLLoaderFactory|
-  // (or, more accurately a property of |URLLoaderFactoryParams|), and
-  // 2) |WebURLLoader| is always associated with the same URLLoaderFactory
-  // (via URLLoaderFactory -> WebBundleManager -> WebBundleURLLoaderFactory
-  // -> WebBundleURLLoader).
-  const base::Optional<url::Origin> request_initiator_origin_lock_;
+  absl::optional<url::Origin> request_initiator_;
+  absl::optional<std::string> devtools_request_id_;
   mojo::Receiver<mojom::URLLoader> receiver_;
   mojo::Remote<mojom::URLLoaderClient> client_;
   mojo::Remote<mojom::TrustedHeaderClient> trusted_header_client_;
+  uint64_t body_length_;
+  size_t headers_bytes_;
+  net::LoadTimingInfo load_timing_;
+  base::TimeTicks request_send_time_;
+  base::TimeTicks response_start_time_;
   base::WeakPtrFactory<URLLoader> weak_ptr_factory_{this};
 };
 
@@ -444,14 +476,16 @@ class WebBundleURLLoaderFactory::BundleDataSource
 WebBundleURLLoaderFactory::WebBundleURLLoaderFactory(
     const GURL& bundle_url,
     mojo::Remote<mojom::WebBundleHandle> web_bundle_handle,
-    const base::Optional<url::Origin>& request_initiator_origin_lock,
     std::unique_ptr<WebBundleMemoryQuotaConsumer>
-        web_bundle_memory_quota_consumer)
+        web_bundle_memory_quota_consumer,
+    mojo::PendingRemote<mojom::DevToolsObserver> devtools_observer,
+    absl::optional<std::string> devtools_request_id)
     : bundle_url_(bundle_url),
       web_bundle_handle_(std::move(web_bundle_handle)),
-      request_initiator_origin_lock_(request_initiator_origin_lock),
       web_bundle_memory_quota_consumer_(
-          std::move(web_bundle_memory_quota_consumer)) {}
+          std::move(web_bundle_memory_quota_consumer)),
+      devtools_observer_(std::move(devtools_observer)),
+      devtools_request_id_(std::move(devtools_request_id)) {}
 
 WebBundleURLLoaderFactory::~WebBundleURLLoaderFactory() {
   for (auto loader : pending_loaders_) {
@@ -506,11 +540,14 @@ void WebBundleURLLoaderFactory::StartSubresourceRequest(
     mojo::PendingReceiver<mojom::URLLoader> receiver,
     const ResourceRequest& url_request,
     mojo::PendingRemote<mojom::URLLoaderClient> client,
-    mojo::Remote<mojom::TrustedHeaderClient> trusted_header_client) {
+    mojo::Remote<mojom::TrustedHeaderClient> trusted_header_client,
+    base::Time request_start_time,
+    base::TimeTicks request_start_time_ticks) {
   TRACE_EVENT0("loading", "WebBundleURLLoaderFactory::StartSubresourceRequest");
-  URLLoader* loader = new URLLoader(
-      std::move(receiver), url_request, std::move(client),
-      request_initiator_origin_lock_, std::move(trusted_header_client));
+  URLLoader* loader =
+      new URLLoader(std::move(receiver), url_request, std::move(client),
+                    std::move(trusted_header_client), request_start_time,
+                    request_start_time_ticks);
 
   // Verify that WebBundle URL associated with the request is correct.
   DCHECK(url_request.web_bundle_token_params.has_value());
@@ -534,7 +571,7 @@ void WebBundleURLLoaderFactory::StartSubresourceRequest(
 void WebBundleURLLoaderFactory::OnBeforeSendHeadersComplete(
     base::WeakPtr<URLLoader> loader,
     int result,
-    const base::Optional<net::HttpRequestHeaders>& headers) {
+    const absl::optional<net::HttpRequestHeaders>& headers) {
   if (!loader)
     return;
   QueueOrStartLoader(loader);
@@ -603,10 +640,24 @@ void WebBundleURLLoaderFactory::OnMetadataParsed(
     ReportErrorAndCancelPendingLoaders(
         SubresourceWebBundleLoadResult::kMetadataParseError,
         mojom::WebBundleErrorType::kMetadataParseError, error->message);
+    if (devtools_request_id_) {
+      devtools_observer_->OnSubresourceWebBundleMetadataError(
+          *devtools_request_id_, error->message);
+    }
     return;
   }
 
   metadata_ = std::move(metadata);
+  if (devtools_observer_ && devtools_request_id_) {
+    std::vector<GURL> urls;
+    urls.reserve(metadata_->requests.size());
+    for (const auto& item : metadata_->requests) {
+      urls.push_back(item.first);
+    }
+    devtools_observer_->OnSubresourceWebBundleMetadata(*devtools_request_id_,
+                                                       std::move(urls));
+  }
+
   if (data_completed_)
     MaybeReportLoadResult(SubresourceWebBundleLoadResult::kSuccess);
   for (auto loader : pending_loaders_)
@@ -622,12 +673,36 @@ void WebBundleURLLoaderFactory::OnResponseParsed(
   if (!loader)
     return;
   if (error) {
+    if (devtools_observer_ && loader->devtools_request_id()) {
+      devtools_observer_->OnSubresourceWebBundleInnerResponseError(
+          *loader->devtools_request_id(), loader->url(), error->message,
+          devtools_request_id_);
+    }
     web_bundle_handle_->OnWebBundleError(
         mojom::WebBundleErrorType::kResponseParseError, error->message);
     loader->OnFail(net::ERR_INVALID_WEB_BUNDLE);
     return;
   }
+  if (devtools_observer_) {
+    std::vector<network::mojom::HttpRawHeaderPairPtr> headers;
+    headers.reserve(response->response_headers.size());
+    for (const auto& it : response->response_headers) {
+      headers.push_back(
+          network::mojom::HttpRawHeaderPair::New(it.first, it.second));
+    }
+    if (loader->devtools_request_id()) {
+      devtools_observer_->OnSubresourceWebBundleInnerResponse(
+          *loader->devtools_request_id(), loader->url(), devtools_request_id_);
+    }
+  }
+  // Add an artificial "X-Content-Type-Options: "nosniff" header, which is
+  // explained at
+  // https://wicg.github.io/webpackage/draft-yasskin-wpack-bundled-exchanges.html#name-responses.
+  response->response_headers["X-Content-Type-Options"] = "nosniff";
   const std::string header_string = web_package::CreateHeaderString(response);
+
+  loader->SetResponseStartTime(base::TimeTicks::Now());
+  loader->SetHeadersBytes(header_string.size());
   if (!loader->trusted_header_client()) {
     SendResponseToLoader(loader, header_string, response->payload_offset,
                          response->payload_length);
@@ -647,8 +722,8 @@ void WebBundleURLLoaderFactory::OnHeadersReceivedComplete(
     uint64_t payload_offset,
     uint64_t payload_length,
     int result,
-    const base::Optional<std::string>& headers,
-    const base::Optional<GURL>& preserve_fragment_on_redirect_url) {
+    const absl::optional<std::string>& headers,
+    const absl::optional<GURL>& preserve_fragment_on_redirect_url) {
   if (!loader)
     return;
   SendResponseToLoader(loader, headers ? *headers : original_header,
@@ -677,15 +752,14 @@ void WebBundleURLLoaderFactory::SendResponseToLoader(
   }
 
   response_head->web_bundle_url = bundle_url_;
-  // Add an artifical "X-Content-Type-Options: "nosniff" header, which is
-  // explained at
-  // https://wicg.github.io/webpackage/draft-yasskin-wpack-bundled-exchanges.html#name-responses.
-  response_head->headers->SetHeader("X-Content-Type-Options", "nosniff");
+
+  response_head->load_timing = loader->load_timing();
+  loader->SetBodyLength(payload_length);
 
   auto corb_analyzer =
       std::make_unique<CrossOriginReadBlocking::ResponseAnalyzer>(
           loader->url(), loader->request_initiator(), *response_head,
-          loader->request_initiator_origin_lock(), loader->request_mode());
+          loader->request_mode());
 
   if (corb_analyzer->ShouldBlock()) {
     loader->BlockResponseForCorb(std::move(response_head));
@@ -731,6 +805,13 @@ void WebBundleURLLoaderFactory::MaybeReportLoadResult(
   base::UmaHistogramEnumeration("SubresourceWebBundles.LoadResult", result);
   web_bundle_handle_->OnWebBundleLoadFinished(
       result == SubresourceWebBundleLoadResult::kSuccess);
+}
+
+void WebBundleURLLoaderFactory::OnWebBundleFetchFailed() {
+  ReportErrorAndCancelPendingLoaders(
+      SubresourceWebBundleLoadResult::kWebBundleFetchFailed,
+      mojom::WebBundleErrorType::kWebBundleFetchFailed,
+      "Failed to fetch the Web Bundle.");
 }
 
 }  // namespace network

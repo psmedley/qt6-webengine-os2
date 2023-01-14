@@ -87,18 +87,6 @@ class ModuleScriptLoaderTestModulator final : public DummyModulator {
 
   ScriptState* GetScriptState() override { return script_state_; }
 
-  void SetModuleRequests(const Vector<String>& requests) {
-    requests_.clear();
-    for (const String& request : requests) {
-      requests_.emplace_back(request, TextPosition::MinimumPosition(),
-                             Vector<ImportAssertion>());
-    }
-  }
-  Vector<ModuleRequest> ModuleRequestsFromModuleRecord(
-      v8::Local<v8::Module>) override {
-    return requests_;
-  }
-
   ModuleScriptFetcher* CreateModuleScriptFetcher(
       ModuleScriptCustomFetchType custom_fetch_type,
       base::PassKey<ModuleScriptLoader> pass_key) override {
@@ -117,7 +105,6 @@ class ModuleScriptLoaderTestModulator final : public DummyModulator {
 
  private:
   Member<ScriptState> script_state_;
-  Vector<ModuleRequest> requests_;
 };
 
 void ModuleScriptLoaderTestModulator::Trace(Visitor* visitor) const {
@@ -128,10 +115,10 @@ void ModuleScriptLoaderTestModulator::Trace(Visitor* visitor) const {
 }  // namespace
 
 class ModuleScriptLoaderTest : public PageTestBase {
-  DISALLOW_COPY_AND_ASSIGN(ModuleScriptLoaderTest);
-
  public:
   ModuleScriptLoaderTest();
+  ModuleScriptLoaderTest(const ModuleScriptLoaderTest&) = delete;
+  ModuleScriptLoaderTest& operator=(const ModuleScriptLoaderTest&) = delete;
   void SetUp() override;
 
   void InitializeForDocument();
@@ -227,7 +214,7 @@ void ModuleScriptLoaderTest::InitializeForWorklet() {
       mojom::blink::V8CacheOptions::kDefault,
       MakeGarbageCollected<WorkletModuleResponsesMap>(),
       mojo::NullRemote() /* browser_interface_broker */,
-      BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
+      BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
       base::UnguessableToken::Create() /* agent_cluster_id */);
   creation_params->parent_context_token = GetFrame().GetLocalFrameToken();
   global_scope_ = MakeGarbageCollected<FakeWorkletGlobalScope>(
@@ -424,7 +411,6 @@ void ModuleScriptLoaderTest::TestInvalidSpecifier(
     TestModuleScriptLoaderClient* client) {
   auto* registry = MakeGarbageCollected<ModuleScriptLoaderRegistry>();
   KURL url("data:text/javascript,import 'invalid';export default 'grapes';");
-  GetModulator()->SetModuleRequests({"invalid"});
   ModuleScriptLoader::Fetch(
       ModuleScriptFetchRequest::CreateForTest(url, ModuleType::kJavaScript),
       fetcher_, ModuleGraphLevel::kTopLevelModuleFetch, GetModulator(),

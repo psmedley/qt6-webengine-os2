@@ -11,7 +11,7 @@ namespace mojo_base {
 
 namespace internal {
 
-BigBufferSharedMemoryRegion::BigBufferSharedMemoryRegion() = default;
+BigBufferSharedMemoryRegion::BigBufferSharedMemoryRegion() : size_(0) {}
 
 BigBufferSharedMemoryRegion::BigBufferSharedMemoryRegion(
     mojo::ScopedSharedBufferHandle buffer_handle,
@@ -41,7 +41,7 @@ namespace {
 void TryCreateSharedMemory(
     size_t size,
     BigBuffer::StorageType* storage_type,
-    base::Optional<internal::BigBufferSharedMemoryRegion>* shared_memory) {
+    absl::optional<internal::BigBufferSharedMemoryRegion>* shared_memory) {
   if (size > BigBuffer::kMaxInlineBytes) {
     auto buffer = mojo::SharedBufferHandle::Create(size);
     if (buffer.is_valid()) {

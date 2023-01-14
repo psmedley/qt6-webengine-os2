@@ -899,10 +899,10 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
   auto* host = GetDocument().getElementById("shadowHost");
   auto* slotted = GetDocument().getElementById("slotted");
 
-  ASSERT_FALSE(
-      host->DisplayLockPreventsActivation(DisplayLockActivationReason::kAny));
-  ASSERT_FALSE(slotted->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *host, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *slotted, DisplayLockActivationReason::kAny));
 
   ShadowRoot& shadow_root =
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
@@ -912,12 +912,12 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
   UpdateAllLifecyclePhasesForTest();
 
   auto* container = shadow_root.getElementById("container");
-  EXPECT_FALSE(
-      host->DisplayLockPreventsActivation(DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(container->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(slotted->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *host, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *container, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *slotted, DisplayLockActivationReason::kAny));
 
   LockElement(*container, false);
 
@@ -927,12 +927,13 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
                 .GetDisplayLockDocumentState()
                 .DisplayLockBlockingAllActivationCount(),
             1);
-  EXPECT_FALSE(
-      host->DisplayLockPreventsActivation(DisplayLockActivationReason::kAny));
-  EXPECT_TRUE(container->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
-  EXPECT_TRUE(slotted->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *host, DisplayLockActivationReason::kAny));
+  // The container itself is locked but that doesn't mean it should be ignored.
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *container, DisplayLockActivationReason::kAny));
+  ASSERT_TRUE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *slotted, DisplayLockActivationReason::kAny));
 
   // Ensure that we resolve the acquire callback, thus finishing the acquire
   // step.
@@ -946,12 +947,12 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
                 .GetDisplayLockDocumentState()
                 .DisplayLockBlockingAllActivationCount(),
             0);
-  EXPECT_FALSE(
-      host->DisplayLockPreventsActivation(DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(container->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(slotted->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *host, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *container, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *slotted, DisplayLockActivationReason::kAny));
 
   UpdateAllLifecyclePhasesForTest();
 
@@ -961,20 +962,21 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
                 .GetDisplayLockDocumentState()
                 .DisplayLockBlockingAllActivationCount(),
             0);
-  EXPECT_FALSE(
-      host->DisplayLockPreventsActivation(DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(container->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(slotted->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *host, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *container, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *slotted, DisplayLockActivationReason::kAny));
 
   SetHtmlInnerHTML(R"HTML(
     <body>
     <div id="nonviewport" style="content-visibility: hidden-matchable">
+      <div id="nonviewport-child"></div>
     </div>
     </body>
   )HTML");
-  auto* non_viewport = GetDocument().getElementById("nonviewport");
+  auto* non_viewport = GetDocument().getElementById("nonviewport-child");
 
   EXPECT_EQ(
       GetDocument().GetDisplayLockDocumentState().LockedDisplayLockCount(), 1);
@@ -983,12 +985,12 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
                 .DisplayLockBlockingAllActivationCount(),
             0);
 
-  EXPECT_FALSE(non_viewport->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kAny));
-  EXPECT_FALSE(non_viewport->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kFindInPage));
-  EXPECT_TRUE(non_viewport->DisplayLockPreventsActivation(
-      DisplayLockActivationReason::kUserFocus));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *non_viewport, DisplayLockActivationReason::kAny));
+  ASSERT_FALSE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *non_viewport, DisplayLockActivationReason::kFindInPage));
+  ASSERT_TRUE(DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
+      *non_viewport, DisplayLockActivationReason::kUserFocus));
 }
 
 TEST_F(DisplayLockContextTest,
@@ -3284,6 +3286,61 @@ TEST_F(DisplayLockContextRenderingTest, FirstAutoFramePaintsInViewport) {
   EXPECT_FLOAT_EQ(hidden_rect->height(), 200);
 }
 
+TEST_F(DisplayLockContextRenderingTest,
+       HadIntersectionNotificationsResetsWhenConnected) {
+  SetHtmlInnerHTML(R"HTML(
+    <style>
+      .auto { content-visibility: auto; }
+    </style>
+    <div id=target class=auto></div>
+  )HTML");
+
+  auto* element = GetDocument().getElementById("target");
+  auto* context = element->GetDisplayLockContext();
+  ASSERT_TRUE(context);
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(context->HadAnyViewportIntersectionNotifications());
+
+  element->remove();
+  GetDocument().body()->AppendChild(element);
+
+  EXPECT_FALSE(context->HadAnyViewportIntersectionNotifications());
+
+  UpdateAllLifecyclePhasesForTest();
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(context->HadAnyViewportIntersectionNotifications());
+}
+
+TEST_F(DisplayLockContextRenderingTest, LocalFrameGraphicsUpdateForced) {
+  SetHtmlInnerHTML(R"HTML(
+    <iframe id="frame"></iframe>
+  )HTML");
+  SetChildFrameHTML(R"HTML(
+    <style>
+      .cv { content-visibility: hidden; }
+      div {
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id=target class=cv></target>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* target = ChildDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  ASSERT_TRUE(target->GetDisplayLockContext());
+
+  target->GetDisplayLockContext()->NotifyForcedGraphicsLayerUpdateBlocked();
+  target->classList().Remove("cv");
+
+  // This should not crash.
+  UpdateAllLifecyclePhasesForTest();
+}
+
 class DisplayLockContextLegacyRenderingTest
     : public RenderingTest,
       private ScopedCSSContentVisibilityHiddenMatchableForTest,
@@ -3405,7 +3462,8 @@ TEST_F(DisplayLockContextTest, PrintingUnlocksAutoLocks) {
 
   {
     // Create a paint preview scope.
-    Document::PaintPreviewScope scope(GetDocument());
+    Document::PaintPreviewScope scope(GetDocument(),
+                                      Document::kPaintingPreview);
     UpdateAllLifecyclePhasesForTest();
 
     EXPECT_FALSE(target->GetDisplayLockContext()->IsLocked());

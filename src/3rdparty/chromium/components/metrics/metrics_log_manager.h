@@ -8,8 +8,6 @@
 #include <stddef.h>
 
 #include <memory>
-#include <string>
-#include <vector>
 
 #include "base/macros.h"
 #include "components/metrics/metrics_log.h"

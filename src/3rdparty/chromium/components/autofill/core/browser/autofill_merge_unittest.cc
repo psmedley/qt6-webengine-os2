@@ -18,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_driven_test.h"
@@ -102,12 +103,11 @@ std::string SerializeProfiles(const std::vector<AutofillProfile*>& profiles) {
     result += kProfileSeparator;
     result += "\n";
     for (const ServerFieldType& type : kProfileFieldTypes) {
-      base::string16 value = profiles[i]->GetRawInfo(type);
+      std::u16string value = profiles[i]->GetRawInfo(type);
       result += AutofillType::ServerFieldTypeToString(type);
       result += kFieldSeparator;
       if (!value.empty()) {
-        base::ReplaceFirstSubstringAfterOffset(
-            &value, 0, base::ASCIIToUTF16("\\n"), base::ASCIIToUTF16("\n"));
+        base::ReplaceFirstSubstringAfterOffset(&value, 0, u"\\n", u"\n");
         result += " ";
         result += base::UTF16ToUTF8(value);
       }
@@ -207,13 +207,9 @@ class AutofillMergeTest : public DataDrivenTest,
 AutofillMergeTest::AutofillMergeTest() : DataDrivenTest(GetTestDataDir()) {
   CountryNames::SetLocaleString("en-US");
   for (size_t i = NO_SERVER_DATA; i < MAX_VALID_FIELD_TYPE; ++i) {
-    // Some ServerFieldTypes are deprecated and removed from the enum
-    // definition.
-    if ((i >= 15 && i <= 19) || (i >= 25 && i <= 29) || (i >= 44 && i <= 50) ||
-        (i == 94)) {
+    ServerFieldType field_type = ToSafeServerFieldType(i, MAX_VALID_FIELD_TYPE);
+    if (field_type == MAX_VALID_FIELD_TYPE)
       continue;
-    }
-    ServerFieldType field_type = static_cast<ServerFieldType>(i);
     string_to_field_type_map_[AutofillType::ServerFieldTypeToString(
         field_type)] = field_type;
   }
@@ -244,7 +240,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
 
   // Create a test form.
   FormData form;
-  form.name = base::ASCIIToUTF16("MyTestForm");
+  form.name = u"MyTestForm";
   form.url = GURL("https://www.example.com/origin.html");
   form.action = GURL("https://www.example.com/action.html");
 
@@ -258,14 +254,13 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
       size_t separator_pos = line.find(kFieldSeparator);
       ASSERT_NE(std::string::npos, separator_pos)
           << "Wrong format for separator on line " << i;
-      base::string16 field_type =
+      std::u16string field_type =
           base::UTF8ToUTF16(line.substr(0, separator_pos));
       do {
         ++separator_pos;
       } while (separator_pos < line.size() && line[separator_pos] == ' ');
-      base::string16 value = base::UTF8ToUTF16(line.substr(separator_pos));
-      base::ReplaceFirstSubstringAfterOffset(
-          &value, 0, base::ASCIIToUTF16("\\n"), base::ASCIIToUTF16("\n"));
+      std::u16string value = base::UTF8ToUTF16(line.substr(separator_pos));
+      base::ReplaceFirstSubstringAfterOffset(&value, 0, u"\\n", u"\n");
 
       FormFieldData field;
       field.label = field_type;
@@ -294,7 +289,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
 
       // Import the profile.
       std::unique_ptr<CreditCard> imported_credit_card;
-      base::Optional<std::string> unused_imported_upi_id;
+      absl::optional<std::string> unused_imported_upi_id;
       form_data_importer_->ImportFormData(form_structure,
                                           true,  // address autofill enabled,
                                           true,  // credit card autofill enabled

@@ -52,7 +52,7 @@ MediaKeyboardHookWinImpl::MediaKeyboardHookWinImpl(
     KeyEventCallback callback,
     bool enable_hook_registration)
     : KeyboardHookWinBase(
-          base::Optional<base::flat_set<DomCode>>(
+          absl::optional<base::flat_set<DomCode>>(
               {DomCode::MEDIA_PLAY_PAUSE, DomCode::MEDIA_STOP,
                DomCode::MEDIA_TRACK_NEXT, DomCode::MEDIA_TRACK_PREVIOUS}),
           std::move(callback),
@@ -91,8 +91,8 @@ bool MediaKeyboardHookWinImpl::ProcessKeyEventMessage(WPARAM w_param,
     return false;
 
   bool is_repeat = false;
-  MSG msg = {nullptr, w_param, vk, GetLParamFromScanCode(scan_code),
-             time_stamp};
+  MSG msg = {nullptr, static_cast<UINT>(w_param), vk,
+             GetLParamFromScanCode(scan_code), time_stamp};
   EventType event_type = EventTypeFromMSG(msg);
   if (event_type == ET_KEY_PRESSED) {
     is_repeat = (last_key_down_ == vk);

@@ -49,7 +49,6 @@
 #include "third_party/blink/renderer/platform/loader/testing/web_url_loader_factory_with_mock.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -70,23 +69,23 @@ class DummyLocalFrameClient : public EmptyLocalFrameClient {
 
 DummyPageHolder::DummyPageHolder(
     const IntSize& initial_view_size,
-    Page::PageClients* page_clients_argument,
+    ChromeClient* chrome_client,
     LocalFrameClient* local_frame_client,
     base::OnceCallback<void(Settings&)> setting_overrider,
     const base::TickClock* clock)
     : enable_mock_scrollbars_(true),
       agent_group_scheduler_(
           Thread::MainThread()->Scheduler()->CreateAgentGroupScheduler()) {
-  Page::PageClients page_clients;
-  if (!page_clients_argument)
-    FillWithEmptyClients(page_clients);
-  else
-    page_clients.chrome_client = page_clients_argument->chrome_client;
-  page_ = Page::CreateNonOrdinary(page_clients, *agent_group_scheduler_);
+  if (!chrome_client)
+    chrome_client = &GetStaticEmptyChromeClientInstance();
+  page_ = Page::CreateNonOrdinary(*chrome_client, *agent_group_scheduler_);
   Settings& settings = page_->GetSettings();
   if (setting_overrider)
     std::move(setting_overrider).Run(settings);
 
+  // DummyPageHolder doesn't provide a browser interface, so code caches cannot
+  // be fetched. If testing for code caches provide a mock code cache host.
+  DocumentLoader::DisableCodeCacheForTesting();
   local_frame_client_ = local_frame_client;
   if (!local_frame_client_)
     local_frame_client_ = MakeGarbageCollected<DummyLocalFrameClient>();
@@ -98,13 +97,14 @@ DummyPageHolder::DummyPageHolder(
       /* Frame* previous_sibling */ nullptr,
       FrameInsertType::kInsertInConstructor, LocalFrameToken(),
       /* WindowAgentFactory* */ nullptr,
-      /* InterfaceRegistry* */ nullptr, /* policy_container */ nullptr, clock);
+      /* InterfaceRegistry* */ nullptr, clock);
   frame_->SetView(
       MakeGarbageCollected<LocalFrameView>(*frame_, initial_view_size));
   frame_->View()->GetPage()->GetVisualViewport().SetSize(initial_view_size);
-  frame_->Init(nullptr);
+  frame_->Init(/*opener=*/nullptr, /*policy_container=*/nullptr);
 
-  CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(), nullptr);
+  CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(),
+                                                      base::EmptyString());
 }
 
 DummyPageHolder::~DummyPageHolder() {

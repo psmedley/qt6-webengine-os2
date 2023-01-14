@@ -43,7 +43,7 @@ class SESSIONS_EXPORT CommandStorageManager {
   // with consumers building the path (similar to weblayer). Remove in
   // approximately a year (1/2022), when we shouldn't need to worry too much
   // about migrating older data.
-  enum SessionType { kSessionRestore, kTabRestore, kOther };
+  enum SessionType { kAppRestore, kSessionRestore, kTabRestore, kOther };
 
   // Creates a new CommandStorageManager. After creation you need to invoke
   // Init(). `delegate` is not owned by this and must outlive this. If
@@ -54,13 +54,10 @@ class SESSIONS_EXPORT CommandStorageManager {
   // `kOther`, then it is a path to a directory. The actual file name used
   // depends upon the type. Once SessionType can be removed, this logic can
   // standardize on that of `kOther`.
-  //
-  // See CommandStorageBackend for details on `use_marker`.
   CommandStorageManager(
       SessionType type,
       const base::FilePath& path,
       CommandStorageManagerDelegate* delegate,
-      bool use_marker = false,
       bool enable_crypto = false,
       const std::vector<uint8_t>& decryption_key = {},
       scoped_refptr<base::SequencedTaskRunner> backend_task_runner = nullptr);
@@ -151,7 +148,7 @@ class SESSIONS_EXPORT CommandStorageManager {
 
   // Whether the backend file should be recreated the next time we send
   // over the commands.
-  bool pending_reset_;
+  bool pending_reset_ = true;
 
   // The number of commands sent to the backend before doing a reset.
   int commands_since_reset_ = 0;

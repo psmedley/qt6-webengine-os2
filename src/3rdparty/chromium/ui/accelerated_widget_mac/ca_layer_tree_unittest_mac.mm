@@ -58,10 +58,10 @@ scoped_refptr<gl::GLImageIOSurface> CreateGLImage(const gfx::Size& size,
     base::ScopedCFTypeRef<CVPixelBufferRef> cv_pixel_buffer;
     CVPixelBufferCreateWithIOSurface(nullptr, io_surface, nullptr,
                                      cv_pixel_buffer.InitializeInto());
-    gl_image->InitializeWithCVPixelBuffer(cv_pixel_buffer,
+    gl_image->InitializeWithCVPixelBuffer(cv_pixel_buffer, 0,
                                           gfx::GenericSharedMemoryId(), format);
   } else {
-    gl_image->Initialize(io_surface, gfx::GenericSharedMemoryId(), format);
+    gl_image->Initialize(io_surface, 0, gfx::GenericSharedMemoryId(), format);
   }
   return gl_image;
 }
@@ -73,7 +73,8 @@ bool ScheduleCALayer(ui::CARendererLayerTree* tree,
       properties->rounded_corner_bounds, properties->sorting_context_id,
       properties->transform, properties->gl_image.get(),
       properties->contents_rect, properties->rect, properties->background_color,
-      properties->edge_aa_mask, properties->opacity, properties->filter));
+      properties->edge_aa_mask, properties->opacity, properties->filter,
+      gfx::ProtectedVideoType::kClear));
 }
 
 void UpdateCALayerTree(std::unique_ptr<ui::CARendererLayerTree>& ca_layer_tree,

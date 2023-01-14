@@ -14,7 +14,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/strings/string16.h"
 #include "base/test/mock_log.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
@@ -30,7 +29,6 @@
 #include "content/public/browser/browser_or_resource_context.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
@@ -40,8 +38,10 @@
 #include "content/public/common/url_utils.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_utils.h"
+#include "content/test/storage_partition_test_helpers.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "content/test/test_render_view_host.h"
@@ -63,8 +63,11 @@ bool DoesURLRequireDedicatedProcess(const IsolationContext& isolation_context,
 SiteInfo CreateSimpleSiteInfo(const GURL& process_lock_url,
                               bool is_origin_keyed) {
   return SiteInfo(GURL("https://www.foo.com"), process_lock_url,
-                  is_origin_keyed,
-                  CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+                  is_origin_keyed, CreateStoragePartitionConfigForTesting(),
+                  WebExposedIsolationInfo::CreateNonIsolated(),
+                  false /* is_guest */,
+                  false /* does_site_request_dedicated_process_for_coop */,
+                  false /* is_jit_disabled */);
 }
 
 }  // namespace
@@ -74,19 +77,6 @@ const char kCustomStandardScheme[] = "custom-standard";
 
 class SiteInstanceTestBrowserClient : public TestContentBrowserClient {
  public:
-  SiteInstanceTestBrowserClient()
-      : privileged_process_id_(-1),
-        site_instance_delete_count_(0),
-        browsing_instance_delete_count_(0) {
-    WebUIControllerFactory::RegisterFactory(
-        ContentWebUIControllerFactory::GetInstance());
-  }
-
-  ~SiteInstanceTestBrowserClient() override {
-    WebUIControllerFactory::UnregisterFactoryForTesting(
-        ContentWebUIControllerFactory::GetInstance());
-  }
-
   bool IsSuitableHost(RenderProcessHost* process_host,
                       const GURL& site_url) override {
     return (privileged_process_id_ == process_host->GetID()) ==
@@ -119,10 +109,13 @@ class SiteInstanceTestBrowserClient : public TestContentBrowserClient {
   }
 
  private:
-  int privileged_process_id_;
+  int privileged_process_id_ = -1;
 
-  int site_instance_delete_count_;
-  int browsing_instance_delete_count_;
+  int site_instance_delete_count_ = 0;
+  int browsing_instance_delete_count_ = 0;
+
+  ScopedWebUIControllerFactoryRegistration factory_registration_{
+      ContentWebUIControllerFactory::GetInstance()};
 };
 
 class SiteInstanceTest : public testing::Test {
@@ -134,10 +127,8 @@ class SiteInstanceTest : public testing::Test {
 
   GURL GetSiteForURL(const IsolationContext& isolation_context,
                      const GURL& url) {
-    return SiteInfo::Create(
-               isolation_context,
-               UrlInfo(url, false /* origin_requests_isolation */),
-               CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated())
+    return SiteInfo::Create(isolation_context, UrlInfo(UrlInfoInit(url)),
+                            WebExposedIsolationInfo::CreateNonIsolated())
         .site_url();
   }
 
@@ -145,6 +136,7 @@ class SiteInstanceTest : public testing::Test {
     old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
     RenderProcessHostImpl::set_render_process_host_factory_for_testing(
         &rph_factory_);
+    SiteIsolationPolicy::DisableFlagCachingForTesting();
   }
 
   void TearDown() override {
@@ -206,11 +198,10 @@ class SiteInstanceTest : public testing::Test {
   static bool IsSameSite(BrowserContext* context,
                          const GURL& url1,
                          const GURL& url2) {
-    return SiteInstanceImpl::IsSameSite(
-        IsolationContext(context),
-        UrlInfo(url1, false /* origin_requests_isolation */),
-        UrlInfo(url2, false /* origin_requests_isolation */),
-        /*should_compare_effective_urls=*/true);
+    return SiteInstanceImpl::IsSameSite(IsolationContext(context),
+                                        UrlInfo(UrlInfoInit(url1)),
+                                        UrlInfo(UrlInfoInit(url2)),
+                                        /*should_compare_effective_urls=*/true);
   }
 
  private:
@@ -243,22 +234,62 @@ TEST_F(SiteInstanceTest, SiteInfoAsContainerKey) {
   auto site_info_4 = CreateSimpleSiteInfo(GURL(), false /* is_origin_keyed */);
   auto site_info_4ok = CreateSimpleSiteInfo(GURL(), true /* is_origin_keyed */);
 
+  // Test IsSamePrincipalWith.
+  EXPECT_TRUE(site_info_1.IsSamePrincipalWith(site_info_1));
+  EXPECT_FALSE(site_info_1.IsSamePrincipalWith(site_info_1ok));
+  EXPECT_FALSE(site_info_1.IsSamePrincipalWith(site_info_2));
+  EXPECT_FALSE(site_info_1.IsSamePrincipalWith(site_info_3));
+  EXPECT_FALSE(site_info_1.IsSamePrincipalWith(site_info_4));
+  EXPECT_TRUE(site_info_2.IsSamePrincipalWith(site_info_2));
+  EXPECT_FALSE(site_info_2.IsSamePrincipalWith(site_info_2ok));
+  EXPECT_FALSE(site_info_2.IsSamePrincipalWith(site_info_3));
+  EXPECT_FALSE(site_info_2.IsSamePrincipalWith(site_info_4));
+  EXPECT_TRUE(site_info_3.IsSamePrincipalWith(site_info_3));
+  EXPECT_FALSE(site_info_3.IsSamePrincipalWith(site_info_3ok));
+  EXPECT_FALSE(site_info_3.IsSamePrincipalWith(site_info_4));
+  EXPECT_TRUE(site_info_4.IsSamePrincipalWith(site_info_4));
+  EXPECT_FALSE(site_info_4.IsSamePrincipalWith(site_info_4ok));
+
   // Test SiteInfoOperators.
-  // Use EXPECT_TRUE and == below to avoid need to define SiteInfo::operator<<.
-  EXPECT_TRUE(site_info_1 == site_info_1);
-  EXPECT_FALSE(site_info_1 == site_info_2);
-  EXPECT_FALSE(site_info_1 == site_info_3);
-  EXPECT_FALSE(site_info_1 == site_info_4);
-  EXPECT_TRUE(site_info_2 == site_info_2);
-  EXPECT_FALSE(site_info_2 == site_info_3);
-  EXPECT_FALSE(site_info_2 == site_info_4);
-  EXPECT_TRUE(site_info_3 == site_info_3);
-  EXPECT_FALSE(site_info_3 == site_info_4);
-  EXPECT_TRUE(site_info_4 == site_info_4);
+  EXPECT_EQ(site_info_1, site_info_1);
+  EXPECT_NE(site_info_1, site_info_2);
+  EXPECT_NE(site_info_1, site_info_3);
+  EXPECT_NE(site_info_1, site_info_4);
+  EXPECT_EQ(site_info_2, site_info_2);
+  EXPECT_NE(site_info_2, site_info_3);
+  EXPECT_NE(site_info_2, site_info_4);
+  EXPECT_EQ(site_info_3, site_info_3);
+  EXPECT_NE(site_info_3, site_info_4);
+  EXPECT_EQ(site_info_4, site_info_4);
 
   EXPECT_TRUE(site_info_1 < site_info_3);  // 'f' before 's'/
   EXPECT_TRUE(site_info_3 < site_info_2);  // 's' before 'w'/
   EXPECT_TRUE(site_info_4 < site_info_1);  // Empty string first.
+
+  // Check that SiteInfos with differing values of
+  // `does_site_request_dedicated_process_for_coop_` are still considered
+  // same-principal.
+  auto site_info_1_with_isolation_request = SiteInfo(
+      GURL("https://www.foo.com") /* site_url */,
+      GURL("https://foo.com") /* process_lock_url */,
+      false /* is_origin_keyed */, CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated(), false /* is_guest */,
+      true /* does_site_request_dedicated_process_for_coop */,
+      false /* is_jit_disabled */);
+  EXPECT_TRUE(
+      site_info_1.IsSamePrincipalWith(site_info_1_with_isolation_request));
+  EXPECT_EQ(site_info_1, site_info_1_with_isolation_request);
+
+  // Check that SiteInfos with differing values of `is_jit_disabled`` are
+  // considered not same-principal.
+  auto site_info_1_with_jit_disabled = SiteInfo(
+      GURL("https://www.foo.com") /* site_url */,
+      GURL("https://foo.com") /* process_lock_url */,
+      false /* is_origin_keyed */, CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated(), false /* is_guest */,
+      false /* does_site_request_dedicated_process_for_coop */,
+      true /* is_jit_disabled */);
+  EXPECT_FALSE(site_info_1.IsSamePrincipalWith(site_info_1_with_jit_disabled));
 
   {
     std::map<SiteInfo, int> test_map;
@@ -284,6 +315,14 @@ TEST_F(SiteInstanceTest, SiteInfoAsContainerKey) {
     auto it4 = test_map.find(site_info_4);
     EXPECT_NE(it4, test_map.end());
     EXPECT_EQ(4, it4->second);
+
+    // Check that `site_info_1` and `site_info_1_with_isolation_request`
+    // collapse into the same key.
+    test_map[site_info_1_with_isolation_request] = 5;
+    EXPECT_EQ(3u, test_map.size());
+    it1 = test_map.find(site_info_1);
+    EXPECT_NE(it1, test_map.end());
+    EXPECT_EQ(5, it1->second);
   }
 
   {
@@ -338,11 +377,9 @@ TEST_F(SiteInstanceTest, SiteInfoAsContainerKey) {
     EXPECT_EQ(test_set.end(), itS3);
     EXPECT_NE(test_set.end(), itS4);
 
-    // Use EXPECT_TRUE and == below to avoid need to define
-    // SiteInfo::operator<<.
-    EXPECT_TRUE(site_info_1 == *itS1);
-    EXPECT_TRUE(site_info_2 == *itS2);
-    EXPECT_TRUE(site_info_4 == *itS4);
+    EXPECT_EQ(site_info_1, *itS1);
+    EXPECT_EQ(site_info_2, *itS2);
+    EXPECT_EQ(site_info_4, *itS4);
   }
   {
     std::set<SiteInfo> test_set;
@@ -367,11 +404,9 @@ TEST_F(SiteInstanceTest, SiteInfoAsContainerKey) {
     EXPECT_EQ(test_set.end(), itS3);
     EXPECT_NE(test_set.end(), itS4);
 
-    // Use EXPECT_TRUE and == below to avoid need to define
-    // SiteInfo::operator<<.
-    EXPECT_TRUE(site_info_1ok == *itS1);
-    EXPECT_TRUE(site_info_2ok == *itS2);
-    EXPECT_TRUE(site_info_4ok == *itS4);
+    EXPECT_EQ(site_info_1ok, *itS1);
+    EXPECT_EQ(site_info_2ok, *itS2);
+    EXPECT_EQ(site_info_4ok, *itS4);
   }
 }
 
@@ -389,7 +424,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
 
   NavigationEntryImpl* e1 = new NavigationEntryImpl(
-      instance, url, Referrer(), base::nullopt, base::string16(),
+      instance, url, Referrer(), absl::nullopt, std::u16string(),
       ui::PAGE_TRANSITION_LINK, false, nullptr /* blob_url_loader_factory */);
 
   // Redundantly setting e1's SiteInstance shouldn't affect the ref count.
@@ -399,7 +434,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
 
   // Add a second reference
   NavigationEntryImpl* e2 = new NavigationEntryImpl(
-      instance, url, Referrer(), base::nullopt, base::string16(),
+      instance, url, Referrer(), absl::nullopt, std::u16string(),
       ui::PAGE_TRANSITION_LINK, false, nullptr /* blob_url_loader_factory */);
 
   instance = nullptr;
@@ -458,16 +493,18 @@ TEST_F(SiteInstanceTest, DefaultSiteInstanceProperties) {
       switches::kDisableSiteIsolation);
 
   const auto cross_origin_isolation_info =
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated();
+      WebExposedIsolationInfo::CreateNonIsolated();
   auto site_instance = SiteInstanceImpl::CreateForUrlInfo(
       &browser_context, UrlInfo::CreateForTesting(GURL("http://foo.com")),
       cross_origin_isolation_info);
 
   EXPECT_TRUE(site_instance->IsDefaultSiteInstance());
   EXPECT_TRUE(site_instance->HasSite());
-  EXPECT_EQ(
-      site_instance->GetSiteInfo(),
-      SiteInfo::CreateForDefaultSiteInstance(cross_origin_isolation_info));
+  EXPECT_EQ(site_instance->GetSiteInfo(),
+            SiteInfo::CreateForDefaultSiteInstance(
+                &browser_context,
+                StoragePartitionConfig::CreateDefault(&browser_context),
+                cross_origin_isolation_info));
   EXPECT_FALSE(site_instance->RequiresDedicatedProcess());
 }
 
@@ -484,9 +521,8 @@ TEST_F(SiteInstanceTest, DefaultSiteInstanceDestruction) {
 
   // Ensure that default SiteInstances are deleted when all references to them
   // are gone.
-  auto site_instance = SiteInstanceImpl::CreateForUrlInfo(
-      &browser_context, UrlInfo::CreateForTesting(GURL("http://foo.com")),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+  auto site_instance = SiteInstanceImpl::CreateForTesting(
+      &browser_context, GURL("http://foo.com"));
 
   EXPECT_EQ(AreDefaultSiteInstancesEnabled(),
             site_instance->IsDefaultSiteInstance());
@@ -655,7 +691,8 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
 
   // Error page URLs.
   auto error_site_info = SiteInfo::CreateForErrorPage(
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated());
   test_url = GURL(kUnreachableWebDataURL);
   site_url = GetSiteForURL(test_url);
   EXPECT_EQ(error_site_info.site_url(), site_url);
@@ -694,15 +731,15 @@ TEST_F(SiteInstanceTest, ProcessLockDoesNotUseEffectiveURL) {
 
   SiteInfo expected_site_info(
       app_url /* site_url */, nonapp_site_url /* process_lock_url */,
-      false /* is_origin_keyed */,
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      false /* is_origin_keyed */, CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated(), false /* is_guest */,
+      false /* does_site_request_dedicated_process_for_coop */,
+      false /* is_jit_disabled */);
 
   // New SiteInstance in a new BrowsingInstance with a predetermined URL.
   {
     scoped_refptr<SiteInstanceImpl> site_instance =
-        SiteInstanceImpl::CreateForUrlInfo(
-            browser_context.get(), UrlInfo::CreateForTesting(test_url),
-            CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+        SiteInstanceImpl::CreateForTesting(browser_context.get(), test_url);
     EXPECT_EQ(expected_site_info, site_instance->GetSiteInfo());
   }
 
@@ -710,10 +747,8 @@ TEST_F(SiteInstanceTest, ProcessLockDoesNotUseEffectiveURL) {
   // predetermined URL.
   {
     scoped_refptr<SiteInstanceImpl> bar_site_instance =
-        SiteInstanceImpl::CreateForUrlInfo(
-            browser_context.get(),
-            UrlInfo::CreateForTesting(GURL("https://bar.com/")),
-            CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+        SiteInstanceImpl::CreateForTesting(browser_context.get(),
+                                           GURL("https://bar.com/"));
     scoped_refptr<SiteInstance> site_instance =
         bar_site_instance->GetRelatedSiteInstance(test_url);
     auto* site_instance_impl =
@@ -806,8 +841,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
       switches::kProcessPerSite));
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
   BrowsingInstance* browsing_instance = new BrowsingInstance(
-      browser_context.get(),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      browser_context.get(), WebExposedIsolationInfo::CreateNonIsolated());
 
   const GURL url_a1("http://www.google.com/1.html");
   scoped_refptr<SiteInstanceImpl> site_instance_a1(
@@ -840,8 +874,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
   // A visit to the original site in a new BrowsingInstance (same or different
   // browser context) should return a different SiteInstance.
   BrowsingInstance* browsing_instance2 = new BrowsingInstance(
-      browser_context.get(),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      browser_context.get(), WebExposedIsolationInfo::CreateNonIsolated());
   // Ensure the new SiteInstance is ref counted so that it gets deleted.
   scoped_refptr<SiteInstanceImpl> site_instance_a2_2(
       browsing_instance2->GetSiteInstanceForURL(
@@ -883,8 +916,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
       switches::kProcessPerSite);
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
   scoped_refptr<BrowsingInstance> browsing_instance = new BrowsingInstance(
-      browser_context.get(),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      browser_context.get(), WebExposedIsolationInfo::CreateNonIsolated());
 
   const GURL url_a1("http://www.google.com/1.html");
   scoped_refptr<SiteInstanceImpl> site_instance_a1(
@@ -917,8 +949,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
   // A visit to the original site in a new BrowsingInstance (same browser
   // context) should return a different SiteInstance with the same process.
   BrowsingInstance* browsing_instance2 = new BrowsingInstance(
-      browser_context.get(),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      browser_context.get(), WebExposedIsolationInfo::CreateNonIsolated());
   scoped_refptr<SiteInstanceImpl> site_instance_a1_2(
       browsing_instance2->GetSiteInstanceForURL(
           UrlInfo::CreateForTesting(url_a1), false));
@@ -931,8 +962,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
   std::unique_ptr<TestBrowserContext> browser_context2(
       new TestBrowserContext());
   BrowsingInstance* browsing_instance3 = new BrowsingInstance(
-      browser_context2.get(),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      browser_context2.get(), WebExposedIsolationInfo::CreateNonIsolated());
   scoped_refptr<SiteInstanceImpl> site_instance_a2_3(
       browsing_instance3->GetSiteInstanceForURL(
           UrlInfo::CreateForTesting(url_a2), false));
@@ -1111,17 +1141,16 @@ TEST_F(SiteInstanceTest, NoProcessPerSiteForEmptySite) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kProcessPerSite);
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
-  RenderProcessHost* host;
   scoped_refptr<SiteInstanceImpl> instance(
       SiteInstanceImpl::Create(browser_context.get()));
 
   instance->SetSite(UrlInfo());
   EXPECT_TRUE(instance->HasSite());
   EXPECT_TRUE(instance->GetSiteURL().is_empty());
-  host = instance->GetProcess();
+  instance->GetProcess();
 
   EXPECT_FALSE(RenderProcessHostImpl::GetSoleProcessHostForSite(
-      instance->GetIsolationContext(), SiteInfo()));
+      instance->GetIsolationContext(), SiteInfo(browser_context.get())));
 
   DrainMessageLoop();
 }
@@ -1210,8 +1239,8 @@ TEST_F(SiteInstanceTest, IsolatedOrigins) {
   EXPECT_FALSE(IsIsolatedOrigin(isolated_foo_url));
   EXPECT_TRUE(IsSameSite(context(), foo_url, isolated_foo_url));
 
-  policy->AddIsolatedOrigins({url::Origin::Create(isolated_foo_url)},
-                             IsolatedOriginSource::TEST);
+  policy->AddFutureIsolatedOrigins({url::Origin::Create(isolated_foo_url)},
+                                   IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(isolated_foo_url));
   EXPECT_FALSE(IsIsolatedOrigin(foo_url));
   EXPECT_FALSE(IsIsolatedOrigin(GURL("http://foo.com")));
@@ -1225,8 +1254,8 @@ TEST_F(SiteInstanceTest, IsolatedOrigins) {
   // Different port.
   EXPECT_TRUE(IsIsolatedOrigin(GURL("http://isolated.foo.com:12345")));
 
-  policy->AddIsolatedOrigins({url::Origin::Create(isolated_bar_url)},
-                             IsolatedOriginSource::TEST);
+  policy->AddFutureIsolatedOrigins({url::Origin::Create(isolated_bar_url)},
+                                   IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(isolated_bar_url));
 
   // IsSameSite should compare origins rather than sites if either URL is an
@@ -1290,8 +1319,9 @@ TEST_F(SiteInstanceTest, IsolatedOriginsWithPort) {
         .Times(1);
     mock_log.StartCapturingLogs();
 
-    policy->AddIsolatedOrigins({url::Origin::Create(isolated_foo_with_port)},
-                               IsolatedOriginSource::TEST);
+    policy->AddFutureIsolatedOrigins(
+        {url::Origin::Create(isolated_foo_with_port)},
+        IsolatedOriginSource::TEST);
   }
 
   EXPECT_TRUE(IsIsolatedOrigin(isolated_foo_url));
@@ -1352,8 +1382,8 @@ TEST_F(SiteInstanceTest, SubdomainOnIsolatedSite) {
   GURL foo_isolated_url("http://foo.isolated.com");
 
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->AddIsolatedOrigins({url::Origin::Create(isolated_url)},
-                             IsolatedOriginSource::TEST);
+  policy->AddFutureIsolatedOrigins({url::Origin::Create(isolated_url)},
+                                   IsolatedOriginSource::TEST);
 
   EXPECT_TRUE(IsIsolatedOrigin(isolated_url));
   EXPECT_TRUE(IsIsolatedOrigin(foo_isolated_url));
@@ -1382,8 +1412,8 @@ TEST_F(SiteInstanceTest, SubdomainOnIsolatedSite) {
 
   // Don't try to match subdomains on IP addresses.
   GURL isolated_ip("http://127.0.0.1");
-  policy->AddIsolatedOrigins({url::Origin::Create(isolated_ip)},
-                             IsolatedOriginSource::TEST);
+  policy->AddFutureIsolatedOrigins({url::Origin::Create(isolated_ip)},
+                                   IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(isolated_ip));
   EXPECT_FALSE(IsIsolatedOrigin(GURL("http://42.127.0.0.1")));
 
@@ -1399,8 +1429,8 @@ TEST_F(SiteInstanceTest, SubdomainOnIsolatedOrigin) {
   GURL baz_isolated_foo_url("http://baz.isolated.foo.com");
 
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->AddIsolatedOrigins({url::Origin::Create(isolated_foo_url)},
-                             IsolatedOriginSource::TEST);
+  policy->AddFutureIsolatedOrigins({url::Origin::Create(isolated_foo_url)},
+                                   IsolatedOriginSource::TEST);
 
   EXPECT_FALSE(IsIsolatedOrigin(foo_url));
   EXPECT_TRUE(IsIsolatedOrigin(isolated_foo_url));
@@ -1449,7 +1479,7 @@ TEST_F(SiteInstanceTest, MultipleIsolatedOriginsWithCommonSite) {
 
   IsolationContext isolation_context(context());
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->AddIsolatedOrigins(
+  policy->AddFutureIsolatedOrigins(
       {url::Origin::Create(foo_url), url::Origin::Create(baz_bar_foo_url)},
       IsolatedOriginSource::TEST);
 
@@ -1498,8 +1528,10 @@ TEST_F(SiteInstanceTest, OriginalURL) {
 
   SiteInfo expected_site_info(
       app_url /* site_url */, original_url /* process_lock_url */,
-      false /* is_origin_keyed */,
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+      false /* is_origin_keyed */, CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated(), false /* is_guest */,
+      false /* does_site_request_dedicated_process_for_coop */,
+      false /* is_jit_disabled */);
 
   // New SiteInstance in a new BrowsingInstance with a predetermined URL.  In
   // this and subsequent cases, the site URL should consist of the effective
@@ -1507,9 +1539,7 @@ TEST_F(SiteInstanceTest, OriginalURL) {
   // |original_url|.
   {
     scoped_refptr<SiteInstanceImpl> site_instance =
-        SiteInstanceImpl::CreateForUrlInfo(
-            browser_context.get(), UrlInfo::CreateForTesting(original_url),
-            CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+        SiteInstanceImpl::CreateForTesting(browser_context.get(), original_url);
     EXPECT_EQ(expected_site_info, site_instance->GetSiteInfo());
     EXPECT_EQ(original_url, site_instance->original_url());
   }
@@ -1518,10 +1548,8 @@ TEST_F(SiteInstanceTest, OriginalURL) {
   // predetermined URL.
   {
     scoped_refptr<SiteInstanceImpl> bar_site_instance =
-        SiteInstanceImpl::CreateForUrlInfo(
-            browser_context.get(),
-            UrlInfo::CreateForTesting(GURL("https://bar.com/")),
-            CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+        SiteInstanceImpl::CreateForTesting(browser_context.get(),
+                                           GURL("https://bar.com/"));
     scoped_refptr<SiteInstance> site_instance =
         bar_site_instance->GetRelatedSiteInstance(original_url);
     auto* site_instance_impl =
@@ -1547,9 +1575,12 @@ TEST_F(SiteInstanceTest, OriginalURL) {
 namespace {
 
 ProcessLock ProcessLockFromString(const std::string& url) {
-  return ProcessLock(
-      SiteInfo(GURL(url), GURL(url), false /* is_origin_keyed */,
-               CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated()));
+  return ProcessLock(SiteInfo(
+      GURL(url), GURL(url), false /* is_origin_keyed */,
+      CreateStoragePartitionConfigForTesting(),
+      WebExposedIsolationInfo::CreateNonIsolated(), false /* is_guest */,
+      false /* does_site_request_dedicated_process_for_coop */,
+      false /* is_jit_disabled */));
 }
 
 }  // namespace
@@ -1577,20 +1608,28 @@ TEST_F(SiteInstanceTest, StartIsolatingSite) {
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
 
   // StartIsolatingSite() should convert the URL to a site before isolating it.
-  SiteInstance::StartIsolatingSite(context(),
-                                   GURL("http://bar.foo.com/foo/bar.html"));
+  SiteInstance::StartIsolatingSite(
+      context(), GURL("http://bar.foo.com/foo/html.bar"),
+      ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(GURL("http://foo.com")));
-  SiteInstance::StartIsolatingSite(context(), GURL("https://a.b.c.com:8000/"));
+  SiteInstance::StartIsolatingSite(
+      context(), GURL("https://a.b.c.com:8000/"),
+      ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(GURL("https://c.com")));
-  SiteInstance::StartIsolatingSite(context(),
-                                   GURL("http://bar.com/foo/bar.html"));
+  SiteInstance::StartIsolatingSite(
+      context(), GURL("http://bar.com/foo/bar.html"),
+      ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(GURL("http://bar.com")));
 
   // Attempts to isolate an unsupported isolated origin should be ignored.
   GURL data_url("data:,");
   GURL blank_url(url::kAboutBlankURL);
-  SiteInstance::StartIsolatingSite(context(), data_url);
-  SiteInstance::StartIsolatingSite(context(), blank_url);
+  SiteInstance::StartIsolatingSite(
+      context(), data_url,
+      ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
+  SiteInstance::StartIsolatingSite(
+      context(), blank_url,
+      ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   EXPECT_FALSE(IsIsolatedOrigin(data_url));
   EXPECT_FALSE(IsIsolatedOrigin(blank_url));
 
@@ -1627,24 +1666,16 @@ TEST_F(SiteInstanceTest, CreateForUrlInfo) {
   ContentBrowserClient* regular_client =
       SetBrowserClientForTesting(&modified_client);
 
-  ChildProcessSecurityPolicyImpl::GetInstance()->AddIsolatedOrigins(
+  ChildProcessSecurityPolicyImpl::GetInstance()->AddFutureIsolatedOrigins(
       {url::Origin::Create(kIsolatedUrl)}, IsolatedOriginSource::TEST);
 
-  auto instance1 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kNonIsolatedUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
-  auto instance2 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kIsolatedUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
-  auto instance3 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kFileUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
-  auto instance4 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(GURL(url::kAboutBlankURL)),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
-  auto instance5 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kCustomUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+  auto instance1 =
+      SiteInstanceImpl::CreateForTesting(context(), kNonIsolatedUrl);
+  auto instance2 = SiteInstanceImpl::CreateForTesting(context(), kIsolatedUrl);
+  auto instance3 = SiteInstanceImpl::CreateForTesting(context(), kFileUrl);
+  auto instance4 =
+      SiteInstanceImpl::CreateForTesting(context(), GURL(url::kAboutBlankURL));
+  auto instance5 = SiteInstanceImpl::CreateForTesting(context(), kCustomUrl);
 
   if (AreDefaultSiteInstancesEnabled()) {
     EXPECT_TRUE(instance1->IsDefaultSiteInstance());
@@ -1705,9 +1736,7 @@ TEST_F(SiteInstanceTest, CreateForUrlInfo) {
 
   // Verify that |kCustomUrl| will always construct a SiteInstance without
   // a site set now.
-  auto instance6 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kCustomUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+  auto instance6 = SiteInstanceImpl::CreateForTesting(context(), kCustomUrl);
   EXPECT_FALSE(instance6->IsDefaultSiteInstance());
   EXPECT_FALSE(instance6->HasSite());
   EXPECT_FALSE(instance6->DoesSiteInfoForURLMatch(
@@ -1723,9 +1752,7 @@ TEST_F(SiteInstanceTest, CreateForGuest) {
   // Verify that a SiteInstance created with CreateForUrlInfo() is not
   // considered a <webview> guest and has the path removed for the site URL like
   // any other standard URL.
-  auto instance1 = SiteInstanceImpl::CreateForUrlInfo(
-      context(), UrlInfo::CreateForTesting(kGuestUrl),
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+  auto instance1 = SiteInstanceImpl::CreateForTesting(context(), kGuestUrl);
   EXPECT_FALSE(instance1->IsGuest());
   if (AreDefaultSiteInstancesEnabled()) {
     EXPECT_TRUE(instance1->IsDefaultSiteInstance());
@@ -1802,7 +1829,7 @@ TEST_F(SiteInstanceTest, DoesSiteRequireDedicatedProcess) {
 
   IsolationContext isolation_context(context());
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->AddIsolatedOrigins(
+  policy->AddFutureIsolatedOrigins(
       {url::Origin::Create(GURL(kExplicitlyIsolatedURL))},
       IsolatedOriginSource::TEST);
 
@@ -1835,7 +1862,8 @@ TEST_F(SiteInstanceTest, DoWebUIURLsWithSubdomainsUseTLDForProcessLock) {
     }
   };
   CustomWebUIWebUIControllerFactory factory;
-  WebUIControllerFactory::RegisterFactory(&factory);
+  content::ScopedWebUIControllerFactoryRegistration factory_registration(
+      &factory);
 
   const GURL webui_tld_url = GetWebUIURL("foo");
   const GURL webui_host_bar_url = GetWebUIURL("bar.foo");
@@ -1863,26 +1891,24 @@ TEST_F(SiteInstanceTest, ErrorPage) {
   const GURL non_error_page_url("http://foo.com");
   const GURL error_page_url(kUnreachableWebDataURL);
 
-  const auto non_isolated_coi =
-      CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated();
-  const auto isolated_coi = CoopCoepCrossOriginIsolatedInfo::CreateIsolated(
+  const auto non_isolated_coi = WebExposedIsolationInfo::CreateNonIsolated();
+  const auto isolated_coi = WebExposedIsolationInfo::CreateIsolated(
       url::Origin::Create(non_error_page_url));
 
-  const auto non_isolated_error_site_info =
-      SiteInfo::CreateForErrorPage(non_isolated_coi);
-  const auto isolated_error_site_info =
-      SiteInfo::CreateForErrorPage(isolated_coi);
+  const auto non_isolated_error_site_info = SiteInfo::CreateForErrorPage(
+      CreateStoragePartitionConfigForTesting(), non_isolated_coi);
+  const auto isolated_error_site_info = SiteInfo::CreateForErrorPage(
+      CreateStoragePartitionConfigForTesting(), isolated_coi);
 
   // Verify that non-isolated and isolated error page SiteInfos are not
   // equal, but indicate they are both for error pages.
   EXPECT_NE(non_isolated_error_site_info, isolated_error_site_info);
   EXPECT_TRUE(non_isolated_error_site_info.is_error_page());
-  EXPECT_EQ(
-      non_isolated_coi,
-      non_isolated_error_site_info.coop_coep_cross_origin_isolated_info());
+  EXPECT_EQ(non_isolated_coi,
+            non_isolated_error_site_info.web_exposed_isolation_info());
   EXPECT_TRUE(isolated_error_site_info.is_error_page());
   EXPECT_EQ(isolated_coi,
-            isolated_error_site_info.coop_coep_cross_origin_isolated_info());
+            isolated_error_site_info.web_exposed_isolation_info());
 
   // Verify that non-error URLs don't generate error page SiteInfos and
   // non-isolated and isolated SiteInfos do not match even though the URL is
@@ -1906,11 +1932,11 @@ TEST_F(SiteInstanceTest, ErrorPage) {
   EXPECT_EQ(non_isolated_error_site_info,
             non_isolated_error_instance->GetSiteInfo());
   EXPECT_EQ(non_isolated_coi,
-            non_isolated_error_instance->GetCoopCoepCrossOriginIsolatedInfo());
+            non_isolated_error_instance->GetWebExposedIsolationInfo());
 
   EXPECT_EQ(isolated_error_site_info, isolated_error_instance->GetSiteInfo());
   EXPECT_EQ(isolated_coi,
-            isolated_error_instance->GetCoopCoepCrossOriginIsolatedInfo());
+            isolated_error_instance->GetWebExposedIsolationInfo());
 
   // Verify that deriving a SiteInfo for an error page URL always returns
   // an error page SiteInfo with the correct isolation info.
@@ -1933,6 +1959,37 @@ TEST_F(SiteInstanceTest, ErrorPage) {
   EXPECT_EQ(isolated_error_site_info,
             static_cast<SiteInstanceImpl*>(isolated_related_instance.get())
                 ->GetSiteInfo());
+}
+
+TEST_F(SiteInstanceTest, RelatedSitesInheritStoragePartitionConfig) {
+  const GURL test_url("https://example.com");
+  const auto isolation_info = WebExposedIsolationInfo::CreateNonIsolated();
+
+  // Create a UrlInfo for test_url loaded in a special StoragePartition.
+  const auto non_default_partition_config =
+      CreateStoragePartitionConfigForTesting(
+          /*in_memory=*/false, /*partition_domain=*/"test_partition");
+  const UrlInfo partitioned_url_info(
+      UrlInfoInit(test_url).WithStoragePartitionConfig(
+          non_default_partition_config));
+
+  // Create a SiteInstance for test_url in the special StoragePartition, and
+  // verify that the StoragePartition is correct.
+  const auto partitioned_instance = SiteInstanceImpl::CreateForUrlInfo(
+      context(), partitioned_url_info, isolation_info);
+  EXPECT_EQ(non_default_partition_config,
+            static_cast<SiteInstanceImpl*>(partitioned_instance.get())
+                ->GetSiteInfo()
+                .storage_partition_config());
+
+  // Create a related SiteInstance that doesn't specify a
+  // StoragePartitionConfig and make sure the StoragePartition gets propagated.
+  const auto related_instance =
+      partitioned_instance->GetRelatedSiteInstance(test_url);
+  EXPECT_EQ(non_default_partition_config,
+            static_cast<SiteInstanceImpl*>(related_instance.get())
+                ->GetSiteInfo()
+                .storage_partition_config());
 }
 
 }  // namespace content

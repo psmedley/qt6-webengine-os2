@@ -5,9 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_KEYFRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_KEYFRAME_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/effect_model.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
@@ -62,11 +61,13 @@ class V8ObjectBuilder;
 // FIXME: Make Keyframe immutable
 class CORE_EXPORT Keyframe : public GarbageCollected<Keyframe> {
  public:
+  Keyframe(const Keyframe&) = delete;
+  Keyframe& operator=(const Keyframe&) = delete;
   virtual ~Keyframe() = default;
 
   // TODO(smcgruer): The keyframe offset should be immutable.
-  void SetOffset(base::Optional<double> offset) { offset_ = offset; }
-  base::Optional<double> Offset() const { return offset_; }
+  void SetOffset(absl::optional<double> offset) { offset_ = offset; }
+  absl::optional<double> Offset() const { return offset_; }
   double CheckedOffset() const { return offset_.value(); }
 
   // TODO(smcgruer): The keyframe composite operation should be immutable.
@@ -124,6 +125,9 @@ class CORE_EXPORT Keyframe : public GarbageCollected<Keyframe> {
     PropertySpecificKeyframe(double offset,
                              scoped_refptr<TimingFunction> easing,
                              EffectModel::CompositeOperation);
+    PropertySpecificKeyframe(const PropertySpecificKeyframe&) = delete;
+    PropertySpecificKeyframe& operator=(const PropertySpecificKeyframe&) =
+        delete;
     virtual ~PropertySpecificKeyframe() = default;
     double Offset() const { return offset_; }
     TimingFunction& Easing() const { return *easing_; }
@@ -165,8 +169,6 @@ class CORE_EXPORT Keyframe : public GarbageCollected<Keyframe> {
     double offset_;
     scoped_refptr<TimingFunction> easing_;
     EffectModel::CompositeOperation composite_;
-
-    DISALLOW_COPY_AND_ASSIGN(PropertySpecificKeyframe);
   };
 
   // Construct and return a property-specific keyframe for this keyframe.
@@ -188,21 +190,20 @@ class CORE_EXPORT Keyframe : public GarbageCollected<Keyframe> {
  protected:
   Keyframe()
       : offset_(), composite_(), easing_(LinearTimingFunction::Shared()) {}
-  Keyframe(base::Optional<double> offset,
-           base::Optional<EffectModel::CompositeOperation> composite,
+  Keyframe(absl::optional<double> offset,
+           absl::optional<EffectModel::CompositeOperation> composite,
            scoped_refptr<TimingFunction> easing)
       : offset_(offset), composite_(composite), easing_(std::move(easing)) {
     if (!easing_)
       easing_ = LinearTimingFunction::Shared();
   }
 
-  base::Optional<double> offset_;
+  absl::optional<double> offset_;
   // To avoid having multiple CompositeOperation enums internally (one with
-  // 'auto' and one without), we use a base::Optional for composite_. A
-  // base::nullopt value represents 'auto'.
-  base::Optional<EffectModel::CompositeOperation> composite_;
+  // 'auto' and one without), we use a absl::optional for composite_. A
+  // absl::nullopt value represents 'auto'.
+  absl::optional<EffectModel::CompositeOperation> composite_;
   scoped_refptr<TimingFunction> easing_;
-  DISALLOW_COPY_AND_ASSIGN(Keyframe);
 };
 
 using PropertySpecificKeyframe = Keyframe::PropertySpecificKeyframe;

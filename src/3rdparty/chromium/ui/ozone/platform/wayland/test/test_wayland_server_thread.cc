@@ -17,6 +17,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
+#include "ui/ozone/platform/wayland/test/test_zwp_primary_selection.h"
 
 namespace wl {
 
@@ -44,7 +45,7 @@ TestWaylandServerThread::~TestWaylandServerThread() {
   Stop();
 }
 
-bool TestWaylandServerThread::Start(uint32_t shell_version) {
+bool TestWaylandServerThread::Start(const ServerConfig& config) {
   display_.reset(wl_display_create());
   if (!display_)
     return false;
@@ -70,18 +71,24 @@ bool TestWaylandServerThread::Start(uint32_t shell_version) {
 
   if (!data_device_manager_.Initialize(display_.get()))
     return false;
+  if (config.primary_selection_protocol != PrimarySelectionProtocol::kNone) {
+    // TODO(crbug.com/1204670): Support gtk primary selection.
+    primary_selection_device_manager_.reset(CreateTestSelectionManagerZwp());
+    if (!primary_selection_device_manager_->Initialize(display_.get()))
+      return false;
+  }
   if (!seat_.Initialize(display_.get()))
     return false;
-  if (shell_version == 6) {
+  if (config.shell_version == ShellVersion::kV6) {
     if (!zxdg_shell_v6_.Initialize(display_.get()))
       return false;
-  } else if (shell_version == 7) {
+  } else {
     if (!xdg_shell_.Initialize(display_.get()))
       return false;
-  } else {
-    NOTREACHED() << "Unsupported shell version: " << shell_version;
   }
   if (!zwp_text_input_manager_v1_.Initialize(display_.get()))
+    return false;
+  if (!zwp_linux_explicit_synchronization_v1_.Initialize(display_.get()))
     return false;
   if (!zwp_linux_dmabuf_v1_.Initialize(display_.get()))
     return false;
@@ -93,7 +100,7 @@ bool TestWaylandServerThread::Start(uint32_t shell_version) {
   base::Thread::Options options;
   options.message_pump_factory = base::BindRepeating(
       &TestWaylandServerThread::CreateMessagePump, base::Unretained(this));
-  if (!base::Thread::StartWithOptions(options))
+  if (!base::Thread::StartWithOptions(std::move(options)))
     return false;
 
   setenv("WAYLAND_SOCKET", base::NumberToString(client_fd.release()).c_str(),

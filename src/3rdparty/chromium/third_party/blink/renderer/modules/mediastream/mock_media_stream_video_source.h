@@ -21,14 +21,14 @@ class MockMediaStreamVideoSource : public blink::MediaStreamVideoSource {
   ~MockMediaStreamVideoSource() override;
 
   MOCK_METHOD1(DoSetMutedState, void(bool muted_state));
-
   MOCK_METHOD0(OnEncodedSinkEnabled, void());
   MOCK_METHOD0(OnEncodedSinkDisabled, void());
   MOCK_METHOD0(OnRequestRefreshFrame, void());
   MOCK_METHOD1(OnCapturingLinkSecured, void(bool));
+  MOCK_METHOD1(SetCanDiscardAlpha, void(bool can_discard_alpha));
   MOCK_CONST_METHOD0(SupportsEncodedOutput, bool());
   MOCK_METHOD1(OnFrameDropped, void(media::VideoCaptureFrameDropReason));
-  MOCK_CONST_METHOD1(OnFrameFeedback, void(const media::VideoFrameFeedback&));
+  MOCK_CONST_METHOD1(OnFrameFeedback, void(const media::VideoCaptureFeedback&));
 
   // Simulate that the underlying source start successfully.
   void StartMockedSource();
@@ -70,7 +70,7 @@ class MockMediaStreamVideoSource : public blink::MediaStreamVideoSource {
 
   // Implements blink::MediaStreamVideoSource.
   void RequestRefreshFrame() override;
-  base::Optional<media::VideoCaptureParams> GetCurrentCaptureParams()
+  absl::optional<media::VideoCaptureParams> GetCurrentCaptureParams()
       const override;
   void OnHasConsumers(bool has_consumers) override;
   VideoCaptureFeedbackCB GetFeedbackCallback() const override;
@@ -84,7 +84,7 @@ class MockMediaStreamVideoSource : public blink::MediaStreamVideoSource {
   void StartSourceImpl(VideoCaptureDeliverFrameCB frame_callback,
                        EncodedVideoFrameCB encoded_frame_callback) override;
   void StopSourceImpl() override;
-  base::Optional<media::VideoCaptureFormat> GetCurrentFormat() const override;
+  absl::optional<media::VideoCaptureFormat> GetCurrentFormat() const override;
   void StopSourceForRestartImpl() override;
   void RestartSourceImpl(const media::VideoCaptureFormat& new_format) override;
 

@@ -57,6 +57,7 @@ struct ANGLE_UTIL_EXPORT ConfigParameters
     EGLint samples;
     Optional<bool> contextProgramCacheEnabled;
     EGLenum resetStrategy;
+    EGLenum colorSpace;
 };
 
 class ANGLE_UTIL_EXPORT GLWindowBase : angle::NonCopyable
@@ -111,6 +112,8 @@ class ANGLE_UTIL_EXPORT EGLWindow : public GLWindowBase
     EGLDisplay getDisplay() const;
     EGLSurface getSurface() const;
     EGLContext getContext() const;
+
+    bool isContextVersion(EGLint glesMajorVersion, EGLint glesMinorVersion) const;
 
     // Internally initializes the Display, Surface and Context.
     bool initializeGL(OSWindow *osWindow,

@@ -9,10 +9,10 @@
 #import <Carbon/Carbon.h>
 
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_policy.h"
-#include "base/stl_util.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace ui {
@@ -878,6 +878,8 @@ UniChar TranslatedUnicodeCharFromKeyCode(TISInputSourceRef input_source,
 
   CFDataRef layout_data = static_cast<CFDataRef>(TISGetInputSourceProperty(
       input_source, kTISPropertyUnicodeKeyLayoutData));
+  if (!layout_data)
+    return 0xFFFD;  // REPLACEMENT CHARACTER
 
   const UCKeyboardLayout* keyboard_layout =
       reinterpret_cast<const UCKeyboardLayout*>(CFDataGetBytePtr(layout_data));

@@ -18,8 +18,6 @@
 
 namespace {
 
-static const int kMaxBufferCount = 3;
-
 class FakeLaunchedVideoCaptureDevice
     : public content::LaunchedVideoCaptureDevice {
  public:
@@ -48,7 +46,7 @@ class FakeLaunchedVideoCaptureDevice
     // Do nothing.
   }
   void OnUtilizationReport(int frame_feedback_id,
-                           media::VideoFrameFeedback feedback) override {
+                           media::VideoCaptureFeedback feedback) override {
     device_->OnUtilizationReport(frame_feedback_id, feedback);
   }
 
@@ -79,7 +77,7 @@ void FakeVideoCaptureDeviceLauncher::LaunchDeviceAsync(
   auto device = system_->CreateDevice(device_id);
   scoped_refptr<media::VideoCaptureBufferPool> buffer_pool(
       new media::VideoCaptureBufferPoolImpl(
-          media::VideoCaptureBufferType::kSharedMemory, kMaxBufferCount));
+          media::VideoCaptureBufferType::kSharedMemory));
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   auto device_client = std::make_unique<media::VideoCaptureDeviceClient>(
       media::VideoCaptureBufferType::kSharedMemory,

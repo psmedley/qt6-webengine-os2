@@ -55,6 +55,14 @@ const char kSetSchedulerConfigurationV2[] = "SetSchedulerConfigurationV2";
 const char kSwapSetParameter[] = "SwapSetParameter";
 const char kBackupArcBugReport[] = "BackupArcBugReport";
 const char kDeleteArcBugReportBackup[] = "DeleteArcBugReportBackup";
+const char kKernelFeatureList[] = "KernelFeatureList";
+const char kKernelFeatureEnable[] = "KernelFeatureEnable";
+// PacketCaptureStart method isn't defined as it's not needed by any component.
+const char kPacketCaptureStop[] = "PacketCaptureStop";
+
+// Signals.
+const char kPacketCaptureStartSignal[] = "PacketCaptureStart";
+const char kPacketCaptureStopSignal[] = "PacketCaptureStop";
 
 // Properties.
 const char kCrashSenderTestMode[] = "CrashSenderTestMode";

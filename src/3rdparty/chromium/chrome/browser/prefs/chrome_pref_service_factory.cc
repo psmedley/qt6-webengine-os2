@@ -12,10 +12,10 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -184,6 +184,8 @@ const prefs::TrackedPreferenceMetadata kTrackedPrefs[] = {
 #if defined(OS_WIN)
     {31, prefs::kSwReporterReportingEnabled, EnforcementLevel::ENFORCE_ON_LOAD,
      PrefTrackingStrategy::ATOMIC, ValueType::IMPERSONAL},
+    {32, prefs::kMediaCdmOriginData, EnforcementLevel::ENFORCE_ON_LOAD,
+     PrefTrackingStrategy::ATOMIC, ValueType::IMPERSONAL},
 #endif  // defined(OS_WIN)
 
     // See note at top, new items added here also need to be added to
@@ -284,9 +286,8 @@ std::unique_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
   std::string seed;
   CHECK(ui::ResourceBundle::HasSharedInstance());
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  seed = ui::ResourceBundle::GetSharedInstance()
-             .GetRawDataResource(IDR_PREF_HASH_SEED_BIN)
-             .as_string();
+  seed = std::string(ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
+      IDR_PREF_HASH_SEED_BIN));
 #endif
   return std::make_unique<ProfilePrefStoreManager>(profile_path, seed,
                                                    legacy_device_id);

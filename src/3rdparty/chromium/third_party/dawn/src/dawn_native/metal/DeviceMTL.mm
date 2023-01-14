@@ -42,6 +42,69 @@
 
 namespace dawn_native { namespace metal {
 
+    namespace {
+
+        // The time interval for each round of kalman filter
+        static constexpr uint64_t kFilterIntervalInMs = static_cast<uint64_t>(NSEC_PER_SEC / 10);
+
+        struct KalmanInfo {
+            float filterValue;  // The estimation value
+            float kalmanGain;   // The kalman gain
+            float R;            // The covariance of the observation noise
+            float P;            // The a posteriori estimate covariance
+        };
+
+        // A simplified kalman filter for estimating timestamp period based on measured values
+        float KalmanFilter(KalmanInfo* info, float measuredValue) {
+            // Optimize kalman gain
+            info->kalmanGain = info->P / (info->P + info->R);
+
+            // Correct filter value
+            info->filterValue =
+                info->kalmanGain * measuredValue + (1.0 - info->kalmanGain) * info->filterValue;
+            // Update estimate covariance
+            info->P = (1.0f - info->kalmanGain) * info->P;
+            return info->filterValue;
+        }
+
+        void API_AVAILABLE(macos(10.15), ios(14))
+            UpdateTimestampPeriod(id<MTLDevice> device,
+                                  KalmanInfo* info,
+                                  MTLTimestamp* cpuTimestampStart,
+                                  MTLTimestamp* gpuTimestampStart,
+                                  float* timestampPeriod) {
+            // The filter value is converged to an optimal value when the kalman gain is less than
+            // 0.01. At this time, the weight of the measured value is too small to change the next
+            // filter value, the sampling and calculations do not need to continue anymore.
+            if (info->kalmanGain < 0.01f) {
+                return;
+            }
+
+            MTLTimestamp cpuTimestampEnd = 0, gpuTimestampEnd = 0;
+            [device sampleTimestamps:&cpuTimestampEnd gpuTimestamp:&gpuTimestampEnd];
+
+            // Update the timestamp start values when timestamp reset happens
+            if (cpuTimestampEnd < *cpuTimestampStart || gpuTimestampEnd < *gpuTimestampStart) {
+                *cpuTimestampStart = cpuTimestampEnd;
+                *gpuTimestampStart = gpuTimestampEnd;
+                return;
+            }
+
+            if (cpuTimestampEnd - *cpuTimestampStart >= kFilterIntervalInMs) {
+                // The measured timestamp period
+                float measurement = (cpuTimestampEnd - *cpuTimestampStart) /
+                                    static_cast<float>(gpuTimestampEnd - *gpuTimestampStart);
+
+                // Measurement update
+                *timestampPeriod = KalmanFilter(info, measurement);
+
+                *cpuTimestampStart = cpuTimestampEnd;
+                *gpuTimestampStart = gpuTimestampEnd;
+            }
+        }
+
+    }  // namespace
+
     // static
     ResultOrError<Device*> Device::Create(AdapterBase* adapter,
                                           NSPRef<id<MTLDevice>> mtlDevice,
@@ -64,11 +127,33 @@ namespace dawn_native { namespace metal {
     MaybeError Device::Initialize() {
         InitTogglesFromDriver();
 
-        if (!IsRobustnessEnabled()) {
-            ForceSetToggle(Toggle::MetalEnableVertexPulling, false);
+        mCommandQueue.Acquire([*mMtlDevice newCommandQueue]);
+        if (mCommandQueue == nil) {
+            return DAWN_INTERNAL_ERROR("Failed to allocate MTLCommandQueue.");
         }
 
-        mCommandQueue.Acquire([*mMtlDevice newCommandQueue]);
+        DAWN_TRY(mCommandContext.PrepareNextCommandBuffer(*mCommandQueue));
+
+        if (IsExtensionEnabled(Extension::TimestampQuery)) {
+            // Make a best guess of timestamp period based on device vendor info, and converge it to
+            // an accurate value by the following calculations.
+            mTimestampPeriod =
+                gpu_info::IsIntel(GetAdapter()->GetPCIInfo().vendorId) ? 83.333f : 1.0f;
+
+            // Initialize kalman filter parameters
+            mKalmanInfo = std::make_unique<KalmanInfo>();
+            mKalmanInfo->filterValue = 0.0f;
+            mKalmanInfo->kalmanGain = 0.5f;
+            mKalmanInfo->R =
+                0.0001f;  // The smaller this value is, the smaller the error of measured value is,
+                          // the more we can trust the measured value.
+            mKalmanInfo->P = 1.0f;
+
+            if (@available(macos 10.15, iOS 14.0, *)) {
+                // Sample CPU timestamp and GPU timestamp for first time at device creation
+                [*mMtlDevice sampleTimestamps:&mCpuTimestamp gpuTimestamp:&mGpuTimestamp];
+            }
+        }
 
         return DeviceBase::Initialize(new Queue(this));
     }
@@ -105,10 +190,16 @@ namespace dawn_native { namespace metal {
             SetToggle(Toggle::DisableBaseInstance, !haveBaseVertexBaseInstance);
         }
 
-        // TODO(jiawei.shao@intel.com): tighten this workaround when the driver bug is fixed.
+        // Vertex buffer robustness is implemented by using programmable vertex pulling. Enable
+        // that code path if it isn't explicitly disabled.
+        if (IsRobustnessEnabled()) {
+            SetToggle(Toggle::MetalEnableVertexPulling, true);
+        }
+
+        // TODO(crbug.com/dawn/846): tighten this workaround when the driver bug is fixed.
         SetToggle(Toggle::AlwaysResolveIntoZeroLevelAndLayer, true);
 
-        // TODO(hao.x.li@intel.com): Use MTLStorageModeShared instead of MTLStorageModePrivate when
+        // TODO(crbug.com/dawn/847): Use MTLStorageModeShared instead of MTLStorageModePrivate when
         // creating MTLCounterSampleBuffer in QuerySet on Intel platforms, otherwise it fails to
         // create the buffer. Change to use MTLStorageModePrivate when the bug is fixed.
         if (@available(macOS 10.15, iOS 14.0, *)) {
@@ -117,64 +208,72 @@ namespace dawn_native { namespace metal {
         }
     }
 
-    ResultOrError<BindGroupBase*> Device::CreateBindGroupImpl(
+    ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
         const BindGroupDescriptor* descriptor) {
         return BindGroup::Create(this, descriptor);
     }
-    ResultOrError<BindGroupLayoutBase*> Device::CreateBindGroupLayoutImpl(
+    ResultOrError<Ref<BindGroupLayoutBase>> Device::CreateBindGroupLayoutImpl(
         const BindGroupLayoutDescriptor* descriptor) {
-        return new BindGroupLayout(this, descriptor);
+        return BindGroupLayout::Create(this, descriptor);
     }
     ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(const BufferDescriptor* descriptor) {
         return Buffer::Create(this, descriptor);
     }
-    CommandBufferBase* Device::CreateCommandBuffer(CommandEncoder* encoder,
-                                                   const CommandBufferDescriptor* descriptor) {
-        return new CommandBuffer(encoder, descriptor);
+    ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
+        CommandEncoder* encoder,
+        const CommandBufferDescriptor* descriptor) {
+        return CommandBuffer::Create(encoder, descriptor);
     }
-    ResultOrError<ComputePipelineBase*> Device::CreateComputePipelineImpl(
+    ResultOrError<Ref<ComputePipelineBase>> Device::CreateComputePipelineImpl(
         const ComputePipelineDescriptor* descriptor) {
         return ComputePipeline::Create(this, descriptor);
     }
-    ResultOrError<PipelineLayoutBase*> Device::CreatePipelineLayoutImpl(
+    ResultOrError<Ref<PipelineLayoutBase>> Device::CreatePipelineLayoutImpl(
         const PipelineLayoutDescriptor* descriptor) {
-        return new PipelineLayout(this, descriptor);
+        return PipelineLayout::Create(this, descriptor);
     }
-    ResultOrError<QuerySetBase*> Device::CreateQuerySetImpl(const QuerySetDescriptor* descriptor) {
+    ResultOrError<Ref<QuerySetBase>> Device::CreateQuerySetImpl(
+        const QuerySetDescriptor* descriptor) {
         return QuerySet::Create(this, descriptor);
     }
-    ResultOrError<RenderPipelineBase*> Device::CreateRenderPipelineImpl(
+    ResultOrError<Ref<RenderPipelineBase>> Device::CreateRenderPipelineImpl(
         const RenderPipelineDescriptor* descriptor) {
         return RenderPipeline::Create(this, descriptor);
     }
-    ResultOrError<SamplerBase*> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
+    ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
         return Sampler::Create(this, descriptor);
     }
-    ResultOrError<ShaderModuleBase*> Device::CreateShaderModuleImpl(
+    ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
         const ShaderModuleDescriptor* descriptor,
         ShaderModuleParseResult* parseResult) {
         return ShaderModule::Create(this, descriptor, parseResult);
     }
-    ResultOrError<SwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(
         const SwapChainDescriptor* descriptor) {
-        return new OldSwapChain(this, descriptor);
+        return OldSwapChain::Create(this, descriptor);
     }
-    ResultOrError<NewSwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<NewSwapChainBase>> Device::CreateSwapChainImpl(
         Surface* surface,
         NewSwapChainBase* previousSwapChain,
         const SwapChainDescriptor* descriptor) {
         return SwapChain::Create(this, surface, previousSwapChain, descriptor);
     }
     ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(const TextureDescriptor* descriptor) {
-        return AcquireRef(new Texture(this, descriptor));
+        return Texture::Create(this, descriptor);
     }
-    ResultOrError<TextureViewBase*> Device::CreateTextureViewImpl(
+    ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor) {
-        return new TextureView(texture, descriptor);
+        return TextureView::Create(texture, descriptor);
+    }
+    void Device::CreateComputePipelineAsyncImpl(const ComputePipelineDescriptor* descriptor,
+                                                size_t blueprintHash,
+                                                WGPUCreateComputePipelineAsyncCallback callback,
+                                                void* userdata) {
+        ComputePipeline::CreateAsync(this, descriptor, blueprintHash, callback, userdata);
     }
 
-    ExecutionSerial Device::CheckAndUpdateCompletedSerials() {
+    ResultOrError<ExecutionSerial> Device::CheckAndUpdateCompletedSerials() {
         uint64_t frontendCompletedSerial{GetCompletedCommandSerial()};
         if (frontendCompletedSerial > mCompletedSerial) {
             // sometimes we increase the serials, in which case the completed serial in
@@ -187,8 +286,14 @@ namespace dawn_native { namespace metal {
     }
 
     MaybeError Device::TickImpl() {
-        if (mCommandContext.GetCommands() != nullptr) {
-            SubmitPendingCommandBuffer();
+        DAWN_TRY(SubmitPendingCommandBuffer());
+
+        // Just run timestamp period calculation when timestamp extension is enabled.
+        if (IsExtensionEnabled(Extension::TimestampQuery)) {
+            if (@available(macos 10.15, iOS 14.0, *)) {
+                UpdateTimestampPeriod(GetMTLDevice(), mKalmanInfo.get(), &mCpuTimestamp,
+                                      &mGpuTimestamp, &mTimestampPeriod);
+            }
         }
 
         return {};
@@ -203,19 +308,13 @@ namespace dawn_native { namespace metal {
     }
 
     CommandRecordingContext* Device::GetPendingCommandContext() {
-        if (mCommandContext.GetCommands() == nullptr) {
-            TRACE_EVENT0(GetPlatform(), General, "[MTLCommandQueue commandBuffer]");
-            // The MTLCommandBuffer will be autoreleased by default.
-            // The autorelease pool may drain before the command buffer is submitted. Retain so it
-            // stays alive.
-            mCommandContext = CommandRecordingContext([*mCommandQueue commandBuffer]);
-        }
+        mCommandContext.MarkUsed();
         return &mCommandContext;
     }
 
-    void Device::SubmitPendingCommandBuffer() {
-        if (mCommandContext.GetCommands() == nullptr) {
-            return;
+    MaybeError Device::SubmitPendingCommandBuffer() {
+        if (!mCommandContext.WasUsed()) {
+            return {};
         }
 
         IncrementLastSubmittedCommandSerial();
@@ -256,6 +355,8 @@ namespace dawn_native { namespace metal {
         TRACE_EVENT_ASYNC_BEGIN0(GetPlatform(), GPUWork, "DeviceMTL::SubmitPendingCommandBuffer",
                                  uint64_t(pendingSerial));
         [*pendingCommands commit];
+
+        return mCommandContext.PrepareNextCommandBuffer(*mCommandQueue);
     }
 
     ResultOrError<std::unique_ptr<StagingBufferBase>> Device::CreateStagingBuffer(size_t size) {
@@ -296,50 +397,17 @@ namespace dawn_native { namespace metal {
                                                 TextureCopy* dst,
                                                 const Extent3D& copySizePixels) {
         Texture* texture = ToBackend(dst->texture.Get());
+        EnsureDestinationTextureInitialized(GetPendingCommandContext(), texture, *dst,
+                                            copySizePixels);
 
-        // This function assumes data is perfectly aligned. Otherwise, it might be necessary
-        // to split copying to several stages: see ComputeTextureBufferCopySplit.
-        const TexelBlockInfo& blockInfo = texture->GetFormat().GetAspectInfo(dst->aspect).block;
-        ASSERT(dataLayout.rowsPerImage == copySizePixels.height / blockInfo.height);
-        ASSERT(dataLayout.bytesPerRow ==
-               copySizePixels.width / blockInfo.width * blockInfo.byteSize);
-
-        EnsureDestinationTextureInitialized(texture, *dst, copySizePixels);
-
-        // Metal validation layer requires that if the texture's pixel format is a compressed
-        // format, the sourceSize must be a multiple of the pixel format's block size or be
-        // clamped to the edge of the texture if the block extends outside the bounds of a
-        // texture.
-        const Extent3D clampedSize =
-            texture->ClampToMipLevelVirtualSize(dst->mipLevel, dst->origin, copySizePixels);
-        const uint32_t copyBaseLayer = dst->origin.z;
-        const uint32_t copyLayerCount = copySizePixels.depth;
-        const uint64_t bytesPerImage = dataLayout.rowsPerImage * dataLayout.bytesPerRow;
-
-        MTLBlitOption blitOption = ComputeMTLBlitOption(texture->GetFormat(), dst->aspect);
-
-        uint64_t bufferOffset = dataLayout.offset;
-        for (uint32_t copyLayer = copyBaseLayer; copyLayer < copyBaseLayer + copyLayerCount;
-             ++copyLayer) {
-            [GetPendingCommandContext()->EnsureBlit()
-                     copyFromBuffer:ToBackend(source)->GetBufferHandle()
-                       sourceOffset:bufferOffset
-                  sourceBytesPerRow:dataLayout.bytesPerRow
-                sourceBytesPerImage:bytesPerImage
-                         sourceSize:MTLSizeMake(clampedSize.width, clampedSize.height, 1)
-                          toTexture:texture->GetMTLTexture()
-                   destinationSlice:copyLayer
-                   destinationLevel:dst->mipLevel
-                  destinationOrigin:MTLOriginMake(dst->origin.x, dst->origin.y, 0)
-                            options:blitOption];
-
-            bufferOffset += bytesPerImage;
-        }
-
+        RecordCopyBufferToTexture(GetPendingCommandContext(), ToBackend(source)->GetBufferHandle(),
+                                  source->GetSize(), dataLayout.offset, dataLayout.bytesPerRow,
+                                  dataLayout.rowsPerImage, texture, dst->mipLevel, dst->origin,
+                                  dst->aspect, copySizePixels);
         return {};
     }
 
-    TextureBase* Device::CreateTextureWrappingIOSurface(const ExternalImageDescriptor* descriptor,
+    Ref<Texture> Device::CreateTextureWrappingIOSurface(const ExternalImageDescriptor* descriptor,
                                                         IOSurfaceRef ioSurface,
                                                         uint32_t plane) {
         const TextureDescriptor* textureDescriptor =
@@ -353,11 +421,18 @@ namespace dawn_native { namespace metal {
             return nullptr;
         }
 
-        return new Texture(this, descriptor, ioSurface, plane);
+        Ref<Texture> result;
+        if (ConsumedError(Texture::CreateFromIOSurface(this, descriptor, ioSurface, plane),
+                          &result)) {
+            return nullptr;
+        }
+        return result;
     }
 
     void Device::WaitForCommandsToBeScheduled() {
-        SubmitPendingCommandBuffer();
+        if (ConsumedError(SubmitPendingCommandBuffer())) {
+            return;
+        }
 
         // Only lock the object while we take a reference to it, otherwise we could block further
         // progress if the driver calls the scheduled handler (which also acquires the lock) before
@@ -373,12 +448,12 @@ namespace dawn_native { namespace metal {
     MaybeError Device::WaitForIdleForDestruction() {
         // Forget all pending commands.
         mCommandContext.AcquireCommands();
-        CheckPassedSerials();
+        DAWN_TRY(CheckPassedSerials());
 
         // Wait for all commands to be finished so we can free resources
         while (GetCompletedCommandSerial() != GetLastSubmittedCommandSerial()) {
             usleep(100);
-            CheckPassedSerials();
+            DAWN_TRY(CheckPassedSerials());
         }
 
         return {};
@@ -403,7 +478,7 @@ namespace dawn_native { namespace metal {
     }
 
     float Device::GetTimestampPeriodInNS() const {
-        return 1.0f;
+        return mTimestampPeriod;
     }
 
 }}  // namespace dawn_native::metal

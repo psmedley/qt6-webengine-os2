@@ -18,6 +18,10 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #include "ui/views/widget/desktop_aura/window_move_client_platform.h"
 
+namespace ui {
+class PaintContext;
+}  // namespace ui
+
 namespace views {
 
 class VIEWS_EXPORT DesktopWindowTreeHostPlatform
@@ -41,8 +45,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   // Accessor for DesktopNativeWidgetAura::content_window().
   aura::Window* GetContentWindow();
   const aura::Window* GetContentWindow() const;
-
-  bool is_shape_explicitly_set() const { return is_shape_explicitly_set_; }
 
   // DesktopWindowTreeHost:
   void Init(const Widget::InitParams& params) override;
@@ -82,7 +84,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   ui::ZOrderLevel GetZOrderLevel() const override;
   void SetVisibleOnAllWorkspaces(bool always_visible) override;
   bool IsVisibleOnAllWorkspaces() const override;
-  bool SetWindowTitle(const base::string16& title) override;
+  bool SetWindowTitle(const std::u16string& title) override;
   void ClearNativeFocus() override;
   Widget::MoveLoopResult RunMoveLoop(
       const gfx::Vector2d& drag_offset,
@@ -108,6 +110,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   bool ShouldUpdateWindowTransparency() const override;
   bool ShouldUseDesktopNativeCursorManager() const override;
   bool ShouldCreateVisibilityController() const override;
+  void UpdateWindowShapeIfNeeded(const ui::PaintContext& context) override;
 
   // WindowTreeHost:
   gfx::Transform GetRootTransform() const override;
@@ -116,13 +119,15 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
 
   // PlatformWindowDelegate:
   void OnClosed() override;
-  void OnWindowStateChanged(ui::PlatformWindowState new_state) override;
+  void OnWindowStateChanged(ui::PlatformWindowState old_state,
+                            ui::PlatformWindowState new_state) override;
   void OnCloseRequest() override;
   void OnWillDestroyAcceleratedWidget() override;
   void OnActivationChanged(bool active) override;
-  base::Optional<gfx::Size> GetMinimumSizeForWindow() override;
-  base::Optional<gfx::Size> GetMaximumSizeForWindow() override;
+  absl::optional<gfx::Size> GetMinimumSizeForWindow() override;
+  absl::optional<gfx::Size> GetMaximumSizeForWindow() override;
   SkPath GetWindowMaskForWindowShapeInPixels() override;
+  absl::optional<ui::MenuType> GetMenuType() override;
 
   // ui::WorkspaceExtensionDelegate:
   void OnWorkspaceChanged() override;
@@ -136,8 +141,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   DesktopNativeWidgetAura* desktop_native_widget_aura() {
     return desktop_native_widget_aura_;
   }
-
-  ui::PlatformWindowState window_show_state() { return old_state_; }
 
   // These are not general purpose methods and must be used with care. Please
   // make sure you understand the rounding direction before using.
@@ -158,32 +161,31 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
       const Widget::InitParams& params,
       ui::PlatformWindowInitProperties* properties);
 
-  // Returns true if WindowShapeUpdater should update the window shape by
-  // window mask, otherwise false when window shape is already updated in views.
-  virtual bool ShouldUseLayerForShapedWindow() const;
+  // Returns window mask to clip canvas to update window shape of
+  // the content window.
+  virtual SkPath GetWindowMaskForClipping() const;
+
+  // Helper method that returns the display for the |window()|.
+  display::Display GetDisplayNearestRootWindow() const;
 
   internal::NativeWidgetDelegate* const native_widget_delegate_;
   DesktopNativeWidgetAura* const desktop_native_widget_aura_;
 
   bool is_active_ = false;
 
-  base::string16 window_title_;
+  std::u16string window_title_;
 
   // We can optionally have a parent which can order us to close, or own
   // children who we're responsible for closing when we CloseNow().
   DesktopWindowTreeHostPlatform* window_parent_ = nullptr;
   std::set<DesktopWindowTreeHostPlatform*> window_children_;
 
-  // Keep track of PlatformWindow state so that we would react correctly and set
-  // visibility only if the window was minimized or was unminimized from the
-  // normal state.
-  ui::PlatformWindowState old_state_ = ui::PlatformWindowState::kUnknown;
-
   // Used for tab dragging in move loop requests.
   WindowMoveClientPlatform window_move_client_;
 
-  // ui::Layer::SetAlphaShape can be set from either SetShape or default window
-  // mask. When explicitly setting from SetShape, |explicitly_set_shape_:true|.
+  // The content window shape can be set from either SetShape or default window
+  // mask. When explicitly setting from SetShape, |explicitly_set_shape_:true|
+  // to prevent clipping the canvas before painting for default window mask.
   bool is_shape_explicitly_set_ = false;
 
   base::WeakPtrFactory<DesktopWindowTreeHostPlatform> close_widget_factory_{

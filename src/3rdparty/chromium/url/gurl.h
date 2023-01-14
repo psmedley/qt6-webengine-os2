@@ -13,7 +13,6 @@
 
 #include "base/component_export.h"
 #include "base/debug/alias.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -46,8 +45,8 @@
 // will know to escape this and produce the desired result.
 class COMPONENT_EXPORT(URL) GURL {
  public:
-  typedef url::StringPieceReplacements<std::string> Replacements;
-  typedef url::StringPieceReplacements<base::string16> ReplacementsW;
+  typedef url::StringPieceReplacements<char> Replacements;
+  typedef url::StringPieceReplacements<char16_t> ReplacementsW;
 
   // Creates an empty, invalid URL.
   GURL();
@@ -167,8 +166,7 @@ class COMPONENT_EXPORT(URL) GURL {
   // Note that we use the more general url::Replacements type to give
   // callers extra flexibility rather than our override.
   GURL ReplaceComponents(const url::Replacements<char>& replacements) const;
-  GURL ReplaceComponents(
-      const url::Replacements<base::char16>& replacements) const;
+  GURL ReplaceComponents(const url::Replacements<char16_t>& replacements) const;
 
   // A helper function that is equivalent to replacing the path with a slash
   // and clearing out everything after that. We sometimes need to know just the
@@ -442,7 +440,7 @@ class COMPONENT_EXPORT(URL) GURL {
   static bool IsAboutPath(base::StringPiece actual_path,
                           base::StringPiece allowed_path);
 
-  void WriteIntoTracedValue(perfetto::TracedValue context) const;
+  void WriteIntoTrace(perfetto::TracedValue context) const;
 
  private:
   // Variant of the string parsing constructor that allows the caller to elect
@@ -453,9 +451,8 @@ class COMPONENT_EXPORT(URL) GURL {
   enum RetainWhiteSpaceSelector { RETAIN_TRAILING_PATH_WHITEPACE };
   GURL(const std::string& url_string, RetainWhiteSpaceSelector);
 
-  template<typename STR>
-  void InitCanonical(base::BasicStringPiece<STR> input_spec,
-                     bool trim_path_end);
+  template <typename T, typename CharT = typename T::value_type>
+  void InitCanonical(T input_spec, bool trim_path_end);
 
   void InitializeFromCanonicalSpec();
 
@@ -473,6 +470,8 @@ class COMPONENT_EXPORT(URL) GURL {
       return base::StringPiece();
     return base::StringPiece(&spec_[comp.begin], comp.len);
   }
+
+  void ProcessFileOrFileSystemURLAfterReplaceComponents(GURL& url) const;
 
   // The actual text of the URL, in canonical ASCII form.
   std::string spec_;

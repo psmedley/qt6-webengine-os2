@@ -12,6 +12,7 @@
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/devtools_observer.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/web_bundle_handle.mojom.h"
 #include "services/network/test/test_url_loader_client.h"
@@ -51,7 +52,7 @@ class TestWebBundleHandle : public mojom::WebBundleHandle {
     web_bundle_handles_.Add(this, std::move(receiver));
   }
 
-  const base::Optional<std::pair<mojom::WebBundleErrorType, std::string>>&
+  const absl::optional<std::pair<mojom::WebBundleErrorType, std::string>>&
   last_bundle_error() const {
     return last_bundle_error_;
   }
@@ -79,7 +80,7 @@ class TestWebBundleHandle : public mojom::WebBundleHandle {
   void OnWebBundleLoadFinished(bool success) override {}
 
  private:
-  base::Optional<std::pair<mojom::WebBundleErrorType, std::string>>
+  absl::optional<std::pair<mojom::WebBundleErrorType, std::string>>
       last_bundle_error_;
   base::OnceClosure quit_closure_for_bundle_error_;
 
@@ -99,7 +100,8 @@ CreateWebBundleLoaderFactory(WebBundleManager& manager, int32_t process_id) {
   base::WeakPtr<WebBundleURLLoaderFactory> factory =
       manager.CreateWebBundleURLLoaderFactory(
           GURL(kBundleUrl), create_params, process_id,
-          /*request_initiator_origin_lock=*/base::nullopt);
+          /*devtools_observer=*/mojo::PendingRemote<mojom::DevToolsObserver>(),
+          /*devtools_request_id=*/absl::nullopt);
 
   return std::forward_as_tuple(std::move(factory), std::move(handle));
 }
@@ -126,7 +128,8 @@ StartSubresourceLoad(WebBundleURLLoaderFactory& factory) {
   request.web_bundle_token_params->bundle_url = GURL(kBundleUrl);
   factory.StartSubresourceRequest(loader.BindNewPipeAndPassReceiver(), request,
                                   client->CreateRemote(),
-                                  mojo::Remote<mojom::TrustedHeaderClient>());
+                                  mojo::Remote<mojom::TrustedHeaderClient>(),
+                                  base::Time::Now(), base::TimeTicks::Now());
   return std::forward_as_tuple(std::move(loader), std::move(client));
 }
 
@@ -165,7 +168,8 @@ TEST_F(WebBundleManagerTest, NoFactoryExistsForDifferentProcessId) {
 
   auto factory = manager.CreateWebBundleURLLoaderFactory(
       GURL(kBundleUrl), create_params, process_id1,
-      /*request_initiator_origin_lock=*/base::nullopt);
+      /*devtools_observer=*/mojo::PendingRemote<mojom::DevToolsObserver>(),
+      /*devtools_request_id=*/absl::nullopt);
   ASSERT_TRUE(factory);
 
   ResourceRequest::WebBundleTokenParams find_params(GURL(kBundleUrl), token,
@@ -185,7 +189,8 @@ TEST_F(WebBundleManagerTest, UseProcesIdInTokenParamsForRequestsFromBrowser) {
 
   auto factory = manager.CreateWebBundleURLLoaderFactory(
       GURL(kBundleUrl), create_params, process_id1,
-      /*request_initiator_origin_lock=*/base::nullopt);
+      /*devtools_observer=*/mojo::PendingRemote<mojom::DevToolsObserver>(),
+      /*devtools_request_id=*/absl::nullopt);
   ASSERT_TRUE(factory);
 
   ResourceRequest::WebBundleTokenParams find_params1(GURL(kBundleUrl), token,
@@ -214,7 +219,8 @@ TEST_F(WebBundleManagerTest, RemoveFactoryWhenDisconnected) {
 
     auto factory = manager.CreateWebBundleURLLoaderFactory(
         GURL(kBundleUrl), create_params, process_id1,
-        /*request_initiator_origin_lock=*/base::nullopt);
+        /*devtools_observer=*/mojo::PendingRemote<mojom::DevToolsObserver>(),
+        /*devtools_request_id=*/absl::nullopt);
     ASSERT_TRUE(factory);
     ASSERT_TRUE(
         GetWebBundleURLLoaderFactory(manager, find_params, process_id1));
@@ -283,7 +289,8 @@ TEST_F(WebBundleManagerTest,
 
   auto factory = manager.CreateWebBundleURLLoaderFactory(
       GURL(kBundleUrl), token_params, process_id1,
-      /*request_initiator_origin_lock=*/base::nullopt);
+      /*devtools_observer=*/mojo::PendingRemote<mojom::DevToolsObserver>(),
+      /*devtools_request_id=*/absl::nullopt);
 
   // Then, simulate that the bundle is loaded from the network, calling
   // SetBundleStream manually.

@@ -23,6 +23,7 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
+#include "media/base/video_aspect_ratio.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
@@ -144,10 +145,6 @@ D3D11VideoDecoder::~D3D11VideoDecoder() {
 
   if (already_initialized_)
     AddLifetimeProgressionStage(D3D11LifetimeProgression::kPlaybackSucceeded);
-}
-
-std::string D3D11VideoDecoder::GetDisplayName() const {
-  return "D3D11VideoDecoder";
 }
 
 VideoDecoderType D3D11VideoDecoder::GetDecoderType() const {
@@ -722,7 +719,7 @@ void D3D11VideoDecoder::CreatePictureBuffers() {
     stream_metadata = *config_.hdr_metadata();
   // else leave |stream_metadata| default-initialized.  We might use it anyway.
 
-  base::Optional<DXGI_HDR_METADATA_HDR10> display_metadata;
+  absl::optional<DXGI_HDR_METADATA_HDR10> display_metadata;
   if (decoder_configurator_->TextureFormat() == DXGI_FORMAT_P010) {
     // For HDR formats, try to get the display metadata.  This may fail, which
     // is okay.  We'll just skip sending the metadata.
@@ -829,8 +826,8 @@ bool D3D11VideoDecoder::OutputResult(const CodecPicture* picture,
     visible_rect = config_.visible_rect();
 
   // TODO(https://crbug.com/843150): Use aspect ratio from decoder (SPS) if
-  // stream metadata doesn't overrride it.
-  double pixel_aspect_ratio = config_.GetPixelAspectRatio();
+  // the config's aspect ratio isn't valid.
+  gfx::Size natural_size = config_.aspect_ratio().GetNaturalSize(visible_rect);
 
   base::TimeDelta timestamp = picture_buffer->timestamp_;
 
@@ -847,7 +844,7 @@ bool D3D11VideoDecoder::OutputResult(const CodecPicture* picture,
   scoped_refptr<VideoFrame> frame = VideoFrame::WrapNativeTextures(
       texture_selector_->PixelFormat(), mailbox_holders,
       VideoFrame::ReleaseMailboxCB(), picture_buffer->size(), visible_rect,
-      GetNaturalSize(visible_rect, pixel_aspect_ratio), timestamp);
+      natural_size, timestamp);
 
   if (!frame) {
     // This can happen if, somehow, we get an unsupported combination of
@@ -913,7 +910,7 @@ void D3D11VideoDecoder::NotifyError(const Status& reason) {
     // decode_cb and input_buffer_queue cb's.
     // Let the init handler set the error string if this is an init failure.
     MEDIA_LOG(ERROR, media_log_) << "D3D11VideoDecoder error: 0x" << std::hex
-                                 << reason.code() << reason.message();
+                                 << reason.code() << " " << reason.message();
   }
 
   current_buffer_ = nullptr;

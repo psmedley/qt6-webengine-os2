@@ -59,18 +59,18 @@ class HeapBufferHandle : public VideoCaptureBufferHandle {
 
 // VideoCaptureDevice::Client::Buffer::HandleProvider implementation that
 // allocates memory on the heap.
-class HeapBufferHandleProvider
+class HeapBufferHandleProvider final
     : public VideoCaptureDevice::Client::Buffer::HandleProvider {
  public:
   HeapBufferHandleProvider(size_t size) : data_(size) {}
-  ~HeapBufferHandleProvider() final = default;
+  ~HeapBufferHandleProvider() override = default;
 
-  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() final {
+  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() override {
     NOTREACHED();
     return {};
   }
 
-  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() final {
+  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() override {
     NOTREACHED();
     return {};
   }
@@ -88,9 +88,9 @@ class HeapBufferHandleProvider
   std::vector<uint8_t> data_;
 };
 
-class TestVideoCaptureClient : public VideoCaptureDevice::Client {
+class TestVideoCaptureClient final : public VideoCaptureDevice::Client {
  public:
-  ~TestVideoCaptureClient() final = default;
+  ~TestVideoCaptureClient() override = default;
 
   void WaitFrame() {
     EXPECT_FALSE(wait_frame_run_loop_);
@@ -114,7 +114,7 @@ class TestVideoCaptureClient : public VideoCaptureDevice::Client {
   ReserveResult ReserveOutputBuffer(const gfx::Size& dimensions,
                                     VideoPixelFormat format,
                                     int frame_feedback_id,
-                                    Buffer* buffer) final {
+                                    Buffer* buffer) override {
     EXPECT_TRUE(started_);
     EXPECT_EQ(format, PIXEL_FORMAT_I420);
     EXPECT_EQ(dimensions.width() % 2, 0);
@@ -132,7 +132,7 @@ class TestVideoCaptureClient : public VideoCaptureDevice::Client {
       base::TimeTicks reference_time,
       base::TimeDelta timestamp,
       gfx::Rect visible_rect,
-      const VideoFrameMetadata& additional_metadata) final {
+      const VideoFrameMetadata& additional_metadata) override {
     EXPECT_TRUE(started_);
 
     received_frames_.push_back(ReceivedFrame{std::move(buffer), format,
@@ -151,7 +151,7 @@ class TestVideoCaptureClient : public VideoCaptureDevice::Client {
                               bool flip_y,
                               base::TimeTicks reference_time,
                               base::TimeDelta timestamp,
-                              int frame_feedback_id) final {
+                              int frame_feedback_id) override {
     NOTREACHED();
   }
   void OnIncomingCapturedGfxBuffer(gfx::GpuMemoryBuffer* buffer,
@@ -159,7 +159,7 @@ class TestVideoCaptureClient : public VideoCaptureDevice::Client {
                                    int clockwise_rotation,
                                    base::TimeTicks reference_time,
                                    base::TimeDelta timestamp,
-                                   int frame_feedback_id) final {
+                                   int frame_feedback_id) override {
     NOTREACHED();
   }
   void OnIncomingCapturedExternalBuffer(
@@ -172,26 +172,26 @@ class TestVideoCaptureClient : public VideoCaptureDevice::Client {
   void OnIncomingCapturedBuffer(Buffer buffer,
                                 const VideoCaptureFormat& format,
                                 base::TimeTicks reference_time,
-                                base::TimeDelta timestamp) final {
+                                base::TimeDelta timestamp) override {
     NOTREACHED();
   }
   void OnError(VideoCaptureError error,
                const base::Location& from_here,
-               const std::string& reason) final {
+               const std::string& reason) override {
     NOTREACHED();
   }
-  void OnFrameDropped(VideoCaptureFrameDropReason reason) final {
+  void OnFrameDropped(VideoCaptureFrameDropReason reason) override {
     NOTREACHED();
   }
-  void OnLog(const std::string& message) final { NOTREACHED(); }
-  double GetBufferPoolUtilization() const final {
+  void OnLog(const std::string& message) override { NOTREACHED(); }
+  double GetBufferPoolUtilization() const override {
     NOTREACHED();
     return 0;
   }
 
   bool started_ = false;
   std::vector<ReceivedFrame> received_frames_;
-  base::Optional<base::RunLoop> wait_frame_run_loop_;
+  absl::optional<base::RunLoop> wait_frame_run_loop_;
 };
 
 }  // namespace
@@ -225,6 +225,11 @@ class VideoCaptureDeviceFuchsiaTest : public testing::Test {
     device_ = device_factory_.CreateDevice(devices_info[0].descriptor);
   }
 
+  FakeCameraStream* GetDefaultCameraStream() {
+    DCHECK(!fake_device_watcher_.devices().empty());
+    return fake_device_watcher_.devices().begin()->second->stream();
+  }
+
   void StartCapturer() {
     if (!device_)
       CreateDevice();
@@ -238,14 +243,14 @@ class VideoCaptureDeviceFuchsiaTest : public testing::Test {
     client_ = client.get();
     device_->AllocateAndStart(params, std::move(client));
 
-    EXPECT_TRUE(fake_device_watcher_.stream()->WaitBuffersAllocated());
+    EXPECT_TRUE(GetDefaultCameraStream()->WaitBuffersAllocated());
   }
 
   void ProduceAndCaptureFrame() {
     const uint8_t kFrameSalt = 1;
 
     auto frame_timestamp = base::TimeTicks::Now();
-    fake_device_watcher_.stream()->ProduceFrame(frame_timestamp, kFrameSalt);
+    GetDefaultCameraStream()->ProduceFrame(frame_timestamp, kFrameSalt);
     client_->WaitFrame();
 
     ASSERT_EQ(client_->received_frames().size(), 1U);
@@ -279,7 +284,7 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, SendFrame) {
 // Verifies that VideoCaptureDevice can recover from failed Sync() on the sysmem
 // buffer collection.
 TEST_F(VideoCaptureDeviceFuchsiaTest, FailBufferCollectionSync) {
-  fake_device_watcher_.stream()->SetFirstBufferCollectionFailMode(
+  GetDefaultCameraStream()->SetFirstBufferCollectionFailMode(
       FakeCameraStream::SysmemFailMode::kFailSync);
 
   StartCapturer();
@@ -289,7 +294,7 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, FailBufferCollectionSync) {
 // Verifies that VideoCaptureDevice can recover from sysmem buffer allocation
 // failures..
 TEST_F(VideoCaptureDeviceFuchsiaTest, FailBufferCollectionAllocation) {
-  fake_device_watcher_.stream()->SetFirstBufferCollectionFailMode(
+  GetDefaultCameraStream()->SetFirstBufferCollectionFailMode(
       FakeCameraStream::SysmemFailMode::kFailAllocation);
 
   StartCapturer();
@@ -299,16 +304,18 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, FailBufferCollectionAllocation) {
 TEST_F(VideoCaptureDeviceFuchsiaTest, MultipleFrames) {
   StartCapturer();
 
-  EXPECT_TRUE(fake_device_watcher_.stream()->WaitBuffersAllocated());
+  FakeCameraStream* stream = GetDefaultCameraStream();
+
+  EXPECT_TRUE(stream->WaitBuffersAllocated());
 
   auto start_timestamp = base::TimeTicks::Now();
 
   for (size_t i = 0; i < 10; ++i) {
-    ASSERT_TRUE(fake_device_watcher_.stream()->WaitFreeBuffer());
+    ASSERT_TRUE(stream->WaitFreeBuffer());
 
     auto frame_timestamp =
         start_timestamp + base::TimeDelta::FromMilliseconds(i * 16);
-    fake_device_watcher_.stream()->ProduceFrame(frame_timestamp, i);
+    stream->ProduceFrame(frame_timestamp, i);
     client_->WaitFrame();
 
     ASSERT_EQ(client_->received_frames().size(), i + 1);
@@ -320,11 +327,13 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, MultipleFrames) {
 
 TEST_F(VideoCaptureDeviceFuchsiaTest, FrameRotation) {
   const gfx::Size kResolution(4, 2);
-  fake_device_watcher_.stream()->SetFakeResolution(kResolution);
+
+  FakeCameraStream* stream = GetDefaultCameraStream();
+  stream->SetFakeResolution(kResolution);
 
   StartCapturer();
 
-  EXPECT_TRUE(fake_device_watcher_.stream()->WaitBuffersAllocated());
+  EXPECT_TRUE(stream->WaitBuffersAllocated());
 
   for (int i = static_cast<int>(fuchsia::camera3::Orientation::UP);
        i <= static_cast<int>(fuchsia::camera3::Orientation::RIGHT_FLIPPED);
@@ -333,9 +342,9 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, FrameRotation) {
 
     auto orientation = static_cast<fuchsia::camera3::Orientation>(i);
 
-    ASSERT_TRUE(fake_device_watcher_.stream()->WaitFreeBuffer());
-    fake_device_watcher_.stream()->SetFakeOrientation(orientation);
-    fake_device_watcher_.stream()->ProduceFrame(base::TimeTicks::Now(), i);
+    ASSERT_TRUE(stream->WaitFreeBuffer());
+    stream->SetFakeOrientation(orientation);
+    stream->ProduceFrame(base::TimeTicks::Now(), i);
     client_->WaitFrame();
 
     gfx::Size expected_size = kResolution;
@@ -350,12 +359,13 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, FrameRotation) {
 }
 
 TEST_F(VideoCaptureDeviceFuchsiaTest, FrameDimensionsNotDivisibleBy2) {
+  FakeCameraStream* stream = GetDefaultCameraStream();
   const gfx::Size kOddResolution(21, 7);
-  fake_device_watcher_.stream()->SetFakeResolution(kOddResolution);
+  stream->SetFakeResolution(kOddResolution);
 
   StartCapturer();
 
-  fake_device_watcher_.stream()->ProduceFrame(base::TimeTicks::Now(), 1);
+  stream->ProduceFrame(base::TimeTicks::Now(), 1);
   client_->WaitFrame();
 
   ASSERT_EQ(client_->received_frames().size(), 1U);
@@ -366,14 +376,15 @@ TEST_F(VideoCaptureDeviceFuchsiaTest, MidStreamResolutionChange) {
   StartCapturer();
 
   // Capture the first frame at the default resolution.
-  fake_device_watcher_.stream()->ProduceFrame(base::TimeTicks::Now(), 1);
+  FakeCameraStream* stream = GetDefaultCameraStream();
+  stream->ProduceFrame(base::TimeTicks::Now(), 1);
   client_->WaitFrame();
-  ASSERT_TRUE(fake_device_watcher_.stream()->WaitFreeBuffer());
+  ASSERT_TRUE(stream->WaitFreeBuffer());
 
   // Update resolution and produce another frames.
   const gfx::Size kUpdatedResolution(3, 14);
-  fake_device_watcher_.stream()->SetFakeResolution(kUpdatedResolution);
-  fake_device_watcher_.stream()->ProduceFrame(base::TimeTicks::Now(), 1);
+  stream->SetFakeResolution(kUpdatedResolution);
+  stream->ProduceFrame(base::TimeTicks::Now(), 1);
   client_->WaitFrame();
 
   // Verify that we get captured frames with correct resolution.
@@ -398,7 +409,7 @@ TEST_F(VideoCaptureDeviceFuchsiaTest,
 
   StartCapturer();
 
-  fake_device_watcher_.stream()->ProduceFrame(base::TimeTicks::Now(), 1);
+  GetDefaultCameraStream()->ProduceFrame(base::TimeTicks::Now(), 1);
   client_->WaitFrame();
 
   ASSERT_EQ(client_->received_frames().size(), 1U);

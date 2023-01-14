@@ -7,7 +7,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "content/browser/media/session/media_session_player_observer.h"
 #include "content/common/content_export.h"
@@ -16,6 +15,7 @@
 #include "media/audio/audio_device_description.h"
 #include "media/base/media_content_type.h"
 #include "services/media_session/public/cpp/media_position.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
@@ -54,13 +54,14 @@ class CONTENT_EXPORT MediaSessionController
   void OnResume(int player_id) override;
   void OnSeekForward(int player_id, base::TimeDelta seek_time) override;
   void OnSeekBackward(int player_id, base::TimeDelta seek_time) override;
+  void OnSeekTo(int player_id, base::TimeDelta seek_time) override;
   void OnSetVolumeMultiplier(int player_id, double volume_multiplier) override;
   void OnEnterPictureInPicture(int player_id) override;
   void OnExitPictureInPicture(int player_id) override;
   void OnSetAudioSinkId(int player_id,
                         const std::string& raw_device_id) override;
   RenderFrameHost* render_frame_host() const override;
-  base::Optional<media_session::MediaPosition> GetPosition(
+  absl::optional<media_session::MediaPosition> GetPosition(
       int player_id) const override;
   bool IsPictureInPictureAvailable(int player_id) const override;
   bool HasAudio(int player_id) const override;
@@ -105,7 +106,7 @@ class CONTENT_EXPORT MediaSessionController
   // Outlives |this|.
   MediaSessionImpl* const media_session_;
 
-  base::Optional<media_session::MediaPosition> position_;
+  absl::optional<media_session::MediaPosition> position_;
 
   // These objects are only created on the UI thread, so this is safe.
   static int player_count_;

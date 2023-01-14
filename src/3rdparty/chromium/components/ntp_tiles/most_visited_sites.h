@@ -20,9 +20,9 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
+#include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
-#include "base/strings/string16.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_observer.h"
@@ -31,10 +31,7 @@
 #include "components/ntp_tiles/popular_sites.h"
 #include "components/ntp_tiles/section_type.h"
 #include "components/ntp_tiles/tile_source.h"
-#include "components/search/repeatable_queries/repeatable_queries_service.h"
-#include "components/search/repeatable_queries/repeatable_queries_service_observer.h"
-#include "components/suggestions/proto/suggestions.pb.h"
-#include "components/suggestions/suggestions_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace user_prefs {
@@ -51,7 +48,7 @@ class IconCacher;
 class MostVisitedSitesSupervisor {
  public:
   struct Allowlist {
-    base::string16 title;
+    std::u16string title;
     GURL entry_point;
     base::FilePath large_icon_path;
   };
@@ -85,19 +82,15 @@ class MostVisitedSitesSupervisor {
 
 // Tracks the list of most visited sites.
 class MostVisitedSites : public history::TopSitesObserver,
-                         public MostVisitedSitesSupervisor::Observer,
-                         public RepeatableQueriesServiceObserver {
+                         public MostVisitedSitesSupervisor::Observer {
  public:
   // The observer to be notified when the list of most visited sites changes.
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
     // |sections| must at least contain the PERSONALIZED section.
     virtual void OnURLsAvailable(
         const std::map<SectionType, NTPTilesVector>& sections) = 0;
     virtual void OnIconMadeAvailable(const GURL& site_url) = 0;
-
-   protected:
-    virtual ~Observer() {}
   };
 
   // This interface delegates the retrieval of the homepage to the
@@ -105,7 +98,7 @@ class MostVisitedSites : public history::TopSitesObserver,
   class HomepageClient {
    public:
     using TitleCallback =
-        base::OnceCallback<void(const base::Optional<base::string16>& title)>;
+        base::OnceCallback<void(const absl::optional<std::u16string>& title)>;
 
     virtual ~HomepageClient() = default;
     virtual bool IsHomepageTileEnabled() const = 0;
@@ -117,7 +110,7 @@ class MostVisitedSites : public history::TopSitesObserver,
    public:
     virtual ~ExploreSitesClient() = default;
     virtual GURL GetExploreSitesUrl() const = 0;
-    virtual base::string16 GetExploreSitesTitle() const = 0;
+    virtual std::u16string GetExploreSitesTitle() const = 0;
   };
 
   // Construct a MostVisitedSites instance.
@@ -127,8 +120,6 @@ class MostVisitedSites : public history::TopSitesObserver,
   //  optional and if null, the associated features will be disabled.
   MostVisitedSites(PrefService* prefs,
                    scoped_refptr<history::TopSites> top_sites,
-                   RepeatableQueriesService* repeatable_queries,
-                   suggestions::SuggestionsService* suggestions,
                    std::unique_ptr<PopularSites> popular_sites,
                    std::unique_ptr<CustomLinksManager> custom_links,
                    std::unique_ptr<IconCacher> icon_cacher,
@@ -143,17 +134,23 @@ class MostVisitedSites : public history::TopSitesObserver,
 
   // Returns the corresponding object passed at construction.
   history::TopSites* top_sites() { return top_sites_.get(); }
-  suggestions::SuggestionsService* suggestions() {
-    return suggestions_service_;
-  }
   PopularSites* popular_sites() { return popular_sites_.get(); }
   MostVisitedSitesSupervisor* supervisor() { return supervisor_.get(); }
 
-  // Sets the observer, and immediately fetches the current suggestions.
+  // Adds the observer and immediately fetches the current suggestions.
+  // All observers will be notified when the suggestions are fetched.
+  //
+  // Note: only observers that require the same |max_num_sites| could observe
+  // the same MostVisitedSites instance. Otherwise, a new Instance should be
+  // created for the observer.
+  //
   // Does not take ownership of |observer|, which must outlive this object and
   // must not be null. |max_num_sites| indicates the the maximum number of most
   // visited sites to return.
-  void SetMostVisitedURLsObserver(Observer* observer, size_t max_num_sites);
+  void AddMostVisitedURLsObserver(Observer* observer, size_t max_num_sites);
+
+  // Removes the observer.
+  void RemoveMostVisitedURLsObserver(Observer* observer);
 
   // Sets the client that provides platform-specific homepage preferences.
   // When used to replace an existing client, the new client will first be
@@ -184,13 +181,19 @@ class MostVisitedSites : public history::TopSitesObserver,
   // otherwise.
   bool IsCustomLinksInitialized();
   // Enables or disables custom links, but does not (un)initialize them. Called
-  // when a third-party NTP is being used, or when the user switches between
-  // custom links and Most Visited sites.
+  // when the user switches between custom links and Most Visited sites on the
+  // 1P Desktop NTP.
   void EnableCustomLinks(bool enable);
+  // Returns whether custom links are enabled.
+  bool IsCustomLinksEnabled() const;
+  // Sets the visibility of the NTP tiles.
+  void SetShortcutsVisible(bool visible);
+  // Returns whether NTP tiles should be shown.
+  bool IsShortcutsVisible() const;
   // Adds a custom link. If the number of current links is maxed, returns false
   // and does nothing. Will initialize custom links if they have not been
   // initialized yet, unless the action fails. Custom links must be enabled.
-  bool AddCustomLink(const GURL& url, const base::string16& title);
+  bool AddCustomLink(const GURL& url, const std::u16string& title);
   // Updates the URL and/or title of the custom link specified by |url|. If
   // |url| does not exist or |new_url| already exists in the custom link list,
   // returns false and does nothing. Will initialize custom links if they have
@@ -198,7 +201,7 @@ class MostVisitedSites : public history::TopSitesObserver,
   // enabled.
   bool UpdateCustomLink(const GURL& url,
                         const GURL& new_url,
-                        const base::string16& new_title);
+                        const std::u16string& new_title);
   // Moves the custom link specified by |url| to the index |new_pos|. If |url|
   // does not exist, or |new_pos| is invalid, returns false and does nothing.
   // Will initialize custom links if they have not been initialized yet, unless
@@ -224,13 +227,14 @@ class MostVisitedSites : public history::TopSitesObserver,
   void OnBlockedSitesChanged() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void ResetProfilePrefs(PrefService* prefs);
 
   // Workhorse for SaveNewTilesAndNotify. Implemented as a separate static and
   // public method for ease of testing.
   static NTPTilesVector MergeTiles(NTPTilesVector personal_tiles,
                                    NTPTilesVector allowlist_tiles,
                                    NTPTilesVector popular_tiles,
-                                   base::Optional<NTPTile> explore_tile);
+                                   absl::optional<NTPTile> explore_tile);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MostVisitedSitesTest,
@@ -256,8 +260,7 @@ class MostVisitedSites : public history::TopSitesObserver,
   // including the "Add shortcut" button.
   size_t GetMaxNumSites() const;
 
-  // Initialize the query to Top Sites. Called if the SuggestionsService
-  // returned no data.
+  // Initialize the query to Top Sites.
   void InitiateTopSitesQuery();
 
   // If there's a allowlist entry point for the URL, return the large icon path.
@@ -267,19 +270,9 @@ class MostVisitedSites : public history::TopSitesObserver,
   void OnMostVisitedURLsAvailable(
       const history::MostVisitedURLList& visited_list);
 
-  NTPTilesVector InsertRepeatableQueryTiles(NTPTilesVector tiles);
-
-  // Callback for when an update is reported by the SuggestionsService.
-  void OnSuggestionsProfileChanged(
-      const suggestions::SuggestionsProfile& suggestions_profile);
-
   // Builds the current tileset based on available caches and notifies the
   // observer.
   void BuildCurrentTiles();
-
-  // Same as above the SuggestionsProfile is provided, no need to read cache.
-  void BuildCurrentTilesGivenSuggestionsProfile(
-      const suggestions::SuggestionsProfile& suggestions_profile);
 
   // Creates allowlist entry point suggestions whose hosts weren't used yet.
   NTPTilesVector CreateAllowlistEntryPointTiles(
@@ -333,14 +326,14 @@ class MostVisitedSites : public history::TopSitesObserver,
   // Drops existing tiles with the same host as the home page and tiles that
   // would exceed the maximum.
   NTPTilesVector InsertHomeTile(NTPTilesVector tiles,
-                                const base::string16& title) const;
+                                const std::u16string& title) const;
 
   // Creates a tile for the Explore Sites page, if enabled. The tile is added to
   // the front of the list.
-  base::Optional<NTPTile> CreateExploreSitesTile();
+  absl::optional<NTPTile> CreateExploreSitesTile();
 
   void OnHomepageTitleDetermined(NTPTilesVector tiles,
-                                 const base::Optional<base::string16>& title);
+                                 const absl::optional<std::u16string>& title);
 
   // Returns true if there is a valid homepage that can be pinned as tile.
   bool ShouldAddHomeTile() const;
@@ -350,14 +343,8 @@ class MostVisitedSites : public history::TopSitesObserver,
   void TopSitesChanged(history::TopSites* top_sites,
                        ChangeReason change_reason) override;
 
-  // RepeatableQueriesServiceObserver implementation.
-  void OnRepeatableQueriesUpdated() override;
-  void OnRepeatableQueriesServiceShuttingDown() override;
-
   PrefService* prefs_;
   scoped_refptr<history::TopSites> top_sites_;
-  RepeatableQueriesService* repeatable_queries_;
-  suggestions::SuggestionsService* suggestions_service_;
   std::unique_ptr<PopularSites> const popular_sites_;
   std::unique_ptr<CustomLinksManager> const custom_links_;
   std::unique_ptr<IconCacher> const icon_cacher_;
@@ -365,37 +352,34 @@ class MostVisitedSites : public history::TopSitesObserver,
   std::unique_ptr<HomepageClient> homepage_client_;
   std::unique_ptr<ExploreSitesClient> explore_sites_client_;
 
-  Observer* observer_;
+  base::ObserverList<Observer> observers_;
 
   // The maximum number of most visited sites to return.
   // Do not use directly. Use GetMaxNumSites() instead.
   size_t max_num_sites_;
 
-  // False if custom links is disabled and Most Visited sites should be returned
-  // instead.
-  bool custom_links_enabled_ = true;
   // Number of actions after custom link initialization. Set to -1 and not
   // incremented if custom links was not initialized during this session.
   int custom_links_action_count_ = -1;
 
-  base::CallbackListSubscription suggestions_subscription_;
+  bool is_custom_links_enabled_ = true;
+  bool is_shortcuts_visible_ = true;
 
   base::ScopedObservation<history::TopSites, history::TopSitesObserver>
       top_sites_observation_{this};
 
-  base::ScopedObservation<RepeatableQueriesService,
-                          RepeatableQueriesServiceObserver>
-      repeatable_queries_observation_{this};
-
   base::CallbackListSubscription custom_links_subscription_;
 
-  // The main source of personal tiles - either TOP_SITES or SUGGESTIONS_SEVICE.
+  // The main source of personal tiles - either TOP_SITES or CUSTOM_LINKS.
   TileSource mv_source_;
 
   // Current set of tiles. Optional so that the observer can be notified
   // whenever it changes, including possibily an initial change from
   // !current_tiles_.has_value() to current_tiles_->empty().
-  base::Optional<NTPTilesVector> current_tiles_;
+  absl::optional<NTPTilesVector> current_tiles_;
+
+  // Whether has started observing data sources.
+  bool is_observing_;
 
   // For callbacks may be run after destruction, used exclusively for TopSites
   // (since it's used to detect whether there's a query in flight).

@@ -8,23 +8,22 @@
 #include <atomic>
 #include <memory>
 
+#include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/allocator/partition_allocator/partition_alloc_forward.h"
-#include "base/allocator/partition_allocator/partition_cookie.h"
+#include "base/allocator/partition_allocator/partition_bucket_lookup.h"
 #include "base/allocator/partition_allocator/partition_freelist_entry.h"
 #include "base/allocator/partition_allocator/partition_lock.h"
 #include "base/allocator/partition_allocator/partition_stats.h"
 #include "base/allocator/partition_allocator/partition_tls.h"
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
+#include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/no_destructor.h"
-#include "base/partition_alloc_buildflags.h"
-#include "base/sequenced_task_runner.h"
-#include "base/synchronization/lock.h"
+#include "build/build_config.h"
 
-// Need TLS support.
-#if defined(OS_POSIX) || defined(OS_WIN)
-#define PA_THREAD_CACHE_SUPPORTED
+#if defined(ARCH_CPU_X86_64) && defined(PA_HAS_64_BITS_POINTERS)
+#include <algorithm>
 #endif
 
 namespace base {
@@ -34,6 +33,33 @@ namespace internal {
 class ThreadCache;
 
 extern BASE_EXPORT PartitionTlsKey g_thread_cache_key;
+// On Windows, |thread_local| variables cannot be marked "dllexport", see
+// compiler error C2492 at
+// https://docs.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2492?view=msvc-160.
+// Don't use it there.
+//
+// On Android, we have to go through emutls, since this is always a shared
+// library, so don't bother.
+//
+// On macOS and iOS with PartitionAlloc-Everywhere enabled, thread_local
+// allocates memory and it causes an infinite loop of ThreadCache::Get() ->
+// malloc_zone_malloc -> ShimMalloc -> ThreadCache::Get() -> ...
+// Exact stack trace is:
+//   libsystem_malloc.dylib`_malloc_zone_malloc
+//   libdyld.dylib`tlv_allocate_and_initialize_for_key
+//   libdyld.dylib`tlv_get_addr
+//   libbase.dylib`thread-local wrapper routine for
+//       base::internal::g_thread_cache
+//   libbase.dylib`base::internal::ThreadCache::Get()
+// where tlv_allocate_and_initialize_for_key performs memory allocation.
+#if !(defined(OS_WIN) && defined(COMPONENT_BUILD)) && !defined(OS_ANDROID) && \
+    !(defined(OS_APPLE) && BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC))
+#define PA_THREAD_CACHE_FAST_TLS
+#endif
+
+#if defined(PA_THREAD_CACHE_FAST_TLS)
+extern BASE_EXPORT thread_local ThreadCache* g_thread_cache;
+#endif
 
 // Global registry of all ThreadCache instances.
 //
@@ -69,6 +95,10 @@ class BASE_EXPORT ThreadCacheRegistry {
   // Starts a periodic timer on the current thread to purge all thread caches.
   void StartPeriodicPurge();
 
+  // Controls the thread cache size, by setting the multiplier to a value above
+  // or below |ThreadCache::kDefaultMultiplier|.
+  void SetThreadCacheMultiplier(float multiplier);
+
   static PartitionLock& GetLock() { return Instance().lock_; }
   // Purges all thread caches *now*. This is completely thread-unsafe, and
   // should only be called in a post-fork() handler.
@@ -81,7 +111,7 @@ class BASE_EXPORT ThreadCacheRegistry {
   static constexpr TimeDelta kMinPurgeInterval = TimeDelta::FromSeconds(1);
   static constexpr TimeDelta kMaxPurgeInterval = TimeDelta::FromMinutes(1);
   static constexpr TimeDelta kDefaultPurgeInterval = 2 * kMinPurgeInterval;
-  static constexpr int kMinMainThreadAllocationsForPurging = 1000;
+  static constexpr size_t kMinCachedMemoryForPurging = 500 * 1024;
 
  private:
   void PeriodicPurge();
@@ -90,17 +120,13 @@ class BASE_EXPORT ThreadCacheRegistry {
   // Not using base::Lock as the object's constructor must be constexpr.
   PartitionLock lock_;
   ThreadCache* list_head_ GUARDED_BY(GetLock()) = nullptr;
-  uint64_t allocations_at_last_purge_ = 0;
   base::TimeDelta purge_interval_ = kDefaultPurgeInterval;
   bool periodic_purge_running_ = false;
 };
 
 constexpr ThreadCacheRegistry::ThreadCacheRegistry() = default;
 
-// Optional statistics collection.
-#define PA_ENABLE_THREAD_CACHE_STATISTICS 1
-
-#if defined(PA_ENABLE_THREAD_CACHE_STATISTICS)
+#if defined(PA_THREAD_CACHE_ENABLE_STATISTICS)
 #define INCREMENT_COUNTER(counter) ++counter
 #define GET_COUNTER(counter) counter
 #else
@@ -108,11 +134,7 @@ constexpr ThreadCacheRegistry::ThreadCacheRegistry() = default;
   do {                             \
   } while (0)
 #define GET_COUNTER(counter) 0
-#endif  // defined(PA_ENABLE_THREAD_CACHE_STATISTICS)
-
-ALWAYS_INLINE static constexpr int ConstexprLog2(size_t n) {
-  return n < 1 ? -1 : (n < 2 ? 0 : (1 + ConstexprLog2(n >> 1)));
-}
+#endif  // defined(PA_THREAD_CACHE_ENABLE_STATISTICS)
 
 #if DCHECK_IS_ON()
 class ReentrancyGuard {
@@ -161,7 +183,11 @@ class BASE_EXPORT ThreadCache {
   static void EnsureThreadSpecificDataInitialized();
 
   static ThreadCache* Get() {
+#if defined(PA_THREAD_CACHE_FAST_TLS)
+    return g_thread_cache;
+#else
     return reinterpret_cast<ThreadCache*>(PartitionTlsGet(g_thread_cache_key));
+#endif
   }
 
   static bool IsValid(ThreadCache* tcache) {
@@ -209,32 +235,54 @@ class BASE_EXPORT ThreadCache {
   // Asks this cache to trigger |Purge()| at a later point. Can be called from
   // any thread.
   void SetShouldPurge();
-  void SetNotifiesRegistry(bool enabled);
   // Empties the cache.
   // The Partition lock must *not* be held when calling this.
   // Must be called from the thread this cache is for.
   void Purge();
+  // Amount of cached memory for this thread's cache, in bytes.
+  size_t CachedMemory() const;
   void AccumulateStats(ThreadCacheStats* stats) const;
+
+  // Purge the thread cache of the current thread, if one exists.
+  static void PurgeCurrentThread();
 
   size_t bucket_count_for_testing(size_t index) const {
     return buckets_[index].count;
   }
 
-  // TODO(lizeb): Once we have periodic purge, lower the ratio.
-  static constexpr uint16_t kBatchFillRatio = 8;
-  static constexpr uint8_t kMaxCountPerBucket = 128;
+  // Sets the maximum size of allocations that may be cached by the thread
+  // cache. This applies to all threads. However, the maximum size is bounded by
+  // |kLargeSizeThreshold|.
+  static void SetLargestCachedSize(size_t size);
 
-  // TODO(lizeb): Optimize the threshold.
-  static constexpr size_t kSizeThreshold = 512;
+  // Fill 1 / kBatchFillRatio * bucket.limit slots at a time.
+  static constexpr uint16_t kBatchFillRatio = 8;
+
+  // Limit for the smallest bucket will be kDefaultMultiplier *
+  // kSmallBucketBaseCount by default.
+  static constexpr float kDefaultMultiplier = 2.;
+  static constexpr uint8_t kSmallBucketBaseCount = 64;
+
+  // When trying to conserve memory, set the thread cache limit to this.
+  static constexpr size_t kDefaultSizeThreshold = 512;
+  // 32kiB is chosen here as from local experiments, "zone" allocation in
+  // V8 is performance-sensitive, and zones can (and do) grow up to 32kiB for
+  // each individual allocation.
+  static constexpr size_t kLargeSizeThreshold = 1 << 15;
+  static_assert(kLargeSizeThreshold <= std::numeric_limits<uint16_t>::max(),
+                "");
 
  private:
   struct Bucket {
-    PartitionFreelistEntry* freelist_head;
+    PartitionFreelistEntry* freelist_head = nullptr;
     // Want to keep sizeof(Bucket) small, using small types.
-    uint8_t count;
-    uint8_t limit;
-    uint16_t slot_size;
+    uint8_t count = 0;
+    std::atomic<uint8_t> limit{};  // Can be changed from another thread.
+    uint16_t slot_size = 0;
+
+    Bucket();
   };
+  static_assert(sizeof(Bucket) <= 2 * sizeof(void*), "Keep Bucket small.");
   enum class Mode { kNormal, kPurge, kNotifyRegistry };
 
   explicit ThreadCache(PartitionRoot<ThreadSafe>* root);
@@ -245,13 +293,20 @@ class BASE_EXPORT ThreadCache {
   // Empties the |bucket| until there are at most |limit| objects in it.
   void ClearBucket(Bucket& bucket, size_t limit);
   ALWAYS_INLINE void PutInBucket(Bucket& bucket, void* slot_start);
-  void HandleNonNormalMode();
   void ResetForTesting();
+  // Releases the entire freelist starting at |head| to the root.
+  void FreeAfter(PartitionFreelistEntry* head, size_t slot_size);
+  static void SetGlobalLimits(PartitionRoot<ThreadSafe>* root,
+                              float multiplier);
 
+#if defined(OS_NACL)
+  // The thread cache is never used with NaCl, but its compiler doesn't
+  // understand enough constexpr to handle the code below.
+  static constexpr uint16_t kBucketCount = 1;
+#else
   static constexpr uint16_t kBucketCount =
-      ((ConstexprLog2(kSizeThreshold) - kMinBucketedOrder + 1)
-       << kNumBucketsPerOrderBits) +
-      1;
+      internal::BucketIndexLookup::GetIndex(kLargeSizeThreshold) + 1;
+#endif
   static_assert(
       kBucketCount < kNumBuckets,
       "Cannot have more cached buckets than what the allocator supports");
@@ -269,7 +324,16 @@ class BASE_EXPORT ThreadCache {
   static constexpr uintptr_t kTombstone = 0x1;
   static constexpr uintptr_t kTombstoneMask = ~kTombstone;
 
+  static uint8_t global_limits_[kBucketCount];
+  // Index of the largest active bucket. Not all processes/platforms will use
+  // all buckets, as using larger buckets increases the memory footprint.
+  //
+  // TODO(lizeb): Investigate making this per-thread rather than static, to
+  // improve locality, and open the door to per-thread settings.
+  static uint16_t largest_active_bucket_index_;
+
   Bucket buckets_[kBucketCount];
+  size_t cached_memory_ = 0;
   std::atomic<bool> should_purge_;
   ThreadCacheStats stats_;
   PartitionRoot<ThreadSafe>* const root_;
@@ -283,14 +347,27 @@ class BASE_EXPORT ThreadCache {
   ThreadCache* prev_ GUARDED_BY(ThreadCacheRegistry::GetLock());
 
   friend class ThreadCacheRegistry;
-  friend class ThreadCacheTest;
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, Simple);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, MultipleObjectsCachedPerBucket);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, LargeAllocationsAreNotCached);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, MultipleThreadCaches);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, RecordStats);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, ThreadCacheRegistry);
-  FRIEND_TEST_ALL_PREFIXES(ThreadCacheTest, MultipleThreadCachesAccounting);
+  friend class PartitionAllocThreadCacheTest;
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, Simple);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           MultipleObjectsCachedPerBucket);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           LargeAllocationsAreNotCached);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, MultipleThreadCaches);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, RecordStats);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, ThreadCacheRegistry);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           MultipleThreadCachesAccounting);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           DynamicCountPerBucket);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           DynamicCountPerBucketClamping);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           DynamicCountPerBucketMultipleThreads);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, DynamicSizeThreshold);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest,
+                           DynamicSizeThresholdPurge);
+  FRIEND_TEST_ALL_PREFIXES(PartitionAllocThreadCacheTest, ClearFromTail);
 };
 
 ALWAYS_INLINE bool ThreadCache::MaybePutInCache(void* slot_start,
@@ -298,7 +375,7 @@ ALWAYS_INLINE bool ThreadCache::MaybePutInCache(void* slot_start,
   PA_REENTRANCY_GUARD(is_in_thread_cache_);
   INCREMENT_COUNTER(stats_.cache_fill_count);
 
-  if (UNLIKELY(bucket_index >= kBucketCount)) {
+  if (UNLIKELY(bucket_index > largest_active_bucket_index_)) {
     INCREMENT_COUNTER(stats_.cache_fill_misses);
     return false;
   }
@@ -308,11 +385,17 @@ ALWAYS_INLINE bool ThreadCache::MaybePutInCache(void* slot_start,
   PA_DCHECK(bucket.count != 0 || bucket.freelist_head == nullptr);
 
   PutInBucket(bucket, slot_start);
+  cached_memory_ += bucket.slot_size;
   INCREMENT_COUNTER(stats_.cache_fill_hits);
 
+  // Relaxed ordering: we don't care about having an up-to-date or consistent
+  // value, just want it to not change while we are using it, hence using
+  // relaxed ordering, and loading into a local variable. Without it, we are
+  // gambling that the compiler would not issue multiple loads.
+  uint8_t limit = bucket.limit.load(std::memory_order_relaxed);
   // Batched deallocation, amortizing lock acquisitions.
-  if (UNLIKELY(bucket.count >= bucket.limit)) {
-    ClearBucket(bucket, bucket.limit / 2);
+  if (UNLIKELY(bucket.count > limit)) {
+    ClearBucket(bucket, limit / 2);
   }
 
   if (UNLIKELY(should_purge_.load(std::memory_order_relaxed)))
@@ -323,10 +406,14 @@ ALWAYS_INLINE bool ThreadCache::MaybePutInCache(void* slot_start,
 
 ALWAYS_INLINE void* ThreadCache::GetFromCache(size_t bucket_index,
                                               size_t* slot_size) {
+#if defined(PA_THREAD_CACHE_ALLOC_STATS)
+  stats_.allocs_per_bucket_[bucket_index]++;
+#endif
+
   PA_REENTRANCY_GUARD(is_in_thread_cache_);
   INCREMENT_COUNTER(stats_.alloc_count);
   // Only handle "small" allocations.
-  if (UNLIKELY(bucket_index >= kBucketCount)) {
+  if (UNLIKELY(bucket_index > largest_active_bucket_index_)) {
     INCREMENT_COUNTER(stats_.alloc_miss_too_large);
     INCREMENT_COUNTER(stats_.alloc_misses);
     return nullptr;
@@ -350,17 +437,67 @@ ALWAYS_INLINE void* ThreadCache::GetFromCache(size_t bucket_index,
 
   PA_DCHECK(bucket.count != 0);
   auto* result = bucket.freelist_head;
-  auto* next = result->GetNext();
+  // Passes the bucket size to |GetNext()|, so that in case of freelist
+  // corruption, we know the bucket size that lead to the crash, helping to
+  // narrow down the search for culprit. |bucket| was touched just now, so this
+  // does not introduce another cache miss.
+  auto* next = result->GetNext(bucket.slot_size);
   PA_DCHECK(result != next);
   bucket.count--;
   PA_DCHECK(bucket.count != 0 || !next);
   bucket.freelist_head = next;
   *slot_size = bucket.slot_size;
 
+  PA_DCHECK(cached_memory_ >= bucket.slot_size);
+  cached_memory_ -= bucket.slot_size;
   return result;
 }
 
 ALWAYS_INLINE void ThreadCache::PutInBucket(Bucket& bucket, void* slot_start) {
+#if defined(ARCH_CPU_X86_64) && defined(PA_HAS_64_BITS_POINTERS)
+  // We see freelist corruption crashes happening in the wild.  These are likely
+  // due to out-of-bounds accesses in the previous slot, or to a Use-After-Free
+  // somewhere in the code.
+  //
+  // The issue is that we detect the UaF far away from the place where it
+  // happens. As a consequence, we should try to make incorrect code crash as
+  // early as possible. Poisoning memory at free() time works for UaF, but it
+  // was seen in the past to incur a high performance cost.
+  //
+  // Here, only poison the current cacheline, which we are touching anyway.
+  // TODO(lizeb): Make sure this does not hurt performance.
+
+  // Everything below requires this aligment.
+  static_assert(kAlignment == 16, "");
+
+#if HAS_BUILTIN(__builtin_assume_aligned)
+  uintptr_t address = reinterpret_cast<uintptr_t>(
+      __builtin_assume_aligned(slot_start, kAlignment));
+#else
+  uintptr_t address = reinterpret_cast<uintptr_t>(slot_start);
+#endif
+
+  // We assume that the cacheline size is 64 byte, which is true on all x86_64
+  // CPUs as of 2021.
+  //
+  // The pointer is always 16 bytes aligned, so its start address is always == 0
+  // % 16. Its distance to the next cacheline is 64 - ((address & 63) / 16) *
+  // 16.
+  int distance_to_next_cacheline_in_16_bytes = 4 - ((address >> 4) & 3);
+  int slot_size_remaining_in_16_bytes =
+      std::min(bucket.slot_size / 16, distance_to_next_cacheline_in_16_bytes);
+
+  static const uint32_t poison_16_bytes[4] = {0xdeadbeef, 0xdeadbeef,
+                                              0xdeadbeef, 0xdeadbeef};
+  uint32_t* address_aligned = reinterpret_cast<uint32_t*>(address);
+
+  for (int i = 0; i < slot_size_remaining_in_16_bytes; i++) {
+    // Clang will expand the memcpy to a 16-byte write (movups on x86).
+    memcpy(address_aligned, poison_16_bytes, sizeof(poison_16_bytes));
+    address_aligned += 4;
+  }
+#endif  // defined(ARCH_CPU_X86_64) && defined(PA_HAS_64_BITS_POINTERS)
+
   auto* entry = PartitionFreelistEntry::InitForThreadCache(
       slot_start, bucket.freelist_head);
   bucket.freelist_head = entry;

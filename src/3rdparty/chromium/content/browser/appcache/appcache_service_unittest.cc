@@ -5,15 +5,16 @@
 #include <stdint.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/appcache/appcache_response_info.h"
 #include "content/browser/appcache/appcache_service_impl.h"
@@ -56,7 +57,7 @@ class MockResponseReader : public AppCacheResponseReader {
     callback_ = std::move(callback);  // Cleared on completion.
 
     int rv = info_.get() ? info_size_ : net::ERR_FAILED;
-    info_buffer_->http_info.reset(info_.release());
+    info_buffer_->http_info = std::move(info_);
     info_buffer_->response_data_size = data_size_;
     ScheduleUserCallback(rv);
   }

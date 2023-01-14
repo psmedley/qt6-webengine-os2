@@ -7,7 +7,10 @@
 #ifndef XFA_FWL_CFWL_MESSAGE_H_
 #define XFA_FWL_CFWL_MESSAGE_H_
 
-#include "core/fxcrt/fx_system.h"
+#include <type_traits>
+
+#include "core/fxcrt/mask.h"
+#include "core/fxcrt/unowned_ptr.h"
 #include "v8/include/cppgc/macros.h"
 
 class CFWL_Widget;
@@ -33,8 +36,8 @@ class CFWL_Message {
 
  private:
   const Type m_type;
-  CFWL_Widget* m_pSrcTarget = nullptr;
-  CFWL_Widget* m_pDstTarget = nullptr;
+  UnownedPtr<CFWL_Widget> m_pSrcTarget;
+  UnownedPtr<CFWL_Widget> m_pDstTarget;
 };
 
 #endif  // XFA_FWL_CFWL_MESSAGE_H_

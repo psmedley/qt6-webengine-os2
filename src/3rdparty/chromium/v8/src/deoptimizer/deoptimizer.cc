@@ -15,12 +15,17 @@
 #include "src/execution/pointer-authentication.h"
 #include "src/execution/v8threads.h"
 #include "src/handles/handles-inl.h"
+#include "src/heap/heap-inl.h"
 #include "src/logging/counters.h"
 #include "src/logging/log.h"
+#include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/js-function-inl.h"
 #include "src/objects/oddball.h"
 #include "src/snapshot/embedded/embedded-data.h"
+
+#if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-linkage.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
 
@@ -176,9 +181,9 @@ Code Deoptimizer::FindDeoptimizingCode(Address addr) {
     NativeContext native_context = function_.context().native_context();
     Object element = native_context.DeoptimizedCodeListHead();
     while (!element.IsUndefined(isolate)) {
-      Code code = Code::cast(element);
+      Code code = FromCodeT(CodeT::cast(element));
       CHECK(CodeKindCanDeoptimize(code.kind()));
-      if (code.contains(addr)) return code;
+      if (code.contains(isolate, addr)) return code;
       element = code.next_code_link();
     }
   }
@@ -259,7 +264,8 @@ class ActivationsFinder : public ThreadVisitor {
             code.marked_for_deoptimization()) {
           codes_->erase(code);
           // Obtain the trampoline to the deoptimizer call.
-          SafepointEntry safepoint = code.GetSafepointEntry(it.frame()->pc());
+          SafepointEntry safepoint =
+              code.GetSafepointEntry(isolate, it.frame()->pc());
           int trampoline_pc = safepoint.trampoline_pc();
           DCHECK_IMPLIES(code == topmost_, safe_to_deopt_);
           STATIC_ASSERT(SafepointEntry::kNoTrampolinePC == -1);
@@ -305,7 +311,8 @@ void Deoptimizer::DeoptimizeMarkedCodeForContext(NativeContext native_context) {
       JSFunction function =
           static_cast<OptimizedFrame*>(it.frame())->function();
       TraceFoundActivation(isolate, function);
-      SafepointEntry safepoint = code.GetSafepointEntry(it.frame()->pc());
+      SafepointEntry safepoint =
+          code.GetSafepointEntry(isolate, it.frame()->pc());
 
       // Turbofan deopt is checked when we are patching addresses on stack.
       bool safe_if_deopt_triggered = safepoint.has_deoptimization_index();
@@ -329,7 +336,7 @@ void Deoptimizer::DeoptimizeMarkedCodeForContext(NativeContext native_context) {
   Code prev;
   Object element = native_context.OptimizedCodeListHead();
   while (!element.IsUndefined(isolate)) {
-    Code code = Code::cast(element);
+    Code code = FromCodeT(CodeT::cast(element));
     CHECK(CodeKindCanDeoptimize(code.kind()));
     Object next = code.next_code_link();
 
@@ -346,7 +353,7 @@ void Deoptimizer::DeoptimizeMarkedCodeForContext(NativeContext native_context) {
 
       // Move the code to the _deoptimized_ code list.
       code.set_next_code_link(native_context.DeoptimizedCodeListHead());
-      native_context.SetDeoptimizedCodeListHead(code);
+      native_context.SetDeoptimizedCodeListHead(ToCodeT(code));
     } else {
       // Not marked; preserve this element.
       prev = code;
@@ -375,8 +382,7 @@ void Deoptimizer::DeoptimizeMarkedCodeForContext(NativeContext native_context) {
 }
 
 void Deoptimizer::DeoptimizeAll(Isolate* isolate) {
-  RuntimeCallTimerScope runtimeTimer(isolate,
-                                     RuntimeCallCounterId::kDeoptimizeCode);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kDeoptimizeCode);
   TimerEventScope<TimerEventDeoptimizeCode> timer(isolate);
   TRACE_EVENT0("v8", "V8.DeoptimizeCode");
   TraceDeoptAll(isolate);
@@ -394,8 +400,7 @@ void Deoptimizer::DeoptimizeAll(Isolate* isolate) {
 }
 
 void Deoptimizer::DeoptimizeMarkedCode(Isolate* isolate) {
-  RuntimeCallTimerScope runtimeTimer(isolate,
-                                     RuntimeCallCounterId::kDeoptimizeCode);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kDeoptimizeCode);
   TimerEventScope<TimerEventDeoptimizeCode> timer(isolate);
   TRACE_EVENT0("v8", "V8.DeoptimizeCode");
   TraceDeoptMarked(isolate);
@@ -413,7 +418,7 @@ void Deoptimizer::MarkAllCodeForContext(NativeContext native_context) {
   Object element = native_context.OptimizedCodeListHead();
   Isolate* isolate = native_context.GetIsolate();
   while (!element.IsUndefined(isolate)) {
-    Code code = Code::cast(element);
+    Code code = FromCodeT(CodeT::cast(element));
     CHECK(CodeKindCanDeoptimize(code.kind()));
     code.set_marked_for_deoptimization(true);
     element = code.next_code_link();
@@ -422,11 +427,10 @@ void Deoptimizer::MarkAllCodeForContext(NativeContext native_context) {
 
 void Deoptimizer::DeoptimizeFunction(JSFunction function, Code code) {
   Isolate* isolate = function.GetIsolate();
-  RuntimeCallTimerScope runtimeTimer(isolate,
-                                     RuntimeCallCounterId::kDeoptimizeCode);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kDeoptimizeCode);
   TimerEventScope<TimerEventDeoptimizeCode> timer(isolate);
   TRACE_EVENT0("v8", "V8.DeoptimizeCode");
-  function.ResetIfBytecodeFlushed();
+  function.ResetIfCodeFlushed();
   if (code.is_null()) code = function.code();
 
   if (CodeKindCanDeoptimize(code.kind())) {
@@ -630,25 +634,27 @@ void Deoptimizer::DeleteFrameDescriptions() {
 #endif  // DEBUG
 }
 
-Builtins::Name Deoptimizer::GetDeoptWithResumeBuiltin(DeoptimizeReason reason) {
+Builtin Deoptimizer::GetDeoptWithResumeBuiltin(DeoptimizeReason reason) {
   switch (reason) {
     case DeoptimizeReason::kDynamicCheckMaps:
-      return Builtins::kDynamicCheckMapsTrampoline;
+      return Builtin::kDynamicCheckMapsTrampoline;
+    case DeoptimizeReason::kDynamicCheckMapsInlined:
+      return Builtin::kDynamicCheckMapsWithFeedbackVectorTrampoline;
     default:
       UNREACHABLE();
   }
 }
 
-Builtins::Name Deoptimizer::GetDeoptimizationEntry(DeoptimizeKind kind) {
+Builtin Deoptimizer::GetDeoptimizationEntry(DeoptimizeKind kind) {
   switch (kind) {
     case DeoptimizeKind::kEager:
-      return Builtins::kDeoptimizationEntry_Eager;
+      return Builtin::kDeoptimizationEntry_Eager;
     case DeoptimizeKind::kSoft:
-      return Builtins::kDeoptimizationEntry_Soft;
+      return Builtin::kDeoptimizationEntry_Soft;
     case DeoptimizeKind::kBailout:
-      return Builtins::kDeoptimizationEntry_Bailout;
+      return Builtin::kDeoptimizationEntry_Bailout;
     case DeoptimizeKind::kLazy:
-      return Builtins::kDeoptimizationEntry_Lazy;
+      return Builtin::kDeoptimizationEntry_Lazy;
     case DeoptimizeKind::kEagerWithResume:
       // EagerWithResume deopts will call a special builtin (specified by
       // GetDeoptWithResumeBuiltin) which will itself select the deoptimization
@@ -659,21 +665,20 @@ Builtins::Name Deoptimizer::GetDeoptimizationEntry(DeoptimizeKind kind) {
 
 bool Deoptimizer::IsDeoptimizationEntry(Isolate* isolate, Address addr,
                                         DeoptimizeKind* type_out) {
-  Code maybe_code = InstructionStream::TryLookupCode(isolate, addr);
-  if (maybe_code.is_null()) return false;
+  Builtin builtin = InstructionStream::TryLookupCode(isolate, addr);
+  if (!Builtins::IsBuiltinId(builtin)) return false;
 
-  Code code = maybe_code;
-  switch (code.builtin_index()) {
-    case Builtins::kDeoptimizationEntry_Eager:
+  switch (builtin) {
+    case Builtin::kDeoptimizationEntry_Eager:
       *type_out = DeoptimizeKind::kEager;
       return true;
-    case Builtins::kDeoptimizationEntry_Soft:
+    case Builtin::kDeoptimizationEntry_Soft:
       *type_out = DeoptimizeKind::kSoft;
       return true;
-    case Builtins::kDeoptimizationEntry_Bailout:
+    case Builtin::kDeoptimizationEntry_Bailout:
       *type_out = DeoptimizeKind::kBailout;
       return true;
-    case Builtins::kDeoptimizationEntry_Lazy:
+    case Builtin::kDeoptimizationEntry_Lazy:
       *type_out = DeoptimizeKind::kLazy;
       return true;
     default:
@@ -691,7 +696,7 @@ int Deoptimizer::GetDeoptimizedCodeCount(Isolate* isolate) {
     NativeContext native_context = NativeContext::cast(context);
     Object element = native_context.DeoptimizedCodeListHead();
     while (!element.IsUndefined(isolate)) {
-      Code code = Code::cast(element);
+      Code code = FromCodeT(CodeT::cast(element));
       DCHECK(CodeKindCanDeoptimize(code.kind()));
       if (!code.marked_for_deoptimization()) {
         length++;
@@ -740,11 +745,19 @@ void Deoptimizer::TraceDeoptBegin(int optimization_id,
     PrintF(file, "%s", CodeKindToString(compiled_code_.kind()));
   }
   PrintF(file,
-         ", opt id %d, bytecode offset %d, deopt exit %d, FP to SP delta %d, "
+         ", opt id %d, "
+#ifdef DEBUG
+         "node id %d, "
+#endif  // DEBUG
+         "bytecode offset %d, deopt exit %d, FP to SP "
+         "delta %d, "
          "caller SP " V8PRIxPTR_FMT ", pc " V8PRIxPTR_FMT "]\n",
-         optimization_id, bytecode_offset.ToInt(), deopt_exit_index_,
-         fp_to_sp_delta_, caller_frame_top_,
-         PointerAuthentication::StripPAC(from_));
+         optimization_id,
+#ifdef DEBUG
+         info.node_id,
+#endif  // DEBUG
+         bytecode_offset.ToInt(), deopt_exit_index_, fp_to_sp_delta_,
+         caller_frame_top_, PointerAuthentication::StripPAC(from_));
   if (verbose_tracing_enabled() && deopt_kind_ != DeoptimizeKind::kLazy) {
     PrintF(file, "            ;;; deoptimize at ");
     OFStream outstr(file);
@@ -937,7 +950,9 @@ void Deoptimizer::DoComputeOutputFrames() {
         DoComputeConstructStubFrame(translated_frame, frame_index);
         break;
       case TranslatedFrame::kBuiltinContinuation:
+#if V8_ENABLE_WEBASSEMBLY
       case TranslatedFrame::kJSToWasmBuiltinContinuation:
+#endif  // V8_ENABLE_WEBASSEMBLY
         DoComputeBuiltinContinuation(translated_frame, frame_index,
                                      BuiltinContinuationMode::STUB);
         break;
@@ -954,7 +969,6 @@ void Deoptimizer::DoComputeOutputFrames() {
         break;
       case TranslatedFrame::kInvalid:
         FATAL("invalid frame");
-        break;
     }
     total_output_frame_size += output_[frame_index]->GetFrameSize();
   }
@@ -962,6 +976,10 @@ void Deoptimizer::DoComputeOutputFrames() {
   FrameDescription* topmost = output_[count - 1];
   topmost->GetRegisterValues()->SetRegister(kRootRegister.code(),
                                             isolate()->isolate_root());
+#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+  topmost->GetRegisterValues()->SetRegister(kPtrComprCageBaseRegister.code(),
+                                            isolate()->cage_base());
+#endif
 
   // Print some helpful diagnostic information.
   if (verbose_tracing_enabled()) {
@@ -981,11 +999,25 @@ void Deoptimizer::DoComputeOutputFrames() {
       stack_guard->real_jslimit() - kStackLimitSlackForDeoptimizationInBytes);
 }
 
+namespace {
+
+// Get the dispatch builtin for unoptimized frames.
+Builtin DispatchBuiltinFor(bool is_baseline, bool advance_bc) {
+  if (is_baseline) {
+    return advance_bc ? Builtin::kBaselineOrInterpreterEnterAtNextBytecode
+                      : Builtin::kBaselineOrInterpreterEnterAtBytecode;
+  } else {
+    return advance_bc ? Builtin::kInterpreterEnterAtNextBytecode
+                      : Builtin::kInterpreterEnterAtBytecode;
+  }
+}
+
+}  // namespace
+
 void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
                                             int frame_index,
                                             bool goto_catch_handler) {
   SharedFunctionInfo shared = translated_frame->raw_shared_info();
-
   TranslatedFrame::iterator value_iterator = translated_frame->begin();
   const bool is_bottommost = (0 == frame_index);
   const bool is_topmost = (output_count_ - 1 == frame_index);
@@ -1010,15 +1042,10 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
   const uint32_t output_frame_size = frame_info.frame_size_in_bytes();
 
   TranslatedFrame::iterator function_iterator = value_iterator++;
-  if (verbose_tracing_enabled()) {
-    PrintF(trace_scope()->file(), "  translating unoptimized frame ");
-    std::unique_ptr<char[]> name = shared.DebugNameCStr();
-    PrintF(trace_scope()->file(), "%s", name.get());
-    PrintF(trace_scope()->file(),
-           " => bytecode_offset=%d, variable_frame_size=%d, frame_size=%d%s\n",
-           real_bytecode_offset, frame_info.frame_size_in_bytes_without_fixed(),
-           output_frame_size, goto_catch_handler ? " (throw)" : "");
-  }
+
+  BytecodeArray bytecode_array =
+      shared.HasBreakInfo() ? shared.GetDebugInfo().DebugBytecodeArray()
+                            : shared.GetBytecodeArray(isolate());
 
   // Allocate and store the output frame description.
   FrameDescription* output_frame = new (output_frame_size)
@@ -1029,6 +1056,34 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
   CHECK_NULL(output_[frame_index]);
   output_[frame_index] = output_frame;
 
+  // Compute this frame's PC and state.
+  // For interpreted frames, the PC will be a special builtin that
+  // continues the bytecode dispatch. Note that non-topmost and lazy-style
+  // bailout handlers also advance the bytecode offset before dispatch, hence
+  // simulating what normal handlers do upon completion of the operation.
+  // For baseline frames, the PC will be a builtin to convert the interpreter
+  // frame to a baseline frame before continuing execution of baseline code.
+  // We can't directly continue into baseline code, because of CFI.
+  Builtins* builtins = isolate_->builtins();
+  const bool advance_bc =
+      (!is_topmost || (deopt_kind_ == DeoptimizeKind::kLazy)) &&
+      !goto_catch_handler;
+  const bool is_baseline = shared.HasBaselineData();
+  Code dispatch_builtin =
+      builtins->code(DispatchBuiltinFor(is_baseline, advance_bc));
+
+  if (verbose_tracing_enabled()) {
+    PrintF(trace_scope()->file(), "  translating %s frame ",
+           is_baseline ? "baseline" : "interpreted");
+    std::unique_ptr<char[]> name = shared.DebugNameCStr();
+    PrintF(trace_scope()->file(), "%s", name.get());
+    PrintF(trace_scope()->file(), " => bytecode_offset=%d, ",
+           real_bytecode_offset);
+    PrintF(trace_scope()->file(), "variable_frame_size=%d, frame_size=%d%s\n",
+           frame_info.frame_size_in_bytes_without_fixed(), output_frame_size,
+           goto_catch_handler ? " (throw)" : "");
+  }
+
   // The top address of the frame is computed from the previous frame's top and
   // this frame's size.
   const intptr_t top_address =
@@ -1038,8 +1093,10 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
 
   // Compute the incoming parameter translation.
   ReadOnlyRoots roots(isolate());
-  if (should_pad_arguments && ShouldPadArguments(parameters_count)) {
-    frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
+  if (should_pad_arguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(parameters_count); ++i) {
+      frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
+    }
   }
 
   // Note: parameters_count includes the receiver.
@@ -1133,9 +1190,6 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
   frame_writer.PushRawValue(argc, "actual argument count\n");
 
   // Set the bytecode array pointer.
-  Object bytecode_array = shared.HasBreakInfo()
-                              ? shared.GetDebugInfo().DebugBytecodeArray()
-                              : shared.GetBytecodeArray(isolate());
   frame_writer.PushRawObject(bytecode_array, "bytecode array\n");
 
   // The bytecode offset was mentioned explicitly in the BEGIN_FRAME.
@@ -1191,7 +1245,7 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
 
   // Translate the accumulator register (depending on frame position).
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
     // For topmost frame, put the accumulator on the stack. The
@@ -1225,26 +1279,16 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
   CHECK_EQ(translated_frame->end(), value_iterator);
   CHECK_EQ(0u, frame_writer.top_offset());
 
-  // Compute this frame's PC and state. The PC will be a special builtin that
-  // continues the bytecode dispatch. Note that non-topmost and lazy-style
-  // bailout handlers also advance the bytecode offset before dispatch, hence
-  // simulating what normal handlers do upon completion of the operation.
-  Builtins* builtins = isolate_->builtins();
-  Code dispatch_builtin =
-      (!is_topmost || (deopt_kind_ == DeoptimizeKind::kLazy)) &&
-              !goto_catch_handler
-          ? builtins->builtin(Builtins::kInterpreterEnterBytecodeAdvance)
-          : builtins->builtin(Builtins::kInterpreterEnterBytecodeDispatch);
+  const intptr_t pc =
+      static_cast<intptr_t>(dispatch_builtin.InstructionStart());
   if (is_topmost) {
     // Only the pc of the topmost frame needs to be signed since it is
     // authenticated at the end of the DeoptimizationEntry builtin.
     const intptr_t top_most_pc = PointerAuthentication::SignAndCheckPC(
-        static_cast<intptr_t>(dispatch_builtin.InstructionStart()),
-        frame_writer.frame()->GetTop());
+        pc, frame_writer.frame()->GetTop());
     output_frame->SetPc(top_most_pc);
   } else {
-    output_frame->SetPc(
-        static_cast<intptr_t>(dispatch_builtin.InstructionStart()));
+    output_frame->SetPc(pc);
   }
 
   // Update constant pool.
@@ -1267,7 +1311,7 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
     Register context_reg = JavaScriptFrame::context_register();
     output_frame->SetRegister(context_reg.code(), context_value);
     // Set the continuation for the topmost frame.
-    Code continuation = builtins->builtin(Builtins::kNotifyDeoptimized);
+    Code continuation = builtins->code(Builtin::kNotifyDeoptimized);
     output_frame->SetContinuation(
         static_cast<intptr_t>(continuation.InstructionStart()));
   }
@@ -1295,11 +1339,10 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(
       argument_count_without_receiver - formal_parameter_count;
   // The number of pushed arguments is the maximum of the actual argument count
   // and the formal parameter count + the receiver.
-  const bool should_pad_args = ShouldPadArguments(
+  const int padding = ArgumentPaddingSlots(
       std::max(argument_count_without_receiver, formal_parameter_count) + 1);
   const int output_frame_size =
-      std::max(0, extra_argument_count * kSystemPointerSize) +
-      (should_pad_args ? kSystemPointerSize : 0);
+      (std::max(0, extra_argument_count) + padding) * kSystemPointerSize;
   if (verbose_tracing_enabled()) {
     PrintF(trace_scope_->file(),
            "  translating arguments adaptor => variable_size=%d\n",
@@ -1322,7 +1365,7 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(
   FrameWriter frame_writer(this, output_frame, verbose_trace_scope());
 
   ReadOnlyRoots roots(isolate());
-  if (should_pad_args) {
+  for (int i = 0; i < padding; ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
@@ -1348,7 +1391,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   CHECK(!is_topmost || deopt_kind_ == DeoptimizeKind::kLazy);
 
   Builtins* builtins = isolate_->builtins();
-  Code construct_stub = builtins->builtin(Builtins::kJSConstructStubGeneric);
+  Code construct_stub = builtins->code(Builtin::kJSConstructStubGeneric);
   BytecodeOffset bytecode_offset = translated_frame->bytecode_offset();
 
   const int parameters_count = translated_frame->height();
@@ -1384,7 +1427,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   output_frame->SetTop(top_address);
 
   ReadOnlyRoots roots(isolate());
-  if (ShouldPadArguments(parameters_count)) {
+  for (int i = 0; i < ArgumentPaddingSlots(parameters_count); ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
@@ -1450,7 +1493,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   frame_writer.PushTranslatedValue(receiver_iterator, debug_hint);
 
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
     // Ensure the result is restored back when we return to the stub.
@@ -1504,7 +1547,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   if (is_topmost) {
     Builtins* builtins = isolate_->builtins();
     DCHECK_EQ(DeoptimizeKind::kLazy, deopt_kind_);
-    Code continuation = builtins->builtin(Builtins::kNotifyDeoptimized);
+    Code continuation = builtins->code(Builtin::kNotifyDeoptimized);
     output_frame->SetContinuation(
         static_cast<intptr_t>(continuation.InstructionStart()));
   }
@@ -1541,26 +1584,27 @@ StackFrame::Type BuiltinContinuationModeToFrameType(
 
 }  // namespace
 
-Builtins::Name Deoptimizer::TrampolineForBuiltinContinuation(
+Builtin Deoptimizer::TrampolineForBuiltinContinuation(
     BuiltinContinuationMode mode, bool must_handle_result) {
   switch (mode) {
     case BuiltinContinuationMode::STUB:
-      return must_handle_result ? Builtins::kContinueToCodeStubBuiltinWithResult
-                                : Builtins::kContinueToCodeStubBuiltin;
+      return must_handle_result ? Builtin::kContinueToCodeStubBuiltinWithResult
+                                : Builtin::kContinueToCodeStubBuiltin;
     case BuiltinContinuationMode::JAVASCRIPT:
     case BuiltinContinuationMode::JAVASCRIPT_WITH_CATCH:
     case BuiltinContinuationMode::JAVASCRIPT_HANDLE_EXCEPTION:
       return must_handle_result
-                 ? Builtins::kContinueToJavaScriptBuiltinWithResult
-                 : Builtins::kContinueToJavaScriptBuiltin;
+                 ? Builtin::kContinueToJavaScriptBuiltinWithResult
+                 : Builtin::kContinueToJavaScriptBuiltin;
   }
   UNREACHABLE();
 }
 
-TranslatedValue Deoptimizer::TranslatedValueForWasmReturnType(
-    base::Optional<wasm::ValueKind> wasm_call_return_type) {
-  if (wasm_call_return_type) {
-    switch (wasm_call_return_type.value()) {
+#if V8_ENABLE_WEBASSEMBLY
+TranslatedValue Deoptimizer::TranslatedValueForWasmReturnKind(
+    base::Optional<wasm::ValueKind> wasm_call_return_kind) {
+  if (wasm_call_return_kind) {
+    switch (wasm_call_return_kind.value()) {
       case wasm::kI32:
         return TranslatedValue::NewInt32(
             &translated_state_,
@@ -1586,6 +1630,7 @@ TranslatedValue Deoptimizer::TranslatedValueForWasmReturnType(
   return TranslatedValue::NewTagged(&translated_state_,
                                     ReadOnlyRoots(isolate()).undefined_value());
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 // BuiltinContinuationFrames capture the machine state that is expected as input
 // to a builtin, including both input register values and stack parameters. When
@@ -1650,7 +1695,9 @@ void Deoptimizer::DoComputeBuiltinContinuation(
     BuiltinContinuationMode mode) {
   TranslatedFrame::iterator result_iterator = translated_frame->end();
 
-  bool is_js_to_wasm_builtin_continuation =
+  bool is_js_to_wasm_builtin_continuation = false;
+#if V8_ENABLE_WEBASSEMBLY
+  is_js_to_wasm_builtin_continuation =
       translated_frame->kind() == TranslatedFrame::kJSToWasmBuiltinContinuation;
   if (is_js_to_wasm_builtin_continuation) {
     // For JSToWasmBuiltinContinuations, add a TranslatedValue with the result
@@ -1658,18 +1705,18 @@ void Deoptimizer::DoComputeBuiltinContinuation(
     // This TranslatedValue will be written in the output frame in place of the
     // hole and we'll use ContinueToCodeStubBuiltin in place of
     // ContinueToCodeStubBuiltinWithResult.
-    TranslatedValue result = TranslatedValueForWasmReturnType(
-        translated_frame->wasm_call_return_type());
+    TranslatedValue result = TranslatedValueForWasmReturnKind(
+        translated_frame->wasm_call_return_kind());
     translated_frame->Add(result);
   }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   TranslatedFrame::iterator value_iterator = translated_frame->begin();
 
   const BytecodeOffset bytecode_offset = translated_frame->bytecode_offset();
-  Builtins::Name builtin_name =
-      Builtins::GetBuiltinFromBytecodeOffset(bytecode_offset);
+  Builtin builtin = Builtins::GetBuiltinFromBytecodeOffset(bytecode_offset);
   CallInterfaceDescriptor continuation_descriptor =
-      Builtins::CallInterfaceDescriptorFor(builtin_name);
+      Builtins::CallInterfaceDescriptorFor(builtin);
 
   const RegisterConfiguration* config = RegisterConfiguration::Default();
 
@@ -1711,7 +1758,7 @@ void Deoptimizer::DoComputeBuiltinContinuation(
            "  translating BuiltinContinuation to %s,"
            " => register_param_count=%d,"
            " stack_param_count=%d, frame_size=%d\n",
-           Builtins::name(builtin_name), register_parameter_count,
+           Builtins::name(builtin), register_parameter_count,
            frame_info.stack_parameter_count(), output_frame_size);
   }
 
@@ -1734,14 +1781,15 @@ void Deoptimizer::DoComputeBuiltinContinuation(
   ++value_iterator;
 
   ReadOnlyRoots roots(isolate());
-  if (ShouldPadArguments(frame_info.stack_parameter_count())) {
+  const int padding = ArgumentPaddingSlots(frame_info.stack_parameter_count());
+  for (int i = 0; i < padding; ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
   if (mode == BuiltinContinuationMode::STUB) {
-    DCHECK_EQ(Builtins::CallInterfaceDescriptorFor(builtin_name)
-                  .GetStackArgumentOrder(),
-              StackArgumentOrder::kDefault);
+    DCHECK_EQ(
+        Builtins::CallInterfaceDescriptorFor(builtin).GetStackArgumentOrder(),
+        StackArgumentOrder::kDefault);
     for (uint32_t i = 0; i < frame_info.translated_stack_parameter_count();
          ++i, ++value_iterator) {
       frame_writer.PushTranslatedValue(value_iterator, "stack parameter");
@@ -1856,13 +1904,14 @@ void Deoptimizer::DoComputeBuiltinContinuation(
                                    "builtin JavaScript context\n");
 
   // The builtin to continue to.
-  frame_writer.PushRawObject(Smi::FromInt(builtin_name), "builtin index\n");
+  frame_writer.PushRawObject(Smi::FromInt(static_cast<int>(builtin)),
+                             "builtin index\n");
 
   const int allocatable_register_count =
       config->num_allocatable_general_registers();
   for (int i = 0; i < allocatable_register_count; ++i) {
     int code = config->GetAllocatableGeneralCode(i);
-    ScopedVector<char> str(128);
+    base::ScopedVector<char> str(128);
     if (verbose_tracing_enabled()) {
       if (BuiltinContinuationModeIsJavaScript(mode) &&
           code == kJavaScriptCallArgCountRegister.code()) {
@@ -1889,7 +1938,7 @@ void Deoptimizer::DoComputeBuiltinContinuation(
   }
 
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
 
@@ -1923,7 +1972,7 @@ void Deoptimizer::DoComputeBuiltinContinuation(
   // ContinueToCodeStubBuiltinWithResult because we don't want to overwrite the
   // return value that we have already set.
   Code continue_to_builtin =
-      isolate()->builtins()->builtin(TrampolineForBuiltinContinuation(
+      isolate()->builtins()->code(TrampolineForBuiltinContinuation(
           mode, frame_info.frame_has_result_stack_slot() &&
                     !is_js_to_wasm_builtin_continuation));
   if (is_topmost) {
@@ -1938,8 +1987,7 @@ void Deoptimizer::DoComputeBuiltinContinuation(
         static_cast<intptr_t>(continue_to_builtin.InstructionStart()));
   }
 
-  Code continuation =
-      isolate()->builtins()->builtin(Builtins::kNotifyDeoptimized);
+  Code continuation = isolate()->builtins()->code(Builtin::kNotifyDeoptimized);
   output_frame->SetContinuation(
       static_cast<intptr_t>(continuation.InstructionStart()));
 }
@@ -2027,11 +2075,13 @@ Deoptimizer::DeoptInfo Deoptimizer::GetDeoptInfo(Code code, Address pc) {
   CHECK(code.InstructionStart() <= pc && pc <= code.InstructionEnd());
   SourcePosition last_position = SourcePosition::Unknown();
   DeoptimizeReason last_reason = DeoptimizeReason::kUnknown;
+  uint32_t last_node_id = 0;
   int last_deopt_id = kNoDeoptimizationId;
   int mask = RelocInfo::ModeMask(RelocInfo::DEOPT_REASON) |
              RelocInfo::ModeMask(RelocInfo::DEOPT_ID) |
              RelocInfo::ModeMask(RelocInfo::DEOPT_SCRIPT_OFFSET) |
-             RelocInfo::ModeMask(RelocInfo::DEOPT_INLINING_ID);
+             RelocInfo::ModeMask(RelocInfo::DEOPT_INLINING_ID) |
+             RelocInfo::ModeMask(RelocInfo::DEOPT_NODE_ID);
   for (RelocIterator it(code, mask); !it.done(); it.next()) {
     RelocInfo* info = it.rinfo();
     if (info->pc() >= pc) break;
@@ -2045,9 +2095,11 @@ Deoptimizer::DeoptInfo Deoptimizer::GetDeoptInfo(Code code, Address pc) {
       last_deopt_id = static_cast<int>(info->data());
     } else if (info->rmode() == RelocInfo::DEOPT_REASON) {
       last_reason = static_cast<DeoptimizeReason>(info->data());
+    } else if (info->rmode() == RelocInfo::DEOPT_NODE_ID) {
+      last_node_id = static_cast<uint32_t>(info->data());
     }
   }
-  return DeoptInfo(last_position, last_reason, last_deopt_id);
+  return DeoptInfo(last_position, last_reason, last_node_id, last_deopt_id);
 }
 
 // static

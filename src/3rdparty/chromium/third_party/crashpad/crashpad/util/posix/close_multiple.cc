@@ -22,10 +22,10 @@
 
 #include <algorithm>
 
+#include "base/cxx17_backports.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "util/file/directory_reader.h"
@@ -109,6 +109,12 @@ bool CloseMultipleNowOrOnExecUsingFDDir(int min_fd, int preserve_fd) {
 }  // namespace
 
 void CloseMultipleNowOrOnExec(int fd, int preserve_fd) {
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  // See comments on the ResetFDOwnership() declaration in
+  // base/files/scoped_file.h regarding why this is called here.
+  base::subtle::ResetFDOwnership();
+#endif
+
   if (CloseMultipleNowOrOnExecUsingFDDir(fd, preserve_fd)) {
     return;
   }

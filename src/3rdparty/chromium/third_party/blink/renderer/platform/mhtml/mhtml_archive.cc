@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/platform/mhtml/mhtml_archive.h"
 
 #include <stddef.h>
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
@@ -193,7 +194,8 @@ String ConvertToPrintableCharacters(const String& text) {
   // Quoted-Printable format to convert to 7-bit printable ASCII characters.
   std::string utf8_text = text.Utf8();
   Vector<char> encoded_text;
-  QuotedPrintableEncode(utf8_text.c_str(), utf8_text.length(),
+  QuotedPrintableEncode(utf8_text.c_str(),
+                        base::checked_cast<wtf_size_t>(utf8_text.length()),
                         true /* is_header */, encoded_text);
   return String(encoded_text.data(), encoded_text.size());
 }
@@ -334,7 +336,8 @@ void MHTMLArchive::GenerateMHTMLHeader(const String& boundary,
   DCHECK(string_builder.ToString().ContainsOnlyASCIIOrEmpty());
   std::string utf8_string = string_builder.ToString().Utf8();
 
-  output_buffer.Append(utf8_string.c_str(), utf8_string.length());
+  output_buffer.Append(utf8_string.c_str(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 }
 
 void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
@@ -384,7 +387,8 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
   string_builder.Append("\r\n");
 
   std::string utf8_string = string_builder.ToString().Utf8();
-  output_buffer.Append(utf8_string.data(), utf8_string.length());
+  output_buffer.Append(utf8_string.data(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 
   if (!strcmp(content_encoding, kBinary)) {
     for (const auto& span : *resource.data)
@@ -423,7 +427,8 @@ void MHTMLArchive::GenerateMHTMLFooterForTesting(const String& boundary,
                                                  Vector<char>& output_buffer) {
   DCHECK(!boundary.IsEmpty());
   std::string utf8_string = String("\r\n--" + boundary + "--\r\n").Utf8();
-  output_buffer.Append(utf8_string.c_str(), utf8_string.length());
+  output_buffer.Append(utf8_string.c_str(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 }
 
 void MHTMLArchive::SetMainResource(ArchiveResource* main_resource) {
@@ -439,7 +444,7 @@ void MHTMLArchive::AddSubresource(ArchiveResource* resource) {
 }
 
 ArchiveResource* MHTMLArchive::SubresourceForURL(const KURL& url) const {
-  return subresources_.at(url.GetString());
+  return subresources_.DeprecatedAtOrEmptyValue(url.GetString());
 }
 
 String MHTMLArchive::GetCacheIdentifier() const {

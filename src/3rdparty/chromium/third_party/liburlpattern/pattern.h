@@ -11,37 +11,39 @@
 #include "base/component_export.h"
 #include "third_party/liburlpattern/options.h"
 
-// NOTE: This code is a work-in-progress.  It is not ready for production use.
-
 namespace liburlpattern {
 
+// Numeric values are set such that more restrictive values come last.  This
+// is important for comparison routines in calling code, like URLPattern.
 enum class PartType {
-  // A fixed, non-variable part of the pattern.  Consists of kChar and
-  // kEscapedChar Tokens.
-  kFixed,
-
-  // A part with a custom regular expression.
-  kRegex,
+  // A part that matches any character to the end of the input string.
+  kFullWildcard = 0,
 
   // A part that matches any character to the next segment separator.
-  kSegmentWildcard,
+  kSegmentWildcard = 1,
 
-  // A part that matches any character to the end of the input string.
-  kFullWildcard,
+  // A part with a custom regular expression.
+  kRegex = 2,
+
+  // A fixed, non-variable part of the pattern.  Consists of kChar and
+  // kEscapedChar Tokens.
+  kFixed = 3,
 };
 
+// Numeric values are set such that more restrictive values come last.  This
+// is important for comparison routines in calling code, like URLPattern.
 enum class Modifier {
-  // No modifier.
-  kNone,
+  // The `*` modifier.
+  kZeroOrMore = 0,
 
   // The `?` modifier.
-  kOptional,
-
-  // The `*` modifier.
-  kZeroOrMore,
+  kOptional = 1,
 
   // The `+` modifier.
-  kOneOrMore,
+  kOneOrMore = 2,
+
+  // No modifier.
+  kNone = 3,
 };
 
 // A structure representing one part of a parsed Pattern.  A full Pattern
@@ -105,6 +107,15 @@ class COMPONENT_EXPORT(LIBURLPATTERN) Pattern {
   Pattern(std::vector<Part> part_list,
           Options options,
           std::string segment_wildcard_regex);
+
+  // Generate a canonical string for the parsed pattern.  This may result
+  // in a value different from the pattern string originally passed to
+  // Parse().  For example, no-op syntax like `{bar}` will be simplified to
+  // `bar`.  In addition, the generated string will include any changes mad
+  // by EncodingCallback hooks.  Finally, regular expressions equivalent to
+  // `*` and named group default matching will be simplified; e.g. `(.*)`
+  // will become just `*`.
+  std::string GeneratePatternString() const;
 
   // Generate an ECMA-262 regular expression string that is equivalent to this
   // pattern.  A vector of strings can be optionally passed to |name_list_out|

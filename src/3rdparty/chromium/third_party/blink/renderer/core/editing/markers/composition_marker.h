@@ -23,14 +23,13 @@ class CORE_EXPORT CompositionMarker final : public StyleableMarker {
                     ui::mojom::ImeTextSpanUnderlineStyle,
                     Color text_color,
                     Color background_color);
+  CompositionMarker(const CompositionMarker&) = delete;
+  CompositionMarker& operator=(const CompositionMarker&) = delete;
 
   // DocumentMarker implementations
   MarkerType GetType() const final;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CompositionMarker);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_COMPOSITION_MARKER_H_

@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_PARSING_UTILS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_PARSING_UTILS_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
@@ -88,6 +88,12 @@ CSSPrimitiveValue* ConsumeLength(CSSParserTokenRange&,
 CSSPrimitiveValue* ConsumePercent(CSSParserTokenRange&,
                                   const CSSParserContext&,
                                   ValueRange);
+
+// Any percentages are converted to numbers.
+CSSPrimitiveValue* ConsumeNumberOrPercent(CSSParserTokenRange&,
+                                          const CSSParserContext&,
+                                          ValueRange);
+
 CSSPrimitiveValue* ConsumeAlphaValue(CSSParserTokenRange&,
                                      const CSSParserContext&);
 CSSPrimitiveValue* ConsumeLengthOrPercent(
@@ -102,11 +108,11 @@ CSSPrimitiveValue* ConsumeSVGGeometryPropertyLength(CSSParserTokenRange&,
 CSSPrimitiveValue* ConsumeAngle(
     CSSParserTokenRange&,
     const CSSParserContext&,
-    base::Optional<WebFeature> unitless_zero_feature);
+    absl::optional<WebFeature> unitless_zero_feature);
 CSSPrimitiveValue* ConsumeAngle(
     CSSParserTokenRange&,
     const CSSParserContext&,
-    base::Optional<WebFeature> unitless_zero_feature,
+    absl::optional<WebFeature> unitless_zero_feature,
     double minimum_value,
     double maximum_value);
 CSSPrimitiveValue* ConsumeTime(CSSParserTokenRange&,
@@ -144,11 +150,11 @@ CSSValue* ConsumeLineWidth(CSSParserTokenRange&,
 CSSValuePair* ConsumePosition(CSSParserTokenRange&,
                               const CSSParserContext&,
                               UnitlessQuirk,
-                              base::Optional<WebFeature> three_value_position);
+                              absl::optional<WebFeature> three_value_position);
 bool ConsumePosition(CSSParserTokenRange&,
                      const CSSParserContext&,
                      UnitlessQuirk,
-                     base::Optional<WebFeature> three_value_position,
+                     absl::optional<WebFeature> three_value_position,
                      CSSValue*& result_x,
                      CSSValue*& result_y);
 bool ConsumeOneOrTwoValuedPosition(CSSParserTokenRange&,
@@ -291,7 +297,7 @@ CSSValue* ParseBackgroundBox(CSSParserTokenRange&,
 CSSValue* ParseBackgroundOrMaskSize(CSSParserTokenRange&,
                                     const CSSParserContext&,
                                     const CSSParserLocalContext&,
-                                    base::Optional<WebFeature> negative_size);
+                                    absl::optional<WebFeature> negative_size);
 bool ParseBackgroundOrMask(bool,
                            CSSParserTokenRange&,
                            const CSSParserContext&,
@@ -378,8 +384,8 @@ CSSValue* ConsumeGridTrackList(CSSParserTokenRange&,
                                TrackListType);
 bool ParseGridTemplateAreasRow(const WTF::String& grid_row_names,
                                NamedGridAreaMap&,
-                               const size_t row_count,
-                               size_t& column_count);
+                               const wtf_size_t row_count,
+                               wtf_size_t& column_count);
 CSSValue* ConsumeGridTemplatesRowsOrColumns(CSSParserTokenRange&,
                                             const CSSParserContext&);
 bool ConsumeGridItemPositionShorthand(bool important,
@@ -446,6 +452,9 @@ CSSValue* ConsumeBorderWidth(CSSParserTokenRange&,
                              UnitlessQuirk);
 CSSValue* ConsumeSVGPaint(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ParseSpacing(CSSParserTokenRange&, const CSSParserContext&);
+
+CSSValue* ConsumeContainerName(CSSParserTokenRange&, const CSSParserContext&);
+CSSValue* ConsumeContainerType(CSSParserTokenRange&);
 
 UnitlessQuirk UnitlessUnlessShorthand(const CSSParserLocalContext&);
 

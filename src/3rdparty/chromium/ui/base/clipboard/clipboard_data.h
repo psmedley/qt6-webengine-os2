@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/file_info.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
@@ -24,7 +25,7 @@ enum class ClipboardInternalFormat {
   kSvg = 1 << 2,
   kRtf = 1 << 3,
   kBookmark = 1 << 4,
-  kBitmap = 1 << 5,
+  kPng = 1 << 5,
   kCustom = 1 << 6,
   kWeb = 1 << 7,
   kFilenames = 1 << 8,
@@ -45,6 +46,10 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
 
   // Bitmask of ClipboardInternalFormat types.
   int format() const { return format_; }
+
+  // Returns the total size of the data in clipboard, or absl::nullopt if it
+  // can't be determined.
+  absl::optional<size_t> size() const;
 
   const std::string& text() const { return text_; }
   void set_text(const std::string& text) {
@@ -88,7 +93,12 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
     format_ |= static_cast<int>(ClipboardInternalFormat::kBookmark);
   }
 
-  const SkBitmap& bitmap() const { return bitmap_; }
+  const std::vector<uint8_t>& png() const { return png_; }
+  void SetPngData(std::vector<uint8_t> png);
+
+  // Bitmaps are stored as encoded bytes in the `png_` member. This means we
+  // cannot return a const reference, since the bitmap is created on request.
+  SkBitmap bitmap() const;
   void SetBitmapData(const SkBitmap& bitmap);
 
   const std::string& custom_data_format() const { return custom_data_format_; }
@@ -130,8 +140,8 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
   std::string bookmark_title_;
   std::string bookmark_url_;
 
-  // Bitmap images.
-  SkBitmap bitmap_;
+  // PNG image data. Bitmaps are encoded into and decoded from this member.
+  std::vector<uint8_t> png_;
 
   // Data with custom format.
   std::string custom_data_format_;
@@ -149,7 +159,7 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
   int format_;
 
   // The source of the data.
-  std::unique_ptr<DataTransferEndpoint> src_ = nullptr;
+  std::unique_ptr<DataTransferEndpoint> src_;
 };
 
 }  // namespace ui

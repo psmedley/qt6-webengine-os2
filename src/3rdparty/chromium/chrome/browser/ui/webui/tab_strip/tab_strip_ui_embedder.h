@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_TAB_STRIP_TAB_STRIP_UI_EMBEDDER_H_
 #define CHROME_BROWSER_UI_WEBUI_TAB_STRIP_TAB_STRIP_UI_EMBEDDER_H_
 
+#include "base/callback_forward.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui_layout.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/native_theme/native_theme.h"
 
 // Interface to be implemented by the embedder. Provides native UI
 // functionality such as showing context menus.
@@ -24,15 +26,20 @@ class TabStripUIEmbedder {
 
   virtual void ShowContextMenuAtPoint(
       gfx::Point point,
-      std::unique_ptr<ui::MenuModel> menu_model) = 0;
+      std::unique_ptr<ui::MenuModel> menu_model,
+      base::RepeatingClosure on_menu_closed_callback) = 0;
+
+  virtual void CloseContextMenu() = 0;
 
   virtual void ShowEditDialogForGroupAtPoint(gfx::Point point,
                                              gfx::Rect rect,
                                              tab_groups::TabGroupId group) = 0;
+  virtual void HideEditDialogForGroup() = 0;
 
   virtual TabStripUILayout GetLayout() = 0;
 
   virtual SkColor GetColor(int id) const = 0;
+  virtual SkColor GetSystemColor(ui::NativeTheme::ColorId id) const = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_TAB_STRIP_TAB_STRIP_UI_EMBEDDER_H_

@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/cxx17_backports.h"
 #include "base/i18n/encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -39,13 +39,13 @@ int FillInRawName(const std::string& encoding,
 
 // Parses |text| as an FTP directory listing. Fills in |entries|
 // and |server_type| and returns network error code.
-int ParseListing(const base::string16& text,
-                 const base::string16& newline_separator,
+int ParseListing(const std::u16string& text,
+                 const std::u16string& newline_separator,
                  const std::string& encoding,
                  const base::Time& current_time,
                  std::vector<FtpDirectoryListingEntry>* entries,
                  FtpServerType* server_type) {
-  std::vector<base::string16> lines = base::SplitStringUsingSubstr(
+  std::vector<std::u16string> lines = base::SplitStringUsingSubstr(
       text, newline_separator, base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   struct {
@@ -89,7 +89,7 @@ int DecodeAndParse(const std::string& text,
     return ERR_ENCODING_DETECTION_FAILED;
   const char* encoding_name = encoding.c_str();
 
-  base::string16 converted_text;
+  std::u16string converted_text;
   if (base::CodepageToUTF16(text, encoding_name,
                             base::OnStringConversionError::SUBSTITUTE,
                             &converted_text)) {

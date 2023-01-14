@@ -10,23 +10,22 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
 #include "base/single_thread_task_runner.h"
-#include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "ppapi/buildflags/buildflags.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/blink/public/common/loader/previews_state.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
-#include "third_party/blink/public/mojom/frame/frame.mojom.h"
+#include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-shared.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/accessibility/ax_tree_update.h"
+
+class GURL;
 
 namespace blink {
 namespace scheduler {
@@ -43,6 +42,7 @@ class WebFrame;
 class WebLocalFrame;
 class WebPlugin;
 struct WebPluginParams;
+class WebView;
 }  // namespace blink
 
 namespace gfx {
@@ -73,8 +73,6 @@ class AXTreeSnapshotter {
   // Return in |accessibility_tree| a snapshot of the accessibility tree
   // for the frame with the given accessibility mode.
   //
-  // - |ax_mode| is the accessibility mode to use, which determines which
-  //   fields of AXNodeData are populated.
   // - |exclude_offscreen| excludes a subtree if a node is entirely offscreen,
   //   but note that this heuristic is imperfect, and an aboslute-positioned
   //   node that's visible, but whose ancestors are entirely offscreen, may
@@ -87,8 +85,7 @@ class AXTreeSnapshotter {
   //   (per frame), specified in milliseconds. Like max_node_count, this is not
   //   a hard limit, and once this/ limit is reached a few more nodes may
   //   be added in order to ensure a well-formed tree. Use 0 for no timeout.
-  virtual void Snapshot(ui::AXMode ax_mode,
-                        bool exclude_offscreen,
+  virtual void Snapshot(bool exclude_offscreen,
                         size_t max_node_count,
                         base::TimeDelta timeout,
                         ui::AXTreeUpdate* accessibility_tree) = 0;
@@ -143,17 +140,30 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   // Returns the RenderView associated with this frame.
   virtual RenderView* GetRenderView() = 0;
 
+  // Returns the RenderFrame associated with the main frame of the WebView.
+  // See `blink::WebView::MainFrame()`. Note that this will be null when
+  // the main frame in this process is a remote frame.
+  virtual RenderFrame* GetMainRenderFrame() = 0;
+
   // Return the RenderAccessibility associated with this frame.
   virtual RenderAccessibility* GetRenderAccessibility() = 0;
 
   // Return an object that can take a snapshot of the accessibility tree.
-  virtual std::unique_ptr<AXTreeSnapshotter> CreateAXTreeSnapshotter() = 0;
+  // |ax_mode| is the accessibility mode to use, which determines which
+  // fields of AXNodeData are populated when you make a snapshot.
+  virtual std::unique_ptr<AXTreeSnapshotter> CreateAXTreeSnapshotter(
+      ui::AXMode ax_mode) = 0;
 
   // Get the routing ID of the frame.
   virtual int GetRoutingID() = 0;
 
+  // Returns the associated WebView.
+  virtual blink::WebView* GetWebView() = 0;
+  virtual const blink::WebView* GetWebView() const = 0;
+
   // Returns the associated WebFrame.
   virtual blink::WebLocalFrame* GetWebFrame() = 0;
+  virtual const blink::WebLocalFrame* GetWebFrame() const = 0;
 
   // Gets WebKit related preferences associated with this frame.
   virtual const blink::web_pref::WebPreferences& GetBlinkPreferences() = 0;
@@ -168,7 +178,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
       const blink::WebPluginParams& params) = 0;
 
   // Execute a string of JavaScript in this frame's context.
-  virtual void ExecuteJavaScript(const base::string16& javascript) = 0;
+  virtual void ExecuteJavaScript(const std::u16string& javascript) = 0;
 
   // Returns true if this is the main (top-level) frame.
   virtual bool IsMainFrame() = 0;
@@ -208,7 +218,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual bool IsFTPDirectoryListing() = 0;
 
   // Notifies the browser of text selection changes made.
-  virtual void SetSelectedText(const base::string16& selection_text,
+  virtual void SetSelectedText(const std::u16string& selection_text,
                                size_t offset,
                                const gfx::Range& range,
                                bool user_initiated) = 0;

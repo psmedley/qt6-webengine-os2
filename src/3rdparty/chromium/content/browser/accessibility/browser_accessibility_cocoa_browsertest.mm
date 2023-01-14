@@ -110,8 +110,8 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
 
   BrowserAccessibility* text_field = FindNode(ax::mojom::Role::kTextField);
   ASSERT_NE(nullptr, text_field);
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
-                            "document.querySelector('input').focus()"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "document.querySelector('input').focus()"));
 
   SimulateKeyPress(shell()->web_contents(), ui::DomKey::FromCharacter('B'),
                    ui::DomCode::US_B, ui::VKEY_B, false, false, false, false);
@@ -292,7 +292,8 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
   std::unique_ptr<BrowserAccessibilityManagerMac> manager(
       new BrowserAccessibilityManagerMac(tree, nullptr));
 
-  for (int child_index = 0; child_index < int{tree.nodes[0].child_ids.size()};
+  for (int child_index = 0;
+       child_index < static_cast<int>(tree.nodes[0].child_ids.size());
        ++child_index) {
     BrowserAccessibility* child =
         manager->GetRoot()->PlatformGetChild(child_index);
@@ -607,8 +608,8 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
   ASSERT_NSEQ(@"AXRow", [tree_children[1] role]);
 
   auto menu_interceptor = std::make_unique<ContextMenuInterceptor>(
+      shell()->web_contents()->GetMainFrame(),
       ContextMenuInterceptor::ShowBehavior::kPreventShow);
-  menu_interceptor->Init(shell()->web_contents()->GetMainFrame());
 
   gfx::Point tree_point =
       TriggerContextMenuAndGetMenuLocation(cocoa_tree, menu_interceptor.get());
@@ -619,8 +620,8 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
   EXPECT_NE(tree_point, item_2_point);
 
   // Now focus the second child and trigger a context menu on the tree.
-  ASSERT_TRUE(ExecuteScript(shell()->web_contents(),
-                            "document.body.children[0].children[1].focus();"));
+  ASSERT_TRUE(ExecJs(shell()->web_contents(),
+                     "document.body.children[0].children[1].focus();"));
   WaitForAccessibilityFocusChange();
 
   // Triggering a context menu on the tree should now trigger the menu
@@ -769,7 +770,7 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
         AccessibilityNotificationWaiter waiter(
             web_contents, ui::kAXModeComplete,
             ax::mojom::Event::kTextSelectionChanged);
-        ASSERT_TRUE(ExecuteScript(web_contents, script));
+        ASSERT_TRUE(ExecJs(web_contents, script));
         waiter.WaitForNotification();
       };
 
@@ -789,8 +790,10 @@ IN_PROC_BROWSER_TEST_F(BrowserAccessibilityCocoaBrowserTest,
   AccessibilityNotificationWaiter waiter2(
       web_contents, ui::kAXModeComplete,
       ax::mojom::Event::kTextSelectionChanged);
-  run_script_and_wait_for_selection_change(
-      "selection.collapse(editable.children[2].childNodes[0], 0);");
+  run_script_and_wait_for_selection_change(R"script(
+      let editable = document.getElementById('editable');
+      const selection = window.getSelection();
+      selection.collapse(editable.children[2].childNodes[0], 0);)script");
 
   // Even when the cursor is in the empty paragraph text node, the focused
   // object should be the keyboard focusable ancestor.

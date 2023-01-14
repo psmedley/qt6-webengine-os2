@@ -37,12 +37,12 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/free_deleter.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
@@ -230,7 +230,7 @@ bool AlsaPcmOutputStream::Open() {
       channel_mixer_ ? mixed_audio_bus_->channels() * bytes_per_sample_
                      : bytes_per_frame_;
   uint32_t output_packet_size = frames_per_packet_ * bytes_per_output_frame_;
-  buffer_.reset(new SeekableBuffer(0, output_packet_size));
+  buffer_ = std::make_unique<SeekableBuffer>(0, output_packet_size);
 
   // Get alsa buffer size.
   snd_pcm_uframes_t buffer_size;
@@ -710,8 +710,8 @@ snd_pcm_t* AlsaPcmOutputStream::AutoSelectDevice(unsigned int latency) {
   // downmixing.
   uint32_t default_channels = channels_;
   if (default_channels > 2) {
-    channel_mixer_.reset(
-        new ChannelMixer(channel_layout_, kDefaultOutputChannelLayout));
+    channel_mixer_ = std::make_unique<ChannelMixer>(
+        channel_layout_, kDefaultOutputChannelLayout);
     default_channels = 2;
     mixed_audio_bus_ = AudioBus::Create(
         default_channels, audio_bus_->frames());

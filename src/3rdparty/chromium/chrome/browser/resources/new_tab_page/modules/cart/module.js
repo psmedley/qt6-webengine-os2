@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '../../img.js';
 import '../module_header.js';
 import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
 import 'chrome://resources/cr_elements/cr_icons_css.m.js';
-import 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.m.js';
+import 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
+import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 
-import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {I18nBehavior, loadTimeData} from '../../i18n_setup.js';
+import {recordOccurence} from '../../metrics_utils.js';
 import {$$} from '../../utils.js';
 import {ModuleDescriptor} from '../module_descriptor.js';
 
@@ -43,7 +44,13 @@ class ChromeCartModuleElement extends mixinBehaviors
       headerChipText: String,
 
       /** @type {string} */
-      headerDescriptionText: String,
+      headerDescriptionText: {
+        type: String,
+        reflectToAttribute: true,
+      },
+
+      /** @type {boolean} */
+      showDiscountConsent: Boolean,
 
       /** @private {boolean} */
       showLeftScrollButton_: Boolean,
@@ -57,9 +64,6 @@ class ChromeCartModuleElement extends mixinBehaviors
       /** @private {string} */
       cartMenuRemoveItem_: String,
 
-      /** @private {number} */
-      height: Number,
-
       /**
        * Data about the most recently dismissed cart item.
        * @type {?{message: string, restoreCallback: function()}}
@@ -69,6 +73,9 @@ class ChromeCartModuleElement extends mixinBehaviors
         type: Object,
         value: null,
       },
+
+      /** @private {string} */
+      confirmDiscountConsentString_: String,
     };
   }
 
@@ -149,6 +156,7 @@ class ChromeCartModuleElement extends mixinBehaviors
    */
   onCartMenuButtonClick_(e) {
     e.preventDefault();
+    e.stopPropagation();
     this.currentMenuIndex_ =
         this.$.cartItemRepeat.indexForElement(e.target.parentElement);
     const merchant = this.cartItems[this.currentMenuIndex_].merchant;
@@ -166,7 +174,6 @@ class ChromeCartModuleElement extends mixinBehaviors
     const cartUrl = this.cartItems[this.currentMenuIndex_].cartUrl;
 
     await ChromeCartProxy.getInstance().handler.hideCart(cartUrl);
-    this.resetCartData_();
 
     this.dismissedCartData_ = {
       message: loadTimeData.getStringF(
@@ -175,7 +182,10 @@ class ChromeCartModuleElement extends mixinBehaviors
         await ChromeCartProxy.getInstance().handler.restoreHiddenCart(cartUrl);
       },
     };
-    $$(this, '#dismissCartToast').show();
+    const isModuleVisible = await this.resetCartData_();
+    if (isModuleVisible) {
+      $$(this, '#dismissCartToast').show();
+    }
   }
 
   /** @private */
@@ -185,7 +195,6 @@ class ChromeCartModuleElement extends mixinBehaviors
     const cartUrl = this.cartItems[this.currentMenuIndex_].cartUrl;
 
     await ChromeCartProxy.getInstance().handler.removeCart(cartUrl);
-    this.resetCartData_();
 
     this.dismissedCartData_ = {
       message: loadTimeData.getStringF(
@@ -194,28 +203,53 @@ class ChromeCartModuleElement extends mixinBehaviors
         await ChromeCartProxy.getInstance().handler.restoreRemovedCart(cartUrl);
       },
     };
-    $$(this, '#dismissCartToast').show();
+    const isModuleVisible = await this.resetCartData_();
+    if (isModuleVisible) {
+      $$(this, '#dismissCartToast').show();
+    }
   }
 
   /** @private */
   async onUndoDismissCartButtonClick_() {
     // Restore the module item.
     await this.dismissedCartData_.restoreCallback();
+    this.dismissedCartData_ = null;
     this.resetCartData_();
 
     // Notify the user.
     $$(this, '#dismissCartToast').hide();
-
-    this.dismissedCartData_ = null;
   }
 
-  /** @private */
+  /**
+   * @return {!Promise<!boolean>} Whether the module is visible after reset.
+   * @private
+   */
   async resetCartData_() {
-    // TODO(crbug.com/1157892): Hide the module silently if there is no cart
-    // item to show.
     const {carts} =
         await ChromeCartProxy.getInstance().handler.getMerchantCarts();
     this.cartItems = carts;
+    const isModuleVisible = this.cartItems.length !== 0;
+    if (!isModuleVisible && this.dismissedCartData_ !== null) {
+      this.dispatchEvent(new CustomEvent('dismiss-module', {
+        bubbles: true,
+        composed: true,
+        detail: {
+          message: this.dismissedCartData_.message,
+          restoreCallback: async () => {
+            chrome.metricsPrivate.recordUserAction(
+                'NewTabPage.Carts.RestoreLastCartRestoresModule');
+            await this.dismissedCartData_.restoreCallback();
+            this.dismissedCartData_ = null;
+            const {carts} =
+                await ChromeCartProxy.getInstance().handler.getMerchantCarts();
+            this.cartItems = carts;
+          },
+        },
+      }));
+      chrome.metricsPrivate.recordUserAction(
+          'NewTabPage.Carts.DismissLastCartHidesModule');
+    }
+    return isModuleVisible;
   }
 
   /** @private */
@@ -303,9 +337,18 @@ class ChromeCartModuleElement extends mixinBehaviors
     const scrollOffset = Math.max(
         leftScrollShadow ? leftScrollShadow.offsetWidth : 0,
         rightScrollShadow ? rightScrollShadow.offsetWidth : 0);
+    let leftPosition = carts[index].offsetLeft - scrollOffset;
+    // TODO(crbug.com/1198632): This could make a left scroll jump over cart
+    // items.
+    if (index === 0) {
+      const consentCard = this.shadowRoot.getElementById('consentCard');
+      if (consentCard) {
+        leftPosition -= consentCard.offsetWidth;
+      }
+    }
     this.$.cartCarousel.scrollTo({
       top: 0,
-      left: carts[index].offsetLeft - scrollOffset,
+      left: leftPosition,
       behavior: this.scrollBehavior,
     });
   }
@@ -327,10 +370,65 @@ class ChromeCartModuleElement extends mixinBehaviors
    * @param {!Event} e
    * @private
    */
-  onCartItemClick_(e) {
+  async onCartItemClick_(e) {
     const index = this.$.cartItemRepeat.indexForElement(e.target);
-    ChromeCartProxy.getInstance().handler.onCartItemClicked(index);
+    // When rule-based discount is enabled, clicking on the cart wouldn't
+    // trigger navigation immediately. Instead, we'll fetch discount URL from
+    // browser process and re-bind URL. Then, we create a new pointer event by
+    // cloning the initial one so that we can re-trigger a navigation with the
+    // new URL. This is to keep the navigation in render process for security
+    // reasons.
+    if (loadTimeData.getBoolean('ruleBasedDiscountEnabled') &&
+        (e.shouldNavigate === undefined || e.shouldNavigate === false)) {
+      e.preventDefault();
+      const {discountUrl} =
+          await ChromeCartProxy.getInstance().handler.getDiscountURL(
+              this.cartItems[index].cartUrl);
+      this.set(`cartItems.${index}.cartUrl`, discountUrl);
+      const cloneEvent = new PointerEvent(e.type, e);
+      cloneEvent.shouldNavigate = true;
+      this.$.cartCarousel.querySelectorAll('.cart-item')[index].dispatchEvent(
+          cloneEvent);
+      return;
+    }
+    ChromeCartProxy.getInstance().handler.prepareForNavigation(
+        this.cartItems[index].cartUrl, /*isNavigating=*/ true);
     this.dispatchEvent(new Event('usage', {bubbles: true, composed: true}));
+    chrome.metricsPrivate.recordSmallCount('NewTabPage.Carts.ClickCart', index);
+  }
+
+  /** @private */
+  onDisallowDiscount_() {
+    this.showDiscountConsent = false;
+    this.confirmDiscountConsentString_ =
+        loadTimeData.getString('modulesCartDiscountConsentRejectConfirmation');
+    $$(this, '#confirmDiscountConsentToast').show();
+    ChromeCartProxy.getInstance().handler.onDiscountConsentAcknowledged(false);
+    chrome.metricsPrivate.recordUserAction(
+        'NewTabPage.Carts.RejectDiscountConsent');
+  }
+
+  /** @private */
+  onAllowDiscount_() {
+    this.showDiscountConsent = false;
+    this.confirmDiscountConsentString_ =
+        loadTimeData.getString('modulesCartDiscountConsentAcceptConfirmation');
+    $$(this, '#confirmDiscountConsentToast').show();
+    ChromeCartProxy.getInstance().handler.onDiscountConsentAcknowledged(true);
+    chrome.metricsPrivate.recordUserAction(
+        'NewTabPage.Carts.AcceptDiscountConsent');
+  }
+
+  /** @private */
+  onConfirmDiscountConsentClick_() {
+    $$(this, '#confirmDiscountConsentToast').hide();
+  }
+
+  /** @private */
+  onCartItemContextMenuClick_(e) {
+    const index = this.$.cartItemRepeat.indexForElement(e.target);
+    ChromeCartProxy.getInstance().handler.prepareForNavigation(
+        this.cartItems[index].cartUrl, /*isNavigating=*/ false);
   }
 }
 
@@ -338,27 +436,56 @@ customElements.define(ChromeCartModuleElement.is, ChromeCartModuleElement);
 
 /** @return {!Promise<?HTMLElement>} */
 async function createCartElement() {
-  const {visible} =
+  // getWarmWelcomeVisible makes server-side change and might flip the status of
+  // whether welcome surface should show or not. Anything whose visibility
+  // dependes on welcome surface (e.g. RBD consent) should check before
+  // getWarmWelcomeVisible.
+  const {consentVisible} = await ChromeCartProxy.getInstance()
+                               .handler.getDiscountConsentCardVisible();
+
+  const {welcomeVisible} =
       await ChromeCartProxy.getInstance().handler.getWarmWelcomeVisible();
   const {carts} =
       await ChromeCartProxy.getInstance().handler.getMerchantCarts();
-  ChromeCartProxy.getInstance().handler.onModuleCreated(carts.length);
+  chrome.metricsPrivate.recordSmallCount(
+      'NewTabPage.Carts.CartCount', carts.length);
+
   if (carts.length === 0) {
     return null;
   }
+
+  if (loadTimeData.getBoolean('ruleBasedDiscountEnabled')) {
+    if (consentVisible) {
+      recordOccurence('NewTabPage.Carts.DiscountConsentShow');
+    }
+
+    let discountedCartCount = 0;
+
+    for (let i = 0; i < carts.length; i++) {
+      const cart = carts[i];
+      if (cart.discountText) {
+        discountedCartCount++;
+        chrome.metricsPrivate.recordSmallCount(
+            'NewTabPage.Carts.DiscountAt', i);
+      }
+    }
+
+    chrome.metricsPrivate.recordSmallCount(
+        'NewTabPage.Carts.DiscountCountAtLoad', discountedCartCount);
+  }
+
   const element = new ChromeCartModuleElement();
-  if (visible) {
+  if (welcomeVisible) {
     element.headerChipText = loadTimeData.getString('modulesCartHeaderNew');
     element.headerDescriptionText =
         loadTimeData.getString('modulesCartWarmWelcome');
-    element.height = 226;
   }
   element.cartItems = carts;
+  element.showDiscountConsent = consentVisible;
   return element;
 }
 
 /** @type {!ModuleDescriptor} */
 export const chromeCartDescriptor = new ModuleDescriptor(
     /*id=*/ 'chrome_cart',
-    /*name=*/ loadTimeData.getString('modulesCartSentence'),
-    /*heightPx=*/ 216, createCartElement);
+    /*name=*/ loadTimeData.getString('modulesCartSentence'), createCartElement);

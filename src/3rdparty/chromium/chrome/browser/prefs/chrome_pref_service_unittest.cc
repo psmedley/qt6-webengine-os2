@@ -30,9 +30,8 @@ TEST(ChromePrefServiceTest, UpdateCommandLinePrefStore) {
   const base::Value* value = pref->GetValue();
   ASSERT_TRUE(value);
   EXPECT_EQ(base::Value::Type::BOOLEAN, value->type());
-  bool actual_bool_value = true;
-  EXPECT_TRUE(value->GetAsBoolean(&actual_bool_value));
-  EXPECT_FALSE(actual_bool_value);
+  EXPECT_TRUE(value->is_bool());
+  EXPECT_FALSE(value->GetBool());
 
   // Change the command line.
   base::CommandLine cmd_line(base::CommandLine::NO_PROGRAM);
@@ -45,9 +44,8 @@ TEST(ChromePrefServiceTest, UpdateCommandLinePrefStore) {
   value = pref->GetValue();
   ASSERT_TRUE(value);
   EXPECT_EQ(base::Value::Type::BOOLEAN, value->type());
-  actual_bool_value = false;
-  EXPECT_TRUE(value->GetAsBoolean(&actual_bool_value));
-  EXPECT_TRUE(actual_bool_value);
+  EXPECT_TRUE(value->is_bool());
+  EXPECT_TRUE(value->GetBool());
 }
 
 class ChromePrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
@@ -91,13 +89,13 @@ TEST_F(ChromePrefServiceWebKitPrefs, PrefsCopied) {
 
   // These should still be the default values.
 #if defined(OS_MAC)
-  const char kDefaultFont[] = "Times";
+  const char16_t kDefaultFont[] = u"Times";
 #elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  const char kDefaultFont[] = "Tinos";
+  const char16_t kDefaultFont[] = u"Tinos";
 #else
-  const char kDefaultFont[] = "Times New Roman";
+  const char16_t kDefaultFont[] = u"Times New Roman";
 #endif
-  EXPECT_EQ(base::ASCIIToUTF16(kDefaultFont),
+  EXPECT_EQ(kDefaultFont,
             webkit_prefs.standard_font_family_map[prefs::kWebKitCommonScript]);
   EXPECT_TRUE(webkit_prefs.javascript_enabled);
 

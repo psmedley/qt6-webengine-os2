@@ -5,8 +5,6 @@
 #ifndef CONTENT_BROWSER_SMS_SMS_PROVIDER_GMS_H_
 #define CONTENT_BROWSER_SMS_SMS_PROVIDER_GMS_H_
 
-#include <utility>
-
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
@@ -29,7 +27,7 @@ class CONTENT_EXPORT SmsProviderGms : public SmsProvider {
   SmsProviderGms();
   ~SmsProviderGms() override;
 
-  void Retrieve(RenderFrameHost* rfh) override;
+  void Retrieve(RenderFrameHost* rfh, SmsFetchType fetch_type) override;
 
   // Implementation of corresponding JNI methods in SmsProviderGms.Natives.*
 

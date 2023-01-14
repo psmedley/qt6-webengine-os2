@@ -30,7 +30,6 @@ source_set("navigation") {
     "//ios/web/public/session",
     "//ios/web/security",
     "//ios/web/session",
-    "//ios/web/text_fragments",
     "//ios/web/web_state:user_interaction",
     "//ios/web/web_state:web_state_impl_header",
     "//ios/web/web_state/ui:web_view_handler",
@@ -88,12 +87,8 @@ source_set("core") {
   ]
 
   sources = [
-    "crw_error_page_helper.h",
-    "crw_error_page_helper.mm",
     "crw_navigation_item_holder.h",
     "crw_navigation_item_holder.mm",
-    "error_retry_state_machine.h",
-    "error_retry_state_machine.mm",
     "navigation_context_impl.h",
     "navigation_context_impl.mm",
     "navigation_item_impl.h",
@@ -119,6 +114,8 @@ source_set("wk_navigation_util") {
   ]
 
   sources = [
+    "crw_error_page_helper.h",
+    "crw_error_page_helper.mm",
     "nscoder_util.h",
     "nscoder_util.mm",
     "wk_navigation_util.h",

@@ -6,8 +6,8 @@
 
 #include <algorithm>
 
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/numerics/ranges.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -22,24 +22,6 @@
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
-
-namespace base {
-// C++14 implementation of C++17's std::clamp():
-// https://en.cppreference.com/w/cpp/algorithm/clamp
-// Please note that the C++ spec makes it undefined behavior to call std::clamp
-// with a value of `lo` that compares greater than the value of `hi`. This
-// implementation uses a CHECK to enforce this as a hard restriction.
-template <typename T, typename Compare>
-constexpr const T& clamp(const T& v, const T& lo, const T& hi, Compare comp) {
-  CHECK(!comp(hi, lo));
-  return comp(v, lo) ? lo : comp(hi, v) ? hi : v;
-}
-
-template <typename T>
-constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
-  return base::clamp(v, lo, hi, std::less<T>{});
-}
-}
 
 namespace blink {
 
@@ -120,7 +102,7 @@ void DecodeAndResizeImage(
 void ThreadedIconLoader::Start(
     ExecutionContext* execution_context,
     const ResourceRequestHead& resource_request,
-    const base::Optional<gfx::Size>& resize_dimensions,
+    const absl::optional<gfx::Size>& resize_dimensions,
     IconCallback callback) {
   DCHECK(!stopped_);
   DCHECK(resource_request.Url().IsValid());
@@ -190,13 +172,13 @@ void ThreadedIconLoader::OnBackgroundTaskComplete(SkBitmap icon,
   std::move(icon_callback_).Run(std::move(icon), resize_scale);
 }
 
-void ThreadedIconLoader::DidFail(const ResourceError& error) {
+void ThreadedIconLoader::DidFail(uint64_t, const ResourceError& error) {
   if (stopped_)
     return;
   std::move(icon_callback_).Run(SkBitmap(), -1);
 }
 
-void ThreadedIconLoader::DidFailRedirectCheck() {
+void ThreadedIconLoader::DidFailRedirectCheck(uint64_t) {
   if (stopped_)
     return;
   std::move(icon_callback_).Run(SkBitmap(), -1);

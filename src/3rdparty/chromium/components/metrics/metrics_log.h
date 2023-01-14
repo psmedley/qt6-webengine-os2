@@ -12,7 +12,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
@@ -20,6 +19,7 @@
 #include "base/strings/string_piece_forward.h"
 #include "base/time/time.h"
 #include "components/metrics/metrics_reporting_default_state.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
 #include "third_party/metrics_proto/system_profile.pb.h"
 
@@ -32,6 +32,25 @@ class HistogramSnapshotManager;
 }  // namespace base
 
 namespace metrics {
+
+// Holds optional metadata associated with a log to be stored.
+struct LogMetadata {
+  LogMetadata();
+  LogMetadata(absl::optional<base::HistogramBase::Count> samples_count,
+              absl::optional<uint64_t> user_id);
+  LogMetadata(const LogMetadata& other);
+  ~LogMetadata();
+
+  // Adds |sample_count| to |samples_count|. If |samples_count| is empty, then
+  // |sample_count| will populate |samples_count|.
+  void AddSampleCount(base::HistogramBase::Count sample_count);
+
+  // The total number of samples in this log if applicable.
+  absl::optional<base::HistogramBase::Count> samples_count;
+
+  // User id associated with the log.
+  absl::optional<uint64_t> user_id;
+};
 
 class MetricsProvider;
 class MetricsServiceClient;
@@ -113,14 +132,15 @@ class MetricsLog {
   // always incrementing for use in measuring time durations.
   static int64_t GetCurrentTime();
 
-  // Record core profile settings into the SystemProfileProto.
+  // Records core profile settings into the SystemProfileProto.
   static void RecordCoreSystemProfile(MetricsServiceClient* client,
                                       SystemProfileProto* system_profile);
 
-  // Record core profile settings into the SystemProfileProto without a client.
+  // Records core profile settings into the SystemProfileProto without a client.
   static void RecordCoreSystemProfile(
       const std::string& version,
       metrics::SystemProfileProto::Channel channel,
+      bool is_extended_stable_channel,
       const std::string& application_locale,
       const std::string& package_name,
       SystemProfileProto* system_profile);
@@ -169,9 +189,7 @@ class MetricsLog {
 
   LogType log_type() const { return log_type_; }
 
-  // Returns the number of samples in this log, it is only valid after the
-  // histogram delta is calculated.
-  base::HistogramBase::Count samples_count() const { return samples_count_; }
+  const LogMetadata& log_metadata() const { return log_metadata_; }
 
   // Exposed for the sake of mocking/accessing in test code.
   ChromeUserMetricsExtension* UmaProtoForTest() { return &uma_proto_; }
@@ -218,8 +236,8 @@ class MetricsLog {
   // RecordEnvironment() or LoadSavedEnvironmentFromPrefs().
   bool has_environment_;
 
-  // The number of samples in this log.
-  base::HistogramBase::Count samples_count_ = 0;
+  // Optional metadata associated with the log.
+  LogMetadata log_metadata_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsLog);
 };

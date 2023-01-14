@@ -16,8 +16,8 @@ class TestTableModel : public ui::TableModel {
 
   // ui::TableModel overrides:
   int RowCount() override;
-  base::string16 GetText(int row, int column_id) override;
-  gfx::ImageSkia GetIcon(int row) override;
+  std::u16string GetText(int row, int column_id) override;
+  ui::ImageModel GetIcon(int row) override;
   void SetObserver(ui::TableModelObserver* observer) override;
 
  private:

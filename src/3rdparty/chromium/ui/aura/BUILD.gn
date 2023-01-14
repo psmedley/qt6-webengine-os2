@@ -124,6 +124,7 @@ jumbo_component("aura") {
     "//ui/events",
     "//ui/events:dom_keyboard_layout",
     "//ui/events:events_base",
+    "//ui/events:keyboard_hook",
     "//ui/events/platform",
     "//ui/gfx",
     "//ui/gfx:gfx_switches",
@@ -135,8 +136,10 @@ jumbo_component("aura") {
 
   public_deps = [
     "//ui/base/cursor:cursor_base",
+    "//ui/base/dragdrop:types",
     "//ui/base/dragdrop/mojom:mojom_headers",
     "//ui/base/ime",
+    "//ui/base/metadata",
     "//ui/compositor",
   ]
 
@@ -147,6 +150,7 @@ jumbo_component("aura") {
       "native_window_occlusion_tracker_win.cc",
       "native_window_occlusion_tracker_win.h",
     ]
+    sources -= [ "input_state_lookup.cc" ]
   }
 
   if (use_x11) {
@@ -157,9 +161,7 @@ jumbo_component("aura") {
     ]
   }
 
-  if (is_win) {
-    sources -= [ "input_state_lookup.cc" ]
-
+  if (is_win && !use_qt) {
     deps += [
       "//ipc",
       "//ui/base/cursor",
@@ -220,9 +222,6 @@ jumbo_static_library("test_support") {
     "test/window_test_api.h",
   ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   public_deps = [
     ":aura",
 
@@ -243,7 +242,6 @@ jumbo_static_library("test_support") {
     "//ui/base/ime/init",
     "//ui/compositor:test_support",
     "//ui/display",
-    "//ui/display/manager",
     "//ui/events",
     "//ui/events:events_base",
     "//ui/events:test_support",
@@ -373,6 +371,11 @@ test("aura_unittests") {
 
   if (use_ozone) {
     deps += [ "//ui/ozone" ]
+  }
+
+  if (is_fuchsia) {
+    additional_manifest_fragments =
+        [ "//build/config/fuchsia/test/present_view_capabilities.test-cmx" ]
   }
 
   data_deps = [ "//third_party/mesa_headers" ]

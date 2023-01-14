@@ -19,20 +19,19 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/clock.h"
-#include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/load_states.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
-#include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
 
 class GURL;
@@ -58,6 +57,7 @@ namespace net {
 class HttpNetworkSession;
 class HttpResponseInfo;
 class NetLog;
+class NetworkIsolationKey;
 struct HttpRequestInfo;
 
 class NET_EXPORT HttpCache : public HttpTransactionFactory {
@@ -185,6 +185,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
             std::unique_ptr<BackendFactory> backend_factory,
             bool is_main_cache);
 
+  HttpCache(const HttpCache&) = delete;
+  HttpCache& operator=(const HttpCache&) = delete;
+
   ~HttpCache() override;
 
   HttpTransactionFactory* network_layer() { return network_layer_.get(); }
@@ -301,13 +304,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   enum {
     kResponseInfoIndex = 0,
     kResponseContentIndex,
-    // Only currently used in DoTruncateCachedMetadata().
-    // TODO(mmenke): Remove this in and DoTruncateCachedMetadata() in M79, after
-    // most metadata entries in the cache have been removed. Without
-    // DoTruncateCachedMetadata(), the metadata will be removed when a cache
-    // entry is destroyed, but some conditionalized updates will keep it around.
-    kMetadataIndex,
-
+    kDeprecatedMetadataIndex,
     // Must remain at the end of the enum.
     kNumCacheEntryDataIndices
   };
@@ -327,7 +324,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   friend class MockHttpCache;
   friend class HttpCacheIOCallbackTest;
 
-  FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheWithFrameOrigin);
+  FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheWithNetworkIsolationKey);
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, NonSplitCache);
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCache);
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheUsesRegistrableDomain);
@@ -686,8 +683,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   THREAD_CHECKER(thread_checker_);
 
   base::WeakPtrFactory<HttpCache> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(HttpCache);
 };
 
 }  // namespace net

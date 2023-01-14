@@ -15,13 +15,13 @@
 #include "quic/core/quic_types.h"
 #include "quic/core/quic_versions.h"
 #include "quic/platform/api/quic_containers.h"
-#include "common/platform/api/quiche_text_utils.h"
+#include "common/quiche_text_utils.h"
 
 namespace quic {
 
 namespace {
 // |kFlowId0| is used to indicate creation of a new compression context.
-const QuicDatagramFlowId kFlowId0 = 0;
+const QuicDatagramStreamId kFlowId0 = 0;
 
 enum MasqueAddressFamily : uint8_t {
   MasqueAddressFamilyIPv4 = 4,
@@ -30,23 +30,18 @@ enum MasqueAddressFamily : uint8_t {
 
 }  // namespace
 
-MasqueCompressionEngine::MasqueCompressionEngine(QuicSession* masque_session)
-    : masque_session_(masque_session) {
-  if (masque_session_->perspective() == Perspective::IS_SERVER) {
-    next_flow_id_ = 1;
-  } else {
-    next_flow_id_ = 2;
-  }
-}
+MasqueCompressionEngine::MasqueCompressionEngine(
+    QuicSpdySession* masque_session)
+    : masque_session_(masque_session),
+      next_available_flow_id_(
+          masque_session_->perspective() == Perspective::IS_CLIENT ? 0 : 1) {}
 
-QuicDatagramFlowId MasqueCompressionEngine::FindOrCreateCompressionContext(
+QuicDatagramStreamId MasqueCompressionEngine::FindOrCreateCompressionContext(
     QuicConnectionId client_connection_id,
     QuicConnectionId server_connection_id,
-    const QuicSocketAddress& server_address,
-    bool client_connection_id_present,
-    bool server_connection_id_present,
-    bool* validated) {
-  QuicDatagramFlowId flow_id = kFlowId0;
+    const QuicSocketAddress& server_address, bool client_connection_id_present,
+    bool server_connection_id_present, bool* validated) {
+  QuicDatagramStreamId flow_id = kFlowId0;
   *validated = false;
   for (const auto& kv : contexts_) {
     const MasqueCompressionContext& context = kv.second;
@@ -79,7 +74,8 @@ QuicDatagramFlowId MasqueCompressionEngine::FindOrCreateCompressionContext(
   }
 
   // Create new compression context.
-  flow_id = GetNextFlowId();
+  next_available_flow_id_ += 2;
+  flow_id = next_available_flow_id_;
   QUIC_DVLOG(1) << "Compression assigning new flow_id " << flow_id << " to "
                 << server_address << " client " << client_connection_id
                 << " server " << server_connection_id;
@@ -97,39 +93,35 @@ bool MasqueCompressionEngine::WriteCompressedPacketToSlice(
     QuicConnectionId server_connection_id,
     const QuicSocketAddress& server_address,
     QuicConnectionId destination_connection_id,
-    QuicConnectionId source_connection_id,
-    QuicDatagramFlowId flow_id,
-    bool validated,
-    uint8_t first_byte,
-    bool long_header,
-    QuicDataReader* reader,
-    QuicDataWriter* writer) {
+    QuicConnectionId source_connection_id, QuicDatagramStreamId flow_id,
+    bool validated, uint8_t first_byte, bool long_header,
+    QuicDataReader* reader, QuicDataWriter* writer) {
   if (validated) {
     QUIC_DVLOG(1) << "Compressing using validated flow_id " << flow_id;
     if (!writer->WriteVarInt62(flow_id)) {
-      QUIC_BUG << "Failed to write flow_id";
+      QUIC_BUG(quic_bug_10981_1) << "Failed to write flow_id";
       return false;
     }
   } else {
     QUIC_DVLOG(1) << "Compressing using unvalidated flow_id " << flow_id;
     if (!writer->WriteVarInt62(kFlowId0)) {
-      QUIC_BUG << "Failed to write kFlowId0";
+      QUIC_BUG(quic_bug_10981_2) << "Failed to write kFlowId0";
       return false;
     }
     if (!writer->WriteVarInt62(flow_id)) {
-      QUIC_BUG << "Failed to write flow_id";
+      QUIC_BUG(quic_bug_10981_3) << "Failed to write flow_id";
       return false;
     }
     if (!writer->WriteLengthPrefixedConnectionId(client_connection_id)) {
-      QUIC_BUG << "Failed to write client_connection_id";
+      QUIC_BUG(quic_bug_10981_4) << "Failed to write client_connection_id";
       return false;
     }
     if (!writer->WriteLengthPrefixedConnectionId(server_connection_id)) {
-      QUIC_BUG << "Failed to write server_connection_id";
+      QUIC_BUG(quic_bug_10981_5) << "Failed to write server_connection_id";
       return false;
     }
     if (!writer->WriteUInt16(server_address.port())) {
-      QUIC_BUG << "Failed to write port";
+      QUIC_BUG(quic_bug_10981_6) << "Failed to write port";
       return false;
     }
     QuicIpAddress peer_ip = server_address.host();
@@ -140,30 +132,31 @@ bool MasqueCompressionEngine::WriteCompressedPacketToSlice(
     if (peer_ip.address_family() == IpAddressFamily::IP_V6) {
       address_id = MasqueAddressFamilyIPv6;
       if (peer_ip_bytes.length() != QuicIpAddress::kIPv6AddressSize) {
-        QUIC_BUG << "Bad IPv6 length " << server_address;
+        QUIC_BUG(quic_bug_10981_7) << "Bad IPv6 length " << server_address;
         return false;
       }
     } else if (peer_ip.address_family() == IpAddressFamily::IP_V4) {
       address_id = MasqueAddressFamilyIPv4;
       if (peer_ip_bytes.length() != QuicIpAddress::kIPv4AddressSize) {
-        QUIC_BUG << "Bad IPv4 length " << server_address;
+        QUIC_BUG(quic_bug_10981_8) << "Bad IPv4 length " << server_address;
         return false;
       }
     } else {
-      QUIC_BUG << "Unexpected server_address " << server_address;
+      QUIC_BUG(quic_bug_10981_9)
+          << "Unexpected server_address " << server_address;
       return false;
     }
     if (!writer->WriteUInt8(address_id)) {
-      QUIC_BUG << "Failed to write address_id";
+      QUIC_BUG(quic_bug_10981_10) << "Failed to write address_id";
       return false;
     }
     if (!writer->WriteStringPiece(peer_ip_bytes)) {
-      QUIC_BUG << "Failed to write IP address";
+      QUIC_BUG(quic_bug_10981_11) << "Failed to write IP address";
       return false;
     }
   }
   if (!writer->WriteUInt8(first_byte)) {
-    QUIC_BUG << "Failed to write first_byte";
+    QUIC_BUG(quic_bug_10981_12) << "Failed to write first_byte";
     return false;
   }
   if (long_header) {
@@ -173,7 +166,7 @@ bool MasqueCompressionEngine::WriteCompressedPacketToSlice(
       return false;
     }
     if (!writer->WriteUInt32(version_label)) {
-      QUIC_BUG << "Failed to write version";
+      QUIC_BUG(quic_bug_10981_13) << "Failed to write version";
       return false;
     }
     QuicConnectionId packet_destination_connection_id,
@@ -215,15 +208,14 @@ bool MasqueCompressionEngine::WriteCompressedPacketToSlice(
   }
   absl::string_view packet_payload = reader->ReadRemainingPayload();
   if (!writer->WriteStringPiece(packet_payload)) {
-    QUIC_BUG << "Failed to write packet_payload";
+    QUIC_BUG(quic_bug_10981_14) << "Failed to write packet_payload";
     return false;
   }
   return true;
 }
 
 void MasqueCompressionEngine::CompressAndSendPacket(
-    absl::string_view packet,
-    QuicConnectionId client_connection_id,
+    absl::string_view packet, QuicConnectionId client_connection_id,
     QuicConnectionId server_connection_id,
     const QuicSocketAddress& server_address) {
   QUIC_DVLOG(2) << "Compressing client " << client_connection_id << " server "
@@ -231,13 +223,13 @@ void MasqueCompressionEngine::CompressAndSendPacket(
                 << quiche::QuicheTextUtils::HexDump(packet);
   QUICHE_DCHECK(server_address.IsInitialized());
   if (packet.empty()) {
-    QUIC_BUG << "Tried to send empty packet";
+    QUIC_BUG(quic_bug_10981_15) << "Tried to send empty packet";
     return;
   }
   QuicDataReader reader(packet.data(), packet.length());
   uint8_t first_byte;
   if (!reader.ReadUInt8(&first_byte)) {
-    QUIC_BUG << "Failed to read first_byte";
+    QUIC_BUG(quic_bug_10981_16) << "Failed to read first_byte";
     return;
   }
   const bool long_header = (first_byte & FLAGS_LONG_HEADER) != 0;
@@ -258,7 +250,7 @@ void MasqueCompressionEngine::CompressAndSendPacket(
   }
 
   bool validated = false;
-  QuicDatagramFlowId flow_id = FindOrCreateCompressionContext(
+  QuicDatagramStreamId flow_id = FindOrCreateCompressionContext(
       client_connection_id, server_connection_id, server_address,
       client_connection_id_present, server_connection_id_present, &validated);
 
@@ -276,10 +268,10 @@ void MasqueCompressionEngine::CompressAndSendPacket(
                     sizeof(server_address.port()) + sizeof(uint8_t) +
                     server_address.host().ToPackedString().length();
   }
-  QuicUniqueBufferPtr buffer = MakeUniqueBuffer(
+  QuicBuffer buffer(
       masque_session_->connection()->helper()->GetStreamSendBufferAllocator(),
       slice_length);
-  QuicDataWriter writer(slice_length, buffer.get());
+  QuicDataWriter writer(buffer.size(), buffer.data());
 
   if (!WriteCompressedPacketToSlice(
           client_connection_id, server_connection_id, server_address,
@@ -288,18 +280,16 @@ void MasqueCompressionEngine::CompressAndSendPacket(
     return;
   }
 
-  QuicMemSlice slice(std::move(buffer), slice_length);
   MessageResult message_result =
-      masque_session_->SendMessage(QuicMemSliceSpan(&slice));
+      masque_session_->SendMessage(QuicMemSlice(std::move(buffer)));
 
   QUIC_DVLOG(1) << "Sent packet compressed with flow ID " << flow_id
                 << " and got message result " << message_result;
 }
 
 bool MasqueCompressionEngine::ParseCompressionContext(
-    QuicDataReader* reader,
-    MasqueCompressionContext* context) {
-  QuicDatagramFlowId new_flow_id;
+    QuicDataReader* reader, MasqueCompressionContext* context) {
+  QuicDatagramStreamId new_flow_id;
   if (!reader->ReadVarInt62(&new_flow_id)) {
     QUIC_DLOG(ERROR) << "Could not read new_flow_id";
     return false;
@@ -341,7 +331,7 @@ bool MasqueCompressionEngine::ParseCompressionContext(
   QuicIpAddress ip_address;
   ip_address.FromPackedString(ip_bytes, ip_bytes_length);
   if (!ip_address.IsInitialized()) {
-    QUIC_BUG << "Failed to parse IP address";
+    QUIC_BUG(quic_bug_10981_17) << "Failed to parse IP address";
     return false;
   }
   QuicSocketAddress new_server_address = QuicSocketAddress(ip_address, port);
@@ -398,10 +388,8 @@ bool MasqueCompressionEngine::ParseCompressionContext(
 }
 
 bool MasqueCompressionEngine::WriteDecompressedPacket(
-    QuicDataReader* reader,
-    const MasqueCompressionContext& context,
-    std::vector<char>* packet,
-    bool* version_present) {
+    QuicDataReader* reader, const MasqueCompressionContext& context,
+    std::vector<char>* packet, bool* version_present) {
   QuicConnectionId destination_connection_id, source_connection_id;
   if (masque_session_->perspective() == Perspective::IS_SERVER) {
     destination_connection_id = context.server_connection_id;
@@ -425,7 +413,7 @@ bool MasqueCompressionEngine::WriteDecompressedPacket(
   *packet = std::vector<char>(packet_length);
   QuicDataWriter writer(packet->size(), packet->data());
   if (!writer.WriteUInt8(first_byte)) {
-    QUIC_BUG << "Failed to write first_byte";
+    QUIC_BUG(quic_bug_10981_18) << "Failed to write first_byte";
     return false;
   }
   if (*version_present) {
@@ -435,42 +423,42 @@ bool MasqueCompressionEngine::WriteDecompressedPacket(
       return false;
     }
     if (!writer.WriteUInt32(version_label)) {
-      QUIC_BUG << "Failed to write version";
+      QUIC_BUG(quic_bug_10981_19) << "Failed to write version";
       return false;
     }
     if (!writer.WriteLengthPrefixedConnectionId(destination_connection_id)) {
-      QUIC_BUG << "Failed to write long header destination_connection_id";
+      QUIC_BUG(quic_bug_10981_20)
+          << "Failed to write long header destination_connection_id";
       return false;
     }
     if (!writer.WriteLengthPrefixedConnectionId(source_connection_id)) {
-      QUIC_BUG << "Failed to write long header source_connection_id";
+      QUIC_BUG(quic_bug_10981_21)
+          << "Failed to write long header source_connection_id";
       return false;
     }
   } else {
     if (!writer.WriteConnectionId(destination_connection_id)) {
-      QUIC_BUG << "Failed to write short header destination_connection_id";
+      QUIC_BUG(quic_bug_10981_22)
+          << "Failed to write short header destination_connection_id";
       return false;
     }
   }
   absl::string_view payload = reader->ReadRemainingPayload();
   if (!writer.WriteStringPiece(payload)) {
-    QUIC_BUG << "Failed to write payload";
+    QUIC_BUG(quic_bug_10981_23) << "Failed to write payload";
     return false;
   }
   return true;
 }
 
 bool MasqueCompressionEngine::DecompressDatagram(
-    absl::string_view datagram,
-    QuicConnectionId* client_connection_id,
-    QuicConnectionId* server_connection_id,
-    QuicSocketAddress* server_address,
-    std::vector<char>* packet,
-    bool* version_present) {
+    absl::string_view datagram, QuicConnectionId* client_connection_id,
+    QuicConnectionId* server_connection_id, QuicSocketAddress* server_address,
+    std::vector<char>* packet, bool* version_present) {
   QUIC_DVLOG(1) << "Decompressing DATAGRAM frame of length "
                 << datagram.length();
   QuicDataReader reader(datagram);
-  QuicDatagramFlowId flow_id;
+  QuicDatagramStreamId flow_id;
   if (!reader.ReadVarInt62(&flow_id)) {
     QUIC_DLOG(ERROR) << "Could not read flow_id";
     return false;
@@ -520,22 +508,16 @@ bool MasqueCompressionEngine::DecompressDatagram(
   return true;
 }
 
-QuicDatagramFlowId MasqueCompressionEngine::GetNextFlowId() {
-  const QuicDatagramFlowId next_flow_id = next_flow_id_;
-  next_flow_id_ += 2;
-  return next_flow_id;
-}
-
 void MasqueCompressionEngine::UnregisterClientConnectionId(
     QuicConnectionId client_connection_id) {
-  std::vector<QuicDatagramFlowId> flow_ids_to_remove;
+  std::vector<QuicDatagramStreamId> flow_ids_to_remove;
   for (const auto& kv : contexts_) {
     const MasqueCompressionContext& context = kv.second;
     if (context.client_connection_id == client_connection_id) {
       flow_ids_to_remove.push_back(kv.first);
     }
   }
-  for (QuicDatagramFlowId flow_id : flow_ids_to_remove) {
+  for (QuicDatagramStreamId flow_id : flow_ids_to_remove) {
     contexts_.erase(flow_id);
   }
 }

@@ -85,15 +85,16 @@ class PartitionAllocator : public Allocator {
   ~PartitionAllocator() override = default;
 
   void* Alloc(size_t size) override {
-    return alloc_.AllocFlagsNoHooks(0, size);
+    return alloc_.AllocFlagsNoHooks(0, size, PartitionPageSize());
   }
   void Free(void* data) override { ThreadSafePartitionRoot::FreeNoHooks(data); }
 
  private:
-  ThreadSafePartitionRoot alloc_{{PartitionOptions::Alignment::kRegular,
+  ThreadSafePartitionRoot alloc_{{PartitionOptions::AlignedAlloc::kDisallowed,
                                   PartitionOptions::ThreadCache::kDisabled,
                                   PartitionOptions::Quarantine::kDisallowed,
-                                  PartitionOptions::RefCount::kDisabled}};
+                                  PartitionOptions::Cookies::kAllowed,
+                                  PartitionOptions::RefCount::kDisallowed}};
 };
 
 // Only one partition with a thread cache.
@@ -103,17 +104,18 @@ class PartitionAllocatorWithThreadCache : public Allocator {
   PartitionAllocatorWithThreadCache() {
     if (!g_partition_root) {
       g_partition_root = new ThreadSafePartitionRoot(
-          {PartitionOptions::Alignment::kRegular,
+          {PartitionOptions::AlignedAlloc::kDisallowed,
            PartitionOptions::ThreadCache::kEnabled,
            PartitionOptions::Quarantine::kDisallowed,
-           PartitionOptions::RefCount::kDisabled});
+           PartitionOptions::Cookies::kAllowed,
+           PartitionOptions::RefCount::kDisallowed});
     }
     internal::ThreadCacheRegistry::Instance().PurgeAll();
   }
   ~PartitionAllocatorWithThreadCache() override = default;
 
   void* Alloc(size_t size) override {
-    return g_partition_root->AllocFlagsNoHooks(0, size);
+    return g_partition_root->AllocFlagsNoHooks(0, size, PartitionPageSize());
   }
   void Free(void* data) override { ThreadSafePartitionRoot::FreeNoHooks(data); }
 };
@@ -280,6 +282,20 @@ float MultiBucketWithFree(Allocator* allocator) {
   return timer.LapsPerSecond() * kMultiBucketRounds;
 }
 
+float DirectMapped(Allocator* allocator) {
+  constexpr size_t kSize = 2 * 1000 * 1000;
+
+  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  do {
+    void* cur = allocator->Alloc(kSize);
+    CHECK_NE(cur, nullptr);
+    allocator->Free(cur);
+    timer.NextLap();
+  } while (!timer.HasTimeLimitExpired());
+
+  return timer.LapsPerSecond();
+}
+
 std::unique_ptr<Allocator> CreateAllocator(AllocatorType type) {
   switch (type) {
     case AllocatorType::kSystem:
@@ -303,8 +319,15 @@ void LogResults(int thread_count,
 void RunTest(int thread_count,
              AllocatorType alloc_type,
              float (*test_fn)(Allocator*),
+             float (*noisy_neighbor_fn)(Allocator*),
              const char* story_base_name) {
   auto alloc = CreateAllocator(alloc_type);
+
+  std::unique_ptr<TestLoopThread> noisy_neighbor_thread = nullptr;
+  if (noisy_neighbor_fn) {
+    noisy_neighbor_thread = std::make_unique<TestLoopThread>(
+        BindOnce(noisy_neighbor_fn, Unretained(alloc.get())));
+  }
 
   std::vector<std::unique_ptr<TestLoopThread>> threads;
   for (int i = 0; i < thread_count; ++i) {
@@ -319,6 +342,9 @@ void RunTest(int thread_count,
     min_laps_per_second = std::min(laps_per_second, min_laps_per_second);
     total_laps_per_second += laps_per_second;
   }
+
+  if (noisy_neighbor_thread)
+    noisy_neighbor_thread->Run();
 
   char const* alloc_type_str;
   switch (alloc_type) {
@@ -343,14 +369,14 @@ void RunTest(int thread_count,
              min_laps_per_second);
 }
 
-class MemoryAllocationPerfTest
+class PartitionAllocMemoryAllocationPerfTest
     : public testing::TestWithParam<std::tuple<int, AllocatorType>> {};
 
 // Only one partition with a thread cache: cannot use the thread cache when
 // PartitionAlloc is malloc().
 INSTANTIATE_TEST_SUITE_P(
     ,
-    MemoryAllocationPerfTest,
+    PartitionAllocMemoryAllocationPerfTest,
     ::testing::Combine(
         ::testing::Values(1, 2, 3, 4),
         ::testing::Values(AllocatorType::kSystem,
@@ -364,31 +390,47 @@ INSTANTIATE_TEST_SUITE_P(
 // This test (and the other one below) allocates a large amount of memory, which
 // can cause issues on Android.
 #if !defined(MEMORY_CONSTRAINED)
-TEST_P(MemoryAllocationPerfTest, SingleBucket) {
+TEST_P(PartitionAllocMemoryAllocationPerfTest, SingleBucket) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), SingleBucket,
+  RunTest(std::get<0>(params), std::get<1>(params), SingleBucket, nullptr,
           "SingleBucket");
 }
 #endif  // defined(MEMORY_CONSTRAINED)
 
-TEST_P(MemoryAllocationPerfTest, SingleBucketWithFree) {
+TEST_P(PartitionAllocMemoryAllocationPerfTest, SingleBucketWithFree) {
   auto params = GetParam();
   RunTest(std::get<0>(params), std::get<1>(params), SingleBucketWithFree,
-          "SingleBucketWithFree");
+          nullptr, "SingleBucketWithFree");
 }
 
 #if !defined(MEMORY_CONSTRAINED)
-TEST_P(MemoryAllocationPerfTest, MultiBucket) {
+TEST_P(PartitionAllocMemoryAllocationPerfTest, MultiBucket) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), MultiBucket, "MultiBucket");
+  RunTest(std::get<0>(params), std::get<1>(params), MultiBucket, nullptr,
+          "MultiBucket");
 }
 #endif  // defined(MEMORY_CONSTRAINED)
 
-TEST_P(MemoryAllocationPerfTest, MultiBucketWithFree) {
+TEST_P(PartitionAllocMemoryAllocationPerfTest, MultiBucketWithFree) {
   auto params = GetParam();
   RunTest(std::get<0>(params), std::get<1>(params), MultiBucketWithFree,
-          "MultiBucketWithFree");
+          nullptr, "MultiBucketWithFree");
 }
+
+TEST_P(PartitionAllocMemoryAllocationPerfTest, DirectMapped) {
+  auto params = GetParam();
+  RunTest(std::get<0>(params), std::get<1>(params), DirectMapped, nullptr,
+          "DirectMapped");
+}
+
+#if !defined(MEMORY_CONSTRAINED)
+TEST_P(PartitionAllocMemoryAllocationPerfTest,
+       DISABLED_MultiBucketWithNoisyNeighbor) {
+  auto params = GetParam();
+  RunTest(std::get<0>(params), std::get<1>(params), MultiBucket, DirectMapped,
+          "MultiBucketWithNoisyNeighbor");
+}
+#endif  // !defined(MEMORY_CONSTRAINED)
 
 }  // namespace
 

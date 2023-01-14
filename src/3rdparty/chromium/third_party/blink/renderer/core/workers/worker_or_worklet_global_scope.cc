@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
 
+#include <utility>
+
 #include "base/threading/thread_checker.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/blink/public/common/features.h"
@@ -11,12 +13,15 @@
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/content_security_notifier.mojom-blink.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/loader_factory_for_worker.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
@@ -37,6 +42,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/null_resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_observer.h"
+#include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -102,10 +108,10 @@ class OutsideSettingsCSPDelegate final
     return nullptr;
   }
 
-  base::Optional<uint16_t> GetStatusCode() override {
+  absl::optional<uint16_t> GetStatusCode() override {
     DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
     // TODO(crbug/928965): Plumb the status code of the parent Document if any.
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   String GetDocumentReferrer() override {
@@ -199,6 +205,7 @@ WorkerOrWorkletGlobalScope::WorkerOrWorkletGlobalScope(
       v8_cache_options_(v8_cache_options),
       reporting_proxy_(reporting_proxy) {
   GetSecurityContext().SetSecurityOrigin(std::move(origin));
+  SetPolicyContainer(PolicyContainer::CreateEmpty());
   if (worker_clients_)
     worker_clients_->ReattachThread();
 }
@@ -212,20 +219,11 @@ const AtomicString& WorkerOrWorkletGlobalScope::InterfaceName() const {
   return g_null_atom;
 }
 
-v8::Local<v8::Value> WorkerOrWorkletGlobalScope::Wrap(
-    v8::Isolate*,
-    v8::Local<v8::Object> creation_context) {
+v8::MaybeLocal<v8::Value> WorkerOrWorkletGlobalScope::Wrap(ScriptState*) {
   LOG(FATAL) << "WorkerOrWorkletGlobalScope must never be wrapped with wrap "
                 "method. The global object of ECMAScript environment is used "
                 "as the wrapper.";
-  return v8::Local<v8::Object>();
-}
-
-v8::MaybeLocal<v8::Value> WorkerOrWorkletGlobalScope::WrapV2(ScriptState*) {
-  LOG(FATAL) << "WorkerOrWorkletGlobalScope must never be wrapped with wrap "
-                "method. The global object of ECMAScript environment is used "
-                "as the wrapper.";
-  return v8::MaybeLocal<v8::Value>();
+  return v8::Local<v8::Value>();
 }
 
 v8::Local<v8::Object> WorkerOrWorkletGlobalScope::AssociateWithWrapper(
@@ -252,6 +250,10 @@ void WorkerOrWorkletGlobalScope::CountUse(WebFeature feature) {
     return;
   used_features_.set(static_cast<size_t>(feature));
   ReportingProxy().CountFeature(feature);
+}
+
+void WorkerOrWorkletGlobalScope::CountDeprecation(WebFeature feature) {
+  Deprecation::CountDeprecation(this, feature);
 }
 
 ResourceLoadScheduler::ThrottleOptionOverride
@@ -284,11 +286,12 @@ void WorkerOrWorkletGlobalScope::InitializeWebFetchContextIfNeeded() {
   }
 }
 
-ResourceFetcher* WorkerOrWorkletGlobalScope::EnsureFetcher() {
+ResourceFetcher* WorkerOrWorkletGlobalScope::Fetcher() {
   DCHECK(IsContextThread());
   // Worklets don't support subresource fetch.
   DCHECK(IsWorkerGlobalScope());
 
+  // Check if the fetcher has already been initialized, otherwise initialize it.
   if (inside_settings_resource_fetcher_)
     return inside_settings_resource_fetcher_;
 
@@ -362,17 +365,9 @@ ResourceFetcher* WorkerOrWorkletGlobalScope::CreateFetcherInternal(
                             nullptr /* back_forward_cache_loader_helper */));
   }
   if (IsContextPaused())
-    fetcher->SetDefersLoading(WebURLLoader::DeferType::kDeferred);
+    fetcher->SetDefersLoading(LoaderFreezeMode::kStrict);
   resource_fetchers_.insert(fetcher);
   return fetcher;
-}
-
-ResourceFetcher* WorkerOrWorkletGlobalScope::Fetcher() const {
-  DCHECK(IsContextThread());
-  // Worklets don't support subresource fetch.
-  DCHECK(IsWorkerGlobalScope());
-  DCHECK(inside_settings_resource_fetcher_);
-  return inside_settings_resource_fetcher_;
 }
 
 ResourceFetcher* WorkerOrWorkletGlobalScope::CreateOutsideSettingsFetcher(
@@ -455,7 +450,17 @@ void WorkerOrWorkletGlobalScope::InitContentSecurityPolicyFromVector(
     auto* csp = MakeGarbageCollected<ContentSecurityPolicy>();
     csp->SetSupportsWasmEval(SchemeRegistry::SchemeSupportsWasmEvalCSP(
         GetSecurityOrigin()->Protocol()));
-    GetSecurityContext().SetContentSecurityPolicy(csp);
+
+    // Check if the embedder wants to add any default policies, and add them.
+    WebVector<WebContentSecurityPolicyHeader> embedder_default_csp;
+    Platform::Current()->AppendContentSecurityPolicy(WebURL(Url()),
+                                                     &embedder_default_csp);
+    for (const auto& header : embedder_default_csp) {
+      csp->AddPolicies(ParseContentSecurityPolicies(
+          header.header_value, header.type, header.source, Url()));
+    }
+
+    SetContentSecurityPolicy(csp);
   }
   GetContentSecurityPolicy()->AddPolicies(std::move(policies));
 }
@@ -516,9 +521,9 @@ void WorkerOrWorkletGlobalScope::FetchModuleScript(
 }
 
 void WorkerOrWorkletGlobalScope::SetDefersLoadingForResourceFetchers(
-    WebURLLoader::DeferType defers) {
+    LoaderFreezeMode mode) {
   for (ResourceFetcher* resource_fetcher : resource_fetchers_)
-    resource_fetcher->SetDefersLoading(defers);
+    resource_fetcher->SetDefersLoading(mode);
 }
 
 int WorkerOrWorkletGlobalScope::GetOutstandingThrottledLimit() const {

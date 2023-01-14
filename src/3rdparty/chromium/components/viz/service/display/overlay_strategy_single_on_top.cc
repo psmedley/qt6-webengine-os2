@@ -20,7 +20,7 @@ OverlayStrategySingleOnTop::OverlayStrategySingleOnTop(
 OverlayStrategySingleOnTop::~OverlayStrategySingleOnTop() {}
 
 bool OverlayStrategySingleOnTop::Attempt(
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
     DisplayResourceProvider* resource_provider,
@@ -41,6 +41,7 @@ bool OverlayStrategySingleOnTop::Attempt(
     if (OverlayCandidate::FromDrawQuad(
             resource_provider, surface_damage_rect_list, output_color_matrix,
             *it, GetPrimaryPlaneDisplayRect(primary_plane), &candidate) &&
+        !candidate.has_mask_filter &&
         !OverlayCandidate::IsOccluded(candidate, quad_list->cbegin(), it)) {
       // If the candidate has been promoted previously and has not changed
       // (resource ID is the same) for 3 frames, do not use it as Overlay as
@@ -76,7 +77,7 @@ bool OverlayStrategySingleOnTop::Attempt(
 }
 
 void OverlayStrategySingleOnTop::ProposePrioritized(
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
     DisplayResourceProvider* resource_provider,
@@ -95,6 +96,7 @@ void OverlayStrategySingleOnTop::ProposePrioritized(
     if (OverlayCandidate::FromDrawQuad(
             resource_provider, surface_damage_rect_list, output_color_matrix,
             *it, GetPrimaryPlaneDisplayRect(primary_plane), &candidate) &&
+        !candidate.has_mask_filter &&
         !OverlayCandidate::IsOccluded(candidate, quad_list->cbegin(), it)) {
       candidates->push_back({it, candidate, this});
     }
@@ -102,7 +104,7 @@ void OverlayStrategySingleOnTop::ProposePrioritized(
 }
 
 bool OverlayStrategySingleOnTop::AttemptPrioritized(
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
     DisplayResourceProvider* resource_provider,

@@ -36,9 +36,9 @@ class ChromeContentSettingsAgentDelegate
 
   // content_settings::ContentSettingsAgentImpl::Delegate:
   bool IsSchemeAllowlisted(const std::string& scheme) override;
-  base::Optional<bool> AllowReadFromClipboard() override;
-  base::Optional<bool> AllowWriteToClipboard() override;
-  base::Optional<bool> AllowMutationEvents() override;
+  absl::optional<bool> AllowReadFromClipboard() override;
+  absl::optional<bool> AllowWriteToClipboard() override;
+  absl::optional<bool> AllowMutationEvents() override;
   void PassiveInsecureContentFound(const blink::WebURL&) override;
 
  private:
@@ -51,6 +51,9 @@ class ChromeContentSettingsAgentDelegate
 
   // Whether the observed RenderFrame is for a platform app.
   bool IsPlatformApp();
+
+  // Whether the observed RenderFrame is an allow-listed System Web App.
+  bool IsAllowListedSystemWebApp();
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // If |origin| corresponds to an installed extension, returns that extension.

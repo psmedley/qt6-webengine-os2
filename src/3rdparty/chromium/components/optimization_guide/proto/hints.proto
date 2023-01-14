@@ -9,10 +9,10 @@ option java_outer_classname = "HintsProto";
 
 package optimization_guide.proto;
 
-import "common_types.proto";
-import "loading_predictor_metadata.proto";
-import "performance_hints_metadata.proto";
-import "public_image_metadata.proto";
+import "components/optimization_guide/proto/common_types.proto";
+import "components/optimization_guide/proto/loading_predictor_metadata.proto";
+import "components/optimization_guide/proto/performance_hints_metadata.proto";
+import "components/optimization_guide/proto/public_image_metadata.proto";
 
 // Information about the hint that the client already has for a host.
 message MatchedHintInfo {
@@ -65,6 +65,13 @@ message GetHintsRequest {
 
   // The field trials that are currently active when this request is made.
   repeated FieldTrial active_field_trials = 6;
+
+  // The locale to associate with this request.
+  //
+  // It is the IETF language tag, defined in BCP 47. The region subtag is not
+  // included when it adds no distinguishing information to the language tag
+  // (e.g. both "en-US" and "fr" are correct here).
+  optional string locale = 7;
 }
 
 // Response to the GetHints request.
@@ -94,6 +101,9 @@ message GetHintsResponse {
 
 
 enum OptimizationType {
+  // Values for obsolete optimizations.
+  reserved 11, 12;
+
   TYPE_UNSPECIFIED = 0;
   // This optimization blocks JavaScript on the page.
   NOSCRIPT = 1;
@@ -121,12 +131,6 @@ enum OptimizationType {
   // This optimization provides information about hosts that historically
   // provide a fast and responsive user experience.
   FAST_HOST_HINTS = 10;
-  // This optimization provides information about the effective delay for async
-  // script execution.
-  DELAY_ASYNC_SCRIPT_EXECUTION = 11;
-  // This optimization provides information about the effective delay and
-  // priority thresholds for delaying low priority requests.
-  DELAY_COMPETING_LOW_PRIORITY_REQUESTS = 12;
   // This optimization provides information about how to throttle meda requests
   // to reduce the bitrate of adaptively streamed media.
   LITE_VIDEO = 13;
@@ -141,6 +145,11 @@ enum OptimizationType {
   // This optimization provides information about hosts that are identified as
   // commonly logged-in.
   LOGIN_DETECTION = 16;
+  // Provides key information about the merchant represented by the current
+  // host.
+  MERCHANT_TRUST_SIGNALS = 17;
+  // Provides pricing data so the user can track prices and price updates.
+  PRICE_TRACKING = 18;
 }
 
 // Presents semantics for how page load URLs should be matched.
@@ -197,11 +206,11 @@ message PageHint {
   // separated by the ‘*’ wildcard character (with an implicit ‘*’ at the
   // beginning and end).
   optional string page_pattern = 1;
-  // An ordered set of optimizations that should be whitelisted for this page
+  // An ordered set of optimizations that should be allowlisted for this page
   // pattern.
   //
   // The client will use the first optimization that it supports.
-  repeated Optimization whitelisted_optimizations = 3;
+  repeated Optimization allowlisted_optimizations = 3;
 }
 
 message Hint {
@@ -210,11 +219,11 @@ message Hint {
   // The key that applies to this hint. The key_representation field describes
   // the form in which this key takes. Guaranteed to be non-empty.
   optional string key = 2;
-  // An unordered set of optimizations that should be whitelisted for this
+  // An unordered set of optimizations that should be allowlisted for this
   // hint.
   //
   // This field is currently only specified for key_representation of HOST.
-  repeated Optimization whitelisted_optimizations = 3;
+  repeated Optimization allowlisted_optimizations = 3;
   // An ordered set of per-page hints. Only the first PageHint record
   // that matches a committed page URL should be used for that page load.
   repeated PageHint page_hints = 4;
@@ -286,15 +295,15 @@ message Configuration {
   // details for that key that it wants to provide as the client will only
   // look at that one record to decide which optimization to apply.
   repeated Hint hints = 1;
-  // A set of per-optimization blacklists.
+  // A set of per-optimization blocklists.
   //
   // It is guaranteed that an optimization type will not have filters in both
-  // |optimization_blacklists| and |optimization_allowlists|.
-  repeated OptimizationFilter optimization_blacklists = 2;
+  // |optimization_blocklists| and |optimization_allowlists|.
+  repeated OptimizationFilter optimization_blocklists = 2;
   // A set of per-optimization allowlists.
   //
   // It is guaranteed that an optimization type will not have filters in both
-  // |optimization_blacklists| and |optimization_allowlists|.
+  // |optimization_blocklists| and |optimization_allowlists|.
   repeated OptimizationFilter optimization_allowlists = 3;
 }
 

@@ -5,14 +5,17 @@
 #ifndef COMPONENTS_PERFORMANCE_MANAGER_PUBLIC_GRAPH_FRAME_NODE_H_
 #define COMPONENTS_PERFORMANCE_MANAGER_PUBLIC_GRAPH_FRAME_NODE_H_
 
+#include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/types/strong_alias.h"
 #include "components/performance_manager/public/execution_context_priority/execution_context_priority.h"
 #include "components/performance_manager/public/graph/node.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
 #include "components/performance_manager/public/mojom/lifecycle.mojom.h"
+#include "content/public/browser/browsing_instance_id.h"
+#include "content/public/browser/site_instance.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -28,28 +31,32 @@ class WorkerNode;
 
 using execution_context_priority::PriorityAndReason;
 
-// Frame nodes form a tree structure, each FrameNode at most has one parent that
-// is a FrameNode. Conceptually, a frame corresponds to a
-// content::RenderFrameHost in the browser, and a content::RenderFrameImpl /
-// blink::LocalFrame/blink::Document in a renderer.
+// Frame nodes form a tree structure, each FrameNode at most has one parent
+// that is a FrameNode. Conceptually, a frame corresponds to a
+// content::RenderFrameHost (RFH) in the browser, and a
+// content::RenderFrameImpl / blink::LocalFrame in a renderer.
 //
-// Note that a frame in a frame tree can be replaced with another, with the
-// continuity of that position represented via the |frame_tree_node_id|. It is
-// possible to have multiple "sibling" nodes that share the same
-// |frame_tree_node_id|. Only one of these may contribute to the content being
+// TODO(crbug.com/1211368): The naming is misleading. In the browser,
+// FrameTreeNode tracks state about a frame and RenderFrameHost tracks state
+// about a document loaded into that frame, which can change over time. The PM
+// node types should be cleaned up to more accurately reflect this.
+//
+// Each RFH is part of a frame tree made up of content::FrameTreeNodes (FTNs).
+// Note that a document in an FTN can be replaced with another, so it is
+// possible to have multiple "sibling" FrameNodes corresponding to RFHs in the
+// same FTN. Only one of these may contribute to the content being
 // rendered, and this node is designated the "current" node in content
 // terminology. A swap is effectively atomic but will take place in two steps
 // in the graph: the outgoing frame will first be marked as not current, and the
 // incoming frame will be marked as current. As such, the graph invariant is
-// that there will be 0 or 1 |is_current| frames with a given
-// |frame_tree_node_id|.
+// that there will be 0 or 1 |is_current| FrameNode's for a given FTN.
 //
-// This occurs when a frame is navigated and the existing frame can't be reused.
-// In that case a "provisional" frame is created to start the navigation. Once
-// the navigation completes (which may actually involve a redirect to another
-// origin meaning the frame has to be destroyed and another one created in
-// another process!) and commits, the frame will be swapped with the previously
-// active frame.
+// This can occur, for example, when a frame is navigated and the existing
+// document can't be reused. In that case a "speculative" RFH is created to
+// start the navigation. Once the navigation completes (which may actually
+// involve a redirect to another origin meaning the document has to be
+// destroyed and another one created in another process!) and commits, the new
+// RFH will be swapped with the previously active RFH.
 //
 // It is only valid to access this object on the sequence of the graph that owns
 // it.
@@ -87,22 +94,17 @@ class FrameNode : public Node {
   // over the lifetime of the frame.
   virtual const ProcessNode* GetProcessNode() const = 0;
 
-  // Gets the FrameTree node ID associated with this node. There may be multiple
-  // sibling nodes with the same frame tree node ID, but at most 1 of them may
-  // be current at a time. This is a constant over the lifetime of the frame.
-  virtual int GetFrameTreeNodeId() const = 0;
-
   // Gets the unique token associated with this frame. This is a constant over
   // the lifetime of the frame and unique across all frames for all time.
   virtual const blink::LocalFrameToken& GetFrameToken() const = 0;
 
   // Gets the ID of the browsing instance to which this frame belongs. This is a
   // constant over the lifetime of the frame.
-  virtual int32_t GetBrowsingInstanceId() const = 0;
+  virtual content::BrowsingInstanceId GetBrowsingInstanceId() const = 0;
 
   // Gets the ID of the site instance to which this frame belongs. This is a
   // constant over the lifetime of the frame.
-  virtual int32_t GetSiteInstanceId() const = 0;
+  virtual content::SiteInstanceId GetSiteInstanceId() const = 0;
 
   // A frame is a main frame if it has no parent FrameNode. This can be
   // called from any thread.
@@ -128,6 +130,18 @@ class FrameNode : public Node {
   // VisitOpenedPageNodes when that makes sense. This can change over the
   // lifetime of the frame.
   virtual const base::flat_set<const PageNode*> GetOpenedPageNodes() const = 0;
+
+  // Visits the page nodes that have been embedded by this frame. The iteration
+  // is halted if the visitor returns false. Returns true if every call to the
+  // visitor returned true, false otherwise.
+  virtual bool VisitEmbeddedPageNodes(const PageNodeVisitor& visitor) const = 0;
+
+  // Returns the set of embedded pages associatted with this frame. Note that
+  // this incurs a full container copy all the embedded nodes. Please use
+  // VisitEmbeddedPageNodes when that makes sense. This can change over the
+  // lifetime of the frame.
+  virtual const base::flat_set<const PageNode*> GetEmbeddedPageNodes()
+      const = 0;
 
   // Returns the current lifecycle state of this frame. See
   // FrameNodeObserver::OnFrameLifecycleStateChanged.
@@ -191,7 +205,7 @@ class FrameNode : public Node {
   // Returns the intersection of this frame with the viewport. This is initially
   // null on node creation and is initialized during layout when the viewport
   // intersection is first calculated. May only be called for a child frame.
-  virtual const base::Optional<gfx::Rect>& GetViewportIntersection() const = 0;
+  virtual const absl::optional<gfx::Rect>& GetViewportIntersection() const = 0;
 
   // Returns true if the frame is visible. This value is based on the viewport
   // intersection of the frame, and the visibility of the page.
@@ -214,10 +228,14 @@ class FrameNodeObserver {
 
   // Node lifetime notifications.
 
-  // Called when a |frame_node| is added to the graph.
+  // Called when a |frame_node| is added to the graph. Observers must not make
+  // any property changes or cause re-entrant notifications during the scope of
+  // this call. Instead, make property changes via a separate posted task.
   virtual void OnFrameNodeAdded(const FrameNode* frame_node) = 0;
 
-  // Called before a |frame_node| is removed from the graph.
+  // Called before a |frame_node| is removed from the graph. Observers must not
+  // make any property changes or cause re-entrant notifications during the
+  // scope of this call.
   virtual void OnBeforeFrameNodeRemoved(const FrameNode* frame_node) = 0;
 
   // Notifications of property changes.

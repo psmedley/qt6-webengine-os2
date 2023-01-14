@@ -7,6 +7,7 @@
 
 #include "components/messages/android/message_enums.h"
 #include "components/messages/android/message_wrapper.h"
+#include "ui/android/window_android.h"
 
 namespace content {
 class WebContents;
@@ -22,11 +23,14 @@ class MessageDispatcherBridge {
 
   static void SetInstanceForTesting(MessageDispatcherBridge* instance);
 
-  virtual void EnqueueMessage(MessageWrapper* message,
+  virtual bool EnqueueMessage(MessageWrapper* message,
                               content::WebContents* web_contents,
-                              MessageScopeType scopeType);
+                              MessageScopeType scope_type,
+                              MessagePriority priority);
+  virtual bool EnqueueWindowScopedMessage(MessageWrapper* message,
+                                          ui::WindowAndroid* window_android,
+                                          MessagePriority priority);
   virtual void DismissMessage(MessageWrapper* message,
-                              content::WebContents* web_contents,
                               DismissReason dismiss_reason);
 
  protected:

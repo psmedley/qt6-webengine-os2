@@ -8,13 +8,15 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/i18n/number_formatting.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/gpu_fence.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/linux/drm_util_linux.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_drm.h"
@@ -46,15 +48,6 @@ uint32_t GetPresentationKindFlags(uint32_t flags) {
   return presentation_flags;
 }
 
-base::TimeTicks GetPresentationFeedbackTimeStamp(uint32_t tv_sec_hi,
-                                                 uint32_t tv_sec_lo,
-                                                 uint32_t tv_nsec) {
-  const int64_t seconds = (static_cast<int64_t>(tv_sec_hi) << 32) + tv_sec_lo;
-  const int64_t microseconds = seconds * base::Time::kMicrosecondsPerSecond +
-                               tv_nsec / base::Time::kNanosecondsPerMicrosecond;
-  return base::TimeTicks() + base::TimeDelta::FromMicroseconds(microseconds);
-}
-
 std::string NumberToString(uint32_t number) {
   return base::UTF16ToUTF8(base::FormatNumber(number));
 }
@@ -71,13 +64,13 @@ struct WaylandBufferManagerHost::Frame {
   void PendingActionComplete() {
     DCHECK(base::CurrentUIThread::IsSet());
     CHECK_GT(pending_actions, 0u);
-    if (!--pending_actions)
-      if (!std::move(frame_commit_cb).Run()) {
-        buffer_manager_->error_message_ =
-            base::StrCat({"Buffer with ", NumberToString(buffer_id),
-                          " id does not exist or failed to be created."});
-        buffer_manager_->TerminateGpuProcess();
-      }
+    if (!--pending_actions && !frame_commit_cb.is_null() &&
+        !std::move(frame_commit_cb).Run()) {
+      buffer_manager_->error_message_ =
+          base::StrCat({"Buffer with ", NumberToString(buffer_id),
+                        " id does not exist or failed to be created."});
+      buffer_manager_->TerminateGpuProcess();
+    }
   }
 
   // |root_surface| and |buffer_id| are saved so this Frame can be destroyed to
@@ -97,7 +90,8 @@ struct WaylandBufferManagerHost::Frame {
 
   // This runs WaylandBufferManagerHost::Surface::CommitBuffer() of
   // |root_surface| with |buffer_id|.
-  base::OnceCallback<bool()> frame_commit_cb;
+  base::OnceCallback<bool()> frame_commit_cb =
+      base::BindOnce([] { return true; });
   base::WeakPtrFactory<WaylandBufferManagerHost::Frame> weak_factory;
 };
 
@@ -108,7 +102,10 @@ class WaylandBufferManagerHost::Surface {
           WaylandBufferManagerHost* buffer_manager)
       : wayland_surface_(wayland_surface),
         connection_(connection),
-        buffer_manager_(buffer_manager) {}
+        buffer_manager_(buffer_manager) {
+    wayland_surface_->set_explicit_release_callback(base::BindRepeating(
+        &Surface::BufferExplicitRelease, weak_ptr_factory_.GetWeakPtr()));
+  }
   ~Surface() = default;
 
   bool CommitBuffer(
@@ -203,15 +200,11 @@ class WaylandBufferManagerHost::Surface {
 
   void ClearState() {
     buffers_.clear();
-    wl_frame_callback_.reset();
-    feedback_queue_ = PresentationFeedbackQueue();
 
     ResetSurfaceContents();
 
+    feedback_queue_.clear();
     submitted_buffers_.clear();
-    for (auto& pending_commit : pending_commits_)
-      std::move(pending_commit.post_commit_cb).Run();
-    pending_commits_.clear();
 
     connection_->ScheduleFlush();
   }
@@ -222,6 +215,34 @@ class WaylandBufferManagerHost::Surface {
 
     wayland_surface_->AttachBuffer(nullptr);
     wayland_surface_->Commit();
+    wl_frame_callback_.reset();
+
+    for (auto& pending_commit : pending_commits_) {
+      std::move(pending_commit.post_commit_cb).Run();
+      if (!pending_commit.buffer)
+        continue;
+
+      submitted_buffers_.push_back(
+          SubmissionInfo{pending_commit.buffer->buffer_id,
+                         /*acked=*/submitted_buffers_.empty() ? true : false});
+      if (connection_->presentation()) {
+        feedback_queue_.push_back(
+            {wl::Object<struct wp_presentation_feedback>(),
+             pending_commit.buffer->buffer_id,
+             gfx::PresentationFeedback::Failure(),
+             /*submission_completed=*/false});
+      }
+    }
+    pending_commits_.clear();
+    // Mutter sometimes does not call buffer.release if wl_surface role is
+    // destroyed, causing graphics freeze. Manually release them and trigger
+    // OnSubmission callbacks.
+    for (auto& buffer : submitted_buffers_) {
+      auto* buff = GetBuffer(buffer.buffer_id);
+      if (buff)
+        buff->released = true;
+    }
+    MaybeProcessSubmittedBuffers();
 
     // ResetSurfaceContents happens upon WaylandWindow::Hide call, which
     // destroys xdg_surface, xdg_popup, etc. They are going to be reinitialized
@@ -258,7 +279,7 @@ class WaylandBufferManagerHost::Surface {
     uint32_t buffer_id;
     // The actual presentation feedback. May be missing if the callback from the
     // Wayland server has not arrived yet.
-    base::Optional<gfx::PresentationFeedback> feedback;
+    absl::optional<gfx::PresentationFeedback> feedback;
     // True iff OnSubmission has been called.
     bool submission_completed;
   };
@@ -299,9 +320,11 @@ class WaylandBufferManagerHost::Surface {
     // received OnSubmission for that buffer, just damage the buffer and
     // commit the surface again. However, if the buffer is released, it's safe
     // to reattach the buffer.
-    if (submitted_buffers_.empty() ||
+    bool should_attach_buffer =
+        submitted_buffers_.empty() ||
         submitted_buffers_.back().buffer_id != buffer->buffer_id ||
-        buffer->released) {
+        buffer->released;
+    if (should_attach_buffer) {
       // Once the BufferRelease is called, the buffer will be released.
       DCHECK(buffer->released);
       buffer->released = false;
@@ -315,8 +338,13 @@ class WaylandBufferManagerHost::Surface {
 
     DamageBuffer(buffer);
 
-    if (wait_for_callback)
+    // On Mutter, we don't receive frame.callback acks if we don't attach a new
+    // wl_buffer. This is more likely to happen with overlay single-on-top
+    // strategy, which leads to graphics freeze. So only setup frame_callback
+    // when we're attaching a different buffer.
+    if (should_attach_buffer && wait_for_callback)
       SetupFrameCallback();
+
     SetupPresentationFeedback(buffer->buffer_id);
 
     CommitSurface();
@@ -328,16 +356,7 @@ class WaylandBufferManagerHost::Surface {
 
   void DamageBuffer(WaylandBuffer* buffer) {
     DCHECK(wayland_surface_);
-
-    gfx::Rect pending_damage_region = buffer->damage_region;
-    // If the size of the damage region is empty, wl_surface_damage must be
-    // supplied with the actual size of the buffer, which is going to be
-    // committed.
-    if (pending_damage_region.size().IsEmpty())
-      pending_damage_region.set_size(buffer->size);
-    DCHECK(!pending_damage_region.size().IsEmpty());
-
-    wayland_surface_->UpdateBufferDamageRegion(pending_damage_region,
+    wayland_surface_->UpdateBufferDamageRegion(buffer->damage_region,
                                                buffer->size);
   }
 
@@ -356,8 +375,7 @@ class WaylandBufferManagerHost::Surface {
 
   void SetupFrameCallback() {
     DCHECK(wayland_surface_);
-    static const wl_callback_listener frame_listener = {
-        &Surface::FrameCallbackDone};
+    static constexpr wl_callback_listener frame_listener = {&FrameCallbackDone};
 
     DCHECK(!wl_frame_callback_);
     wl_frame_callback_.reset(wl_surface_frame(wayland_surface_->surface()));
@@ -370,25 +388,17 @@ class WaylandBufferManagerHost::Surface {
     if (!connection_->presentation())
       return;
 
-    static const wp_presentation_feedback_listener feedback_listener = {
-        &Surface::FeedbackSyncOutput, &Surface::FeedbackPresented,
-        &Surface::FeedbackDiscarded};
+    static constexpr wp_presentation_feedback_listener feedback_listener = {
+        &FeedbackSyncOutput, &FeedbackPresented, &FeedbackDiscarded};
 
     feedback_queue_.push_back(
         {wl::Object<struct wp_presentation_feedback>(wp_presentation_feedback(
              connection_->presentation(), wayland_surface_->surface())),
-         buffer_id, /*feedback=*/base::nullopt,
+         buffer_id, /*feedback=*/absl::nullopt,
          /*submission_completed=*/false});
     wp_presentation_feedback_add_listener(
         feedback_queue_.back().wp_presentation_feedback.get(),
         &feedback_listener, this);
-  }
-
-  void SetupBufferReleaseListener(WaylandBuffer* buffer) {
-    static struct wl_buffer_listener buffer_listener = {
-        &Surface::BufferRelease,
-    };
-    wl_buffer_add_listener(buffer->wl_buffer.get(), &buffer_listener, this);
   }
 
   WaylandBuffer* GetBuffer(uint32_t buffer_id) const {
@@ -412,7 +422,8 @@ class WaylandBufferManagerHost::Surface {
     self->OnFrameCallback(callback);
   }
 
-  void OnRelease(struct wl_buffer* wl_buffer) {
+  void OnRelease(struct wl_buffer* wl_buffer,
+                 gfx::GpuFenceHandle release_fence) {
     DCHECK(wl_buffer);
 
     // Releases may not necessarily come in order, so search the submitted
@@ -425,20 +436,44 @@ class WaylandBufferManagerHost::Surface {
         break;
       }
     }
-    DCHECK(buffer);
-    DCHECK(!buffer->released);
-    buffer->released = true;
+    // It's possible to be unable to find the released buffer in
+    // |submitted_buffers_| due to the manual releasing in
+    // ResetSurfaceContents().
+    if (buffer) {
+      buffer->released = true;
+      buffer->release_fence = std::move(release_fence);
+    }
 
     // A release means we may be able to send OnSubmission for previously
     // submitted buffers.
     MaybeProcessSubmittedBuffers();
   }
 
+  void SetupBufferReleaseListener(WaylandBuffer* buffer) {
+    static struct wl_buffer_listener buffer_listener = {
+        &Surface::BufferRelease,
+    };
+    wl_buffer_add_listener(buffer->wl_buffer.get(), &buffer_listener, this);
+  }
+
+  // Called when we receive an immediate or fenced release for a buffer, via
+  // the explicit synchronization protocol.
+  void BufferExplicitRelease(wl_buffer* wl_buffer,
+                             absl::optional<int32_t> fence) {
+    if (fence) {
+      gfx::GpuFenceHandle handle;
+      handle.owned_fd.reset(fence.value());
+      OnRelease(wl_buffer, std::move(handle));
+    } else {
+      OnRelease(wl_buffer, /*release_fence=*/gfx::GpuFenceHandle());
+    }
+  }
+
   // wl_buffer_listener
   static void BufferRelease(void* data, struct wl_buffer* wl_buffer) {
     Surface* self = static_cast<Surface*>(data);
     DCHECK(self);
-    self->OnRelease(wl_buffer);
+    self->OnRelease(wl_buffer, /*release_fence=*/gfx::GpuFenceHandle());
   }
 
   void MaybeProcessSubmittedBuffers() {
@@ -451,14 +486,16 @@ class WaylandBufferManagerHost::Surface {
     // if it is the first buffer submitted and it is destroyed before being
     // explicitly released. In that case, don't send an OnSubmission.
     if (submitted_buffers_.size() == 1u && !submitted_buffers_[0].acked)
-      ProcessOldestSubmittedBuffer();
+      ProcessOldestSubmittedBuffer(/*release_fence=*/gfx::GpuFenceHandle());
 
     // Buffers may be released out of order, but we need to provide the
     // guarantee that OnSubmission will be called in order of buffer submission.
     while (submitted_buffers_.size() >= 2) {
       auto* buffer0 = GetBuffer(submitted_buffers_[0].buffer_id);
       // Treat a buffer as released if it has been explicitly released or
-      // destroyed.
+      // destroyed. This includes if we have a release fence for it - in that
+      // case, the OnSubmission for the 2nd oldest buffer should contain the
+      // release fence for the oldest buffer.
       bool buffer0_released = !buffer0 || buffer0->released;
       // We can send OnSubmission for the 2nd oldest buffer if the oldest buffer
       // is released, or it's the same buffer.
@@ -469,11 +506,12 @@ class WaylandBufferManagerHost::Surface {
       DCHECK(submitted_buffers_[0].acked);
       DCHECK(!submitted_buffers_[1].acked);
       submitted_buffers_.erase(submitted_buffers_.begin());
-      ProcessOldestSubmittedBuffer();
+      ProcessOldestSubmittedBuffer(buffer0 ? std::move(buffer0->release_fence)
+                                           : gfx::GpuFenceHandle());
     }
   }
 
-  void ProcessOldestSubmittedBuffer() {
+  void ProcessOldestSubmittedBuffer(gfx::GpuFenceHandle release_fence) {
     DCHECK(wayland_surface_);
     DCHECK(!submitted_buffers_.empty());
 
@@ -484,7 +522,8 @@ class WaylandBufferManagerHost::Surface {
     // release because SwapCompletionCallback indicates to the client that the
     // previous buffer is available for reuse.
     buffer_manager_->OnSubmission(wayland_surface_->GetWidget(), buffer_id,
-                                  gfx::SwapResult::SWAP_ACK);
+                                  gfx::SwapResult::SWAP_ACK,
+                                  std::move(release_fence));
 
     // If presentation feedback is not supported, use a fake feedback. This
     // literally means there are no presentation feedback callbacks created.
@@ -581,10 +620,10 @@ class WaylandBufferManagerHost::Surface {
     DCHECK(self);
     self->OnPresentation(
         wp_presentation_feedback,
-        gfx::PresentationFeedback(
-            GetPresentationFeedbackTimeStamp(tv_sec_hi, tv_sec_lo, tv_nsec),
-            base::TimeDelta::FromNanoseconds(refresh),
-            GetPresentationKindFlags(flags)));
+        gfx::PresentationFeedback(self->connection_->ConvertPresentationTime(
+                                      tv_sec_hi, tv_sec_lo, tv_nsec),
+                                  base::TimeDelta::FromNanoseconds(refresh),
+                                  GetPresentationKindFlags(flags)));
   }
 
   static void FeedbackDiscarded(
@@ -681,6 +720,8 @@ class WaylandBufferManagerHost::Surface {
   // and send an error - "The surface has never been configured.".
   bool configured_ = false;
 
+  base::WeakPtrFactory<Surface> weak_ptr_factory_{this};
+
   DISALLOW_COPY_AND_ASSIGN(Surface);
 };
 
@@ -775,11 +816,11 @@ WaylandBufferManagerHost::BindInterface() {
 }
 
 void WaylandBufferManagerHost::OnChannelDestroyed() {
-  buffer_manager_gpu_associated_.reset();
-  receiver_.reset();
-
   for (auto& surface_pair : surfaces_)
     surface_pair.second->ClearState();
+
+  buffer_manager_gpu_associated_.reset();
+  receiver_.reset();
 
   anonymous_buffers_.clear();
   pending_frames_.clear();
@@ -803,6 +844,10 @@ bool WaylandBufferManagerHost::SupportsDmabuf() const {
 
 bool WaylandBufferManagerHost::SupportsAcquireFence() const {
   return !!connection_->linux_explicit_synchronization_v1();
+}
+
+bool WaylandBufferManagerHost::SupportsViewporter() const {
+  return !!connection_->viewporter();
 }
 
 void WaylandBufferManagerHost::SetWaylandBufferManagerGpu(
@@ -939,7 +984,6 @@ bool WaylandBufferManagerHost::CommitBufferInternal(
   base::OnceClosure subsurface_committed_cb = base::DoNothing();
   if (!pending_frames_.empty() && commit_synced_subsurface) {
     pending_frames_.back()->IncrementPendingActions();
-    subsurface_committed_cb.Reset();
     subsurface_committed_cb =
         base::BindOnce(&WaylandBufferManagerHost::Frame::PendingActionComplete,
                        pending_frames_.back()->weak_factory.GetWeakPtr());
@@ -1065,6 +1109,11 @@ void WaylandBufferManagerHost::ResetSurfaceContents(
     WaylandSurface* wayland_surface) {
   auto* surface = GetSurface(wayland_surface);
   DCHECK(surface);
+  for (auto& pending_frame : pending_frames_) {
+    if (pending_frame->root_surface == wayland_surface) {
+      pending_frame->frame_commit_cb = base::BindOnce([] { return true; });
+    }
+  }
   surface->ResetSurfaceContents();
 }
 
@@ -1207,14 +1256,15 @@ void WaylandBufferManagerHost::OnCreateBufferComplete(
   // be destroyed.
 }
 
-void WaylandBufferManagerHost::OnSubmission(
-    gfx::AcceleratedWidget widget,
-    uint32_t buffer_id,
-    const gfx::SwapResult& swap_result) {
+void WaylandBufferManagerHost::OnSubmission(gfx::AcceleratedWidget widget,
+                                            uint32_t buffer_id,
+                                            const gfx::SwapResult& swap_result,
+                                            gfx::GpuFenceHandle release_fence) {
   DCHECK(base::CurrentUIThread::IsSet());
 
   DCHECK(buffer_manager_gpu_associated_);
-  buffer_manager_gpu_associated_->OnSubmission(widget, buffer_id, swap_result);
+  buffer_manager_gpu_associated_->OnSubmission(widget, buffer_id, swap_result,
+                                               std::move(release_fence));
 }
 
 void WaylandBufferManagerHost::OnPresentation(

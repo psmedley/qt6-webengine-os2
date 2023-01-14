@@ -8,8 +8,8 @@
 #include "base/notreached.h"
 #include "ui/ozone/platform/wayland/common/wayland_util.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
-#include "ui/ozone/platform/wayland/host/wayland_event_source.h"
 #include "ui/ozone/platform/wayland/host/wayland_toplevel_window.h"
+#include "ui/platform_window/platform_window_init_properties.h"
 
 namespace ui {
 
@@ -22,12 +22,12 @@ gfx::Rect GetAnchorRect(MenuType menu_type,
                         const gfx::Rect& parent_window_bounds) {
   gfx::Rect anchor_rect;
   switch (menu_type) {
-    case MenuType::TYPE_RIGHT_CLICK:
-      // Place anchor for right click menus normally.
+    case MenuType::kRootContextMenu:
+      // Place anchor for context menus normally.
       anchor_rect = gfx::Rect(menu_bounds.x(), menu_bounds.y(),
                               kAnchorDefaultWidth, kAnchorDefaultHeight);
       break;
-    case MenuType::TYPE_3DOT_PARENT_MENU:
+    case MenuType::kRootMenu:
       // The anchor for parent menu windows is positioned slightly above the
       // specified bounds to ensure flipped window along y-axis won't hide 3-dot
       // menu button.
@@ -35,7 +35,7 @@ gfx::Rect GetAnchorRect(MenuType menu_type,
                               menu_bounds.y() - kAnchorHeightParentMenu,
                               kAnchorDefaultWidth, kAnchorHeightParentMenu);
       break;
-    case MenuType::TYPE_3DOT_CHILD_MENU:
+    case MenuType::kChildMenu:
       // The child menu's anchor must meet the following requirements: at some
       // point, the Wayland compositor can flip it along x-axis. To make sure
       // it's positioned correctly, place it closer to the beginning of the
@@ -75,9 +75,6 @@ gfx::Rect GetAnchorRect(MenuType menu_type,
         }
       }
       break;
-    case MenuType::TYPE_UNKNOWN:
-      NOTREACHED() << "Unsupported menu type";
-      break;
   }
 
   return anchor_rect;
@@ -86,13 +83,13 @@ gfx::Rect GetAnchorRect(MenuType menu_type,
 WlAnchor GetAnchor(MenuType menu_type, const gfx::Rect& bounds) {
   WlAnchor anchor = WlAnchor::None;
   switch (menu_type) {
-    case MenuType::TYPE_RIGHT_CLICK:
+    case MenuType::kRootContextMenu:
       anchor = WlAnchor::TopLeft;
       break;
-    case MenuType::TYPE_3DOT_PARENT_MENU:
+    case MenuType::kRootMenu:
       anchor = WlAnchor::BottomRight;
       break;
-    case MenuType::TYPE_3DOT_CHILD_MENU:
+    case MenuType::kChildMenu:
       // Chromium may want to manually position a child menu on the left side of
       // its parent menu. Thus, react accordingly. Positive x means the child is
       // located on the right side of the parent and negative - on the left
@@ -102,9 +99,6 @@ WlAnchor GetAnchor(MenuType menu_type, const gfx::Rect& bounds) {
       else
         anchor = WlAnchor::TopLeft;
       break;
-    case MenuType::TYPE_UNKNOWN:
-      NOTREACHED() << "Unsupported menu type";
-      break;
   }
 
   return anchor;
@@ -113,13 +107,13 @@ WlAnchor GetAnchor(MenuType menu_type, const gfx::Rect& bounds) {
 WlGravity GetGravity(MenuType menu_type, const gfx::Rect& bounds) {
   WlGravity gravity = WlGravity::None;
   switch (menu_type) {
-    case MenuType::TYPE_RIGHT_CLICK:
+    case MenuType::kRootContextMenu:
       gravity = WlGravity::BottomRight;
       break;
-    case MenuType::TYPE_3DOT_PARENT_MENU:
+    case MenuType::kRootMenu:
       gravity = WlGravity::BottomRight;
       break;
-    case MenuType::TYPE_3DOT_CHILD_MENU:
+    case MenuType::kChildMenu:
       // Chromium may want to manually position a child menu on the left side of
       // its parent menu. Thus, react accordingly. Positive x means the child is
       // located on the right side of the parent and negative - on the left
@@ -128,9 +122,6 @@ WlGravity GetGravity(MenuType menu_type, const gfx::Rect& bounds) {
         gravity = WlGravity::BottomRight;
       else
         gravity = WlGravity::BottomLeft;
-      break;
-    case MenuType::TYPE_UNKNOWN:
-      NOTREACHED() << "Unsupported menu type";
       break;
   }
 
@@ -141,44 +132,24 @@ WlConstraintAdjustment GetConstraintAdjustment(MenuType menu_type) {
   WlConstraintAdjustment constraint = WlConstraintAdjustment::None;
 
   switch (menu_type) {
-    case MenuType::TYPE_RIGHT_CLICK:
+    case MenuType::kRootContextMenu:
       constraint =
           WlConstraintAdjustment::SlideX | WlConstraintAdjustment::SlideY |
           WlConstraintAdjustment::FlipY | WlConstraintAdjustment::ResizeY;
       break;
-    case MenuType::TYPE_3DOT_PARENT_MENU:
+    case MenuType::kRootMenu:
       constraint = WlConstraintAdjustment::SlideX |
                    WlConstraintAdjustment::FlipY |
                    WlConstraintAdjustment::ResizeY;
       break;
-    case MenuType::TYPE_3DOT_CHILD_MENU:
+    case MenuType::kChildMenu:
       constraint = WlConstraintAdjustment::SlideY |
                    WlConstraintAdjustment::FlipX |
                    WlConstraintAdjustment::ResizeY;
       break;
-    case MenuType::TYPE_UNKNOWN:
-      NOTREACHED() << "Unsupported menu type";
-      break;
   }
 
   return constraint;
-}
-
-MenuType ShellPopupWrapper::GetMenuTypeForPositioner(
-    WaylandConnection* connection,
-    WaylandWindow* parent_window) const {
-  bool is_right_click_menu =
-      connection->event_source()->last_pointer_button_pressed() &
-      EF_RIGHT_MOUSE_BUTTON;
-
-  // Different types of menu require different anchors, constraint adjustments,
-  // gravity and etc.
-  if (is_right_click_menu)
-    return MenuType::TYPE_RIGHT_CLICK;
-  else if (!wl::IsMenuType(parent_window->type()))
-    return MenuType::TYPE_3DOT_PARENT_MENU;
-  else
-    return MenuType::TYPE_3DOT_CHILD_MENU;
 }
 
 bool ShellPopupWrapper::CanGrabPopup(WaylandConnection* connection) const {

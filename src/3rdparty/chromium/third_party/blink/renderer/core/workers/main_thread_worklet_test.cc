@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include <bitset>
+
 #include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
@@ -54,10 +56,10 @@ class MainThreadWorkletTest : public PageTestBase {
     // MainThreadWorklet inherits the owner Document's CSP.
     auto* csp = MakeGarbageCollected<ContentSecurityPolicy>();
     scoped_refptr<SecurityOrigin> self_origin = SecurityOrigin::Create(url);
-    csp->DidReceiveHeader(csp_header, *(self_origin),
-                          network::mojom::ContentSecurityPolicyType::kEnforce,
-                          network::mojom::ContentSecurityPolicySource::kHTTP);
-    window->GetSecurityContext().SetContentSecurityPolicy(csp);
+    csp->AddPolicies(ParseContentSecurityPolicies(
+        csp_header, network::mojom::ContentSecurityPolicyType::kEnforce,
+        network::mojom::ContentSecurityPolicySource::kHTTP, *(self_origin)));
+    window->SetContentSecurityPolicy(csp);
 
     reporting_proxy_ =
         std::make_unique<MainThreadWorkletReportingProxyForTest>(window);
@@ -74,7 +76,7 @@ class MainThreadWorkletTest : public PageTestBase {
         mojom::blink::V8CacheOptions::kDefault,
         MakeGarbageCollected<WorkletModuleResponsesMap>(),
         mojo::NullRemote() /* browser_interface_broker */,
-        BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
+        BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
         window->GetAgentClusterID(), ukm::kInvalidSourceId,
         window->GetExecutionContextToken());
     global_scope_ = MakeGarbageCollected<FakeWorkletGlobalScope>(

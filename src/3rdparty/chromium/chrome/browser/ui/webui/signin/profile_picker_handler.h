@@ -36,6 +36,15 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
 
  private:
   friend class ProfilePickerHandlerTest;
+  friend class ProfilePickerCreationFlowBrowserTest;
+  FRIEND_TEST_ALL_PREFIXES(ProfilePickerCreationFlowBrowserTest,
+                           CloseBrowserBeforeCreatingNewProfile);
+  FRIEND_TEST_ALL_PREFIXES(
+      ProfilePickerEnterpriseCreationFlowBrowserTest,
+      CreateSignedInProfileSigninAlreadyExists_ConfirmSwitch);
+  FRIEND_TEST_ALL_PREFIXES(
+      ProfilePickerEnterpriseCreationFlowBrowserTest,
+      CreateSignedInProfileSigninAlreadyExists_CancelSwitch);
 
   void HandleMainViewInitialize(const base::ListValue* args);
   void HandleLaunchSelectedProfile(bool open_settings,
@@ -53,6 +62,11 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
   void HandleGetAvailableIcons(const base::ListValue* args);
   void HandleCreateProfile(const base::ListValue* args);
 
+  // Profile switch screen:
+  void HandleGetSwitchProfile(const base::ListValue* args);
+  void HandleConfirmProfileSwitch(const base::ListValue* args);
+  void HandleCancelProfileSwitch(const base::ListValue* args);
+
   // |args| is unused.
   void HandleRecordSignInPromoImpression(const base::ListValue* args);
 
@@ -64,11 +78,11 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
                                  bool open_settings,
                                  Profile* profile,
                                  Profile::CreateStatus profile_create_status);
-  void OnProfileCreated(base::Optional<SkColor> profile_color,
+  void OnProfileCreated(absl::optional<SkColor> profile_color,
                         bool create_shortcut,
                         Profile* profile,
                         Profile::CreateStatus status);
-  void OnProfileCreationSuccess(base::Optional<SkColor> profile_color,
+  void OnProfileCreationSuccess(absl::optional<SkColor> profile_color,
                                 bool create_shortcut,
                                 Profile* profile);
   void PushProfilesList();
@@ -82,13 +96,13 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
   // ProfileAttributesStorage::Observer:
   void OnProfileAdded(const base::FilePath& profile_path) override;
   void OnProfileWasRemoved(const base::FilePath& profile_path,
-                           const base::string16& profile_name) override;
+                           const std::u16string& profile_name) override;
   void OnProfileIsOmittedChanged(const base::FilePath& profile_path) override;
   void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
   void OnProfileHighResAvatarLoaded(
       const base::FilePath& profile_path) override;
   void OnProfileNameChanged(const base::FilePath& profile_path,
-                            const base::string16& old_profile_name) override;
+                            const std::u16string& old_profile_name) override;
   void OnProfileHostedDomainChanged(
       const base::FilePath& profile_path) override;
 
@@ -101,7 +115,7 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
   void SetProfilesOrder(const std::vector<ProfileAttributesEntry*>& entries);
 
   // Returns the list of profiles in the same order as when the picker
-  // was first shown. Guest profile is not included here.
+  // was first shown.
   std::vector<ProfileAttributesEntry*> GetProfileAttributes();
 
   // Creation time of the handler, to measure performance on startup. Only set

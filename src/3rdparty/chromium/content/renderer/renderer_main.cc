@@ -13,7 +13,6 @@
 #include "base/message_loop/message_pump.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -26,6 +25,7 @@
 #include "build/chromeos_buildflags.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
+#include "content/common/partition_alloc_support.h"
 #include "content/common/skia_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -39,8 +39,11 @@
 #include "ppapi/buildflags/buildflags.h"
 #include "sandbox/policy/switches.h"
 #include "services/tracing/public/cpp/trace_startup.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+#include "third_party/icu/source/common/unicode/unistr.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_ANDROID)
@@ -58,9 +61,11 @@
 #endif  // OS_MAC
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(ARCH_CPU_X86_64)
 #include "chromeos/memory/userspace_swap/userspace_swap_renderer_initialization_impl.h"
+#endif  // defined(X86_64)
 #include "chromeos/system/core_scheduling.h"
-#endif  // IS_CHROMEOS_ASH
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/renderer/pepper/pepper_plugin_registry.h"
@@ -79,8 +84,7 @@ namespace {
 
 // This function provides some ways to test crash and assertion handling
 // behavior of the renderer.
-static void HandleRendererErrorTestParameters(
-    const base::CommandLine& command_line) {
+void HandleRendererErrorTestParameters(const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kWaitForDebugger))
     base::debug::WaitForDebugger(60, true);
 
@@ -108,7 +112,9 @@ std::unique_ptr<base::MessagePump> CreateMainThreadMessagePump() {
 int RendererMain(const MainFunctionParams& parameters) {
   // Don't use the TRACE_EVENT0 macro because the tracing infrastructure doesn't
   // expect synchronous events around the main loop of a thread.
-  TRACE_EVENT_ASYNC_BEGIN1("startup", "RendererMain", 0, "zygote_child", false);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("startup", "RendererMain",
+                                    TRACE_ID_WITH_SCOPE("RendererMain", 0),
+                                    "zygote_child", false);
 
   base::trace_event::TraceLog::GetInstance()->set_process_name("Renderer");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
@@ -121,10 +127,10 @@ int RendererMain(const MainFunctionParams& parameters) {
 #endif  // OS_MAC
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  // As Zygote process starts up earlier than browser process gets its own
-  // locale (at login time for Chrome OS), we have to set the ICU default
-  // locale for renderer process here.
-  // ICU locale will be used for fallback font selection etc.
+  // As the Zygote process starts up earlier than the browser process, it gets
+  // its own locale (at login time for Chrome OS). So we have to set the ICU
+  // default locale for the renderer process here.
+  // ICU locale will be used for fallback font selection, etc.
   if (command_line.HasSwitch(switches::kLang)) {
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
@@ -135,17 +141,25 @@ int RendererMain(const MainFunctionParams& parameters) {
   // available we want to turn it on.
   chromeos::system::EnableCoreSchedulingIfAvailable();
 
-  using chromeos::memory::userspace_swap::
-      UserspaceSwapRendererInitializationImpl;
-  base::Optional<UserspaceSwapRendererInitializationImpl> swap_init;
-  if (UserspaceSwapRendererInitializationImpl::
-          UserspaceSwapSupportedAndEnabled()) {
+#if defined(ARCH_CPU_X86_64)
+  using UserspaceSwapInit =
+      chromeos::memory::userspace_swap::UserspaceSwapRendererInitializationImpl;
+  absl::optional<UserspaceSwapInit> swap_init;
+  if (UserspaceSwapInit::UserspaceSwapSupportedAndEnabled()) {
     swap_init.emplace();
 
     PLOG_IF(ERROR, !swap_init->PreSandboxSetup())
         << "Unable to complete presandbox userspace swap initialization";
   }
-#endif
+#endif  // defined(ARCH_CPU_X86_64)
+#endif  // defined(IS_CHROMEOS_ASH)
+
+  if (command_line.HasSwitch(switches::kTimeZoneForTesting)) {
+    std::string time_zone =
+        command_line.GetSwitchValueASCII(switches::kTimeZoneForTesting);
+    icu::TimeZone::adoptDefault(
+        icu::TimeZone::createTimeZone(icu::UnicodeString(time_zone.c_str())));
+  }
 
   InitializeSkia();
 
@@ -163,25 +177,10 @@ int RendererMain(const MainFunctionParams& parameters) {
   // better means of determining which is the main thread, remove.
   RenderThread::IsMainThread();
 
-#if defined(OS_ANDROID)
-  // If we have any pending LibraryLoader histograms, record them.
-  base::android::RecordLibraryLoaderRendererHistograms();
-#endif
-
-  base::Optional<base::Time> initial_virtual_time;
-  if (command_line.HasSwitch(switches::kInitialVirtualTime)) {
-    double initial_time;
-    if (base::StringToDouble(
-            command_line.GetSwitchValueASCII(switches::kInitialVirtualTime),
-            &initial_time)) {
-      initial_virtual_time = base::Time::FromDoubleT(initial_time);
-    }
-  }
-
   blink::Platform::InitializeBlink();
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler(
-          CreateMainThreadMessagePump(), initial_virtual_time);
+          CreateMainThreadMessagePump());
 
   platform.PlatformInitialize();
 
@@ -219,7 +218,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     new RenderThreadImpl(run_loop.QuitClosure(),
                          std::move(main_thread_scheduler));
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) && defined(ARCH_CPU_X86_64)
     // Once the sandbox has been entered and initialization of render threads
     // complete we will transfer FDs to the browser, or close them on failure.
     // This should always be called because it will also transfer the errno that
@@ -242,8 +241,9 @@ int RendererMain(const MainFunctionParams& parameters) {
     // the tracing SMB on our behalf due to the zygote sandbox.
     if (parameters.zygote_child) {
       tracing::EnableStartupTracingIfNeeded();
-      TRACE_EVENT_ASYNC_BEGIN1("startup", "RendererMain", 0, "zygote_child",
-                               true);
+      TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("startup", "RendererMain",
+                                        TRACE_ID_WITH_SCOPE("RendererMain", 0),
+                                        "zygote_child", true);
     }
 #endif  // OS_POSIX && !OS_ANDROID && !OS_MAC
 
@@ -254,6 +254,9 @@ int RendererMain(const MainFunctionParams& parameters) {
     mojo::BeginRandomMojoDelays();
 #endif
 
+    internal::PartitionAllocSupport::Get()->ReconfigureAfterTaskRunnerInit(
+        switches::kRendererProcess);
+
     base::HighResolutionTimerManager hi_res_timer_manager;
 
     if (should_run_loop) {
@@ -261,9 +264,13 @@ int RendererMain(const MainFunctionParams& parameters) {
       if (pool)
         pool->Recycle();
 #endif
-      TRACE_EVENT_ASYNC_BEGIN0("toplevel", "RendererMain.START_MSG_LOOP", 0);
+      TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
+          "toplevel", "RendererMain.START_MSG_LOOP",
+          TRACE_ID_WITH_SCOPE("RendererMain.START_MSG_LOOP", 0));
       run_loop.Run();
-      TRACE_EVENT_ASYNC_END0("toplevel", "RendererMain.START_MSG_LOOP", 0);
+      TRACE_EVENT_NESTABLE_ASYNC_END0(
+          "toplevel", "RendererMain.START_MSG_LOOP",
+          TRACE_ID_WITH_SCOPE("RendererMain.START_MSG_LOOP", 0));
     }
 
 #if defined(LEAK_SANITIZER)
@@ -273,7 +280,8 @@ int RendererMain(const MainFunctionParams& parameters) {
 #endif
   }
   platform.PlatformUninitialize();
-  TRACE_EVENT_ASYNC_END0("startup", "RendererMain", 0);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("startup", "RendererMain",
+                                  TRACE_ID_WITH_SCOPE("RendererMain", 0));
   return 0;
 }
 

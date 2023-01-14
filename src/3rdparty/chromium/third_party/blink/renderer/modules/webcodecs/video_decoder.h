@@ -68,6 +68,7 @@ class MODULES_EXPORT VideoDecoderTraits {
       media::GpuVideoAcceleratorFactories* gpu_factories,
       media::MediaLog* media_log);
   static void InitializeDecoder(MediaDecoderType& decoder,
+                                bool low_delay,
                                 const MediaConfigType& media_config,
                                 MediaDecoderType::InitCB init_cb,
                                 MediaDecoderType::OutputCB output_cb);
@@ -75,8 +76,9 @@ class MODULES_EXPORT VideoDecoderTraits {
   static void UpdateDecoderLog(const MediaDecoderType& decoder,
                                const MediaConfigType& media_config,
                                media::MediaLog* media_log);
-  static OutputType* MakeOutput(scoped_refptr<MediaOutputType>,
-                                ExecutionContext*);
+  static media::StatusOr<OutputType*> MakeOutput(scoped_refptr<MediaOutputType>,
+                                                 ExecutionContext*);
+  static const char* GetName();
 };
 
 class MODULES_EXPORT VideoDecoder : public DecoderTemplate<VideoDecoderTraits> {
@@ -113,7 +115,8 @@ class MODULES_EXPORT VideoDecoder : public DecoderTemplate<VideoDecoderTraits> {
                                   MediaConfigType* out_media_config,
                                   String* out_console_message) override;
   media::StatusOr<scoped_refptr<media::DecoderBuffer>> MakeDecoderBuffer(
-      const InputType& input) override;
+      const InputType& input,
+      bool verify_key_frame) override;
 
   static ScriptPromise IsAcceleratedConfigSupported(ScriptState* script_state,
                                                     const VideoDecoderConfig*,
@@ -124,9 +127,12 @@ class MODULES_EXPORT VideoDecoder : public DecoderTemplate<VideoDecoderTraits> {
   std::unique_ptr<media::mp4::AVCDecoderConfigurationRecord> h264_avcc_;
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
+  media::VideoCodec current_codec_ = media::kUnknownVideoCodec;
+
  private:
   // DecoderTemplate implementation.
   HardwarePreference GetHardwarePreference(const ConfigType& config) override;
+  bool GetLowDelayPreference(const ConfigType& config) override;
   void SetHardwarePreference(HardwarePreference preference) override;
 };
 

@@ -24,7 +24,12 @@ source_set("tabs") {
   ]
 
   deps = [
+    "//chrome/common:buildflags",
     "//content/public/browser",
+    "//extensions/browser",
+    "//extensions/common",
+    "//extensions/common:mojom",
+    "//extensions/common/api",
   ]
 }
 

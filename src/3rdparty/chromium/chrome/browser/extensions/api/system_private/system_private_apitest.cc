@@ -13,8 +13,8 @@
 #include "content/public/test/browser_test.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/fake_update_engine_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"  // nogncheck
+#include "chromeos/dbus/update_engine/fake_update_engine_client.h"
 
 using chromeos::UpdateEngineClient;
 #endif
@@ -25,8 +25,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, GetIncognitoModeAvailability) {
   PrefService* pref_service = browser()->profile()->GetPrefs();
   pref_service->SetInteger(prefs::kIncognitoModeAvailability, 1);
 
-  EXPECT_TRUE(RunComponentExtensionTest(
-      "system/get_incognito_mode_availability")) << message_;
+  EXPECT_TRUE(RunExtensionTest("system/get_incognito_mode_availability", {},
+                               {.load_as_component = true}))
+      << message_;
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -68,8 +69,9 @@ IN_PROC_BROWSER_TEST_F(GetUpdateStatusApiTest, Progress) {
   fake_update_engine_client_->PushLastStatus(status_updating);
   fake_update_engine_client_->PushLastStatus(status_boot_needed);
 
-  ASSERT_TRUE(RunComponentExtensionTest(
-      "system/get_update_status")) << message_;
+  ASSERT_TRUE(RunExtensionTest("system/get_update_status", {},
+                               {.load_as_component = true}))
+      << message_;
 }
 
 #endif

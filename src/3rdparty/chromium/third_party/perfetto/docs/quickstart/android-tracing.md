@@ -17,6 +17,12 @@ tracing services are enabled before getting started:
 adb shell setprop persist.traced.enable 1
 ```
 
+If you are running a version of Android older than P, you can still capture a
+trace with Perfetto using the `record_android_trace` script. See instructions
+below in the
+[Recording a trace through the cmdline](#recording-a-trace-through-the-cmdline)
+section.
+
 ## Recording a trace
 
 Command line tools (usage examples below in this page):
@@ -65,6 +71,8 @@ We suggest using the `tools/record_android_trace` script to record traces from
 the command line. It is the equivalent of running `adb shell perfetto` but it
 helps with getting the paths right, auto-pulling the trace once done and opening
 it on the browser.
+Furthermore, on older versions of Android it takes care of sideloading the
+`tracebox` binary to make up for the lack of tracing system services.
 
 If you are already familiar with `systrace` or `atrace`, both cmdline tools
 support a systrace-equivalent syntax:
@@ -76,14 +84,16 @@ curl -O https://raw.githubusercontent.com/google/perfetto/master/tools/record_an
 chmod u+x record_android_trace
 
 # See ./record_android_trace --help for more
-./record_android_trace -o trace_file.pftrace -t 10s -b 32mb sched gfx wm
+./record_android_trace -o trace_file.perfetto-trace -t 10s -b 32mb \
+sched freq idle am wm gfx view binder_driver hal dalvik camera input res memory
 ```
 
 On Windows:
 
 ```bash
 curl -O https://raw.githubusercontent.com/google/perfetto/master/tools/record_android_trace
-python3 record_android_trace -o trace_file.pftrace -t 10s -b 32mb sched gfx wm
+python3 record_android_trace -o trace_file.perfetto-trace -t 10s -b 32mb \
+sched freq idle am wm gfx view binder_driver hal dalvik camera input res memory
 ```
 
 **Using the on-device /system/bin/perfetto command**
@@ -91,7 +101,8 @@ python3 record_android_trace -o trace_file.pftrace -t 10s -b 32mb sched gfx wm
 Or, if you want to use directly the on-device binary do instead:
 
 ```bash
-adb shell perfetto -o /data/misc/perfetto-traces/trace_file.pftrace -t 20s sched freq idle am wm gfx view
+adb shell perfetto -o /data/misc/perfetto-traces/trace_file.perfetto-trace -t 20s \
+sched freq idle am wm gfx view binder_driver hal dalvik camera input res memory
 ```
 
 Caveats when using directly the `adb shell perfetto` workflow:
@@ -103,6 +114,9 @@ Caveats when using directly the `adb shell perfetto` workflow:
   `cat config | adb shell perfetto -c -` (-: stdin) because of over-restrictive
   SELinux rules. Since Android 12 `/data/misc/perfetto-configs` can be used for
   storing configs.
+* On devices before Android 10, adb cannot directly pull
+  `/data/misc/perfetto-traces`. Use
+  `adb shell cat /data/misc/perfetto-traces/trace > trace` to work around.
 * When capturing longer traces, e.g. in the context of benchmarks or CI, use
   `PID=$(perfetto --background)` and then `kill $PID` to stop.
 
@@ -166,20 +180,20 @@ data_sources: {
 }
 EOF
 
-./record_android_trace -c config.pbtx -o trace_file.pftrace 
+./record_android_trace -c config.pbtx -o trace_file.perfetto-trace 
 ```
 
 Or alternatively, when using directly the on-device command:
 
 ```bash
-cat config.pbtx | adb shell perfetto -c - --txt -o /data/misc/perfetto-traces/trace.pftrace
+cat config.pbtx | adb shell perfetto -c - --txt -o /data/misc/perfetto-traces/trace.perfetto-trace
 ```
 
 Alternatively, first push the trace config file and then invoke perfetto:
 
 ```bash
 adb push config.pbtx /data/local/tmp/config.pbtx
-adb shell 'cat /data/local/tmp/config.pbtx | perfetto --txt -c - -o /data/misc/perfetto-traces/trace.pftrace'
+adb shell 'cat /data/local/tmp/config.pbtx | perfetto --txt -c - -o /data/misc/perfetto-traces/trace.perfetto-trace'
 ```
 
 NOTE: because of strict SELinux rules, on non-rooted builds of Android, passing
@@ -187,8 +201,13 @@ directly the file path as `-c /data/local/tmp/config` will fail, hence the
 `-c -` + stdin piping above. From Android 12 (S), `/data/misc/perfetto-configs/`
 can be used instead.
 
-Pull the file using `adb pull /data/misc/perfetto-traces/trace ~/trace.pftrace`
+Pull the file using `adb pull /data/misc/perfetto-traces/trace ~/trace.perfetto-trace`
 and open it in the [Perfetto UI](https://ui.perfetto.dev).
+
+NOTE: On devices before Android 10, adb cannot directly pull
+      `/data/misc/perfetto-traces`. Use
+       `adb shell cat /data/misc/perfetto-traces/trace > trace.perfetto-trace`
+       to work around.
 
 The full reference for the `perfetto` cmdline interface can be found
 [here](/docs/reference/perfetto-cli.md).

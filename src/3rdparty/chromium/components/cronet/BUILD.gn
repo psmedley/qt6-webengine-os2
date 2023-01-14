@@ -109,10 +109,7 @@ if (is_android) {
     if (is_mac && !is_component_build) {
       # Executable targets that depend on the shared libraries below need to have
       # the rpath setup in non-component build configurations.
-      ldflags = [
-        "-rpath",
-        "@executable_path/",
-      ]
+      ldflags = [ "-Wl,-rpath,@executable_path/" ]
     }
   }
 
@@ -160,6 +157,11 @@ if (is_android) {
 
     if ((is_linux || is_chromeos) && !is_component_build) {
       public_configs = [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
+    }
+
+    if (is_fuchsia) {
+      additional_manifest_fragments =
+          [ "//build/config/fuchsia/test/network_capabilities.test-cmx" ]
     }
   }
 

@@ -24,11 +24,11 @@ namespace chrome_pdf {
 gfx::Point PointFromPPPoint(const PP_Point& pp_point);
 
 gfx::PointF PointFFromPPFloatPoint(const PP_FloatPoint& pp_point);
+PP_FloatPoint PPFloatPointFromPointF(const gfx::PointF& point);
 
 gfx::Rect RectFromPPRect(const PP_Rect& pp_rect);
 PP_Rect PPRectFromRect(const gfx::Rect& rect);
 
-gfx::RectF RectFFromPPFloatRect(const PP_FloatRect& pp_rect);
 PP_FloatRect PPFloatRectFromRectF(const gfx::RectF& rect);
 
 gfx::Size SizeFromPPSize(const PP_Size& pp_size);

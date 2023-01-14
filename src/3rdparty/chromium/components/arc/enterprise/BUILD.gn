@@ -22,7 +22,7 @@ static_library("enterprise") {
 
   deps = [
     "//ash/constants",
-    "//base/util/timer",
+    "//base",
     "//chromeos",
     "//chromeos/cryptohome",
     "//chromeos/dbus:dbus",
@@ -33,6 +33,7 @@ static_library("enterprise") {
     "//components/prefs",
     "//components/session_manager/core",
     "//components/user_manager",
+    "//ui/gl",
     "//ui/ozone",
   ]
 }

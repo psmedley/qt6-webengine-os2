@@ -12,6 +12,11 @@
 
 namespace blink {
 
+extern template class CORE_EXTERN_TEMPLATE_EXPORT
+    LayoutNGBlockFlowMixin<LayoutBlockFlow>;
+extern template class CORE_EXTERN_TEMPLATE_EXPORT
+    LayoutNGMixin<LayoutBlockFlow>;
+
 // A LayoutObject subclass for outside-positioned list markers in LayoutNG.
 class CORE_EXPORT LayoutNGOutsideListMarker final
     : public LayoutNGBlockFlowMixin<LayoutBlockFlow> {
@@ -26,6 +31,9 @@ class CORE_EXPORT LayoutNGOutsideListMarker final
 
   const ListMarker& Marker() const { return list_marker_; }
   ListMarker& Marker() { return list_marker_; }
+
+  PaginationBreakability GetPaginationBreakability(
+      FragmentationEngine engine) const final;
 
  private:
   bool IsOfType(LayoutObjectType) const override;

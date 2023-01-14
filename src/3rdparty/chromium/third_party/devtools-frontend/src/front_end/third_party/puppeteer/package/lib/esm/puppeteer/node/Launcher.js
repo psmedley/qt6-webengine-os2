@@ -35,7 +35,7 @@ class ChromeLauncher {
         this._isPuppeteerCore = isPuppeteerCore;
     }
     async launch(options = {}) {
-        const { ignoreDefaultArgs = false, args = [], dumpio = false, executablePath = null, pipe = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, slowMo = 0, timeout = 30000, } = options;
+        const { ignoreDefaultArgs = false, args = [], dumpio = false, executablePath = null, pipe = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, slowMo = 0, timeout = 30000, waitForInitialPage = true, } = options;
         const profilePath = path.join(os.tmpdir(), 'puppeteer_dev_chrome_profile-');
         const chromeArguments = [];
         if (!ignoreDefaultArgs)
@@ -53,7 +53,9 @@ class ChromeLauncher {
         }
         let chromeExecutable = executablePath;
         if (!executablePath) {
-            if (os.arch() === 'arm64') {
+            // Use Intel x86 builds on Apple M1 until native macOS arm64
+            // Chromium builds are available.
+            if (os.platform() !== 'darwin' && os.arch() === 'arm64') {
                 chromeExecutable = '/usr/bin/chromium-browser';
             }
             else {
@@ -64,7 +66,7 @@ class ChromeLauncher {
             }
         }
         const usePipe = chromeArguments.includes('--remote-debugging-pipe');
-        const runner = new BrowserRunner(chromeExecutable, chromeArguments, temporaryUserDataDir);
+        const runner = new BrowserRunner(this.product, chromeExecutable, chromeArguments, temporaryUserDataDir);
         runner.start({
             handleSIGHUP,
             handleSIGTERM,
@@ -81,7 +83,8 @@ class ChromeLauncher {
                 preferredRevision: this._preferredRevision,
             });
             const browser = await Browser.create(connection, [], ignoreHTTPSErrors, defaultViewport, runner.proc, runner.close.bind(runner));
-            await browser.waitForTarget((t) => t.type() === 'page');
+            if (waitForInitialPage)
+                await browser.waitForTarget((t) => t.type() === 'page');
             return browser;
         }
         catch (error) {
@@ -89,10 +92,6 @@ class ChromeLauncher {
             throw error;
         }
     }
-    /**
-     * @param {!Launcher.ChromeArgOptions=} options
-     * @returns {!Array<string>}
-     */
     defaultArgs(options = {}) {
         const chromeArguments = [
             '--disable-background-networking',
@@ -152,7 +151,7 @@ class FirefoxLauncher {
         this._isPuppeteerCore = isPuppeteerCore;
     }
     async launch(options = {}) {
-        const { ignoreDefaultArgs = false, args = [], dumpio = false, executablePath = null, pipe = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, slowMo = 0, timeout = 30000, extraPrefsFirefox = {}, } = options;
+        const { ignoreDefaultArgs = false, args = [], dumpio = false, executablePath = null, pipe = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, slowMo = 0, timeout = 30000, extraPrefsFirefox = {}, waitForInitialPage = true, } = options;
         const firefoxArguments = [];
         if (!ignoreDefaultArgs)
             firefoxArguments.push(...this.defaultArgs(options));
@@ -177,7 +176,7 @@ class FirefoxLauncher {
                 throw new Error(missingText);
             firefoxExecutable = executablePath;
         }
-        const runner = new BrowserRunner(firefoxExecutable, firefoxArguments, temporaryUserDataDir);
+        const runner = new BrowserRunner(this.product, firefoxExecutable, firefoxArguments, temporaryUserDataDir);
         runner.start({
             handleSIGHUP,
             handleSIGTERM,
@@ -194,7 +193,8 @@ class FirefoxLauncher {
                 preferredRevision: this._preferredRevision,
             });
             const browser = await Browser.create(connection, [], ignoreHTTPSErrors, defaultViewport, runner.proc, runner.close.bind(runner));
-            await browser.waitForTarget((t) => t.type() === 'page');
+            if (waitForInitialPage)
+                await browser.waitForTarget((t) => t.type() === 'page');
             return browser;
         }
         catch (error) {
@@ -443,8 +443,10 @@ function resolveExecutablePath(launcher) {
         }
     }
     const revisionInfo = browserFetcher.revisionInfo(launcher._preferredRevision);
+    const firefoxHelp = `Run \`PUPPETEER_PRODUCT=firefox npm install\` to download a supported Firefox browser binary.`;
+    const chromeHelp = `Run \`npm install\` to download the correct Chromium revision (${launcher._preferredRevision}).`;
     const missingText = !revisionInfo.local
-        ? `Could not find browser revision ${launcher._preferredRevision}. Run "PUPPETEER_PRODUCT=firefox npm install" or "PUPPETEER_PRODUCT=firefox yarn install" to download a supported Firefox browser binary.`
+        ? `Could not find expected browser (${launcher.product}) locally. ${launcher.product === 'chrome' ? chromeHelp : firefoxHelp}`
         : null;
     return { executablePath: revisionInfo.executablePath, missingText };
 }

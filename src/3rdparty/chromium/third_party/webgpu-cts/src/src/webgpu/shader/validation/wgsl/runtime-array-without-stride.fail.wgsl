@@ -2,10 +2,10 @@
 
 [[block]]
 struct Foo {
-  [[offset (0)]] a : array<f32>;
+  a : array<f32>;
 };
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
   return;
 }

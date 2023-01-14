@@ -223,8 +223,6 @@ BASE_SRCS_ALL = struct(
         "src/utils/win/**/*",
 
         # Exclude multiple definitions.
-        "src/gpu/GrPathRendering_none.cpp",
-        "src/gpu/ccpr/GrCoverageCountingPathRenderer_none.cpp",
         "src/gpu/gl/GrGLMakeNativeInterface_none.cpp",
         "src/pdf/SkDocument_PDF_None.cpp",  # We use src/pdf/SkPDFDocument.cpp.
 
@@ -594,6 +592,8 @@ DM_SRCS_ALL = struct(
         "tools/ResourceFactory.h",
         "tools/Resources.cpp",
         "tools/Resources.h",
+        "tools/RuntimeBlendUtils.cpp",
+        "tools/RuntimeBlendUtils.h",
         "tools/SkMetaData.cpp",
         "tools/SkMetaData.h",
         "tools/SkSharingProc.cpp",
@@ -721,8 +721,6 @@ def base_defines(os_conditions):
         "SK_BUILD_FOR_GOOGLE3",
         # Required for building dm.
         "GR_TEST_UTILS",
-        # Google3 probably doesn't want this feature yet
-        "SK_DISABLE_REDUCE_OPLIST_SPLITTING",
         # Staging flags for API changes
         "SK_PARAGRAPH_GRAPHEME_EDGES",
         # Should remove after we update golden images
@@ -942,13 +940,26 @@ SKOTTIE_TOOL_SRCS = [
 ## SkShaper
 ################################################################################
 
+# Stubs, pending SkUnicode fission
+SKUNICODE_ICU_BUILTIN_SRCS = [
+    "modules/skunicode/include/SkUnicode.h",
+    "modules/skunicode/src/SkUnicode_icu.cpp",
+    "modules/skunicode/src/SkUnicode_icu.h",
+    "modules/skunicode/src/SkUnicode_icu_builtin.cpp",
+]
+
+SKUNICODE_ICU_RUNTIME_SRCS = [
+    "modules/skunicode/include/SkUnicode.h",
+    "modules/skunicode/src/SkUnicode_icu.cpp",
+    "modules/skunicode/src/SkUnicode_icu.h",
+    "modules/skunicode/src/SkUnicode_icu_runtime.cpp",
+]
+
 SKSHAPER_HARFBUZZ_SRCS = [
     "modules/skshaper/include/SkShaper.h",
     "modules/skshaper/src/SkShaper.cpp",
     "modules/skshaper/src/SkShaper_harfbuzz.cpp",
     "modules/skshaper/src/SkShaper_primitive.cpp",
-    "modules/skshaper/src/SkUnicode.h",
-    "modules/skshaper/src/SkUnicode_icu.cpp",
 ]
 
 SKSHAPER_PRIMITIVE_SRCS = [

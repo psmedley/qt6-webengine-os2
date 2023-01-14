@@ -6,14 +6,12 @@
 #define COMPONENTS_ARC_SESSION_CONNECTION_HOLDER_H_
 
 #include <memory>
-#include <string>
 #include <type_traits>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "components/arc/session/connection_notifier.h"
 #include "components/arc/session/connection_observer.h"

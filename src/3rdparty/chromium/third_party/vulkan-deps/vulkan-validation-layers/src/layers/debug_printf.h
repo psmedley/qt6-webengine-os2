@@ -71,7 +71,7 @@ class DebugPrintf : public ValidationStateTracker {
     VkPhysicalDeviceFeatures supported_features;
 
     uint32_t unique_shader_module_id = 0;
-    std::unordered_map<VkCommandBuffer, std::vector<DPFBufferInfo>> command_buffer_map;
+    layer_data::unordered_map<VkCommandBuffer, std::vector<DPFBufferInfo>> command_buffer_map;
     uint32_t output_buffer_size;
 
     bool CommandBufferNeedsProcessing(VkCommandBuffer command_buffer);
@@ -90,7 +90,7 @@ class DebugPrintf : public ValidationStateTracker {
     VkDescriptorSetLayout debug_desc_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout dummy_desc_layout = VK_NULL_HANDLE;
     std::unique_ptr<UtilDescriptorSetManager> desc_set_manager;
-    std::unordered_map<uint32_t, DPFShaderTracker> shader_map;
+    layer_data::unordered_map<uint32_t, DPFShaderTracker> shader_map;
     PFN_vkSetDeviceLoaderData vkSetDeviceLoaderData;
     VmaAllocator vmaAllocator = {};
     std::map<VkQueue, UtilQueueBarrierCommandInfo> queue_barrier_command_infos;
@@ -173,8 +173,13 @@ class DebugPrintf : public ValidationStateTracker {
                                     uint32_t operation_index, uint32_t* const debug_output_buffer);
     void PreCallRecordCmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex,
                               uint32_t firstInstance) override;
+    void PreCallRecordCmdDrawMultiEXT(VkCommandBuffer commandBuffer, uint32_t drawCount, const VkMultiDrawInfoEXT* pVertexInfo,
+                                      uint32_t instanceCount, uint32_t firstInstance, uint32_t stride) override;
     void PreCallRecordCmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                                      uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) override;
+    void PreCallRecordCmdDrawMultiIndexedEXT(VkCommandBuffer commandBuffer, uint32_t drawCount,
+                                             const VkMultiDrawIndexedInfoEXT* pIndexInfo, uint32_t instanceCount,
+                                             uint32_t firstInstance, uint32_t stride, const int32_t* pVertexOffset) override;
     void PreCallRecordCmdDrawIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t count,
                                       uint32_t stride) override;
     void PreCallRecordCmdDrawIndexedIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t count,

@@ -26,46 +26,43 @@ class F extends ValidationTest {
 
   createRenderPipeline(): GPURenderPipeline {
     const pipeline = this.device.createRenderPipeline({
-      vertexStage: {
+      vertex: {
         module: this.device.createShaderModule({
           code: `
             [[block]] struct VertexUniforms {
-              [[offset(0)]] transform : mat2x2<f32> ;
+              transform : mat2x2<f32> ;
             };
-            [[set(0), binding(0)]] var<uniform> uniforms : VertexUniforms;
+            [[group(0), binding(0)]] var<uniform> uniforms : VertexUniforms;
 
-            [[builtin(position)]] var<out> Position : vec4<f32>;
-            [[builtin(vertex_idx)]] var<in> VertexIndex : i32;
-            [[stage(vertex)]] fn main() -> void {
+            [[stage(vertex)]] fn main(
+              [[builtin(vertex_index)]] VertexIndex : u32
+              ) -> [[builtin(position)]] vec4<f32> {
               var pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
                 vec2<f32>(-1.0, -1.0),
                 vec2<f32>( 1.0, -1.0),
                 vec2<f32>(-1.0,  1.0)
               );
-              Position = vec4<f32>(uniforms.transform * pos[VertexIndex], 0.0, 1.0);
-              return;
+              return vec4<f32>(uniforms.transform * pos[VertexIndex], 0.0, 1.0);
             }`,
         }),
         entryPoint: 'main',
       },
-      fragmentStage: {
+      fragment: {
         module: this.device.createShaderModule({
           code: `
             [[block]] struct FragmentUniforms {
-              [[offset(0)]] color : vec4<f32>;
+              color : vec4<f32>;
             };
-            [[set(1), binding(0)]] var<uniform> uniforms : FragmentUniforms;
+            [[group(1), binding(0)]] var<uniform> uniforms : FragmentUniforms;
 
-            [[location(0)]] var<out> fragColor : vec4<f32>;
-            [[stage(fragment)]] fn main() -> void {
-              fragColor = uniforms.color;
-              return;
+            [[stage(fragment)]] fn main() -> [[location(0)]] vec4<f32> {
+              return uniforms.color;
             }`,
         }),
         entryPoint: 'main',
+        targets: [{ format: 'rgba8unorm' }],
       },
-      primitiveTopology: 'triangle-list',
-      colorStates: [{ format: 'rgba8unorm' }],
+      primitive: { topology: 'triangle-list' },
     });
     return pipeline;
   }
@@ -73,15 +70,16 @@ class F extends ValidationTest {
   beginRenderPass(commandEncoder: GPUCommandEncoder): GPURenderPassEncoder {
     const attachmentTexture = this.device.createTexture({
       format: 'rgba8unorm',
-      size: { width: 16, height: 16, depth: 1 },
-      usage: GPUTextureUsage.OUTPUT_ATTACHMENT,
+      size: { width: 16, height: 16, depthOrArrayLayers: 1 },
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
     return commandEncoder.beginRenderPass({
       colorAttachments: [
         {
-          attachment: attachmentTexture.createView(),
+          view: attachmentTexture.createView(),
           loadValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          storeOp: 'store',
         },
       ],
     });
@@ -91,7 +89,7 @@ class F extends ValidationTest {
 export const g = makeTestGroup(F);
 
 g.test('it_is_invalid_to_draw_in_a_render_pass_with_missing_bind_groups')
-  .params([
+  .paramsSubcasesOnly([
     { setBindGroup1: true, setBindGroup2: true, _success: true },
     { setBindGroup1: true, setBindGroup2: false, _success: false },
     { setBindGroup1: false, setBindGroup2: true, _success: false },

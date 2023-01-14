@@ -26,6 +26,7 @@ TypeConverter<ui::ozone::mojom::WaylandOverlayConfigPtr,
   wayland_overlay_config->bounds_rect = input.display_bounds;
   wayland_overlay_config->crop_rect = input.crop_rect;
   wayland_overlay_config->enable_blend = input.enable_blend;
+  wayland_overlay_config->damage_region = input.damage_rect;
   wayland_overlay_config->access_fence_handle =
       !input.gpu_fence || input.gpu_fence->GetGpuFenceHandle().is_null()
           ? gfx::GpuFenceHandle()
@@ -45,14 +46,15 @@ void WaylandBufferManagerGpu::Initialize(
     const base::flat_map<::gfx::BufferFormat, std::vector<uint64_t>>&
         buffer_formats_with_modifiers,
     bool supports_dma_buf,
+    bool supports_viewporter,
     bool supports_acquire_fence) {
-  DCHECK(supported_buffer_formats_with_modifiers_.empty());
   supported_buffer_formats_with_modifiers_ = buffer_formats_with_modifiers;
 
 #if defined(WAYLAND_GBM)
   if (!supports_dma_buf)
     set_gbm_device(nullptr);
 #endif
+  supports_viewporter_ = supports_viewporter;
   supports_acquire_fence_ = supports_acquire_fence;
 
   BindHostInterface(std::move(remote_host));
@@ -62,7 +64,8 @@ void WaylandBufferManagerGpu::Initialize(
 
 void WaylandBufferManagerGpu::OnSubmission(gfx::AcceleratedWidget widget,
                                            uint32_t buffer_id,
-                                           gfx::SwapResult swap_result) {
+                                           gfx::SwapResult swap_result,
+                                           gfx::GpuFenceHandle release_fence) {
   base::AutoLock scoped_lock(lock_);
   DCHECK(io_thread_runner_->BelongsToCurrentThread());
   DCHECK_LE(commit_thread_runners_.count(widget), 1u);
@@ -73,7 +76,8 @@ void WaylandBufferManagerGpu::OnSubmission(gfx::AcceleratedWidget widget,
   it->second->PostTask(
       FROM_HERE,
       base::BindOnce(&WaylandBufferManagerGpu::SubmitSwapResultOnOriginThread,
-                     base::Unretained(this), widget, buffer_id, swap_result));
+                     base::Unretained(this), widget, buffer_id, swap_result,
+                     std::move(release_fence)));
 }
 
 void WaylandBufferManagerGpu::OnPresentation(
@@ -163,11 +167,10 @@ void WaylandBufferManagerGpu::CreateDmabufBasedBuffer(
                      buffer_id));
 }
 
-void WaylandBufferManagerGpu::CreateShmBasedBuffer(
-    base::ScopedFD shm_fd,
-    size_t length,
-    gfx::Size size,
-    uint32_t buffer_id) {
+void WaylandBufferManagerGpu::CreateShmBasedBuffer(base::ScopedFD shm_fd,
+                                                   size_t length,
+                                                   gfx::Size size,
+                                                   uint32_t buffer_id) {
   if (!remote_host_) {
     LOG(ERROR) << "Interface is not bound. Can't request "
                   "WaylandBufferManagerHost to create/commit/destroy buffers.";
@@ -228,7 +231,7 @@ void WaylandBufferManagerGpu::DestroyBuffer(gfx::AcceleratedWidget widget,
 
 void WaylandBufferManagerGpu::AddBindingWaylandBufferManagerGpu(
     mojo::PendingReceiver<ozone::mojom::WaylandBufferManagerGpu> receiver) {
-  receiver_.Bind(std::move(receiver));
+  receiver_set_.Add(this, std::move(receiver));
 }
 
 const std::vector<uint64_t>&
@@ -287,6 +290,12 @@ void WaylandBufferManagerGpu::DestroyBufferInternal(
 
 void WaylandBufferManagerGpu::BindHostInterface(
     mojo::PendingRemote<ozone::mojom::WaylandBufferManagerHost> remote_host) {
+  // WaylandBufferManagerHost may bind host again after an error. See
+  // WaylandBufferManagerHost::BindInterface for more details.
+  if (remote_host_.is_bound()) {
+    remote_host_.reset();
+    associated_receiver_.reset();
+  }
   remote_host_.Bind(std::move(remote_host));
 
   // Setup associated interface.
@@ -315,12 +324,13 @@ void WaylandBufferManagerGpu::ForgetTaskRunnerForWidgetOnIOThread(
 void WaylandBufferManagerGpu::SubmitSwapResultOnOriginThread(
     gfx::AcceleratedWidget widget,
     uint32_t buffer_id,
-    gfx::SwapResult swap_result) {
+    gfx::SwapResult swap_result,
+    gfx::GpuFenceHandle release_fence) {
   DCHECK_NE(widget, gfx::kNullAcceleratedWidget);
   auto* surface = GetSurface(widget);
   // The surface might be destroyed by the time the swap result is provided.
   if (surface)
-    surface->OnSubmission(buffer_id, swap_result);
+    surface->OnSubmission(buffer_id, swap_result, std::move(release_fence));
 }
 
 void WaylandBufferManagerGpu::SubmitPresentationOnOriginThread(

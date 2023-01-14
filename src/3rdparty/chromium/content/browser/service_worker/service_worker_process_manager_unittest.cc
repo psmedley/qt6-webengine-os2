@@ -4,6 +4,7 @@
 
 #include "content/browser/service_worker/service_worker_process_manager.h"
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -62,12 +63,14 @@ class ServiceWorkerProcessManagerTest : public testing::Test {
   ServiceWorkerProcessManagerTest() {}
 
   void SetUp() override {
-    browser_context_.reset(new TestBrowserContext);
-    process_manager_.reset(
-        new ServiceWorkerProcessManager(browser_context_.get()));
+    browser_context_ = std::make_unique<TestBrowserContext>();
+    process_manager_ =
+        std::make_unique<ServiceWorkerProcessManager>(browser_context_.get());
+    process_manager_->set_storage_partition(static_cast<StoragePartitionImpl*>(
+        browser_context_->GetDefaultStoragePartition()));
     script_url_ = GURL("http://www.example.com/sw.js");
-    render_process_host_factory_.reset(
-        new SiteInstanceRenderProcessHostFactory());
+    render_process_host_factory_ =
+        std::make_unique<SiteInstanceRenderProcessHostFactory>();
     RenderProcessHostImpl::set_render_process_host_factory_for_testing(
         render_process_host_factory_.get());
   }
@@ -121,7 +124,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   blink::ServiceWorkerStatusCode status =
       process_manager_->AllocateWorkerProcess(
           kEmbeddedWorkerId, script_url_,
-          base::nullopt /* cross_origin_embedder_policy */,
+          absl::nullopt /* cross_origin_embedder_policy */,
           true /* can_use_existing_process */, &process_info);
 
   // An existing process should be allocated to the worker.
@@ -165,7 +168,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   blink::ServiceWorkerStatusCode status =
       process_manager_->AllocateWorkerProcess(
           kEmbeddedWorkerId, script_url_,
-          base::nullopt /* cross_origin_embedder_policy */,
+          absl::nullopt /* cross_origin_embedder_policy */,
           false /* can_use_existing_process */, &process_info);
 
   // A new process should be allocated to the worker.
@@ -194,7 +197,7 @@ TEST_F(ServiceWorkerProcessManagerTest, AllocateWorkerProcess_InShutdown) {
   ServiceWorkerProcessManager::AllocatedProcessInfo process_info;
   blink::ServiceWorkerStatusCode status =
       process_manager_->AllocateWorkerProcess(
-          1, script_url_, base::nullopt /* cross_origin_embedder_policy */,
+          1, script_url_, absl::nullopt /* cross_origin_embedder_policy */,
           true /* can_use_existing_process */, &process_info);
 
   // Allocating a process in shutdown should abort.
@@ -220,7 +223,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
     blink::ServiceWorkerStatusCode status =
         process_manager_->AllocateWorkerProcess(
             kEmbeddedWorkerId, script_url_,
-            base::nullopt /* cross_origin_embedder_policy */,
+            absl::nullopt /* cross_origin_embedder_policy */,
             true /* can_use_existing_process */, &process_info);
     EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status);
     // Instead of testing the input to the CreateRenderProcessHost(), it'd be
@@ -250,7 +253,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   // would be no added value to this test since MockRenderProcessHost is not
   // StoragePartition-aware.
   StoragePartitionImpl* storage_partition = static_cast<StoragePartitionImpl*>(
-      BrowserContext::GetDefaultStoragePartition(browser_context_.get()));
+      browser_context_->GetDefaultStoragePartition());
   storage_partition->set_site_for_guest_service_worker_or_shared_worker(
       site_instance->GetSiteURL());
   process_manager_->set_storage_partition(storage_partition);
@@ -263,7 +266,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
     blink::ServiceWorkerStatusCode status =
         process_manager_->AllocateWorkerProcess(
             kEmbeddedWorkerId, script_url_,
-            base::nullopt /* cross_origin_embedder_policy */,
+            absl::nullopt /* cross_origin_embedder_policy */,
             true /* can_use_existing_process */, &process_info);
     EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status);
     EXPECT_EQ(

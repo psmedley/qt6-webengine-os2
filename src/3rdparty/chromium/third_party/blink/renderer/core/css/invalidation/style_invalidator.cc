@@ -13,7 +13,6 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
@@ -210,12 +209,11 @@ void StyleInvalidator::PushInvalidationSetsForContainerNode(
       PushInvalidationSet(*invalidation_set);
     }
     if (UNLIKELY(*g_style_invalidator_tracing_enabled)) {
-      TRACE_EVENT_INSTANT1(
+      DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT_WITH_CATEGORIES(
           TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
-          "StyleInvalidatorInvalidationTracking", TRACE_EVENT_SCOPE_THREAD,
-          "data",
-          inspector_style_invalidator_invalidate_event::InvalidationList(
-              node, pending_invalidations.Descendants()));
+          "StyleInvalidatorInvalidationTracking",
+          inspector_style_invalidator_invalidate_event::InvalidationList, node,
+          pending_invalidations.Descendants());
     }
   }
 }

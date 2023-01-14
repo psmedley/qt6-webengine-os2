@@ -12,8 +12,8 @@ Are you a Google employee? See
 
 ## System requirements
 
-*   A 64-bit Intel Mac running 10.15.4+. (Building on Arm Macs is
-    [not yet supported](https://chromium.googlesource.com/chromium/src.git/+/master/docs/mac_arm64.md).)
+*   A Mac running 10.15.4+, Intel or Arm.
+    ([More details about Arm Macs](https://chromium.googlesource.com/chromium/src.git/+/main/docs/mac_arm64.md).)
 *   [Xcode](https://developer.apple.com/xcode/) 12.2+. This version of Xcode
     comes with ...
 *   The macOS 11.0 SDK. Run
@@ -51,6 +51,11 @@ Ensure that unicode filenames aren't mangled by HFS:
 ```shell
 $ git config --global core.precomposeUnicode true
 ```
+
+In System Preferences, check that "Energy Saver" -> "Power Adapter" ->
+"Prevent computer from sleeping automatically when the display is off" is
+checked so that your laptop doesn't go to sleep and interrupt the long network
+connection needed here.
 
 Create a `chromium` directory for the checkout and change to it (you can call
 this whatever you like and put it wherever you like, as long as the full path
@@ -90,7 +95,7 @@ development and testing purposes.
 ## Setting up the build
 
 Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
-a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+a tool called [GN](https://gn.googlesource.com/gn/+/main/docs/quick_start.md)
 to generate `.ninja` files. You can create any number of *build directories*
 with different configurations. To create a build directory:
 
@@ -107,7 +112,7 @@ $ gn gen out/Default
   The default will be a debug component build matching the current host
   operating system and CPU.
 * For more info on GN, run `gn help` on the command line or read the
-  [quick start guide](https://gn.googlesource.com/gn/+/master/docs/quick_start.md).
+  [quick start guide](https://gn.googlesource.com/gn/+/main/docs/quick_start.md).
 * Building Chromium for arm Macs requires [additional setup](mac_arm64.md).
 
 
@@ -204,21 +209,7 @@ You can find out more about GoogleTest at its
 
 ## Debugging
 
-Good debugging tips can be found
-[here](https://dev.chromium.org/developers/how-tos/debugging-on-os-x). If you
-would like to debug in a graphical environment, rather than using `lldb` at the
-command line, that is possible without building in Xcode (see
-[Debugging in Xcode](https://www.chromium.org/developers/how-tos/debugging-on-os-x/building-with-ninja-debugging-with-xcode)).
-
-Tips for printing variables from `lldb` prompt (both in Xcode or in terminal):
-* If `uptr` is a `std::unique_ptr`, the address it wraps is accessible as
-  `uptr.__ptr_.__value_`.
-* To pretty-print `base::string16`, ensure you have a `~/.lldbinit` file and
-  add the following line into it (substitute {SRC} for your actual path to the
-  root of Chromium's sources):
-```
-command script import {SRC}/tools/lldb/lldb_chrome.py
-```
+Good debugging tips can be found [here](mac/debugging.md).
 
 ## Update your checkout
 
@@ -231,7 +222,7 @@ $ gclient sync
 
 The first command updates the primary Chromium source repository and rebases
 any of your local branches on top of tip-of-tree (aka the Git branch
-`origin/master`). If you don't want to use this script, you can also just use
+`origin/main`). If you don't want to use this script, you can also just use
 `git pull` or other common Git commands to update the repo.
 
 The second command syncs dependencies to the appropriate versions and re-runs

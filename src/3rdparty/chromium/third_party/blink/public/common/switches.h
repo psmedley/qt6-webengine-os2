@@ -43,13 +43,12 @@ BLINK_COMMON_EXPORT extern const char kMaxUntiledLayerHeight[];
 BLINK_COMMON_EXPORT extern const char kMaxUntiledLayerWidth[];
 BLINK_COMMON_EXPORT extern const char kMinHeightForGpuRasterTile[];
 BLINK_COMMON_EXPORT extern const char kNetworkQuietTimeout[];
-BLINK_COMMON_EXPORT extern const char kPassiveListenersDefault[];
 BLINK_COMMON_EXPORT extern const char kShowLayoutShiftRegions[];
 BLINK_COMMON_EXPORT extern const char kShowPaintRects[];
 BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy[];
+BLINK_COMMON_EXPORT extern const char kSharedArrayBufferAllowedOrigins[];
 
-BLINK_COMMON_EXPORT extern const char kUserAgentClientHintDisable[];
 }  // namespace switches
 }  // namespace blink
 
-#endif  // CONTENT_PUBLIC_COMMON_CONTENT_SWITCHES_H_
+#endif  // THIRD_PARTY_BLINK_PUBLIC_COMMON_SWITCHES_H_

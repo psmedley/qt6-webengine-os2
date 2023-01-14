@@ -4,7 +4,6 @@
 
 #include "content/browser/conversions/conversion_internals_ui.h"
 
-#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "content/browser/conversions/conversion_manager.h"
@@ -14,11 +13,13 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
@@ -26,7 +27,10 @@ namespace {
 
 const char kConversionInternalsUrl[] = "chrome://conversion-internals/";
 
-const base::string16 kCompleteTitle = base::ASCIIToUTF16("Complete");
+const std::u16string kCompleteTitle = u"Complete";
+
+const std::u16string kMaxInt64String = u"9223372036854775807";
+const std::u16string kMaxUint64String = u"18446744073709551615";
 
 }  // namespace
 
@@ -43,7 +47,7 @@ class ConversionInternalsWebUiBrowserTest : public ContentBrowserTest {
   // "eval()", which is what EvalJs uses under the hood.
   bool ExecJsInWebUI(const std::string& script) {
     return ExecJs(shell()->web_contents()->GetMainFrame(), script,
-                  EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1 /* world_id */);
+                  EXECUTE_SCRIPT_DEFAULT_OPTIONS, /*world_id=*/1);
   }
 
   void OverrideWebUIConversionManager(ConversionManager* manager) {
@@ -60,7 +64,7 @@ class ConversionInternalsWebUiBrowserTest : public ContentBrowserTest {
 
   // Registers a mutation observer that sets the window title to |title| when
   // the report table is empty.
-  void SetTitleOnReportsTableEmpty(const base::string16& title) {
+  void SetTitleOnReportsTableEmpty(const std::u16string& title) {
     const std::string kObserveEmptyReportsTableScript = R"(
     let table = document.getElementById("report-table-body");
     let obs = new MutationObserver(() => {
@@ -84,11 +88,10 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
 
   // Execute script to ensure the page has loaded correctly, executing similarly
   // to ExecJsInWebUI().
-  EXPECT_EQ(
-      true,
-      EvalJs(shell()->web_contents()->GetMainFrame(),
-             "document.body.innerHTML.search('Conversion Internals') >= 0;",
-             EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1 /* world_id */));
+  EXPECT_EQ(true, EvalJs(shell()->web_contents()->GetMainFrame(),
+                         "document.body.innerHTML.search('Attribution "
+                         "Reporting API Internals') >= 0;",
+                         EXECUTE_SCRIPT_DEFAULT_OPTIONS, /*world_id=*/1));
 }
 
 IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
@@ -153,11 +156,11 @@ IN_PROC_BROWSER_TEST_F(
   OverrideWebUIConversionManager(&manager);
 
   std::string wait_script = R"(
-    let table = document.getElementById("impression-table-body");
+    let table = document.getElementById("source-table-body");
     let obs = new MutationObserver(() => {
       if (table.children.length === 1 &&
           table.children[0].children[0].innerText ===
-          "No active impressions.") {
+          "No active sources.") {
         document.title = $1;
       }
     });
@@ -173,22 +176,39 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
                        WebUIShownWithActiveImpression_ImpressionsDisplayed) {
   EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
 
+  // We use the max values of `uint64_t` and `int64_t` here to ensure that they
+  // are properly handled as `bigint` values in JS and don't run into issues
+  // with `Number.MAX_SAFE_INTEGER`.
+
   TestConversionManager manager;
   manager.SetActiveImpressionsForWebUI(
-      {ImpressionBuilder(base::Time::Now()).SetData("100").Build(),
-       ImpressionBuilder(base::Time::Now()).Build()});
+      {ImpressionBuilder(base::Time::Now())
+           .SetData(std::numeric_limits<uint64_t>::max())
+           .Build(),
+       ImpressionBuilder(base::Time::Now())
+           .SetSourceType(StorableImpression::SourceType::kEvent)
+           .SetPriority(std::numeric_limits<int64_t>::max())
+           .SetDedupKeys({13, 17})
+           .Build()});
   OverrideWebUIConversionManager(&manager);
 
   std::string wait_script = R"(
-    let table = document.getElementById("impression-table-body");
+    let table = document.getElementById("source-table-body");
     let obs = new MutationObserver(() => {
       if (table.children.length === 2 &&
-          table.children[0].children[0].innerText === "100") {
-        document.title = $1;
+          table.children[0].children[0].innerText === $1 &&
+          table.children[0].children[6].innerText === "Navigation" &&
+          table.children[1].children[6].innerText === "Event" &&
+          table.children[0].children[7].innerText === "0" &&
+          table.children[1].children[7].innerText === $2 &&
+          table.children[0].children[8].innerText === "" &&
+          table.children[1].children[8].innerText === "13,17") {
+        document.title = $3;
       }
     });
     obs.observe(table, {'childList': true});)";
-  EXPECT_TRUE(ExecJsInWebUI(JsReplace(wait_script, kCompleteTitle)));
+  EXPECT_TRUE(ExecJsInWebUI(JsReplace(wait_script, kMaxUint64String,
+                                      kMaxInt64String, kCompleteTitle)));
 
   TitleWatcher title_watcher(shell()->web_contents(), kCompleteTitle);
   ClickRefreshButton();
@@ -209,22 +229,18 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
-                       WebUIShownWithPendingReports_ReportsDisplayed) {
+                       WebUIShownWithNoSentReports_NoSentReportsDisplayed) {
   EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
 
   TestConversionManager manager;
-  ConversionReport report(
-      ImpressionBuilder(base::Time::Now()).SetData("100").Build(),
-      "7" /* conversion_data */, base::Time::Now() /* conversion_time */,
-      base::Time::Now() /* report_time */, 1 /* conversion_id */);
-  manager.SetReportsForWebUI({report});
   OverrideWebUIConversionManager(&manager);
 
   std::string wait_script = R"(
-    let table = document.getElementById("report-table-body");
+    let table = document.getElementById("sent-report-table-body");
     let obs = new MutationObserver(() => {
       if (table.children.length === 1 &&
-          table.children[0].children[1].innerText === "7") {
+          table.children[0].children[0].innerText ===
+          "No sent reports.") {
         document.title = $1;
       }
     });
@@ -237,14 +253,151 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
+                       WebUIShownWithSentReport_SentReportsDisplayed) {
+  EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
+
+  TestConversionManager manager;
+  manager.SetSentReportsForWebUI(
+      {SentReportInfo(/*conversion_id=*/0,
+                      /*original_report_time=*/base::Time(),
+                      /*report_url=*/GURL("https://example.com/1"),
+                      /*report_body=*/"a",
+                      /*http_response_code=*/200,
+                      /*should_retry*/ false),
+       SentReportInfo(/*conversion_id=*/0,
+                      /*original_report_time=*/base::Time(),
+                      /*report_url=*/GURL("https://example.com/2"),
+                      /*report_body=*/"b",
+                      /*http_response_code=*/404,
+                      /*should_retry*/ false)});
+  OverrideWebUIConversionManager(&manager);
+
+  std::string wait_script = R"(
+    let table = document.getElementById("sent-report-table-body");
+    let obs = new MutationObserver(() => {
+      if (table.children.length === 2 &&
+          table.children[0].children[0].innerText === "https://example.com/1" &&
+          table.children[0].children[1].innerText === "a" &&
+          table.children[0].children[2].innerText === "200" &&
+          table.children[1].children[0].innerText === "https://example.com/2" &&
+          table.children[1].children[1].innerText === "b" &&
+          table.children[1].children[2].innerText === "404") {
+        document.title = $1;
+      }
+    });
+    obs.observe(table, {'childList': true});)";
+  EXPECT_TRUE(ExecJsInWebUI(JsReplace(wait_script, kCompleteTitle)));
+
+  TitleWatcher title_watcher(shell()->web_contents(), kCompleteTitle);
+  ClickRefreshButton();
+  EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
+                       WebUIShownWithManager_DebugModeDisabled) {
+  EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
+
+  TestConversionManager manager;
+  OverrideWebUIConversionManager(&manager);
+
+  // Create a mutation observer to wait for the content to render to the dom.
+  // Waiting on calls to TestConversionManager is not sufficient because the
+  // results are returned in promises.
+  std::string wait_script = R"(
+    let status = document.getElementById("debug-mode-content");
+    let obs = new MutationObserver(() => {
+      if (status.innerText.trim() === "") {
+        document.title = $1;
+      }
+    });
+    obs.observe(status, {'childList': true, 'characterData': true});)";
+  EXPECT_TRUE(ExecJsInWebUI(JsReplace(wait_script, kCompleteTitle)));
+
+  TitleWatcher title_watcher(shell()->web_contents(), kCompleteTitle);
+  ClickRefreshButton();
+  EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
+                       WebUIShownWithManager_DebugModeEnabled) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kConversionsDebugMode);
+
+  EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
+
+  TestConversionManager manager;
+  OverrideWebUIConversionManager(&manager);
+
+  // Create a mutation observer to wait for the content to render to the dom.
+  // Waiting on calls to TestConversionManager is not sufficient because the
+  // results are returned in promises.
+  std::string wait_script = R"(
+    let status = document.getElementById("debug-mode-content");
+    let obs = new MutationObserver(() => {
+      if (status.innerText.trim() !== "") {
+        document.title = $1;
+      }
+    });
+    obs.observe(status, {'childList': true, 'characterData': true});)";
+  EXPECT_TRUE(ExecJsInWebUI(JsReplace(wait_script, kCompleteTitle)));
+
+  TitleWatcher title_watcher(shell()->web_contents(), kCompleteTitle);
+  ClickRefreshButton();
+  EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
+                       WebUIShownWithPendingReports_ReportsDisplayed) {
+  EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
+
+  // We use the max value of `uint64_t` here to ensure that it is properly
+  // handled as a `bigint` value in JS and doesn't run into issues with
+  // `Number.MAX_SAFE_INTEGER`.
+
+  TestConversionManager manager;
+  ConversionReport report(
+      ImpressionBuilder(base::Time::Now()).SetData(100).Build(),
+      /*conversion_data=*/std::numeric_limits<uint64_t>::max(),
+      /*conversion_time=*/base::Time::Now(),
+      /*report_time=*/base::Time::Now(), /*conversion_id=*/1);
+  ConversionReport report2(
+      ImpressionBuilder(base::Time::Now())
+          .SetData(200)
+          .SetSourceType(StorableImpression::SourceType::kEvent)
+          .Build(),
+      /*conversion_data=*/7, /*conversion_time=*/base::Time::Now(),
+      /*report_time=*/base::Time::Now(), /*conversion_id=*/1);
+  manager.SetReportsForWebUI({report, report2});
+  OverrideWebUIConversionManager(&manager);
+
+  std::string wait_script = R"(
+    let table = document.getElementById("report-table-body");
+    let obs = new MutationObserver(() => {
+      if (table.children.length === 2 &&
+          table.children[0].children[1].innerText === $1 &&
+          table.children[0].children[5].innerText === "Navigation" &&
+          table.children[1].children[5].innerText === "Event") {
+        document.title = $2;
+      }
+    });
+    obs.observe(table, {'childList': true});)";
+  EXPECT_TRUE(
+      ExecJsInWebUI(JsReplace(wait_script, kMaxUint64String, kCompleteTitle)));
+
+  TitleWatcher title_watcher(shell()->web_contents(), kCompleteTitle);
+  ClickRefreshButton();
+  EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
                        WebUIWithPendingReportsClearStorage_ReportsRemoved) {
   EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
 
   TestConversionManager manager;
   ConversionReport report(
-      ImpressionBuilder(base::Time::Now()).SetData("100").Build(),
-      "7" /* conversion_data */, base::Time::Now() /* conversion_time */,
-      base::Time::Now() /* report_time */, 1 /* conversion_id */);
+      ImpressionBuilder(base::Time::Now()).SetData(100).Build(),
+      /*conversion_data=*/7, /*conversion_time=*/base::Time::Now(),
+      /*report_time=*/base::Time::Now(), /*conversion_id=*/1);
   manager.SetReportsForWebUI({report});
   OverrideWebUIConversionManager(&manager);
 
@@ -265,7 +418,7 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
   EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
 
   // Click the clear storage button and expect that the report table is emptied.
-  const base::string16 kDeleteTitle = base::ASCIIToUTF16("Delete");
+  const std::u16string kDeleteTitle = u"Delete";
   TitleWatcher delete_title_watcher(shell()->web_contents(), kDeleteTitle);
   SetTitleOnReportsTableEmpty(kDeleteTitle);
 
@@ -282,9 +435,9 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
 
   TestConversionManager manager;
   ConversionReport report(
-      ImpressionBuilder(base::Time::Now()).SetData("100").Build(),
-      "7" /* conversion_data */, base::Time::Now() /* conversion_time */,
-      base::Time::Now() /* report_time */, 1 /* conversion_id */);
+      ImpressionBuilder(base::Time::Now()).SetData(100).Build(),
+      /*conversion_data=*/7, /*conversion_time=*/base::Time::Now(),
+      /*report_time=*/base::Time::Now(), /*conversion_id=*/1);
   manager.SetReportsForWebUI({report});
   OverrideWebUIConversionManager(&manager);
 
@@ -305,7 +458,7 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
   EXPECT_EQ(kCompleteTitle, title_watcher.WaitAndGetTitle());
 
   // Click the send reports button and expect that the report table is emptied.
-  const base::string16 kSentTitle = base::ASCIIToUTF16("Sent");
+  const std::u16string kSentTitle = u"Sent";
   TitleWatcher sent_title_watcher(shell()->web_contents(), kSentTitle);
   SetTitleOnReportsTableEmpty(kSentTitle);
 
@@ -318,7 +471,7 @@ IN_PROC_BROWSER_TEST_F(ConversionInternalsWebUiBrowserTest,
                        MojoJsBindingsCorrectlyScoped) {
   EXPECT_TRUE(NavigateToURL(shell(), GURL(kConversionInternalsUrl)));
 
-  const base::string16 passed_title = base::ASCIIToUTF16("passed");
+  const std::u16string passed_title = u"passed";
 
   {
     TitleWatcher sent_title_watcher(shell()->web_contents(), passed_title);

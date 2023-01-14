@@ -13,13 +13,12 @@
 #include <utility>
 #include <vector>
 
-#include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "printing/backend/cups_connection.h"
 #include "printing/backend/cups_ipp_constants.h"
@@ -29,7 +28,6 @@
 #include "printing/mojom/print.mojom.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings.h"
-#include "printing/printing_features.h"
 #include "printing/printing_utils.h"
 #include "printing/units.h"
 
@@ -43,22 +41,22 @@ const char kUsernamePlaceholder[] = "chronos";
 // We only support sending document name for secure printers.
 const char kDocumentNamePlaceholder[] = "-";
 
-bool IsUriInsecure(const base::StringPiece uri) {
-  return !base::StartsWith(uri, "ipps:") && !base::StartsWith(uri, "https:") &&
-         !base::StartsWith(uri, "usb:") && !base::StartsWith(uri, "ippusb:");
+bool IsUriSecure(base::StringPiece uri) {
+  return base::StartsWith(uri, "ipps:") || base::StartsWith(uri, "https:") ||
+         base::StartsWith(uri, "usb:") || base::StartsWith(uri, "ippusb:");
 }
 
-// Returns a new char buffer which is a null-terminated copy of |value|.  The
+// Returns a new char buffer which is a null-terminated copy of `value`.  The
 // caller owns the returned string.
-char* DuplicateString(const base::StringPiece value) {
+char* DuplicateString(base::StringPiece value) {
   char* dst = new char[value.size() + 1];
   value.copy(dst, value.size());
   dst[value.size()] = '\0';
   return dst;
 }
 
-ScopedCupsOption ConstructOption(const base::StringPiece name,
-                                 const base::StringPiece value) {
+ScopedCupsOption ConstructOption(base::StringPiece name,
+                                 base::StringPiece value) {
   // ScopedCupsOption frees the name and value buffers on deletion
   ScopedCupsOption option = ScopedCupsOption(new cups_option_t);
   option->name = DuplicateString(name);
@@ -115,20 +113,20 @@ void ReportEnumUsage(const std::string& attribute_name) {
   base::UmaHistogramEnumeration("Printing.CUPS.IppAttributes", it->second);
 }
 
-// Given an integral |value| expressed in PWG units (1/100 mm), returns
+// Given an integral `value` expressed in PWG units (1/100 mm), returns
 // the same value expressed in device units.
 int PwgUnitsToDeviceUnits(int value, float micrometers_per_device_unit) {
   return ConvertUnitDouble(value, micrometers_per_device_unit, 10);
 }
 
-// Given a |media_size|, the specification of the media's |margins|, and
+// Given a `media_size`, the specification of the media's `margins`, and
 // the number of micrometers per device unit, returns the rectangle
 // bounding the apparent printable area of said media.
 gfx::Rect RepresentPrintableArea(const gfx::Size& media_size,
                                  const CupsPrinter::CupsMediaMargins& margins,
                                  float micrometers_per_device_unit) {
   // These values express inward encroachment by margins, away from the
-  // edges of the |media_size|.
+  // edges of the `media_size`.
   int left_bound =
       PwgUnitsToDeviceUnits(margins.left, micrometers_per_device_unit);
   int bottom_bound =
@@ -250,17 +248,24 @@ std::unique_ptr<PrintingContext> PrintingContext::Create(Delegate* delegate) {
   return std::make_unique<PrintingContextChromeos>(delegate);
 }
 
+// static
+std::unique_ptr<PrintingContextChromeos>
+PrintingContextChromeos::CreateForTesting(
+    Delegate* delegate,
+    std::unique_ptr<CupsConnection> connection) {
+  // Private ctor.
+  return base::WrapUnique(
+      new PrintingContextChromeos(delegate, std::move(connection)));
+}
+
 PrintingContextChromeos::PrintingContextChromeos(Delegate* delegate)
     : PrintingContext(delegate),
-      connection_(CupsConnection::Create(GURL(), HTTP_ENCRYPT_NEVER, true)),
-      send_user_info_(false) {}
+      connection_(CupsConnection::Create(GURL(), HTTP_ENCRYPT_NEVER, true)) {}
 
 PrintingContextChromeos::PrintingContextChromeos(
     Delegate* delegate,
     std::unique_ptr<CupsConnection> connection)
-    : PrintingContext(delegate),
-      connection_(std::move(connection)),
-      send_user_info_(false) {}
+    : PrintingContext(delegate), connection_(std::move(connection)) {}
 
 PrintingContextChromeos::~PrintingContextChromeos() {
   ReleaseContext();
@@ -374,11 +379,8 @@ PrintingContext::Result PrintingContextChromeos::UpdatePrinterSettings(
   send_user_info_ = settings_->send_user_info();
   if (send_user_info_) {
     DCHECK(printer_);
-    if (IsUriInsecure(printer_->GetUri())) {
-      username_ = kUsernamePlaceholder;
-    } else {
-      username_ = settings_->username();
-    }
+    username_ = IsUriSecure(printer_->GetUri()) ? settings_->username()
+                                                : kUsernamePlaceholder;
   }
 
   return OK;
@@ -400,18 +402,16 @@ PrintingContext::Result PrintingContextChromeos::InitializeDevice(
 }
 
 PrintingContext::Result PrintingContextChromeos::NewDocument(
-    const base::string16& document_name) {
+    const std::u16string& document_name) {
   DCHECK(!in_print_job_);
   in_print_job_ = true;
 
   std::string converted_name;
   if (send_user_info_) {
     DCHECK(printer_);
-    if (IsUriInsecure(printer_->GetUri())) {
-      converted_name = kDocumentNamePlaceholder;
-    } else {
-      converted_name = base::UTF16ToUTF8(document_name);
-    }
+    converted_name = IsUriSecure(printer_->GetUri())
+                         ? base::UTF16ToUTF8(document_name)
+                         : kDocumentNamePlaceholder;
   }
 
   std::vector<cups_option_t> options;

@@ -97,6 +97,9 @@ class BookmarkModelMerger {
     RemoteTreeNode();
 
     syncer::UpdateResponseData update_;
+    // Redundant, parsed instance of the unique position in specifics, used
+    // to sort siblings by their position information.
+    syncer::UniquePosition unique_position_;
     std::vector<RemoteTreeNode> children_;
   };
 
@@ -118,6 +121,11 @@ class BookmarkModelMerger {
   // specifics as well as tombstones, in the unlikely event that the server
   // sends tombstones as part of the initial download.
   static RemoteForest BuildRemoteForest(syncer::UpdateResponseDataList updates);
+
+  // Recursively counts and returns the number of descendants for |node|,
+  // excluding |node| itself.
+  static int CountRemoteTreeNodeDescendantsForUma(
+      const BookmarkModelMerger::RemoteTreeNode& node);
 
   // Computes bookmark pairs that should be matched by GUID. Local bookmark
   // GUIDs may be regenerated for the case where they collide with a remote GUID

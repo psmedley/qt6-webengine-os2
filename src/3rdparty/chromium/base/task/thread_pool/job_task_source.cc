@@ -43,14 +43,14 @@ JobTaskSource::State::Value JobTaskSource::State::Cancel() {
 }
 
 JobTaskSource::State::Value JobTaskSource::State::DecrementWorkerCount() {
-  const size_t value_before_sub =
+  const uint32_t value_before_sub =
       value_.fetch_sub(kWorkerCountIncrement, std::memory_order_relaxed);
   DCHECK((value_before_sub >> kWorkerCountBitOffset) > 0);
   return {uint32_t(value_before_sub)};
 }
 
 JobTaskSource::State::Value JobTaskSource::State::IncrementWorkerCount() {
-  size_t value_before_add =
+  uint32_t value_before_add =
       value_.fetch_add(kWorkerCountIncrement, std::memory_order_relaxed);
   return {uint32_t(value_before_add)};
 }
@@ -61,6 +61,10 @@ JobTaskSource::State::Value JobTaskSource::State::Load() const {
 
 JobTaskSource::JoinFlag::JoinFlag() = default;
 JobTaskSource::JoinFlag::~JoinFlag() = default;
+
+void JobTaskSource::JoinFlag::Reset() {
+  value_.store(kNotWaiting, std::memory_order_relaxed);
+}
 
 void JobTaskSource::JoinFlag::SetWaiting() {
   value_.store(kWaitingForWorkerToYield, std::memory_order_relaxed);
@@ -184,6 +188,10 @@ bool JobTaskSource::WaitForParticipationOpportunity() {
     // |worker_count - 1| to exclude the joining thread which is not active.
     max_concurrency = GetMaxConcurrency(state.worker_count() - 1);
   }
+  // It's possible though unlikely that the joining thread got a participation
+  // opportunity without a worker signaling.
+  join_flag_.Reset();
+
   // Case A:
   if (state.worker_count() <= max_concurrency && !state.is_canceled())
     return true;
@@ -321,7 +329,7 @@ Task JobTaskSource::TakeTask(TaskSource::Transaction* transaction) {
   // if |transaction| is nullptr.
   DCHECK_GT(TS_UNCHECKED_READ(state_).Load().worker_count(), 0U);
   DCHECK(primary_task_);
-  return Task(from_here_, primary_task_, TimeDelta());
+  return Task(from_here_, primary_task_, TimeTicks(), TimeDelta());
 }
 
 bool JobTaskSource::DidProcessTask(TaskSource::Transaction* /*transaction*/) {
@@ -360,7 +368,7 @@ Task JobTaskSource::Clear(TaskSource::Transaction* transaction) {
   // Nothing is cleared since other workers might still racily run tasks. For
   // simplicity, the destructor will take care of it once all references are
   // released.
-  return Task(from_here_, DoNothing(), TimeDelta());
+  return Task(from_here_, DoNothing(), TimeTicks(), TimeDelta());
 }
 
 }  // namespace internal

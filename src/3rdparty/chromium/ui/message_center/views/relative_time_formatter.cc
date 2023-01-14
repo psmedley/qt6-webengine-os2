@@ -4,8 +4,8 @@
 
 #include "ui/message_center/views/relative_time_formatter.h"
 
+#include "base/cxx17_backports.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/strings/grit/ui_strings.h"
 
@@ -56,7 +56,7 @@ const RelativeTimeFormat& GetRelativeTimeFormat(TimeDelta delta) {
 }  // namespace
 
 void GetRelativeTimeStringAndNextUpdateTime(TimeDelta delta,
-                                            base::string16* relative_time,
+                                            std::u16string* relative_time,
                                             TimeDelta* next_update) {
   bool past = delta < TimeDelta();
   TimeDelta absolute = past ? -delta : delta;

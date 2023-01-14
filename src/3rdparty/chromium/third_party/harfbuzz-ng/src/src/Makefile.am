@@ -235,7 +235,8 @@ DEF_FILES += harfbuzz-gobject.def
 endif
 check: $(DEF_FILES) # For check-symbols.sh
 CLEANFILES += $(DEF_FILES)
-harfbuzz.def: $(HBHEADERS) $(HBNODISTHEADERS)
+harfbuzz.def: $(top_builddir)/config.status
+harfbuzz.def: $(HBHEADERS)
 	$(AM_V_GEN) $(srcdir)/gen-def.py "$@" $^
 harfbuzz-subset.def: $(HB_SUBSET_headers)
 	$(AM_V_GEN) $(srcdir)/gen-def.py "$@" $^
@@ -341,7 +342,7 @@ test_gsub_would_substitute_SOURCES = test-gsub-would-substitute.cc
 test_gsub_would_substitute_CPPFLAGS = $(HBCFLAGS) $(FREETYPE_CFLAGS)
 test_gsub_would_substitute_LDADD = libharfbuzz.la $(HBLIBS) $(FREETYPE_LIBS)
 
-COMPILED_TESTS = test-algs test-array test-iter test-meta test-number test-ot-tag test-unicode-ranges test-bimap
+COMPILED_TESTS = test-algs test-array test-iter test-meta test-number test-ot-tag test-priority-queue test-unicode-ranges test-bimap test-repacker
 COMPILED_TESTS_CPPFLAGS = $(HBCFLAGS) -DMAIN -UNDEBUG
 COMPILED_TESTS_LDADD = libharfbuzz.la $(HBLIBS)
 check_PROGRAMS += $(COMPILED_TESTS)
@@ -354,6 +355,14 @@ test_algs_LDADD = $(COMPILED_TESTS_LDADD)
 test_array_SOURCES = test-array.cc
 test_array_CPPFLAGS = $(HBCFLAGS)
 test_array_LDADD = libharfbuzz.la $(HBLIBS)
+
+test_priority_queue_SOURCES = test-priority-queue.cc hb-static.cc
+test_priority_queue_CPPFLAGS = $(HBCFLAGS)
+test_priority_queue_LDADD = libharfbuzz.la $(HBLIBS)
+
+test_repacker_SOURCES = test-repacker.cc hb-static.cc
+test_repacker_CPPFLAGS = $(HBCFLAGS)
+test_repacker_LDADD = libharfbuzz.la libharfbuzz-subset.la $(HBLIBS)
 
 test_iter_SOURCES = test-iter.cc hb-static.cc
 test_iter_CPPFLAGS = $(COMPILED_TESTS_CPPFLAGS)
@@ -401,6 +410,10 @@ TESTS_ENVIRONMENT = \
 	MAKE="$(MAKE) $(AM_MAKEFLAGS)" \
 	HBSOURCES="$(HBSOURCES)" \
 	HBHEADERS="$(HBHEADERS)" \
+	LDD="$(LDD)" \
+	NM="$(NM)" \
+	OBJDUMP="$(OBJDUMP)" \
+	OTOOL="$(OTOOL)" \
 	$(NULL)
 
 if HAVE_INTROSPECTION

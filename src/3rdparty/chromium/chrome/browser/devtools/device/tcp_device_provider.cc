@@ -51,7 +51,7 @@ class ResolveHostAndOpenSocket final : public network::ResolveHostClientBase {
                               pending_receiver) {
                          g_browser_process->system_network_context_manager()
                              ->GetContext()
-                             ->CreateHostResolver(base::nullopt,
+                             ->CreateHostResolver(absl::nullopt,
                                                   std::move(pending_receiver));
                        },
                        resolver.BindNewPipeAndPassReceiver()));
@@ -63,7 +63,7 @@ class ResolveHostAndOpenSocket final : public network::ResolveHostClientBase {
     receiver_.set_disconnect_handler(
         base::BindOnce(&ResolveHostAndOpenSocket::OnComplete,
                        base::Unretained(this), net::ERR_NAME_NOT_RESOLVED,
-                       net::ResolveErrorInfo(net::ERR_FAILED), base::nullopt));
+                       net::ResolveErrorInfo(net::ERR_FAILED), absl::nullopt));
   }
 
  private:
@@ -71,7 +71,7 @@ class ResolveHostAndOpenSocket final : public network::ResolveHostClientBase {
   void OnComplete(
       int result,
       const net::ResolveErrorInfo& resolve_error_info,
-      const base::Optional<net::AddressList>& resolved_addresses) override {
+      const absl::optional<net::AddressList>& resolved_addresses) override {
     if (result != net::OK) {
       RunSocketCallback(std::move(callback_), nullptr,
                         resolve_error_info.error);
@@ -82,12 +82,12 @@ class ResolveHostAndOpenSocket final : public network::ResolveHostClientBase {
         new net::TCPClientSocket(resolved_addresses.value(), nullptr, nullptr,
                                  nullptr, net::NetLogSource()));
     net::StreamSocket* socket_ptr = socket.get();
-    net::CompletionRepeatingCallback on_connect =
-        base::AdaptCallbackForRepeating(base::BindOnce(
-            &RunSocketCallback, std::move(callback_), std::move(socket)));
-    result = socket_ptr->Connect(on_connect);
-    if (result != net::ERR_IO_PENDING)
-      on_connect.Run(result);
+    auto split_callback = base::SplitOnceCallback(base::BindOnce(
+        &RunSocketCallback, std::move(callback_), std::move(socket)));
+    result = socket_ptr->Connect(std::move(split_callback.first));
+    if (result != net::ERR_IO_PENDING) {
+      std::move(split_callback.second).Run(result);
+    }
     delete this;
   }
 

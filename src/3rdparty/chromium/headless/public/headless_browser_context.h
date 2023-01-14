@@ -8,11 +8,9 @@
 #include <list>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/optional.h"
 #include "content/public/browser/browser_context.h"
 #include "headless/public/headless_export.h"
 #include "headless/public/headless_web_contents.h"

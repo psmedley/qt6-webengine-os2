@@ -27,6 +27,7 @@
 #include "storage/browser/quota/quota_device_info_helper.h"
 #include "storage/browser/quota/quota_features.h"
 #include "storage/browser/quota/quota_manager.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom-shared.h"
 
 using storage::QuotaManager;
@@ -72,11 +73,12 @@ class QuotaChangeBrowserTest : public ContentBrowserTest,
   void TriggerStoragePressureCheck(const GURL& test_url) {
     GetIOThreadTaskRunner({})->PostTask(
         FROM_HERE,
-        base::BindOnce(&QuotaManager::GetUsageAndQuotaForWebApps,
-                       quota_manager(), url::Origin::Create(test_url),
-                       blink::mojom::StorageType::kTemporary,
-                       base::DoNothing::Once<blink::mojom::QuotaStatusCode,
-                                             int64_t, int64_t>()));
+        base::BindOnce(
+            &QuotaManager::GetUsageAndQuotaForWebApps, quota_manager(),
+            blink::StorageKey::CreateFromStringForTesting(test_url.spec()),
+            blink::mojom::StorageType::kTemporary,
+            base::DoNothing::Once<blink::mojom::QuotaStatusCode, int64_t,
+                                  int64_t>()));
   }
 
   Shell* browser() {
@@ -89,8 +91,10 @@ class QuotaChangeBrowserTest : public ContentBrowserTest,
   bool is_incognito() const { return is_incognito_; }
 
   QuotaManager* quota_manager() {
-    return BrowserContext::GetDefaultStoragePartition(
-               browser()->web_contents()->GetBrowserContext())
+    return browser()
+        ->web_contents()
+        ->GetBrowserContext()
+        ->GetDefaultStoragePartition()
         ->GetQuotaManager();
   }
 
@@ -125,10 +129,7 @@ IN_PROC_BROWSER_TEST_P(QuotaChangeBrowserTest, DispatchEvent) {
   observer.WaitForNavigationFinished();
   const GURL& last_url = browser()->web_contents()->GetLastCommittedURL();
   if (last_url.ref() != "pass") {
-    std::string js_result;
-    ASSERT_TRUE(ExecuteScriptAndExtractString(
-        browser(), "window.domAutomationController.send(getLog())",
-        &js_result));
+    std::string js_result = EvalJs(browser(), "getLog()").ExtractString();
     FAIL() << "Failed: " << last_url << "\n" << js_result;
   }
 }

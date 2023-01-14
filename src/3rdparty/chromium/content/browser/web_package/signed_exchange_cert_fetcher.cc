@@ -23,8 +23,11 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
@@ -80,7 +83,7 @@ SignedExchangeCertFetcher::CreateAndStart(
     bool force_fetch,
     CertificateCallback callback,
     SignedExchangeDevToolsProxy* devtools_proxy,
-    const base::Optional<base::UnguessableToken>& throttling_profile_id,
+    const absl::optional<base::UnguessableToken>& throttling_profile_id,
     net::IsolationInfo isolation_info) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeCertFetcher::CreateAndStart");
@@ -101,7 +104,7 @@ SignedExchangeCertFetcher::SignedExchangeCertFetcher(
     bool force_fetch,
     CertificateCallback callback,
     SignedExchangeDevToolsProxy* devtools_proxy,
-    const base::Optional<base::UnguessableToken>& throttling_profile_id,
+    const absl::optional<base::UnguessableToken>& throttling_profile_id,
     net::IsolationInfo isolation_info)
     : shared_url_loader_factory_(std::move(shared_url_loader_factory)),
       throttles_(std::move(throttles)),
@@ -125,7 +128,6 @@ SignedExchangeCertFetcher::SignedExchangeCertFetcher(
     resource_request_->load_flags |=
         net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_CACHE;
   }
-  resource_request_->render_frame_id = MSG_ROUTING_NONE;
   if (devtools_proxy_) {
     cert_request_id_ = base::UnguessableToken::Create();
     resource_request_->enable_load_timing = true;
@@ -156,7 +158,6 @@ void SignedExchangeCertFetcher::Start() {
   }
   url_loader_ = blink::ThrottlingURLLoader::CreateLoaderAndStart(
       std::move(shared_url_loader_factory_), std::move(throttles_),
-      0 /* routing_id */,
       signed_exchange_utils::MakeRequestID() /* request_id */,
       network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
       kCertFetcherTrafficAnnotation, base::ThreadTaskRunnerHandle::Get());
@@ -230,6 +231,9 @@ void SignedExchangeCertFetcher::OnDataComplete() {
 }
 
 // network::mojom::URLLoaderClient
+void SignedExchangeCertFetcher::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {}
+
 void SignedExchangeCertFetcher::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr head) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
@@ -341,7 +345,7 @@ void SignedExchangeCertFetcher::OnDataURLRequest(
   mojo::Remote<network::mojom::URLLoaderFactory> factory(
       DataURLLoaderFactory::Create());
   factory->CreateLoaderAndStart(
-      std::move(url_loader_receiver), 0, 0, 0, resource_request,
+      std::move(url_loader_receiver), 0, 0, resource_request,
       std::move(url_loader_client_remote),
       net::MutableNetworkTrafficAnnotationTag(kCertFetcherTrafficAnnotation));
 }

@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "media/base/video_frame.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 
@@ -79,7 +80,7 @@ class MODULES_EXPORT LowLatencyVideoRendererAlgorithm {
   VideoFrameQueue frame_queue_;
 
   // Render deadline min for when the last frame was rendered.
-  base::Optional<base::TimeTicks> last_render_deadline_min_;
+  absl::optional<base::TimeTicks> last_render_deadline_min_;
 
   // Stores the number of fractional frames that were not rendered as of
   // |last_render_deadline_min_|. This is needed in case the display refresh
@@ -98,7 +99,7 @@ class MODULES_EXPORT LowLatencyVideoRendererAlgorithm {
 
   // The number of consecutive render frames with a post-decode queue back-up
   // (defined as greater than one frame).
-  int consecutive_frames_with_back_up_;
+  uint16_t consecutive_frames_with_back_up_;
 
   struct Stats {
     int total_frames;
@@ -113,8 +114,17 @@ class MODULES_EXPORT LowLatencyVideoRendererAlgorithm {
     int max_size_drop_queue;
   };
   Stats stats_;
-  base::Optional<base::TimeTicks> last_deadline_min_stats_recorded_;
+  absl::optional<base::TimeTicks> last_deadline_min_stats_recorded_;
   void RecordAndResetStats();
+  // Maximum post decode queue size which should trigger a max queue size
+  // reduction.
+  uint16_t max_post_decode_queue_size_;
+  // Maximum number of frames to drop when there is a max queue size reduction.
+  // A size of 0 indicates dropping all the frames in the queue.
+  uint16_t max_consecutive_frames_to_drop_;
+  // Count of consecutive rendered frames with a newer frame in the queue which
+  // should force a steady state reduction of one frame.
+  uint16_t reduce_steady_state_queue_size_threshold_;
 };
 
 }  // namespace blink

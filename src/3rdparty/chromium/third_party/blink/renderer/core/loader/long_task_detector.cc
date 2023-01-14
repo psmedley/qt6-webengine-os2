@@ -49,10 +49,7 @@ void LongTaskDetector::DidProcessTask(base::TimeTicks start_time,
     return;
 
   iterating_ = true;
-  // We copy `observers_` because it might be mutated in OnLongTaskDetected,
-  // and container mutation is not allowed during iteration.
-  const HeapHashSet<Member<LongTaskObserver>> observers = observers_;
-  for (auto& observer : observers) {
+  for (auto& observer : observers_) {
     observer->OnLongTaskDetected(start_time, end_time);
   }
   iterating_ = false;

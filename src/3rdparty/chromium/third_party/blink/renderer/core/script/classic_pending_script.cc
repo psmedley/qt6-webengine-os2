@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/script/classic_pending_script.h"
 
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_streamer.h"
@@ -50,7 +51,7 @@ ClassicPendingScript* ClassicPendingScript::Fetch(
 
   ClassicPendingScript* pending_script =
       MakeGarbageCollected<ClassicPendingScript>(
-          element, TextPosition(), KURL(), String(),
+          element, TextPosition::MinimumPosition(), KURL(), String(),
           ScriptSourceLocationType::kExternalFile, options,
           true /* is_external */);
 
@@ -238,12 +239,14 @@ void ClassicPendingScript::NotifyFinished(Resource* resource) {
                                        options_, cross_origin);
   }
 
-  TRACE_EVENT_WITH_FLOW1(
-      TRACE_DISABLED_BY_DEFAULT("v8.compile"),
-      "ClassicPendingScript::NotifyFinished", this, TRACE_EVENT_FLAG_FLOW_OUT,
-      "data",
-      inspector_parse_script_event::Data(GetResource()->InspectorId(),
-                                         GetResource()->Url().GetString()));
+  TRACE_EVENT_WITH_FLOW1(TRACE_DISABLED_BY_DEFAULT("v8.compile"),
+                         "ClassicPendingScript::NotifyFinished", this,
+                         TRACE_EVENT_FLAG_FLOW_OUT, "data",
+                         [&](perfetto::TracedValue context) {
+                           inspector_parse_script_event::Data(
+                               std::move(context), GetResource()->InspectorId(),
+                               GetResource()->Url().GetString());
+                         });
 
   bool error_occurred = GetResource()->ErrorOccurred() || integrity_failure_;
   AdvanceReadyState(error_occurred ? kErrorOccurred : kReady);
@@ -326,7 +329,8 @@ ClassicScript* ClassicPendingScript::GetSource(const KURL& document_url) const {
   // Check if we can use the script streamer.
   ScriptStreamer* streamer;
   ScriptStreamer::NotStreamingReason not_streamed_reason;
-  std::tie(streamer, not_streamed_reason) = ScriptStreamer::TakeFrom(resource);
+  std::tie(streamer, not_streamed_reason) =
+      ScriptStreamer::TakeFrom(resource, mojom::blink::ScriptType::kClassic);
 
   if (ready_state_ == kErrorOccurred) {
     not_streamed_reason = ScriptStreamer::NotStreamingReason::kErrorOccurred;

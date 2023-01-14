@@ -25,7 +25,6 @@
 #include "base/threading/thread.h"
 #include "gpu/config/gpu_preferences.h"
 #include "media/base/video_color_space.h"
-#include "media/base/win/mf_initializer.h"
 #include "media/gpu/gpu_video_decode_accelerator_helpers.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/gpu/windows/d3d11_com_defs.h"
@@ -66,6 +65,7 @@ class ConfigChangeDetector {
   virtual VideoColorSpace current_color_space(
       const VideoColorSpace& container_color_space) const = 0;
   virtual bool IsYUV420() const;
+  virtual bool is_vp9_resilient_mode() const;
   bool config_changed() const { return config_changed_; }
 
  protected:
@@ -419,9 +419,6 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   // To expose client callbacks from VideoDecodeAccelerator.
   VideoDecodeAccelerator::Client* client_;
 
-  // MediaFoundation session, calls MFShutdown on deletion.
-  MFSessionLifetime session_;
-
   Microsoft::WRL::ComPtr<IMFTransform> decoder_;
 
   Microsoft::WRL::ComPtr<IDirect3D9Ex> d3d9_;
@@ -616,6 +613,8 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   const bool enable_accelerated_vp8_decode_;
   const bool enable_accelerated_vp9_decode_;
 
+  const bool disallow_vp9_resilient_dxva_decoding_;
+
   // The media foundation H.264 decoder has problems handling changes like
   // resolution change, bitrate change etc. If we reinitialize the decoder
   // when these changes occur then, the decoder works fine. The
@@ -634,7 +633,7 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   gfx::Rect current_visible_rect_;
   VideoColorSpace current_color_space_;
 
-  base::Optional<gl::HDRMetadataHelperWin> hdr_metadata_helper_;
+  absl::optional<gl::HDRMetadataHelperWin> hdr_metadata_helper_;
   bool use_empty_video_hdr_metadata_ = false;
 
   // Have we delivered any decoded frames since the last call to Initialize()?

@@ -208,4 +208,3 @@ sk_sp<SkData> SkPDFSubsetFont(sk_sp<SkData>, const SkPDFGlyphUse&, SkPDF::Metada
     return nullptr;
 }
 #endif  // defined(SK_PDF_USE_SFNTLY)
-

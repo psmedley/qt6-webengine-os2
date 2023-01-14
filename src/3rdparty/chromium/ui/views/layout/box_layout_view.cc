@@ -6,9 +6,9 @@
 
 #include <memory>
 
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/layout/layout_manager.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace views {
 
@@ -133,25 +133,6 @@ void BoxLayoutView::ClearFlexForView(const View* view) {
   InvalidateLayout();
 }
 
-DEFINE_ENUM_CONVERTERS(BoxLayout::Orientation,
-                       {BoxLayout::Orientation::kHorizontal,
-                        STRING16_LITERAL("kHorizontal")},
-                       {BoxLayout::Orientation::kVertical,
-                        STRING16_LITERAL("kVertical")})
-
-DEFINE_ENUM_CONVERTERS(
-    BoxLayout::MainAxisAlignment,
-    {BoxLayout::MainAxisAlignment::kStart, STRING16_LITERAL("kStart")},
-    {BoxLayout::MainAxisAlignment::kCenter, STRING16_LITERAL("kCenter")},
-    {BoxLayout::MainAxisAlignment::kEnd, STRING16_LITERAL("kEnd")})
-
-DEFINE_ENUM_CONVERTERS(
-    BoxLayout::CrossAxisAlignment,
-    {BoxLayout::CrossAxisAlignment::kStretch, STRING16_LITERAL("kStretch")},
-    {BoxLayout::CrossAxisAlignment::kStart, STRING16_LITERAL("kStart")},
-    {BoxLayout::CrossAxisAlignment::kCenter, STRING16_LITERAL("kCenter")},
-    {BoxLayout::CrossAxisAlignment::kEnd, STRING16_LITERAL("kEnd")})
-
 BEGIN_METADATA(BoxLayoutView, View)
 ADD_PROPERTY_METADATA(BoxLayout::Orientation, Orientation)
 ADD_PROPERTY_METADATA(BoxLayout::MainAxisAlignment, MainAxisAlignment)
@@ -164,3 +145,21 @@ ADD_PROPERTY_METADATA(int, DefaultFlex)
 END_METADATA
 
 }  // namespace views
+
+DEFINE_ENUM_CONVERTERS(views::BoxLayout::Orientation,
+                       {views::BoxLayout::Orientation::kHorizontal,
+                        u"kHorizontal"},
+                       {views::BoxLayout::Orientation::kVertical, u"kVertical"})
+
+DEFINE_ENUM_CONVERTERS(views::BoxLayout::MainAxisAlignment,
+                       {views::BoxLayout::MainAxisAlignment::kStart, u"kStart"},
+                       {views::BoxLayout::MainAxisAlignment::kCenter,
+                        u"kCenter"},
+                       {views::BoxLayout::MainAxisAlignment::kEnd, u"kEnd"})
+
+DEFINE_ENUM_CONVERTERS(
+    views::BoxLayout::CrossAxisAlignment,
+    {views::BoxLayout::CrossAxisAlignment::kStretch, u"kStretch"},
+    {views::BoxLayout::CrossAxisAlignment::kStart, u"kStart"},
+    {views::BoxLayout::CrossAxisAlignment::kCenter, u"kCenter"},
+    {views::BoxLayout::CrossAxisAlignment::kEnd, u"kEnd"})

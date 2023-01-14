@@ -12,7 +12,7 @@
 #include "base/files/file_path.h"
 #include "base/fuchsia/process_context.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/frame_service_base.h"
+#include "content/public/browser/document_service_base.h"
 #include "content/public/browser/provision_fetcher_factory.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -26,8 +26,8 @@
 
 namespace {
 
-class MediaResourceProviderImpl
-    : public content::FrameServiceBase<
+class MediaResourceProviderImpl final
+    : public content::DocumentServiceBase<
           media::mojom::FuchsiaMediaResourceProvider> {
  public:
   MediaResourceProviderImpl(
@@ -35,7 +35,7 @@ class MediaResourceProviderImpl
       content::RenderFrameHost* render_frame_host,
       mojo::PendingReceiver<media::mojom::FuchsiaMediaResourceProvider>
           receiver);
-  ~MediaResourceProviderImpl() final;
+  ~MediaResourceProviderImpl() override;
 
   MediaResourceProviderImpl(const MediaResourceProviderImpl&) = delete;
   MediaResourceProviderImpl& operator=(const MediaResourceProviderImpl&) =
@@ -45,11 +45,11 @@ class MediaResourceProviderImpl
   void CreateCdm(
       const std::string& key_system,
       fidl::InterfaceRequest<fuchsia::media::drm::ContentDecryptionModule>
-          request) final;
+          request) override;
   void CreateAudioConsumer(
-      fidl::InterfaceRequest<fuchsia::media::AudioConsumer> request) final;
+      fidl::InterfaceRequest<fuchsia::media::AudioConsumer> request) override;
   void CreateAudioCapturer(
-      fidl::InterfaceRequest<fuchsia::media::AudioCapturer> request) final;
+      fidl::InterfaceRequest<fuchsia::media::AudioCapturer> request) override;
 
  private:
   media::FuchsiaCdmManager* const cdm_manager_;
@@ -59,7 +59,7 @@ MediaResourceProviderImpl::MediaResourceProviderImpl(
     media::FuchsiaCdmManager* cdm_manager,
     content::RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<media::mojom::FuchsiaMediaResourceProvider> receiver)
-    : FrameServiceBase(render_frame_host, std::move(receiver)),
+    : DocumentServiceBase(render_frame_host, std::move(receiver)),
       cdm_manager_(cdm_manager) {
   DCHECK(cdm_manager_);
 }
@@ -71,8 +71,10 @@ void MediaResourceProviderImpl::CreateCdm(
     fidl::InterfaceRequest<fuchsia::media::drm::ContentDecryptionModule>
         request) {
   scoped_refptr<network::SharedURLLoaderFactory> loader_factory =
-      content::BrowserContext::GetDefaultStoragePartition(
-          render_frame_host()->GetProcess()->GetBrowserContext())
+      render_frame_host()
+          ->GetProcess()
+          ->GetBrowserContext()
+          ->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess();
   media::CreateFetcherCB create_fetcher_cb = base::BindRepeating(
       &content::CreateProvisionFetcher, std::move(loader_factory));
@@ -166,7 +168,7 @@ std::unique_ptr<media::FuchsiaCdmManager> CreateCdmManager() {
   std::string cdm_data_directory =
       command_line->GetSwitchValueASCII(switches::kCdmDataDirectory);
 
-  base::Optional<uint64_t> cdm_data_quota_bytes;
+  absl::optional<uint64_t> cdm_data_quota_bytes;
   if (command_line->HasSwitch(switches::kCdmDataQuotaBytes)) {
     uint64_t value = 0;
     CHECK(base::StringToUint64(

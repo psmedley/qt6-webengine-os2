@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 #include "third_party/blink/renderer/platform/fonts/opentype/open_type_vertical_data.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/skia/include/core/SkFont.h"
 
 struct hb_font_t;
@@ -30,6 +29,8 @@ struct HarfBuzzFontData {
         space_in_gsub_(SpaceGlyphInOpenTypeTables::Unknown),
         vertical_data_(nullptr),
         range_set_(nullptr) {}
+  HarfBuzzFontData(const HarfBuzzFontData&) = delete;
+  HarfBuzzFontData& operator=(const HarfBuzzFontData&) = delete;
 
   // The vertical origin and vertical advance functions in HarfBuzzFace require
   // the ascent and height metrics as fallback in case no specific vertical
@@ -105,9 +106,6 @@ struct HarfBuzzFontData {
 
   scoped_refptr<OpenTypeVerticalData> vertical_data_;
   scoped_refptr<UnicodeRangeSet> range_set_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(HarfBuzzFontData);
 };
 
 }  // namespace blink

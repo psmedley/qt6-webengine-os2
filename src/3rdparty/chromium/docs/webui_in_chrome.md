@@ -11,27 +11,22 @@
 </style>
 
 # Creating WebUI Interfaces outside components/
-This guide is based on [Creating WebUI Interfaces in components](webui_in_components), and comments from reviewers when creating the ChromeOS emoji picker.
+This guide is based on [Creating WebUI Interfaces in components](webui_in_components.md), and comments from reviewers when creating the ChromeOS emoji picker.
 
 [TOC]
 
 <a name="creating_web_ui_page"></a>
 WebUI pages live in `chrome/browser/resources`.  You should create a folder for your project `chrome/browser/resources/hello_world`.
-When creating WebUI resources, follow the [Web Development Style Guide](https://chromium.googlesource.com/chromium/src/+/master/styleguide/web/web.md). For a sample WebUI page you could start with the following files:
+When creating WebUI resources, follow the [Web Development Style Guide](https://chromium.googlesource.com/chromium/src/+/main/styleguide/web/web.md). For a sample WebUI page you could start with the following files:
 
-`chrome/browser/resources/hello_world/hello_world.html`
+`chrome/browser/resources/hello_world/hello_world_container.html`
 ```html
 <!DOCTYPE HTML>
 <html>
-<head>
- <meta charset="utf-8">
- <link rel="stylesheet" href="hello_world.css">
- <script type="module" src="hello_world.js"></script>
-</head>
-<body>
-  <h1>Hello World</h1>
-  <div id="example-div"></div>
-</body>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="hello_world.css">
+  <hello-world></hello-world>
+  <script type="module" src="hello_world.js"></script>
 </html>
 ```
 
@@ -42,27 +37,52 @@ body {
 }
 ```
 
+`chrome/browser/resources/hello_world/hello_world.html`
+```html
+<h1>Hello World</h1>
+<div id="example-div">[[message_]]</div>
+```
+
 `chrome/browser/resources/hello_world/hello_world.js`
 ```js
 import './strings.m.js';
 
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {$} from 'chrome://resources/js/util.m.js';
+import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-function initialize() {
-  const block = document.createElement('div');
-  block.innerText =  loadTimeData.getString('message');
-  $('example-div').appendChild(block);
+/** @polymer */
+export class HelloWorldElement extends PolymerElement {
+  static get is() {
+    return 'hello-world';
+  }
+
+  static get template() {
+    return html`{__html_template__}`;
+  }
+
+  static get properties() {
+    return {
+      message_: {
+        type: String,
+        value: () => loadTimeData.getString('message'),
+      },
+    };
+  }
 }
 
-document.addEventListener('DOMContentLoaded', initialize);
+customElements.define(HelloWorldElement.is, HelloWorldElement);
 ```
 
-Add a `BUILD.gn` file to get Javascript type checking:
+Add a `BUILD.gn` file to get Javascript type checking and Polymer compilation:
 
 `chrome/browser/resources/hello_world/BUILD.gn`
 ```
 import("//third_party/closure_compiler/compile_js.gni")
+import("//tools/polymer/html_to_js.gni")
+
+html_to_js("web_components") {
+  js_files = [ "hello_world.js" ]
+}
 
 js_library("hello_world") {
   deps = [
@@ -76,7 +96,8 @@ js_type_check("closure_compile") {
 }
 ```
 
-Then refer to the new `:closure_compile` target from `chrome/browser/resources/BUILD.gn`:
+Add the new `:closure_compile` target to `chrome/browser/resources/BUILD.gn` to
+include it in coverage:
 
 ```
 group("closure_compile) {
@@ -90,24 +111,37 @@ group("closure_compile) {
 Finally, create an `OWNERS` file for the new folder.
 
 ## Adding the resources
-Resources for the browser are stored in `grd` files.  Current best practice is to autogenerate a grd file for your 
+Resources for the browser are stored in `grd` files.  Current best practice is to autogenerate a grd file for your
 component in the `BUILD` file we created earlier
 
 `chrome/browser/resources/hello_world/BUILD.gn`
 ```
 import("//tools/grit/grit_rule.gni")
+import("//tools/grit/preprocess_if_expr.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
 
+preprocess_folder = "preprocessed"
+preprocess_gen_manifest = "preprocessed_gen_manifest.json"
 resources_grd_file = "$target_gen_dir/resources.grd"
+
+preprocess_if_expr("preprocess_generated") {
+  deps = [ ":web_components" ]
+  in_folder = target_gen_dir
+  out_folder = "$target_gen_dir/$preprocess_folder"
+  out_manifest = "$target_gen_dir/$preprocess_gen_manifest"
+  in_files = [ "hello_world.js" ]
+}
+
 generate_grd("build_grd") {
   grd_prefix = "hello_world"
   out_grd = resources_grd_file
   input_files = [
     "hello_world.css",
-    "hello_world.html",
-    "hello_world.js",
+    "hello_world_container.html",
   ]
   input_files_base_dir = rebase_path(".", "//")
+  deps = [ ":preprocess_generated" ]
+  manifest_files = [ "$target_gen_dir/$preprocess_gen_manifest" ]
 }
 
 grit("resources") {
@@ -130,6 +164,24 @@ group("resources") {
   public_deps += [
     ...
     "hello_world:resources"
+    ...
+  ]
+}
+```
+
+Also add to `chrome/chrome_paks.gni`
+
+```
+template("chrome_extra_paks") {
+  ... (lots)
+  sources += [
+    ...
+    "$root_gen_dir/chrome/hello_world_resources.pak",
+    ...
+  ]
+  deps += [
+    ...
+    "//chrome/browser/resources/hello_world:resources",
     ...
   ]
 }
@@ -158,7 +210,6 @@ dialogs will also need another class which will subclass `WebDialogDelegate`, th
 #ifndef CHROME_BROWSER_UI_WEBUI_HELLO_WORLD_HELLO_WORLD_H_
 #define CHROME_BROWSER_UI_WEBUI_HELLO_WORLD_HELLO_WORLD_H_
 
-#include "base/macros.h"
 #include "content/public/browser/web_ui_controller.h"
 
 // The WebUI for chrome://hello-world
@@ -166,7 +217,6 @@ class HelloWorldUI : public content::WebUIController {
  public:
   explicit HelloWorldUI(content::WebUI* web_ui);
   ~HelloWorldUI() override;
- private:
 };
 
 #endif // CHROME_BROWSER_UI_WEBUI_HELLO_WORLD_HELLO_WORLD_H_
@@ -177,9 +227,11 @@ class HelloWorldUI : public content::WebUIController {
 #include "chrome/browser/ui/webui/hello_world_ui.h"
 
 #include "chrome/browser/ui/webui/webui_util.h"
-#include "components/hello_world/constants.h"
+#include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
+#include "chrome/grit/hello_world_resources.h"
+#include "chrome/grit/hello_world_resources_map.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 
@@ -196,14 +248,14 @@ HelloWorldUI::HelloWorldUI(content::WebUI* web_ui)
   html_source->UseStringsJs();
 
   // Add required resources.
-  webui::SetupWUIDataSource(html_source, base::make_span(kHelloWorldResources, kHelloWorldResourcesSize), IDR_HELLO_WORLD_HELLO_WORLD_HTML);
+  webui::SetupWebUIDataSource(html_source, base::make_span(kHelloWorldResources, kHelloWorldResourcesSize), IDR_HELLO_WORLD_HELLO_WORLD_HTML);
 
   content::BrowserContext* browser_context =
       web_ui->GetWebContents()->GetBrowserContext();
   content::WebUIDataSource::Add(browser_context, html_source);
 }
 
-HelloWorldUI::~HelloWorldUI() {}
+HelloWorldUI::~HelloWorldUI() = default;
 ```
 
 To ensure that your code actually gets compiled, you need to add it to `chrome/browser/ui/BUILD.gn`:
@@ -212,8 +264,8 @@ To ensure that your code actually gets compiled, you need to add it to `chrome/b
 static_library("ui") {
   sources = [
     ... (lots)
-    "webui/hello_world/hello_world_ui.cc",
-    "webui/hello_world/hello_world_ui.h",
+    "webui/hello_world_ui.cc",
+    "webui/hello_world_ui.h",
 ```
 
 ## Adding your WebUI request handler to the Chrome WebUI factory
@@ -226,6 +278,21 @@ The Chrome WebUI factory is where you setup your new request handler.
 ...
 + if (url.host() == chrome::kChromeUIHelloWorldHost)
 +   return &NewWebUI<HelloWorldUI>;
+```
+
+## Add an entry to resource_ids.spec
+This file is for automatically generating resource ids. Ensure that your entry
+has a unique ID and preserves numerical ordering.
+
+`tools/gritsettings/resource_ids.spec`
+
+```
+  # START chrome/ WebUI resources section
+  ... (lots)
+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/hello_world/resources.grd": {
+    "META": {"sizes": {"includes": [5]}},
+    "includes": [2085],
+  },
 ```
 
 ## Check everything works
@@ -248,12 +315,14 @@ do that, some small changes are needed to your code.  First, we need to add a ne
  public:
   static void Show();
   ~HelloWorldDialog() override;
+  HelloWorldDialog(const HelloWorldDialog&) = delete;
+  HelloWorldDialog& operator=(const HelloWorldDialog&) = delete;
 
  private:
   HelloWorldDialog();
   // ui::WebDialogDelegate:
   ui::ModalType GetDialogModalType() const override;
-  base::string16 GetDialogTitle() const override;
+  std::u16string GetDialogTitle() const override;
   GURL GetDialogContentURL() const override;
   void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const override;
@@ -266,8 +335,6 @@ do that, some small changes are needed to your code.  First, we need to add a ne
   bool ShouldShowDialogTitle() const override;
 
   content::WebUI* webui_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(HelloWorldDialog);
 };
 ```
 
@@ -275,7 +342,7 @@ do that, some small changes are needed to your code.  First, we need to add a ne
 ```c++
  // Leave the old content, but add this new stuff
 
-HelloWorldDialog::HelloWorldDialog() {}
+HelloWorldDialog::HelloWorldDialog() = default;
 
 void HelloWorldDialog::Show() {
   chrome::ShowWebDialog(nullptr, ProfileManager::GetActiveUserProfile(),
@@ -286,8 +353,8 @@ ui::ModalType HelloWorldDialog::GetDialogModalType() const {
   return ui::MODAL_TYPE_NONE;
 }
 
-base::string16 HelloWorldDialog::GetDialogTitle() const {
-  return base::UTF8ToUTF16("Hello world");
+std::u16string HelloWorldDialog::GetDialogTitle() const {
+  return u"Hello world";
 }
 
 GURL HelloWorldDialog::GetDialogContentURL() const {

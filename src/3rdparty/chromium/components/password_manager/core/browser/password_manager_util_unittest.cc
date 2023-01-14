@@ -11,7 +11,6 @@
 
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/autofill/core/common/password_generation_util.h"
@@ -36,9 +35,9 @@ constexpr char kTestFederationURL[] = "https://google.com/";
 constexpr char kTestProxyOrigin[] = "http://proxy.com/";
 constexpr char kTestProxySignonRealm[] = "proxy.com/realm";
 constexpr char kTestURL[] = "https://example.com/login/";
-constexpr char kTestUsername[] = "Username";
-constexpr char kTestUsername2[] = "Username2";
-constexpr char kTestPassword[] = "12345";
+constexpr char16_t kTestUsername[] = u"Username";
+constexpr char16_t kTestUsername2[] = u"Username2";
+constexpr char16_t kTestPassword[] = u"12345";
 
 class MockPasswordManagerClient
     : public password_manager::StubPasswordManagerClient {
@@ -60,8 +59,8 @@ PasswordForm GetTestAndroidCredential() {
   form.scheme = PasswordForm::Scheme::kHtml;
   form.url = GURL(kTestAndroidRealm);
   form.signon_realm = kTestAndroidRealm;
-  form.username_value = base::ASCIIToUTF16(kTestUsername);
-  form.password_value = base::ASCIIToUTF16(kTestPassword);
+  form.username_value = kTestUsername;
+  form.password_value = kTestPassword;
   return form;
 }
 
@@ -70,8 +69,8 @@ PasswordForm GetTestCredential() {
   form.scheme = PasswordForm::Scheme::kHtml;
   form.url = GURL(kTestURL);
   form.signon_realm = form.url.GetOrigin().spec();
-  form.username_value = base::ASCIIToUTF16(kTestUsername);
-  form.password_value = base::ASCIIToUTF16(kTestPassword);
+  form.username_value = kTestUsername;
+  form.password_value = kTestPassword;
   return form;
 }
 
@@ -80,8 +79,8 @@ PasswordForm GetTestProxyCredential() {
   form.scheme = PasswordForm::Scheme::kBasic;
   form.url = GURL(kTestProxyOrigin);
   form.signon_realm = kTestProxySignonRealm;
-  form.username_value = base::ASCIIToUTF16(kTestUsername);
-  form.password_value = base::ASCIIToUTF16(kTestPassword);
+  form.username_value = kTestUsername;
+  form.password_value = kTestPassword;
   return form;
 }
 
@@ -102,7 +101,7 @@ TEST(PasswordManagerUtil, TrimUsernameOnlyCredentials) {
   PasswordForm username_only;
   username_only.scheme = PasswordForm::Scheme::kUsernameOnly;
   username_only.signon_realm = kTestAndroidRealm;
-  username_only.username_value = base::ASCIIToUTF16(kTestUsername2);
+  username_only.username_value = kTestUsername2;
   forms.push_back(std::make_unique<PasswordForm>(username_only));
 
   username_only.federation_origin =
@@ -136,6 +135,32 @@ TEST(PasswordManagerUtil, GetSignonRealmWithProtocolExcluded) {
             "localhost/accounts.federation.com");
 }
 
+TEST(PasswordManagerUtil, GetMatchType_Android) {
+  PasswordForm form = GetTestAndroidCredential();
+  form.is_affiliation_based_match = true;
+
+  EXPECT_EQ(GetLoginMatchType::kExact, GetMatchType(form));
+}
+
+TEST(PasswordManagerUtil, GetMatchType_Web) {
+  PasswordForm form = GetTestCredential();
+  form.is_public_suffix_match = true;
+  form.is_affiliation_based_match = true;
+  EXPECT_EQ(GetLoginMatchType::kAffiliated, GetMatchType(form));
+
+  form.is_public_suffix_match = false;
+  form.is_affiliation_based_match = true;
+  EXPECT_EQ(GetLoginMatchType::kAffiliated, GetMatchType(form));
+
+  form.is_public_suffix_match = true;
+  form.is_affiliation_based_match = false;
+  EXPECT_EQ(GetLoginMatchType::kPSL, GetMatchType(form));
+
+  form.is_public_suffix_match = false;
+  form.is_affiliation_based_match = false;
+  EXPECT_EQ(GetLoginMatchType::kExact, GetMatchType(form));
+}
+
 TEST(PasswordManagerUtil, FindBestMatches) {
   const base::Time kNow = base::Time::Now();
   const base::Time kYesterday = kNow - base::TimeDelta::FromDays(1);
@@ -144,7 +169,7 @@ TEST(PasswordManagerUtil, FindBestMatches) {
   struct TestMatch {
     bool is_psl_match;
     base::Time date_last_used;
-    std::string username;
+    std::u16string username;
   };
   struct TestCase {
     const char* description;
@@ -154,39 +179,47 @@ TEST(PasswordManagerUtil, FindBestMatches) {
   } test_cases[] = {
       {"Empty matches", {}, kNotFound, {}},
       {"1 non-psl match",
-       {{.is_psl_match = false, .date_last_used = kNow, .username = "u"}},
+       {{.is_psl_match = false, .date_last_used = kNow, .username = u"u"}},
        0,
        {{"u", 0}}},
       {"1 psl match",
-       {{.is_psl_match = true, .date_last_used = kNow, .username = "u"}},
+       {{.is_psl_match = true, .date_last_used = kNow, .username = u"u"}},
        0,
        {{"u", 0}}},
       {"2 matches with the same username",
-       {{.is_psl_match = false, .date_last_used = kNow, .username = "u"},
-        {.is_psl_match = false, .date_last_used = kYesterday, .username = "u"}},
+       {{.is_psl_match = false, .date_last_used = kNow, .username = u"u"},
+        {.is_psl_match = false,
+         .date_last_used = kYesterday,
+         .username = u"u"}},
        0,
        {{"u", 0}}},
       {"2 matches with different usernames, most recently used taken",
-       {{.is_psl_match = false, .date_last_used = kNow, .username = "u1"},
+       {{.is_psl_match = false, .date_last_used = kNow, .username = u"u1"},
         {.is_psl_match = false,
          .date_last_used = kYesterday,
-         .username = "u2"}},
+         .username = u"u2"}},
        0,
        {{"u1", 0}, {"u2", 1}}},
       {"2 matches with different usernames, non-psl much taken",
-       {{.is_psl_match = false, .date_last_used = kYesterday, .username = "u1"},
-        {.is_psl_match = true, .date_last_used = kNow, .username = "u2"}},
+       {{.is_psl_match = false,
+         .date_last_used = kYesterday,
+         .username = u"u1"},
+        {.is_psl_match = true, .date_last_used = kNow, .username = u"u2"}},
        0,
        {{"u1", 0}, {"u2", 1}}},
       {"8 matches, 3 usernames",
-       {{.is_psl_match = false, .date_last_used = kYesterday, .username = "u2"},
-        {.is_psl_match = true, .date_last_used = kYesterday, .username = "u3"},
-        {.is_psl_match = true, .date_last_used = kYesterday, .username = "u1"},
-        {.is_psl_match = false, .date_last_used = k2DaysAgo, .username = "u3"},
-        {.is_psl_match = true, .date_last_used = kNow, .username = "u1"},
-        {.is_psl_match = false, .date_last_used = kNow, .username = "u2"},
-        {.is_psl_match = true, .date_last_used = kYesterday, .username = "u3"},
-        {.is_psl_match = false, .date_last_used = k2DaysAgo, .username = "u1"}},
+       {{.is_psl_match = false,
+         .date_last_used = kYesterday,
+         .username = u"u2"},
+        {.is_psl_match = true, .date_last_used = kYesterday, .username = u"u3"},
+        {.is_psl_match = true, .date_last_used = kYesterday, .username = u"u1"},
+        {.is_psl_match = false, .date_last_used = k2DaysAgo, .username = u"u3"},
+        {.is_psl_match = true, .date_last_used = kNow, .username = u"u1"},
+        {.is_psl_match = false, .date_last_used = kNow, .username = u"u2"},
+        {.is_psl_match = true, .date_last_used = kYesterday, .username = u"u3"},
+        {.is_psl_match = false,
+         .date_last_used = k2DaysAgo,
+         .username = u"u1"}},
        5,
        {{"u1", 7}, {"u2", 5}, {"u3", 3}}},
 
@@ -201,7 +234,7 @@ TEST(PasswordManagerUtil, FindBestMatches) {
       PasswordForm form;
       form.is_public_suffix_match = match.is_psl_match;
       form.date_last_used = match.date_last_used;
-      form.username_value = base::ASCIIToUTF16(match.username);
+      form.username_value = match.username;
       owning_matches.push_back(form);
     }
     std::vector<const PasswordForm*> matches;
@@ -242,10 +275,10 @@ TEST(PasswordManagerUtil, FindBestMatches) {
 }
 
 TEST(PasswordManagerUtil, FindBestMatchesInProfileAndAccountStores) {
-  const base::string16 kUsername1 = base::ASCIIToUTF16("Username1");
-  const base::string16 kPassword1 = base::ASCIIToUTF16("Password1");
-  const base::string16 kUsername2 = base::ASCIIToUTF16("Username2");
-  const base::string16 kPassword2 = base::ASCIIToUTF16("Password2");
+  const std::u16string kUsername1 = u"Username1";
+  const std::u16string kPassword1 = u"Password1";
+  const std::u16string kUsername2 = u"Username2";
+  const std::u16string kPassword2 = u"Password2";
 
   PasswordForm form;
   form.is_public_suffix_match = false;
@@ -282,13 +315,13 @@ TEST(PasswordManagerUtil, FindBestMatchesInProfileAndAccountStores) {
   std::vector<const PasswordForm*> same_scheme_matches;
   FindBestMatches(matches, PasswordForm::Scheme::kHtml, &same_scheme_matches,
                   &best_matches, &preferred_match);
-  // All 4 matches should be returned in best matches.
-  EXPECT_EQ(best_matches.size(), 4U);
+  // |profile_form1| is filtered out because it's the same as |account_form1|.
+  EXPECT_EQ(best_matches.size(), 3U);
   EXPECT_NE(std::find(best_matches.begin(), best_matches.end(), &account_form1),
             best_matches.end());
   EXPECT_NE(std::find(best_matches.begin(), best_matches.end(), &account_form2),
             best_matches.end());
-  EXPECT_NE(std::find(best_matches.begin(), best_matches.end(), &profile_form1),
+  EXPECT_EQ(std::find(best_matches.begin(), best_matches.end(), &profile_form1),
             best_matches.end());
   EXPECT_NE(std::find(best_matches.begin(), best_matches.end(), &profile_form2),
             best_matches.end());
@@ -297,7 +330,7 @@ TEST(PasswordManagerUtil, FindBestMatchesInProfileAndAccountStores) {
 TEST(PasswordManagerUtil, GetMatchForUpdating_MatchUsername) {
   PasswordForm stored = GetTestCredential();
   PasswordForm parsed = GetTestCredential();
-  parsed.password_value = base::ASCIIToUTF16("new_password");
+  parsed.password_value = u"new_password";
 
   EXPECT_EQ(&stored, GetMatchForUpdating(parsed, {&stored}));
 }
@@ -305,7 +338,7 @@ TEST(PasswordManagerUtil, GetMatchForUpdating_MatchUsername) {
 TEST(PasswordManagerUtil, GetMatchForUpdating_RejectUnknownUsername) {
   PasswordForm stored = GetTestCredential();
   PasswordForm parsed = GetTestCredential();
-  parsed.username_value = base::ASCIIToUTF16("other_username");
+  parsed.username_value = u"other_username";
 
   EXPECT_EQ(nullptr, GetMatchForUpdating(parsed, {&stored}));
 }
@@ -331,7 +364,7 @@ TEST(PasswordManagerUtil, GetMatchForUpdating_MatchUsernamePSLAnotherPassword) {
   PasswordForm stored = GetTestCredential();
   stored.is_public_suffix_match = true;
   PasswordForm parsed = GetTestCredential();
-  parsed.password_value = base::ASCIIToUTF16("new_password");
+  parsed.password_value = u"new_password";
 
   EXPECT_EQ(nullptr, GetMatchForUpdating(parsed, {&stored}));
 }
@@ -352,7 +385,7 @@ TEST(PasswordManagerUtil,
   PasswordForm stored = GetTestCredential();
   stored.is_public_suffix_match = true;
   PasswordForm parsed = GetTestCredential();
-  parsed.new_password_value = base::ASCIIToUTF16("new_password");
+  parsed.new_password_value = u"new_password";
   parsed.password_value.clear();
 
   EXPECT_EQ(nullptr, GetMatchForUpdating(parsed, {&stored}));
@@ -388,14 +421,14 @@ TEST(PasswordManagerUtil, GetMatchForUpdating_EmptyUsernameCMAPI) {
 
 TEST(PasswordManagerUtil, GetMatchForUpdating_EmptyUsernamePickFirst) {
   PasswordForm stored1 = GetTestCredential();
-  stored1.username_value = base::ASCIIToUTF16("Adam");
-  stored1.password_value = base::ASCIIToUTF16("Adam_password");
+  stored1.username_value = u"Adam";
+  stored1.password_value = u"Adam_password";
   PasswordForm stored2 = GetTestCredential();
-  stored2.username_value = base::ASCIIToUTF16("Ben");
-  stored2.password_value = base::ASCIIToUTF16("Ben_password");
+  stored2.username_value = u"Ben";
+  stored2.password_value = u"Ben_password";
   PasswordForm stored3 = GetTestCredential();
-  stored3.username_value = base::ASCIIToUTF16("Cindy");
-  stored3.password_value = base::ASCIIToUTF16("Cindy_password");
+  stored3.username_value = u"Cindy";
+  stored3.password_value = u"Cindy_password";
 
   PasswordForm parsed = GetTestCredential();
   parsed.username_value.clear();
@@ -407,7 +440,7 @@ TEST(PasswordManagerUtil, GetMatchForUpdating_EmptyUsernamePickFirst) {
 
 TEST(PasswordManagerUtil, MakeNormalizedBlocklistedForm_Android) {
   PasswordForm blocklisted_credential = MakeNormalizedBlocklistedForm(
-      password_manager::PasswordStore::FormDigest(GetTestAndroidCredential()));
+      password_manager::PasswordFormDigest(GetTestAndroidCredential()));
   EXPECT_TRUE(blocklisted_credential.blocked_by_user);
   EXPECT_EQ(PasswordForm::Scheme::kHtml, blocklisted_credential.scheme);
   EXPECT_EQ(kTestAndroidRealm, blocklisted_credential.signon_realm);
@@ -416,7 +449,7 @@ TEST(PasswordManagerUtil, MakeNormalizedBlocklistedForm_Android) {
 
 TEST(PasswordManagerUtil, MakeNormalizedBlocklistedForm_Html) {
   PasswordForm blocklisted_credential = MakeNormalizedBlocklistedForm(
-      password_manager::PasswordStore::FormDigest(GetTestCredential()));
+      password_manager::PasswordFormDigest(GetTestCredential()));
   EXPECT_TRUE(blocklisted_credential.blocked_by_user);
   EXPECT_EQ(PasswordForm::Scheme::kHtml, blocklisted_credential.scheme);
   EXPECT_EQ(GURL(kTestURL).GetOrigin().spec(),
@@ -426,7 +459,7 @@ TEST(PasswordManagerUtil, MakeNormalizedBlocklistedForm_Html) {
 
 TEST(PasswordManagerUtil, MakeNormalizedBlocklistedForm_Proxy) {
   PasswordForm blocklisted_credential = MakeNormalizedBlocklistedForm(
-      password_manager::PasswordStore::FormDigest(GetTestProxyCredential()));
+      password_manager::PasswordFormDigest(GetTestProxyCredential()));
   EXPECT_TRUE(blocklisted_credential.blocked_by_user);
   EXPECT_EQ(PasswordForm::Scheme::kBasic, blocklisted_credential.scheme);
   EXPECT_EQ(kTestProxySignonRealm, blocklisted_credential.signon_realm);

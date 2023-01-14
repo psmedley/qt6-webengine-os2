@@ -1722,7 +1722,7 @@ std::unique_ptr<SkAdvancedTypefaceMetrics> LogFontTypeface::onGetAdvancedMetrics
     return info;
 }
 
-//Dummy representation of a Base64 encoded GUID from create_unique_font_name.
+//Placeholder representation of a Base64 encoded GUID from create_unique_font_name.
 #define BASE64_GUID_ID "XXXXXXXXXXXXXXXXXXXXXXXX"
 //Length of GUID representation from create_id, including nullptr terminator.
 #define BASE64_GUID_ID_LEN SK_ARRAY_COUNT(BASE64_GUID_ID)
@@ -2269,14 +2269,6 @@ protected:
                                                     const char* bcp47[], int bcp47Count,
                                                     SkUnichar character) const override {
         return nullptr;
-    }
-
-    virtual SkTypeface* onMatchFaceStyle(const SkTypeface* familyMember,
-                                         const SkFontStyle& fontstyle) const override {
-        // could be in base impl
-        SkString familyName;
-        ((LogFontTypeface*)familyMember)->getFamilyName(&familyName);
-        return this->matchFamilyStyle(familyName.c_str(), fontstyle);
     }
 
     sk_sp<SkTypeface> onMakeFromStreamIndex(std::unique_ptr<SkStreamAsset> stream,

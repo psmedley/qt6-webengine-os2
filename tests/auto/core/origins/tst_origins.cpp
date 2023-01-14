@@ -266,6 +266,8 @@ private Q_SLOTS:
     void mixedXHR();
     void mixedContent_data();
     void mixedContent();
+    void localMediaBlock_data();
+    void localMediaBlock();
 #if defined(WEBSOCKETS)
     void webSocket();
 #endif
@@ -1160,12 +1162,12 @@ void tst_Origins::serviceWorker()
     QVERIFY(verifyLoad(QSL("tst:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
     QVERIFY(eval(QSL("error")).toString()
-            .contains(QSL("Cannot read property 'register' of undefined")));
+             .contains(QSL("Cannot read properties of undefined")));
 
     QVERIFY(verifyLoad(QSL("PathSyntax:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
     QVERIFY(eval(QSL("error")).toString()
-            .contains(QSL("Cannot read property 'register' of undefined")));
+            .contains(QSL("Cannot read properties of undefined")));
 
     QVERIFY(verifyLoad(QSL("PathSyntax-Secure:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
@@ -1175,7 +1177,7 @@ void tst_Origins::serviceWorker()
     QVERIFY(verifyLoad(QSL("PathSyntax-ServiceWorkersAllowed:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
     QVERIFY(eval(QSL("error")).toString()
-            .contains(QSL("Cannot read property 'register' of undefined")));
+            .contains(QSL("Cannot read properties of undefined")));
 
     QVERIFY(verifyLoad(QSL("PathSyntax-Secure-ServiceWorkersAllowed:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
@@ -1184,7 +1186,7 @@ void tst_Origins::serviceWorker()
     QVERIFY(verifyLoad(QSL("PathSyntax-NoAccessAllowed:/resources/serviceWorker.html")));
     QTRY_VERIFY(eval(QSL("done")).toBool());
     QVERIFY(eval(QSL("error")).toString()
-            .contains(QSL("Cannot read property 'register' of undefined")));
+            .contains(QSL("Cannot read properties of undefined")));
 }
 
 // Support for view-source must be enabled explicitly.
@@ -1237,6 +1239,36 @@ void tst_Origins::redirect()
     QCOMPARE(m_handler->requests()[4], QUrl(QStringLiteral("redirect1:/resources/Akronim-Regular.woff2")));
     QCOMPARE(m_handler->requests()[5], QUrl(QStringLiteral("redirect1:/resources/Akronim-Regular.woff2")));
     QCOMPARE(m_handler->requests()[6], QUrl(QStringLiteral("redirect2:/resources/Akronim-Regular.woff2")));
+}
+
+void tst_Origins::localMediaBlock_data()
+{
+    QTest::addColumn<bool>("enableAccess");
+    QTest::addRow("enabled") << true;
+    QTest::addRow("disabled") << false;
+}
+
+void tst_Origins::localMediaBlock()
+{
+    QFETCH(bool, enableAccess);
+
+    std::atomic<bool> accessed = false;
+    HttpServer server;
+    server.setResourceDirs({ QDir(QT_TESTCASE_SOURCEDIR).canonicalPath() + "/resources" });
+    connect(&server, &HttpServer::newRequest, [&](HttpReqRep *) { accessed.store(true); });
+    QVERIFY(server.start());
+
+    ScopedAttribute sa1(m_page->settings(), QWebEngineSettings::LocalContentCanAccessRemoteUrls, enableAccess);
+
+    QVERIFY(verifyLoad("file:" + QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
+                       + "/resources/media.html"));
+    eval("addAudio('" + server.url("/mixedXHR.txt").toString() + "')");
+
+    // Give it a chance to avoid a false positive on the default value of accessed.
+    if (!enableAccess)
+        QTest::qSleep(500);
+    QTRY_COMPARE(accessed.load(), enableAccess);
+
 }
 
 QTEST_MAIN(tst_Origins)

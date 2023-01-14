@@ -61,7 +61,7 @@ struct Referrer;
 } // namespace content
 
 namespace device {
-class GeolocationSystemPermissionManager;
+class GeolocationManager;
 } // namespace device
 
 namespace gl {
@@ -97,7 +97,7 @@ public:
                                               net::ClientCertIdentityList client_certs,
                                               std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
     std::unique_ptr<net::ClientCertStore> CreateClientCertStore(content::BrowserContext *browser_context) override;
-    content::DevToolsManagerDelegate *GetDevToolsManagerDelegate() override;
+    std::unique_ptr<content::DevToolsManagerDelegate> CreateDevToolsManagerDelegate() override;
     content::PlatformNotificationService * GetPlatformNotificationService(content::BrowserContext *browser_context) override;
 
     std::string GetApplicationLocale() override;
@@ -117,6 +117,9 @@ public:
     void ExposeInterfacesToRenderer(service_manager::BinderRegistry *registry,
                                     blink::AssociatedInterfaceRegistry *associated_registry,
                                     content::RenderProcessHost *render_process_host) override;
+    bool BindAssociatedReceiverFromFrame(content::RenderFrameHost *render_frame_host,
+                                         const std::string &interface_name,
+                                         mojo::ScopedInterfaceEndpointHandle *handle) override;
 
     bool CanCreateWindow(content::RenderFrameHost *opener,
                          const GURL &opener_url,
@@ -145,23 +148,23 @@ public:
 
     bool AllowAppCache(const GURL &manifest_url,
                        const GURL &first_party,
-                       const base::Optional<url::Origin> &top_frame_origin,
+                       const absl::optional<url::Origin> &top_frame_origin,
                        content::BrowserContext *context) override;
     content::AllowServiceWorkerResult AllowServiceWorker(
             const GURL &scope,
             const GURL &site_for_cookies,
-            const base::Optional<url::Origin> &top_frame_origin,
+            const absl::optional<url::Origin> &top_frame_origin,
             const GURL &script_url,
             content::BrowserContext *context) override;
 
     void AllowWorkerFileSystem(const GURL &url,
                                content::BrowserContext *context,
-                               const std::vector<content::GlobalFrameRoutingId> &render_frames,
+                               const std::vector<content::GlobalRenderFrameHostId> &render_frames,
                                base::OnceCallback<void(bool)> callback) override;
 
     bool AllowWorkerIndexedDB(const GURL &url,
                               content::BrowserContext *context,
-                              const std::vector<content::GlobalFrameRoutingId> &render_frames) override;
+                              const std::vector<content::GlobalRenderFrameHostId> &render_frames) override;
     AllowWebBluetoothResult AllowWebBluetooth(content::BrowserContext *browser_context,
                                               const url::Origin &requesting_origin,
                                               const url::Origin &embedding_origin) override;
@@ -169,7 +172,7 @@ public:
 #if QT_CONFIG(webengine_geolocation)
     std::unique_ptr<device::LocationProvider> OverrideSystemLocationProvider() override;
 #endif
-    device::GeolocationSystemPermissionManager *GetLocationPermissionManager() override;
+    device::GeolocationManager *GetGeolocationManager() override;
 
     bool ShouldIsolateErrorPage(bool in_main_frame) override;
     bool ShouldUseProcessPerSite(content::BrowserContext *browser_context, const GURL &effective_url) override;
@@ -203,13 +206,14 @@ public:
 
     bool HandleExternalProtocol(
             const GURL &url,
-            base::OnceCallback<content::WebContents*()> web_contents_getter,
+            base::RepeatingCallback<content::WebContents*()> web_contents_getter,
             int child_id,
+            int frame_tree_node_id,
             content::NavigationUIData *navigation_data,
             bool is_main_frame,
             ui::PageTransition page_transition,
             bool has_user_gesture,
-            const base::Optional<url::Origin> &initiating_origin,
+            const absl::optional<url::Origin> &initiating_origin,
             mojo::PendingRemote<network::mojom::URLLoaderFactory> *out_factory) override;
 
     std::vector<std::unique_ptr<blink::URLLoaderThrottle>> CreateURLLoaderThrottles(
@@ -230,7 +234,7 @@ public:
                                     int render_process_id,
                                     URLLoaderFactoryType type,
                                     const url::Origin &request_initiator,
-                                    base::Optional<int64_t> navigation_id,
+                                    absl::optional<int64_t> navigation_id,
                                     ukm::SourceIdObj ukm_source_id,
                                     mojo::PendingReceiver<network::mojom::URLLoaderFactory> *factory_receiver,
                                     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient> *header_client,

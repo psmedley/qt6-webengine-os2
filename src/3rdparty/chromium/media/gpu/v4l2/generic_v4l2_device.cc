@@ -18,9 +18,9 @@
 #include <algorithm>
 #include <memory>
 
+#include "base/cxx17_backports.h"
 #include "base/files/scoped_file.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -48,6 +48,32 @@ using media_gpu_v4l2::StubPathMap;
 #endif
 
 namespace media {
+
+namespace {
+
+uint32_t V4L2PixFmtToDrmFormat(uint32_t format) {
+  switch (format) {
+    case V4L2_PIX_FMT_NV12:
+    case V4L2_PIX_FMT_NV12M:
+      return DRM_FORMAT_NV12;
+
+    case V4L2_PIX_FMT_YUV420:
+    case V4L2_PIX_FMT_YUV420M:
+      return DRM_FORMAT_YUV420;
+
+    case V4L2_PIX_FMT_YVU420:
+      return DRM_FORMAT_YVU420;
+
+    case V4L2_PIX_FMT_RGB32:
+      return DRM_FORMAT_ARGB8888;
+
+    default:
+      DVLOGF(1) << "Unrecognized format " << FourccToString(format);
+      return 0;
+  }
+}
+
+}  // namespace
 
 GenericV4L2Device::GenericV4L2Device() {
 #if BUILDFLAG(USE_LIBV4L2)

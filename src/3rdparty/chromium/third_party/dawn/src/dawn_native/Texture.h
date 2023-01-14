@@ -30,7 +30,8 @@ namespace dawn_native {
 
     MaybeError ValidateTextureDescriptor(const DeviceBase* device,
                                          const TextureDescriptor* descriptor);
-    MaybeError ValidateTextureViewDescriptor(const TextureBase* texture,
+    MaybeError ValidateTextureViewDescriptor(const DeviceBase* device,
+                                             const TextureBase* texture,
                                              const TextureViewDescriptor* descriptor);
     TextureViewDescriptor GetTextureViewDescriptorWithDefaults(
         const TextureBase* texture,
@@ -39,11 +40,7 @@ namespace dawn_native {
     bool IsValidSampleCount(uint32_t sampleCount);
 
     static constexpr wgpu::TextureUsage kReadOnlyTextureUsages =
-        wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::Sampled | kReadOnlyStorageTexture;
-
-    static constexpr wgpu::TextureUsage kWritableTextureUsages =
-        wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::Storage |
-        wgpu::TextureUsage::RenderAttachment;
+        wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::TextureBinding | kReadOnlyStorageTexture;
 
     class TextureBase : public ObjectBase {
       public:
@@ -64,7 +61,13 @@ namespace dawn_native {
         SubresourceRange GetAllSubresources() const;
         uint32_t GetSampleCount() const;
         uint32_t GetSubresourceCount() const;
+
+        // |GetUsage| returns the usage with which the texture was created using the base WebGPU
+        // API. The dawn-internal-usages extension may add additional usages. |GetInternalUsage|
+        // returns the union of base usage and the usages added by the extension.
         wgpu::TextureUsage GetUsage() const;
+        wgpu::TextureUsage GetInternalUsage() const;
+
         TextureState GetTextureState() const;
         uint32_t GetSubresourceIndex(uint32_t mipLevel, uint32_t arraySlice, Aspect aspect) const;
         bool IsSubresourceContentInitialized(const SubresourceRange& range) const;
@@ -86,8 +89,8 @@ namespace dawn_native {
                                             const Extent3D& extent) const;
 
         // Dawn API
-        TextureViewBase* CreateView(const TextureViewDescriptor* descriptor = nullptr);
-        void Destroy();
+        TextureViewBase* APICreateView(const TextureViewDescriptor* descriptor = nullptr);
+        void APIDestroy();
 
       protected:
         void DestroyInternal();
@@ -98,15 +101,15 @@ namespace dawn_native {
 
         MaybeError ValidateDestroy() const;
         wgpu::TextureDimension mDimension;
-        // TODO(cwallez@chromium.org): This should be deduplicated in the Device
         const Format& mFormat;
         Extent3D mSize;
         uint32_t mMipLevelCount;
         uint32_t mSampleCount;
         wgpu::TextureUsage mUsage = wgpu::TextureUsage::None;
+        wgpu::TextureUsage mInternalUsage = wgpu::TextureUsage::None;
         TextureState mState;
 
-        // TODO(natlee@microsoft.com): Use a more optimized data structure to save space
+        // TODO(crbug.com/dawn/845): Use a more optimized data structure to save space
         std::vector<bool> mIsSubresourceContentInitializedAtIndex;
     };
 
@@ -133,7 +136,6 @@ namespace dawn_native {
 
         Ref<TextureBase> mTexture;
 
-        // TODO(cwallez@chromium.org): This should be deduplicated in the Device
         const Format& mFormat;
         wgpu::TextureViewDimension mDimension;
         SubresourceRange mRange;

@@ -20,8 +20,6 @@
 #include "dawn_native/Instance.h"
 #include "dawn_native/Surface.h"
 
-#include <spirv_cross.hpp>
-
 namespace dawn_native { namespace null {
 
     // Implementation of pre-Device objects: the null adapter, null backend connection and Connect()
@@ -31,10 +29,14 @@ namespace dawn_native { namespace null {
         mAdapterType = wgpu::AdapterType::CPU;
 
         // Enable all extensions by default for the convenience of tests.
-        mSupportedExtensions.extensionsBitSet.flip();
+        mSupportedExtensions.extensionsBitSet.set();
     }
 
     Adapter::~Adapter() = default;
+
+    bool Adapter::SupportsExternalImages() const {
+        return false;
+    }
 
     // Used for the tests that intend to use an adapter without all extensions enabled.
     void Adapter::SetSupportedExtensions(const std::vector<const char*>& requiredExtensions) {
@@ -92,52 +94,54 @@ namespace dawn_native { namespace null {
         return DeviceBase::Initialize(new Queue(this));
     }
 
-    ResultOrError<BindGroupBase*> Device::CreateBindGroupImpl(
+    ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
         const BindGroupDescriptor* descriptor) {
-        return new BindGroup(this, descriptor);
+        return AcquireRef(new BindGroup(this, descriptor));
     }
-    ResultOrError<BindGroupLayoutBase*> Device::CreateBindGroupLayoutImpl(
+    ResultOrError<Ref<BindGroupLayoutBase>> Device::CreateBindGroupLayoutImpl(
         const BindGroupLayoutDescriptor* descriptor) {
-        return new BindGroupLayout(this, descriptor);
+        return AcquireRef(new BindGroupLayout(this, descriptor));
     }
     ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(const BufferDescriptor* descriptor) {
         DAWN_TRY(IncrementMemoryUsage(descriptor->size));
         return AcquireRef(new Buffer(this, descriptor));
     }
-    CommandBufferBase* Device::CreateCommandBuffer(CommandEncoder* encoder,
-                                                   const CommandBufferDescriptor* descriptor) {
-        return new CommandBuffer(encoder, descriptor);
+    ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
+        CommandEncoder* encoder,
+        const CommandBufferDescriptor* descriptor) {
+        return AcquireRef(new CommandBuffer(encoder, descriptor));
     }
-    ResultOrError<ComputePipelineBase*> Device::CreateComputePipelineImpl(
+    ResultOrError<Ref<ComputePipelineBase>> Device::CreateComputePipelineImpl(
         const ComputePipelineDescriptor* descriptor) {
-        return new ComputePipeline(this, descriptor);
+        return AcquireRef(new ComputePipeline(this, descriptor));
     }
-    ResultOrError<PipelineLayoutBase*> Device::CreatePipelineLayoutImpl(
+    ResultOrError<Ref<PipelineLayoutBase>> Device::CreatePipelineLayoutImpl(
         const PipelineLayoutDescriptor* descriptor) {
-        return new PipelineLayout(this, descriptor);
+        return AcquireRef(new PipelineLayout(this, descriptor));
     }
-    ResultOrError<QuerySetBase*> Device::CreateQuerySetImpl(const QuerySetDescriptor* descriptor) {
-        return new QuerySet(this, descriptor);
+    ResultOrError<Ref<QuerySetBase>> Device::CreateQuerySetImpl(
+        const QuerySetDescriptor* descriptor) {
+        return AcquireRef(new QuerySet(this, descriptor));
     }
-    ResultOrError<RenderPipelineBase*> Device::CreateRenderPipelineImpl(
+    ResultOrError<Ref<RenderPipelineBase>> Device::CreateRenderPipelineImpl(
         const RenderPipelineDescriptor* descriptor) {
-        return new RenderPipeline(this, descriptor);
+        return AcquireRef(new RenderPipeline(this, descriptor));
     }
-    ResultOrError<SamplerBase*> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
-        return new Sampler(this, descriptor);
+    ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
+        return AcquireRef(new Sampler(this, descriptor));
     }
-    ResultOrError<ShaderModuleBase*> Device::CreateShaderModuleImpl(
+    ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
         const ShaderModuleDescriptor* descriptor,
         ShaderModuleParseResult* parseResult) {
         Ref<ShaderModule> module = AcquireRef(new ShaderModule(this, descriptor));
         DAWN_TRY(module->Initialize(parseResult));
-        return module.Detach();
+        return module;
     }
-    ResultOrError<SwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(
         const SwapChainDescriptor* descriptor) {
-        return new OldSwapChain(this, descriptor);
+        return AcquireRef(new OldSwapChain(this, descriptor));
     }
-    ResultOrError<NewSwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<NewSwapChainBase>> Device::CreateSwapChainImpl(
         Surface* surface,
         NewSwapChainBase* previousSwapChain,
         const SwapChainDescriptor* descriptor) {
@@ -146,10 +150,10 @@ namespace dawn_native { namespace null {
     ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(const TextureDescriptor* descriptor) {
         return AcquireRef(new Texture(this, descriptor, TextureBase::TextureState::OwnedInternal));
     }
-    ResultOrError<TextureViewBase*> Device::CreateTextureViewImpl(
+    ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor) {
-        return new TextureView(texture, descriptor);
+        return AcquireRef(new TextureView(texture, descriptor));
     }
 
     ResultOrError<std::unique_ptr<StagingBufferBase>> Device::CreateStagingBuffer(size_t size) {
@@ -203,7 +207,7 @@ namespace dawn_native { namespace null {
 
     MaybeError Device::IncrementMemoryUsage(uint64_t bytes) {
         static_assert(kMaxMemoryUsage <= std::numeric_limits<size_t>::max(), "");
-        if (bytes > kMaxMemoryUsage || mMemoryUsage + bytes > kMaxMemoryUsage) {
+        if (bytes > kMaxMemoryUsage || mMemoryUsage > kMaxMemoryUsage - bytes) {
             return DAWN_OUT_OF_MEMORY_ERROR("Out of memory.");
         }
         mMemoryUsage += bytes;
@@ -216,25 +220,27 @@ namespace dawn_native { namespace null {
     }
 
     MaybeError Device::TickImpl() {
-        SubmitPendingOperations();
-        return {};
+        return SubmitPendingOperations();
     }
 
-    ExecutionSerial Device::CheckAndUpdateCompletedSerials() {
+    ResultOrError<ExecutionSerial> Device::CheckAndUpdateCompletedSerials() {
         return GetLastSubmittedCommandSerial();
     }
 
     void Device::AddPendingOperation(std::unique_ptr<PendingOperation> operation) {
         mPendingOperations.emplace_back(std::move(operation));
     }
-    void Device::SubmitPendingOperations() {
+
+    MaybeError Device::SubmitPendingOperations() {
         for (auto& operation : mPendingOperations) {
             operation->Execute();
         }
         mPendingOperations.clear();
 
-        CheckPassedSerials();
+        DAWN_TRY(CheckPassedSerials());
         IncrementLastSubmittedCommandSerial();
+
+        return {};
     }
 
     // BindGroupDataHolder
@@ -261,6 +267,7 @@ namespace dawn_native { namespace null {
     Buffer::Buffer(Device* device, const BufferDescriptor* descriptor)
         : BufferBase(device, descriptor) {
         mBackingData = std::unique_ptr<uint8_t[]>(new uint8_t[GetSize()]);
+        mAllocatedSize = GetSize();
     }
 
     Buffer::~Buffer() {
@@ -334,8 +341,13 @@ namespace dawn_native { namespace null {
     }
 
     MaybeError Queue::SubmitImpl(uint32_t, CommandBufferBase* const*) {
-        ToBackend(GetDevice())->SubmitPendingOperations();
-        return {};
+        Device* device = ToBackend(GetDevice());
+
+        // The Vulkan, D3D12 and Metal implementation all tick the device here,
+        // for testing purposes we should also tick in the null implementation.
+        DAWN_TRY(device->Tick());
+
+        return device->SubmitPendingOperations();
     }
 
     MaybeError Queue::WriteBufferImpl(BufferBase* buffer,
@@ -349,19 +361,18 @@ namespace dawn_native { namespace null {
     // SwapChain
 
     // static
-    ResultOrError<SwapChain*> SwapChain::Create(Device* device,
-                                                Surface* surface,
-                                                NewSwapChainBase* previousSwapChain,
-                                                const SwapChainDescriptor* descriptor) {
-        std::unique_ptr<SwapChain> swapchain =
-            std::make_unique<SwapChain>(device, surface, descriptor);
+    ResultOrError<Ref<SwapChain>> SwapChain::Create(Device* device,
+                                                    Surface* surface,
+                                                    NewSwapChainBase* previousSwapChain,
+                                                    const SwapChainDescriptor* descriptor) {
+        Ref<SwapChain> swapchain = AcquireRef(new SwapChain(device, surface, descriptor));
         DAWN_TRY(swapchain->Initialize(previousSwapChain));
-        return swapchain.release();
+        return swapchain;
     }
 
     MaybeError SwapChain::Initialize(NewSwapChainBase* previousSwapChain) {
         if (previousSwapChain != nullptr) {
-            // TODO(cwallez@chromium.org): figure out what should happen when surfaces are used by
+            // TODO(crbug.com/dawn/269): figure out what should happen when surfaces are used by
             // multiple backends one after the other. It probably needs to block until the backend
             // and GPU are completely finished with the previous swapchain.
             if (previousSwapChain->GetBackendType() != wgpu::BackendType::Null) {
@@ -375,21 +386,23 @@ namespace dawn_native { namespace null {
     SwapChain::~SwapChain() = default;
 
     MaybeError SwapChain::PresentImpl() {
-        mTexture->Destroy();
+        mTexture->APIDestroy();
         mTexture = nullptr;
         return {};
     }
 
     ResultOrError<TextureViewBase*> SwapChain::GetCurrentTextureViewImpl() {
         TextureDescriptor textureDesc = GetSwapChainBaseTextureDescriptor(this);
+        // TODO(dawn:723): change to not use AcquireRef for reentrant object creation.
         mTexture = AcquireRef(
             new Texture(GetDevice(), &textureDesc, TextureBase::TextureState::OwnedInternal));
-        return mTexture->CreateView();
+        // TODO(dawn:723): change to not use AcquireRef for reentrant object creation.
+        return mTexture->APICreateView();
     }
 
     void SwapChain::DetachFromSurfaceImpl() {
         if (mTexture != nullptr) {
-            mTexture->Destroy();
+            mTexture->APIDestroy();
             mTexture = nullptr;
         }
     }
@@ -412,7 +425,7 @@ namespace dawn_native { namespace null {
     }
 
     TextureBase* OldSwapChain::GetNextTextureImpl(const TextureDescriptor* descriptor) {
-        return GetDevice()->CreateTexture(descriptor);
+        return GetDevice()->APICreateTexture(descriptor);
     }
 
     MaybeError OldSwapChain::OnBeforePresent(TextureViewBase*) {

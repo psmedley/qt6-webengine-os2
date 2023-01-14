@@ -161,9 +161,12 @@ GpuMemoryBufferFactoryNativePixmap::CreateImageForGpuMemoryBuffer(
     gfx::GpuMemoryBufferHandle handle,
     const gfx::Size& size,
     gfx::BufferFormat format,
+    gfx::BufferPlane plane,
     int client_id,
     SurfaceHandle surface_handle) {
   if (handle.type != gfx::NATIVE_PIXMAP)
+    return nullptr;
+  if (plane != gfx::BufferPlane::DEFAULT)
     return nullptr;
 
   scoped_refptr<gfx::NativePixmap> pixmap;
@@ -318,6 +321,9 @@ GpuMemoryBufferFactoryNativePixmap::CreateGpuMemoryBufferFromNativePixmap(
   new_handle.type = gfx::NATIVE_PIXMAP;
   new_handle.id = id;
   new_handle.native_pixmap_handle = pixmap->ExportHandle();
+
+  if (new_handle.native_pixmap_handle.planes.empty())
+    return gfx::GpuMemoryBufferHandle();
 
   // TODO(reveman): Remove this once crbug.com/628334 has been fixed.
   {

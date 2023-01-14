@@ -5,6 +5,7 @@
 #include "services/network/net_log_proxy_sink.h"
 
 #include "base/run_loop.h"
+#include "base/task/thread_pool.h"
 #include "base/test/task_environment.h"
 #include "net/log/test_net_log.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -86,10 +87,16 @@ TEST(NetLogProxySink, TestMultipleObservers) {
       net_log_proxy_source.WaitForUpdateCaptureModes());
 
   std::unique_ptr<net::RecordingNetLogObserver> net_log_observer2;
-  // Create observer2 on a different thread.
-  base::ThreadPool::PostTask(FROM_HERE,
-                             base::BindOnce(&CreateObserver, &net_log_observer2,
-                                            net::NetLogCaptureMode::kDefault));
+  {
+    // Create observer2 on a different thread.
+    base::RunLoop run_loop;
+    base::ThreadPool::PostTaskAndReply(
+        FROM_HERE,
+        base::BindOnce(&CreateObserver, &net_log_observer2,
+                       net::NetLogCaptureMode::kDefault),
+        run_loop.QuitClosure());
+    run_loop.Run();
+  }
   EXPECT_EQ(
       net::NetLogCaptureModeToBit(net::NetLogCaptureMode::kIncludeSensitive) |
           net::NetLogCaptureModeToBit(net::NetLogCaptureMode::kDefault),

@@ -19,11 +19,13 @@
 #include "common/ityp_array.h"
 #include "dawn_native/BindingInfo.h"
 #include "dawn_native/CachedObject.h"
+#include "dawn_native/CompilationMessages.h"
 #include "dawn_native/Error.h"
 #include "dawn_native/Format.h"
 #include "dawn_native/Forward.h"
 #include "dawn_native/IntegerTypes.h"
 #include "dawn_native/PerStage.h"
+#include "dawn_native/VertexFormat.h"
 #include "dawn_native/dawn_platform.h"
 
 #include <bitset>
@@ -36,23 +38,48 @@ namespace tint {
     class Program;
 
     namespace transform {
+        class DataMap;
         class Transform;
         class VertexPulling;
     }  // namespace transform
 
 }  // namespace tint
 
-namespace spirv_cross {
-    class Compiler;
-}
-
 namespace dawn_native {
 
     struct EntryPointMetadata;
 
+    // Base component type of an inter-stage variable
+    enum class InterStageComponentType {
+        Sint,
+        Uint,
+        Float,
+    };
+
+    enum class InterpolationType {
+        Perspective,
+        Linear,
+        Flat,
+    };
+
+    enum class InterpolationSampling {
+        None,
+        Center,
+        Centroid,
+        Sample,
+    };
+
+    using PipelineLayoutEntryPointPair = std::pair<PipelineLayoutBase*, std::string>;
+    struct PipelineLayoutEntryPointPairHashFunc {
+        size_t operator()(const PipelineLayoutEntryPointPair& pair) const;
+    };
+
     // A map from name to EntryPointMetadata.
     using EntryPointMetadataTable =
         std::unordered_map<std::string, std::unique_ptr<EntryPointMetadata>>;
+
+    // Source for a tint program
+    class TintSource;
 
     struct ShaderModuleParseResult {
         ShaderModuleParseResult();
@@ -60,46 +87,67 @@ namespace dawn_native {
         ShaderModuleParseResult(ShaderModuleParseResult&& rhs);
         ShaderModuleParseResult& operator=(ShaderModuleParseResult&& rhs);
 
-#ifdef DAWN_ENABLE_WGSL
+        bool HasParsedShader() const;
+
         std::unique_ptr<tint::Program> tintProgram;
-#endif
-        std::vector<uint32_t> spirv;
+        std::unique_ptr<TintSource> tintSource;
     };
 
-    ResultOrError<ShaderModuleParseResult> ValidateShaderModuleDescriptor(
-        DeviceBase* device,
-        const ShaderModuleDescriptor* descriptor);
+    MaybeError ValidateShaderModuleDescriptor(DeviceBase* device,
+                                              const ShaderModuleDescriptor* descriptor,
+                                              ShaderModuleParseResult* parseResult,
+                                              OwnedCompilationMessages* outMessages);
     MaybeError ValidateCompatibilityWithPipelineLayout(DeviceBase* device,
                                                        const EntryPointMetadata& entryPoint,
                                                        const PipelineLayoutBase* layout);
 
     RequiredBufferSizes ComputeRequiredBufferSizesForLayout(const EntryPointMetadata& entryPoint,
                                                             const PipelineLayoutBase* layout);
-#ifdef DAWN_ENABLE_WGSL
     ResultOrError<tint::Program> RunTransforms(tint::transform::Transform* transform,
-                                               tint::Program* program);
+                                               const tint::Program* program,
+                                               const tint::transform::DataMap& inputs,
+                                               tint::transform::DataMap* outputs,
+                                               OwnedCompilationMessages* messages);
 
-    std::unique_ptr<tint::transform::VertexPulling> MakeVertexPullingTransform(
-        const VertexStateDescriptor& vertexState,
-        const std::string& entryPoint,
-        BindGroupIndex pullingBufferBindingSet);
-#endif
+    /// Creates and adds the tint::transform::VertexPulling::Config to transformInputs.
+    void AddVertexPullingTransformConfig(const VertexState& vertexState,
+                                         const std::string& entryPoint,
+                                         BindGroupIndex pullingBufferBindingSet,
+                                         tint::transform::DataMap* transformInputs);
 
     // Contains all the reflection data for a valid (ShaderModule, entryPoint, stage). They are
     // stored in the ShaderModuleBase and destroyed only when the shader program is destroyed so
     // pointers to EntryPointMetadata are safe to store as long as you also keep a Ref to the
     // ShaderModuleBase.
     struct EntryPointMetadata {
+        // Mirrors wgpu::SamplerBindingLayout but instead stores a single boolean
+        // for isComparison instead of a wgpu::SamplerBindingType enum.
+        struct ShaderSamplerBindingInfo {
+            bool isComparison;
+        };
+
+        // Mirrors wgpu::TextureBindingLayout but instead has a set of compatible sampleTypes
+        // instead of a single enum.
+        struct ShaderTextureBindingInfo {
+            SampleTypeBit compatibleSampleTypes;
+            wgpu::TextureViewDimension viewDimension;
+            bool multisampled;
+        };
+
         // Per-binding shader metadata contains some SPIRV specific information in addition to
         // most of the frontend per-binding information.
-        struct ShaderBindingInfo : BindingInfo {
+        struct ShaderBindingInfo {
             // The SPIRV ID of the resource.
             uint32_t id;
             uint32_t base_type_id;
 
-          private:
-            // Disallow access to unused members.
-            using BindingInfo::visibility;
+            BindingNumber binding;
+            BindingInfoType bindingType;
+
+            BufferBindingLayout buffer;
+            ShaderSamplerBindingInfo sampler;
+            ShaderTextureBindingInfo texture;
+            StorageTextureBindingLayout storageTexture;
         };
 
         // bindings[G][B] is the reflection data for the binding defined with
@@ -108,13 +156,36 @@ namespace dawn_native {
         using BindingInfoArray = ityp::array<BindGroupIndex, BindingGroupInfoMap, kMaxBindGroups>;
         BindingInfoArray bindings;
 
+        struct SamplerTexturePair {
+            BindingSlot sampler;
+            BindingSlot texture;
+        };
+        std::vector<SamplerTexturePair> samplerTexturePairs;
+
         // The set of vertex attributes this entryPoint uses.
-        std::bitset<kMaxVertexAttributes> usedVertexAttributes;
+        ityp::array<VertexAttributeLocation, VertexFormatBaseType, kMaxVertexAttributes>
+            vertexInputBaseTypes;
+        ityp::bitset<VertexAttributeLocation, kMaxVertexAttributes> usedVertexInputs;
 
         // An array to record the basic types (float, int and uint) of the fragment shader outputs.
-        ityp::array<ColorAttachmentIndex, wgpu::TextureComponentType, kMaxColorAttachments>
-            fragmentOutputFormatBaseTypes;
+        struct FragmentOutputVariableInfo {
+            wgpu::TextureComponentType baseType;
+            uint8_t componentCount;
+        };
+        ityp::array<ColorAttachmentIndex, FragmentOutputVariableInfo, kMaxColorAttachments>
+            fragmentOutputVariables;
         ityp::bitset<ColorAttachmentIndex, kMaxColorAttachments> fragmentOutputsWritten;
+
+        struct InterStageVariableInfo {
+            InterStageComponentType baseType;
+            uint32_t componentCount;
+            InterpolationType interpolationType;
+            InterpolationSampling interpolationSampling;
+        };
+        // Now that we only support vertex and fragment stages, there can't be both inter-stage
+        // inputs and outputs in one shader stage.
+        std::bitset<kMaxInterStageShaderVariables> usedInterStageVariables;
+        std::array<InterStageVariableInfo, kMaxInterStageShaderVariables> interStageVariables;
 
         // The local workgroup size declared for a compute entry point (or 0s otehrwise).
         Origin3D localWorkgroupSize;
@@ -128,7 +199,7 @@ namespace dawn_native {
         ShaderModuleBase(DeviceBase* device, const ShaderModuleDescriptor* descriptor);
         ~ShaderModuleBase() override;
 
-        static ShaderModuleBase* MakeError(DeviceBase* device);
+        static Ref<ShaderModuleBase> MakeError(DeviceBase* device);
 
         // Return true iff the program has an entrypoint called `entryPoint`.
         bool HasEntryPoint(const std::string& entryPoint) const;
@@ -144,21 +215,14 @@ namespace dawn_native {
             bool operator()(const ShaderModuleBase* a, const ShaderModuleBase* b) const;
         };
 
-        const std::vector<uint32_t>& GetSpirv() const;
+        const tint::Program* GetTintProgram() const;
 
-#ifdef DAWN_ENABLE_WGSL
-        ResultOrError<std::vector<uint32_t>> GeneratePullingSpirv(
-            const std::vector<uint32_t>& spirv,
-            const VertexStateDescriptor& vertexState,
-            const std::string& entryPoint,
-            BindGroupIndex pullingBufferBindingSet) const;
+        void APIGetCompilationInfo(wgpu::CompilationInfoCallback callback, void* userdata);
 
-        ResultOrError<std::vector<uint32_t>> GeneratePullingSpirv(
-            tint::Program* program,
-            const VertexStateDescriptor& vertexState,
-            const std::string& entryPoint,
-            BindGroupIndex pullingBufferBindingSet) const;
-#endif
+        void InjectCompilationMessages(
+            std::unique_ptr<OwnedCompilationMessages> compilationMessages);
+
+        OwnedCompilationMessages* GetCompilationMessages() const;
 
       protected:
         MaybeError InitializeBase(ShaderModuleParseResult* parseResult);
@@ -166,13 +230,17 @@ namespace dawn_native {
       private:
         ShaderModuleBase(DeviceBase* device, ObjectBase::ErrorTag tag);
 
+        // The original data in the descriptor for caching.
         enum class Type { Undefined, Spirv, Wgsl };
         Type mType;
         std::vector<uint32_t> mOriginalSpirv;
-        std::vector<uint32_t> mSpirv;
         std::string mWgsl;
 
         EntryPointMetadataTable mEntryPoints;
+        std::unique_ptr<tint::Program> mTintProgram;
+        std::unique_ptr<TintSource> mTintSource;  // Keep the tint::Source::File alive
+
+        std::unique_ptr<OwnedCompilationMessages> mCompilationMessages;
     };
 
 }  // namespace dawn_native

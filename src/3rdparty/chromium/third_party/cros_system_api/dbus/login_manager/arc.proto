@@ -60,6 +60,11 @@ message StartArcMiniContainerRequest {
   optional DalvikMemoryProfile dalvik_memory_profile = 9
       [default = MEMORY_PROFILE_DEFAULT];
 
+  // Option to disable download provider for tests that are sensetive to the
+  // external components installaton. Last causes the flakiness in tests like
+  // arc.CacheValidation.
+  optional bool disable_download_provider = 12 [default = false];
+
   // Option to disable media store maintenance task scheduling. Used in tests
   // to prevent unreliable performance measurements and CPU not idle failures.
   optional bool disable_media_store_maintenance = 10 [default = false];
@@ -68,7 +73,7 @@ message StartArcMiniContainerRequest {
   // rosters.
   optional bool arc_generate_pai = 11 [default = false];
 
-  // Next ID to use: 12
+  // Next ID to use: 13
 }
 
 // ARC upgrade options sent from Chrome to session manager. This message is used
@@ -86,7 +91,7 @@ message UpgradeArcContainerRequest {
     SKIP_SETUP_COPY_ON_INIT = 2;
   }
 
-  enum SupervisionTransition {
+  enum ManagementTransition {
     // No transition necessary.
     NONE = 0;
     // Child user is transitioning to regular account, need to lift supervision.
@@ -94,6 +99,9 @@ message UpgradeArcContainerRequest {
     // Regular user is transitioning to child account, need to enable
     // supervision.
     REGULAR_TO_CHILD = 2;
+    // Unmanaged user is transitioning to managed state, need to enable
+    // management.
+    UNMANAGED_TO_MANAGED = 3;
   }
 
   // Account ID of the user to start ARC for. This must be the same as the
@@ -107,8 +115,7 @@ message UpgradeArcContainerRequest {
   // managed.
   optional bool is_managed_adb_sideloading_allowed = 16;
 
-  // See description in StartArcMiniContainerRequest.
-  optional bool disable_ureadahead = 15 [default = false];
+  reserved 15;
 
   // Option to disable ACTION_BOOT_COMPLETED broadcast for 3rd party apps.
   optional bool skip_boot_completed_broadcast = 2 [default = false];
@@ -138,9 +145,12 @@ message UpgradeArcContainerRequest {
   // Preferred languages to set in Android container during the boot.
   repeated string preferred_languages = 8;
 
-  // Option to notify ARC that it should transition from a supervised state to
-  // a non-supervised state, and vice-versa.
-  optional SupervisionTransition supervision_transition = 11;
+  // Option to notify ARC that it should transition from a managed state to an
+  // unmanaged state, and vice-versa.
+  optional ManagementTransition management_transition = 11;
 
-  // Next ID to use: 17
+  // Option to enable Arc Nearby Share.
+  optional bool enable_arc_nearby_share = 17 [default = false];
+
+  // Next ID to use: 18
 }

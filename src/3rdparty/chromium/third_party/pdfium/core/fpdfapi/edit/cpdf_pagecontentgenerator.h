@@ -7,17 +7,18 @@
 #ifndef CORE_FPDFAPI_EDIT_CPDF_PAGECONTENTGENERATOR_H_
 #define CORE_FPDFAPI_EDIT_CPDF_PAGECONTENTGENERATOR_H_
 
+#include <stdint.h>
+
 #include <map>
-#include <memory>
 #include <sstream>
 #include <vector>
 
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
 
 class CPDF_ContentMarks;
 class CPDF_Document;
+class CPDF_FormObject;
 class CPDF_ImageObject;
 class CPDF_Object;
 class CPDF_PageObject;
@@ -40,6 +41,7 @@ class CPDF_PageContentGenerator {
   void ProcessPageObject(std::ostringstream* buf, CPDF_PageObject* pPageObj);
   void ProcessPathPoints(std::ostringstream* buf, CPDF_Path* pPath);
   void ProcessPath(std::ostringstream* buf, CPDF_PathObject* pPathObj);
+  void ProcessForm(std::ostringstream* buf, CPDF_FormObject* pFormObj);
   void ProcessImage(std::ostringstream* buf, CPDF_ImageObject* pImageObj);
   void ProcessGraphics(std::ostringstream* buf, CPDF_PageObject* pPageObj);
   void ProcessDefaultGraphics(std::ostringstream* buf);
@@ -55,13 +57,11 @@ class CPDF_PageContentGenerator {
 
   // Returns a map from content stream index to new stream data. Unmodified
   // streams are not touched.
-  std::map<int32_t, std::unique_ptr<std::ostringstream>>
-  GenerateModifiedStreams();
+  std::map<int32_t, std::ostringstream> GenerateModifiedStreams();
 
   // Add buffer as a stream in page's 'Contents'
   void UpdateContentStreams(
-      const std::map<int32_t, std::unique_ptr<std::ostringstream>>&
-          new_stream_data);
+      std::map<int32_t, std::ostringstream>&& new_stream_data);
 
   // Set the stream index of all page objects with stream index ==
   // |CPDF_PageObject::kNoContentStream|. These are new objects that had not

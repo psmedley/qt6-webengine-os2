@@ -13,7 +13,6 @@
 #include "base/files/platform_file.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/buffer_usage_util.h"
@@ -34,41 +33,59 @@ GbmPixmapWayland::GbmPixmapWayland(WaylandBufferManagerGpu* buffer_manager)
       buffer_id_(buffer_manager->AllocateBufferID()) {}
 
 GbmPixmapWayland::~GbmPixmapWayland() {
-  if (gbm_bo_)
+  if (gbm_bo_ && widget_ != gfx::kNullAcceleratedWidget)
     buffer_manager_->DestroyBuffer(widget_, buffer_id_);
 }
 
-bool GbmPixmapWayland::InitializeBuffer(gfx::Size size,
-                                        gfx::BufferFormat format,
-                                        gfx::BufferUsage usage) {
+bool GbmPixmapWayland::InitializeBuffer(
+    gfx::AcceleratedWidget widget,
+    gfx::Size size,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
+    absl::optional<gfx::Size> visible_area_size) {
+  DCHECK(!visible_area_size ||
+         ((visible_area_size.value().width() <= size.width()) &&
+          (visible_area_size.value().height() <= size.height())));
   TRACE_EVENT0("wayland", "GbmPixmapWayland::InitializeBuffer");
+
+  widget_ = widget;
 
   if (!buffer_manager_->gbm_device())
     return false;
 
   const uint32_t fourcc_format = GetFourCCFormatFromBufferFormat(format);
-  auto gbm_usage = ui::BufferUsageToGbmFlags(usage);
-  std::vector<uint64_t> modifiers;
-  if (!(gbm_usage & GBM_BO_USE_LINEAR))
-    modifiers = buffer_manager_->GetModifiersForBufferFormat(format);
+  const uint32_t gbm_flags = ui::BufferUsageToGbmFlags(usage);
+  auto modifiers = buffer_manager_->GetModifiersForBufferFormat(format);
 
-  gbm_bo_ = buffer_manager_->gbm_device()->CreateBufferWithModifiers(
-      fourcc_format, size, gbm_usage, modifiers);
+  // Create buffer object without format modifiers unless they are explicitly
+  // advertised by the Wayland compositor, via linux-dmabuf protocol.
+  if (modifiers.empty()) {
+    gbm_bo_ = buffer_manager_->gbm_device()->CreateBuffer(fourcc_format, size,
+                                                          gbm_flags);
+  } else {
+    // When buffer |usage| implies on GBM_BO_USE_LINEAR, pass in
+    // DRM_FORMAT_MOD_LINEAR, i.e: no tiling, when creating gbm buffers,
+    // otherwise it fails to create BOs.
+    if (gbm_flags & GBM_BO_USE_LINEAR)
+      modifiers = {DRM_FORMAT_MOD_LINEAR};
+    gbm_bo_ = buffer_manager_->gbm_device()->CreateBufferWithModifiers(
+        fourcc_format, size, gbm_flags, modifiers);
+  }
+
   if (!gbm_bo_) {
     LOG(ERROR) << "Cannot create bo with format= "
-               << gfx::BufferFormatToString(format) << " and usage "
-               << gfx::BufferUsageToString(usage);
+               << gfx::BufferFormatToString(format)
+               << " and usage=" << gfx::BufferUsageToString(usage);
     return false;
   }
 
-  CreateDmabufBasedBuffer();
-  return true;
-}
+  DVLOG(3) << "Created gbm bo. format= " << gfx::BufferFormatToString(format)
+           << " usage=" << gfx::BufferUsageToString(usage);
 
-void GbmPixmapWayland::SetAcceleratedWiget(gfx::AcceleratedWidget widget) {
-  DCHECK(widget != gfx::kNullAcceleratedWidget);
-  DCHECK(widget_ == gfx::kNullAcceleratedWidget);
-  widget_ = widget;
+  visible_area_size_ = visible_area_size ? visible_area_size.value() : size;
+  if (widget_ != gfx::kNullAcceleratedWidget)
+    CreateDmabufBasedBuffer();
+  return true;
 }
 
 bool GbmPixmapWayland::AreDmaBufFdsValid() const {
@@ -118,13 +135,25 @@ bool GbmPixmapWayland::ScheduleOverlayPlane(
     const gfx::Rect& display_bounds,
     const gfx::RectF& crop_rect,
     bool enable_blend,
+    const gfx::Rect& damage_rect,
     std::vector<gfx::GpuFence> acquire_fences,
     std::vector<gfx::GpuFence> release_fences) {
-  // If the widget this pixmap backs has not been assigned before, do it now.
-  if (widget_ == gfx::kNullAcceleratedWidget)
-    SetAcceleratedWiget(widget);
+  DCHECK_NE(widget, gfx::kNullAcceleratedWidget);
 
-  DCHECK_EQ(widget_, widget);
+  // It's possible for a buffer to be attached to a different widget or
+  // wl_surface if this buffer represents an overlay and is being tab-dragged to
+  // a different window. Recreate wl_buffer handle if this happens.
+  // TODO(fangzhoug): Remove this workaround once better buffer management is
+  //   implemented.
+  z_order_ = z_order_set_ ? z_order_ : plane_z_order;
+  if (widget_ != widget || z_order_ != plane_z_order) {
+    if (widget_ != gfx::kNullAcceleratedWidget)
+      buffer_manager_->DestroyBuffer(widget_, buffer_id_);
+    CreateDmabufBasedBuffer();
+    widget_ = widget;
+    z_order_ = plane_z_order;
+  }
+  z_order_set_ = true;
 
   auto* surface = buffer_manager_->GetSurface(widget);
   // This must never be hit.
@@ -140,7 +169,7 @@ bool GbmPixmapWayland::ScheduleOverlayPlane(
                                           : std::make_unique<gfx::GpuFence>(
                                                 std::move(acquire_fences[0])),
                    plane_z_order, plane_transform, display_bounds, crop_rect,
-                   enable_blend),
+                   enable_blend, damage_rect),
       buffer_id_);
   return true;
 }
@@ -191,7 +220,7 @@ void GbmPixmapWayland::CreateDmabufBasedBuffer() {
   }
   // Asks Wayland to create a wl_buffer based on the |file| fd.
   buffer_manager_->CreateDmabufBasedBuffer(
-      std::move(fd), GetBufferSize(), strides, offsets, modifiers,
+      std::move(fd), visible_area_size_, strides, offsets, modifiers,
       gbm_bo_->GetFormat(), plane_count, buffer_id_);
 }
 

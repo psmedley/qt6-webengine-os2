@@ -95,10 +95,10 @@ scoped_refptr<const NGLayoutResult> NGFieldsetLayoutAlgorithm::Layout() {
       intrinsic_block_size_ + borders_.block_end);
 
   // Recompute the block-axis size now that we know our content size.
-  border_box_size_.block_size = ComputeBlockSizeForFragment(
-      ConstraintSpace(), Style(), BorderPadding(),
-      intrinsic_block_size_ + consumed_block_size_,
-      border_box_size_.inline_size, Node().ShouldBeConsideredAsReplaced());
+  border_box_size_.block_size =
+      ComputeBlockSizeForFragment(ConstraintSpace(), Style(), BorderPadding(),
+                                  intrinsic_block_size_ + consumed_block_size_,
+                                  border_box_size_.inline_size);
 
   // The above computation utility knows nothing about fieldset weirdness. The
   // legend may eat from the available content box block size. Make room for
@@ -149,7 +149,8 @@ NGBreakStatus NGFieldsetLayoutAlgorithm::LayoutChildren() {
   bool has_seen_all_children = false;
   if (const auto* token = BreakToken()) {
     const auto child_tokens = token->ChildBreakTokens();
-    if (wtf_size_t break_token_count = child_tokens.size()) {
+    if (wtf_size_t break_token_count =
+            base::checked_cast<wtf_size_t>(child_tokens.size())) {
       scoped_refptr<const NGBlockBreakToken> child_token =
           To<NGBlockBreakToken>(child_tokens[0]);
       if (child_token) {
@@ -358,9 +359,6 @@ NGBreakStatus NGFieldsetLayoutAlgorithm::LayoutFieldsetContent(
         ConstraintSpace(), fieldset_content, *result.get(),
         ConstraintSpace().FragmentainerOffsetAtBfc() + intrinsic_block_size_,
         has_container_separation, &container_builder_);
-    EBreakBetween break_after = JoinFragmentainerBreakValues(
-        result->FinalBreakAfter(), fieldset_content.Style().BreakAfter());
-    container_builder_.SetPreviousBreakAfter(break_after);
   }
 
   if (break_status == NGBreakStatus::kContinue) {
@@ -383,19 +381,24 @@ bool NGFieldsetLayoutAlgorithm::IsFragmentainerOutOfSpace(
 }
 
 MinMaxSizesResult NGFieldsetLayoutAlgorithm::ComputeMinMaxSizes(
-    const MinMaxSizesInput& input) const {
+    const MinMaxSizesFloatInput&) const {
   MinMaxSizesResult result;
 
   bool has_inline_size_containment = Node().ShouldApplyInlineSizeContainment();
   if (has_inline_size_containment) {
     // Size containment does not consider the legend for sizing.
-    base::Optional<MinMaxSizesResult> result_without_children =
+    absl::optional<MinMaxSizesResult> result_without_children =
         CalculateMinMaxSizesIgnoringChildren(Node(), BorderScrollbarPadding());
     if (result_without_children)
       return *result_without_children;
   } else {
     if (NGBlockNode legend = Node().GetRenderedLegend()) {
-      result = ComputeMinAndMaxContentContribution(Style(), legend, input);
+      NGMinMaxConstraintSpaceBuilder builder(ConstraintSpace(), Style(), legend,
+                                             /* is_new_fc */ true);
+      builder.SetAvailableBlockSize(kIndefiniteSize);
+      const auto space = builder.ToConstraintSpace();
+
+      result = ComputeMinAndMaxContentContribution(Style(), legend, space);
       result.sizes += ComputeMinMaxMargins(Style(), legend).InlineSum();
     }
   }
@@ -408,13 +411,19 @@ MinMaxSizesResult NGFieldsetLayoutAlgorithm::ComputeMinMaxSizes(
   // Size containment does not consider the content for sizing.
   if (!has_inline_size_containment) {
     if (NGBlockNode content = Node().GetFieldsetContent()) {
+      NGMinMaxConstraintSpaceBuilder builder(ConstraintSpace(), Style(),
+                                             content,
+                                             /* is_new_fc */ true);
+      builder.SetAvailableBlockSize(kIndefiniteSize);
+      const auto space = builder.ToConstraintSpace();
+
       MinMaxSizesResult content_result =
-          ComputeMinAndMaxContentContribution(Style(), content, input);
+          ComputeMinAndMaxContentContribution(Style(), content, space);
       content_result.sizes +=
           ComputeMinMaxMargins(Style(), content).InlineSum();
       result.sizes.Encompass(content_result.sizes);
-      result.depends_on_percentage_block_size |=
-          content_result.depends_on_percentage_block_size;
+      result.depends_on_block_constraints |=
+          content_result.depends_on_block_constraints;
     }
   }
 
@@ -449,7 +458,7 @@ NGFieldsetLayoutAlgorithm::CreateConstraintSpaceForFieldsetContent(
       /* is_new_fc */ true);
   builder.SetCacheSlot(slot);
   builder.SetAvailableSize(padding_box_size);
-  builder.SetStretchInlineSizeIfAuto(true);
+  builder.SetInlineAutoBehavior(NGAutoBehavior::kStretchImplicit);
   // We pass the container's PercentageResolutionSize because percentage
   // padding for the fieldset content should be computed as they are in
   // the container.
@@ -465,7 +474,6 @@ NGFieldsetLayoutAlgorithm::CreateConstraintSpaceForFieldsetContent(
     SetupSpaceBuilderForFragmentation(ConstraintSpace(), fieldset_content,
                                       block_offset, &builder,
                                       /* is_new_fc */ true);
-    builder.SetEarlyBreakAppeal(container_builder_.BreakAppeal());
   }
   return builder.ToConstraintSpace();
 }

@@ -40,6 +40,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/modules/v8/to_v8_for_modules.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_idbcursor_idbindex_idbobjectstore.h"
 #include "third_party/blink/renderer/core/dom/dom_string_list.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -400,7 +401,8 @@ IDBRequest* IDBObjectStore::DoPutAll(ScriptState* script_state,
     keys.push_back(std::move(key_ptr));
   }
 
-  IDBRequest::Source source = IDBRequest::Source::FromIDBObjectStore(this);
+  const IDBRequest::Source* source =
+      MakeGarbageCollected<IDBRequest::Source>(this);
 
   IDBRequest::AsyncTraceState metrics("IDBObjectStore::putAll");
   if (IsDeleted()) {
@@ -597,13 +599,13 @@ IDBRequest* IDBObjectStore::DoPut(ScriptState* script_state,
   if (exception_state.HadException())
     return nullptr;
   return DoPut(script_state, put_mode,
-               IDBRequest::Source::FromIDBObjectStore(this), value, key.get(),
-               exception_state);
+               MakeGarbageCollected<IDBRequest::Source>(this),
+               value, key.get(), exception_state);
 }
 
 IDBRequest* IDBObjectStore::DoPut(ScriptState* script_state,
                                   mojom::IDBPutMode put_mode,
-                                  const IDBRequest::Source& source,
+                                  const IDBRequest::Source* source,
                                   const ScriptValue& value,
                                   const IDBKey* key,
                                   ExceptionState& exception_state) {

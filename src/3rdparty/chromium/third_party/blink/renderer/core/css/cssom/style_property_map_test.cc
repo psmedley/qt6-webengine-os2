@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/cssom/style_property_map.h"
+
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssstylevalue_string.h"
 #include "third_party/blink/renderer/core/css/cssom/css_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/inline_style_property_map.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
@@ -17,12 +19,14 @@ class StylePropertyMapTest : public PageTestBase {};
 TEST_F(StylePropertyMapTest, SetRevertWithFeatureEnabled) {
   DummyExceptionStateForTesting exception_state;
 
-  HeapVector<CSSStyleValueOrString> revert_string;
-  revert_string.push_back(CSSStyleValueOrString::FromString(" revert"));
+  HeapVector<Member<V8UnionCSSStyleValueOrString>> revert_string;
+  revert_string.push_back(
+      MakeGarbageCollected<V8UnionCSSStyleValueOrString>(" revert"));
 
-  HeapVector<CSSStyleValueOrString> revert_style_value;
-  revert_style_value.push_back(CSSStyleValueOrString::FromCSSStyleValue(
-      CSSKeywordValue::Create("revert", exception_state)));
+  HeapVector<Member<V8UnionCSSStyleValueOrString>> revert_style_value;
+  revert_style_value.push_back(
+      MakeGarbageCollected<V8UnionCSSStyleValueOrString>(
+          CSSKeywordValue::Create("revert", exception_state)));
 
   auto* map =
       MakeGarbageCollected<InlineStylePropertyMap>(GetDocument().body());
@@ -53,8 +57,9 @@ TEST_F(StylePropertyMapTest, SetOverflowClipString) {
 
   DummyExceptionStateForTesting exception_state;
 
-  HeapVector<CSSStyleValueOrString> clip_string;
-  clip_string.push_back(CSSStyleValueOrString::FromString(" clip"));
+  HeapVector<Member<V8UnionCSSStyleValueOrString>> clip_string;
+  clip_string.push_back(
+      MakeGarbageCollected<V8UnionCSSStyleValueOrString>(" clip"));
 
   auto* map =
       MakeGarbageCollected<InlineStylePropertyMap>(GetDocument().body());
@@ -76,8 +81,8 @@ TEST_F(StylePropertyMapTest, SetOverflowClipStyleValue) {
 
   DummyExceptionStateForTesting exception_state;
 
-  HeapVector<CSSStyleValueOrString> clip_style_value;
-  clip_style_value.push_back(CSSStyleValueOrString::FromCSSStyleValue(
+  HeapVector<Member<V8UnionCSSStyleValueOrString>> clip_style_value;
+  clip_style_value.push_back(MakeGarbageCollected<V8UnionCSSStyleValueOrString>(
       CSSKeywordValue::Create("clip", exception_state)));
 
   auto* map =

@@ -27,10 +27,11 @@
 #include <iterator>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "base/template_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
+#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/container_annotations.h"
@@ -571,8 +572,6 @@ class VectorBufferBase {
   T* buffer_;
   wtf_size_t capacity_;
   wtf_size_t size_;
-
-  DISALLOW_COPY_AND_ASSIGN(VectorBufferBase);
 };
 
 template <typename T,
@@ -608,7 +607,7 @@ class VectorBuffer<T, 0, Allocator> : protected VectorBufferBase<T, Allocator> {
 
   bool ExpandBuffer(wtf_size_t new_capacity) {
     size_t size_to_allocate = AllocationSize(new_capacity);
-    if (Allocator::ExpandVectorBacking(buffer_, size_to_allocate)) {
+    if (buffer_ && Allocator::ExpandVectorBacking(buffer_, size_to_allocate)) {
       capacity_ = static_cast<wtf_size_t>(size_to_allocate / sizeof(T));
       return true;
     }
@@ -616,14 +615,22 @@ class VectorBuffer<T, 0, Allocator> : protected VectorBufferBase<T, Allocator> {
   }
 
   inline bool ShrinkBuffer(wtf_size_t new_capacity) {
+    DCHECK(buffer_);
     DCHECK_LT(new_capacity, capacity());
     size_t size_to_allocate = AllocationSize(new_capacity);
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    ANNOTATE_DELETE_BUFFER(buffer_, capacity_, size_);
+#endif
+    bool succeeded = false;
     if (Allocator::ShrinkVectorBacking(buffer_, AllocationSize(capacity()),
                                        size_to_allocate)) {
       capacity_ = static_cast<wtf_size_t>(size_to_allocate / sizeof(T));
-      return true;
+      succeeded = true;
     }
-    return false;
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    ANNOTATE_NEW_BUFFER(buffer_, capacity_, size_);
+#endif
+    return succeeded;
   }
 
   void ResetBufferPointer() {
@@ -699,6 +706,9 @@ class VectorBuffer : protected VectorBufferBase<T, Allocator> {
       Base::AllocateBuffer(capacity);
   }
 
+  VectorBuffer(const VectorBuffer&) = delete;
+  VectorBuffer& operator=(const VectorBuffer&) = delete;
+
   void Destruct() {
     DeallocateBuffer(buffer_);
     buffer_ = nullptr;
@@ -719,7 +729,7 @@ class VectorBuffer : protected VectorBufferBase<T, Allocator> {
       return false;
 
     size_t size_to_allocate = AllocationSize(new_capacity);
-    if (Allocator::ExpandVectorBacking(buffer_, size_to_allocate)) {
+    if (buffer_ && Allocator::ExpandVectorBacking(buffer_, size_to_allocate)) {
       capacity_ = static_cast<wtf_size_t>(size_to_allocate / sizeof(T));
       return true;
     }
@@ -727,6 +737,7 @@ class VectorBuffer : protected VectorBufferBase<T, Allocator> {
   }
 
   inline bool ShrinkBuffer(wtf_size_t new_capacity) {
+    DCHECK(buffer_);
     DCHECK_LT(new_capacity, capacity());
     if (new_capacity <= inlineCapacity) {
       // We need to switch to inlineBuffer.  Vector::ShrinkCapacity will
@@ -735,11 +746,19 @@ class VectorBuffer : protected VectorBufferBase<T, Allocator> {
     }
     DCHECK_NE(buffer_, InlineBuffer());
     size_t new_size = AllocationSize(new_capacity);
-    if (!Allocator::ShrinkVectorBacking(buffer_, AllocationSize(capacity()),
-                                        new_size))
-      return false;
-    capacity_ = static_cast<wtf_size_t>(new_size / sizeof(T));
-    return true;
+    bool succeeded = false;
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    ANNOTATE_DELETE_BUFFER(buffer_, capacity_, size_);
+#endif
+    if (Allocator::ShrinkVectorBacking(buffer_, AllocationSize(capacity()),
+                                       new_size)) {
+      capacity_ = static_cast<wtf_size_t>(new_size / sizeof(T));
+      succeeded = true;
+    }
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    ANNOTATE_NEW_BUFFER(buffer_, capacity_, size_);
+#endif
+    return succeeded;
   }
 
   void ResetBufferPointer() {
@@ -981,8 +1000,6 @@ class VectorBuffer : protected VectorBufferBase<T, Allocator> {
   alignas(T) char inline_buffer_[kInlineBufferSize];
   template <typename U, wtf_size_t inlineBuffer, typename V>
   friend class Deque;
-
-  DISALLOW_COPY_AND_ASSIGN(VectorBuffer);
 };
 
 //
@@ -1794,13 +1811,12 @@ void Vector<T, inlineCapacity, Allocator>::ReserveCapacity(
     Base::AllocateBuffer(new_capacity);
     return;
   }
-#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
   wtf_size_t old_capacity = capacity();
-#endif
   // The Allocator::isGarbageCollected check is not needed.  The check is just
   // a static hint for a compiler to indicate that Base::expandBuffer returns
   // false if Allocator is a PartitionAllocator.
   if (Allocator::kIsGarbageCollected && Base::ExpandBuffer(new_capacity)) {
+    DCHECK_LE(old_capacity, capacity());
     ANNOTATE_CHANGE_CAPACITY(begin(), old_capacity, size_, capacity());
     return;
   }
@@ -1837,7 +1853,6 @@ void Vector<T, inlineCapacity, Allocator>::ShrinkCapacity(
 #endif
   if (new_capacity > 0) {
     if (Base::ShrinkBuffer(new_capacity)) {
-      ANNOTATE_CHANGE_CAPACITY(begin(), old_capacity, size_, capacity());
       return;
     }
 
@@ -2069,7 +2084,7 @@ inline auto Vector<T, inlineCapacity, Allocator>::erase(iterator first,
     -> iterator {
   DCHECK_LE(first, last);
   const wtf_size_t index = static_cast<wtf_size_t>(first - begin());
-  const wtf_size_t diff = std::distance(first, last);
+  const wtf_size_t diff = static_cast<wtf_size_t>(std::distance(first, last));
   EraseAt(index, diff);
   return begin() + index;
 }
@@ -2234,7 +2249,7 @@ namespace base {
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ <= 7
 // Workaround for g++7 and earlier family.
 // Due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80654, without this
-// base::Optional<WTF::Vector<T>> where T is non-copyable causes a compile
+// absl::optional<WTF::Vector<T>> where T is non-copyable causes a compile
 // error. As we know it is not trivially copy constructible, explicitly declare
 // so.
 //

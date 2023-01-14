@@ -15,9 +15,24 @@ Polymer({
     /** @type {!cellular_setup.CellularSetupDelegate} */
     delegate: Object,
 
+    /**
+     * Title of the flow, shown at the top of the dialog. No title shown if the
+     * string is empty.
+     */
     flowTitle: {
       type: String,
       notify: true,
+      value: '',
+    },
+
+    /**
+     * Header for the flow, shown below the title. No header shown if the string
+     * is empty.
+     */
+    flowHeader: {
+      type: String,
+      notify: true,
+      value: '',
     },
 
     /**
@@ -47,8 +62,7 @@ Polymer({
     /**
      * DOM Element corresponding to the visible page.
      *
-     * @private {!SetupSelectionFlowElement|!PsimFlowUiElement|
-     *           !EsimFlowUiElement}
+     * @private {!PsimFlowUiElement|!EsimFlowUiElement}
      */
     currentPage_: {
       type: Object,
@@ -75,44 +89,10 @@ Polymer({
 
   /** @override */
   attached() {
+    // By default eSIM flow is selected.
     if (!this.currentPageName) {
-      this.setCurrentPage_();
+      this.currentPageName = cellularSetup.CellularSetupPageName.ESIM_FLOW_UI;
     }
-  },
-
-  /**
-   * Sets current cellular setup flow, one of eSIM flow, pSIM flow or
-   * selection flow, depending on available pSIM and eSIM slots.
-   * @private
-   */
-  setCurrentPage_() {
-    const networkConfig = network_config.MojoInterfaceProviderImpl.getInstance()
-                              .getMojoServiceRemote();
-    networkConfig.getDeviceStateList().then(response => {
-      const deviceStateList = response.result;
-
-      const deviceState = deviceStateList.find(
-          (device) => device.type ===
-              chromeos.networkConfig.mojom.NetworkType.kCellular);
-
-      if (!deviceState) {
-        this.currentPageName =
-            cellularSetup.CellularSetupPageName.SETUP_FLOW_SELECTION;
-        return;
-      }
-
-      const {pSimSlots, eSimSlots} = getSimSlotCount(deviceState);
-
-      if (pSimSlots > 0 && eSimSlots === 0) {
-        this.currentPageName = cellularSetup.CellularSetupPageName.PSIM_FLOW_UI;
-        return;
-      } else if (pSimSlots === 0 && eSimSlots > 0) {
-        this.currentPageName = cellularSetup.CellularSetupPageName.ESIM_FLOW_UI;
-        return;
-      }
-      this.currentPageName =
-          cellularSetup.CellularSetupPageName.SETUP_FLOW_SELECTION;
-    });
   },
 
   /** @private */
@@ -125,15 +105,7 @@ Polymer({
 
   /** @private */
   onBackwardNavRequested_() {
-    const isNavHandled = this.currentPage_.attemptBackwardNavigation();
-
-    // Subflow returns false in a state where it cannot perform backward
-    // navigation any more. Switch back to the selection flow in this case so
-    // that the user can select a flow again.
-    if (!isNavHandled) {
-      this.currentPageName =
-          cellularSetup.CellularSetupPageName.SETUP_FLOW_SELECTION;
-    }
+    this.currentPage_.navigateBackward();
   },
 
   onCancelRequested_() {
@@ -147,13 +119,6 @@ Polymer({
 
   /** @private */
   onForwardNavRequested_() {
-    // Switch current page to user selected flow when navigating forward from
-    // setup selection.
-    if (this.currentPageName ===
-        cellularSetup.CellularSetupPageName.SETUP_FLOW_SELECTION) {
-      this.currentPageName = this.selectedFlow_;
-      return;
-    }
     this.currentPage_.navigateForward();
   },
 
@@ -166,7 +131,7 @@ Polymer({
    * @param {string} currentPage
    * @private
    */
-  isPSimSelected_(currentPage) {
+  shouldShowPsimFlow_(currentPage) {
     return currentPage === cellularSetup.CellularSetupPageName.PSIM_FLOW_UI;
   },
 
@@ -174,7 +139,7 @@ Polymer({
    * @param {string} currentPage
    * @private
    */
-  isESimSelected_(currentPage) {
+  shouldShowEsimFlow_(currentPage) {
     return currentPage === cellularSetup.CellularSetupPageName.ESIM_FLOW_UI;
   }
 });

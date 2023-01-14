@@ -24,16 +24,19 @@ std::unique_ptr<AudioDecoder> MojoMediaClient::CreateAudioDecoder(
   return nullptr;
 }
 
-SupportedVideoDecoderConfigMap
+SupportedVideoDecoderConfigs
 MojoMediaClient::GetSupportedVideoDecoderConfigs() {
   return {};
+}
+
+VideoDecoderType MojoMediaClient::GetDecoderImplementationType() {
+  return VideoDecoderType::kUnknown;
 }
 
 std::unique_ptr<VideoDecoder> MojoMediaClient::CreateVideoDecoder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     MediaLog* media_log,
     mojom::CommandBufferIdPtr command_buffer_id,
-    VideoDecoderImplementation implementation,
     RequestOverlayInfoCB request_overlay_info_cb,
     const gfx::ColorSpace& target_color_space) {
   return nullptr;
@@ -56,6 +59,16 @@ std::unique_ptr<Renderer> MojoMediaClient::CreateCastRenderer(
   return nullptr;
 }
 #endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
+
+#if defined(OS_WIN)
+std::unique_ptr<Renderer> MojoMediaClient::CreateMediaFoundationRenderer(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    mojom::FrameInterfaceFactory* frame_interfaces,
+    mojo::PendingReceiver<mojom::MediaFoundationRendererExtension>
+        renderer_extension_receiver) {
+  return nullptr;
+}
+#endif  // defined(OS_WIN)
 
 std::unique_ptr<CdmFactory> MojoMediaClient::CreateCdmFactory(
     mojom::FrameInterfaceFactory* frame_interfaces) {

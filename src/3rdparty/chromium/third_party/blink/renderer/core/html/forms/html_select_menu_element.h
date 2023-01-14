@@ -26,20 +26,49 @@ class HTMLSelectMenuElement final : public HTMLElement {
  public:
   explicit HTMLSelectMenuElement(Document&);
 
-  String value() const;
+  String value();
   void setValue(const String&, bool send_events = false);
-
-  bool IsOpen() const;
+  bool open() const;
 
   void Trace(Visitor*) const override;
 
  private:
-  void CreateShadowSubtree();
-  void Open();
-  void Close();
+  class SelectMutationCallback;
+
+  void DidAddUserAgentShadowRoot(ShadowRoot&) override;
+  void OpenListbox();
+  void CloseListbox();
   void UpdatePartElements();
+
+  Element* FirstOptionPart() const;
+  Element* FirstValidButtonPart() const;
+  Element* FirstValidListboxPart() const;
+  Element* FirstValidSelectedValuePart() const;
+  HTMLSlotElement* ButtonSlot() const;
+  HTMLSlotElement* ListboxSlot() const;
+  void EnsureSelectedOptionIsValid();
+  Element* SelectedOption();
   void SetSelectedOption(Element* selected_option);
   void UpdateSelectedValuePartContents();
+
+  void ButtonPartInserted(Element*);
+  void ButtonPartRemoved(Element*);
+  void UpdateButtonPart();
+  void SelectedValuePartInserted(Element*);
+  void SelectedValuePartRemoved(Element*);
+  void UpdateSelectedValuePart();
+  void ListboxPartInserted(Element*);
+  void ListboxPartRemoved(Element*);
+  void UpdateListboxPart();
+  void OptionPartInserted(Element*);
+  void OptionPartRemoved(Element*);
+
+  bool IsValidButtonPart(const Element* part, bool show_warning) const;
+  bool IsValidListboxPart(const Element* part, bool show_warning) const;
+  bool IsValidOptionPart(const Element* part, bool show_warning) const;
+
+  void SetButtonPart(Element* new_button_part);
+  void SetListboxPart(HTMLPopupElement* new_listbox_part);
 
   class ButtonPartEventListener : public NativeEventListener {
    public:
@@ -95,10 +124,14 @@ class HTMLSelectMenuElement final : public HTMLElement {
   Member<OptionPartEventListener> option_part_listener_;
   Member<SlotChangeEventListener> slotchange_listener_;
 
+  Member<SelectMutationCallback> select_mutation_callback_;
+
   Member<Element> button_part_;
   Member<Element> selected_value_part_;
   Member<HTMLPopupElement> listbox_part_;
   HeapLinkedHashSet<Member<Element>> option_parts_;
+  Member<HTMLSlotElement> button_slot_;
+  Member<HTMLSlotElement> listbox_slot_;
   Member<Element> selected_option_;
 };
 

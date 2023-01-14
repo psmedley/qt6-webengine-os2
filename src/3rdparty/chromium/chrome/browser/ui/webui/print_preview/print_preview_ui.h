@@ -17,7 +17,6 @@
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/services/printing/public/mojom/pdf_nup_converter.mojom.h"
@@ -25,6 +24,7 @@
 #include "components/services/print_compositor/public/mojom/print_compositor.mojom.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "printing/mojom/print.mojom-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -77,15 +77,13 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
   bool IsBound() const;
 
   // Setters
-  void SetInitiatorTitle(const base::string16& initiator_title);
+  void SetInitiatorTitle(const std::u16string& initiator_title);
 
-  const base::string16& initiator_title() const { return initiator_title_; }
+  const std::u16string& initiator_title() const { return initiator_title_; }
 
   bool source_is_arc() const { return source_is_arc_; }
 
   bool source_is_modifiable() const { return source_is_modifiable_; }
-
-  bool source_is_pdf() const { return source_is_pdf_; }
 
   bool source_has_selection() const { return source_has_selection_; }
 
@@ -141,11 +139,11 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
   // Determines whether to cancel a print preview request based on the request
   // id.
   // Can be called from any thread.
-  static bool ShouldCancelRequest(const base::Optional<int32_t>& preview_ui_id,
+  static bool ShouldCancelRequest(const absl::optional<int32_t>& preview_ui_id,
                                   int request_id);
 
   // Returns an id to uniquely identify this PrintPreviewUI.
-  base::Optional<int32_t> GetIDForPrintPreviewUI() const;
+  absl::optional<int32_t> GetIDForPrintPreviewUI() const;
 
   // Notifies the Web UI of a print preview request with |request_id|.
   virtual void OnPrintPreviewRequest(int request_id);
@@ -227,6 +225,8 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
  private:
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewDialogControllerUnitTest,
                            TitleAfterReload);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewUIUnitTest,
+                           PrintPreviewFailureCancelsPendingActions);
 
   // Sets the print preview |data|. |index| is zero-based, and can be
   // |COMPLETE_PREVIEW_DOCUMENT_INDEX| to set the entire preview document.
@@ -273,7 +273,10 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
 
   // The unique ID for this class instance. Stored here to avoid calling
   // GetIDForPrintPreviewUI() everywhere.
-  base::Optional<int32_t> id_;
+  absl::optional<int32_t> id_;
+
+  // This UI's client ID with the print backend service manager.
+  uint32_t service_manager_client_id_;
 
   // Weak pointer to the WebUI handler.
   PrintPreviewHandler* const handler_;
@@ -283,9 +286,6 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
 
   // Indicates whether the source document can be modified.
   bool source_is_modifiable_ = true;
-
-  // Indicates whether the source document is a PDF.
-  bool source_is_pdf_ = false;
 
   // Indicates whether the source document has selection.
   bool source_has_selection_ = false;
@@ -298,7 +298,7 @@ class PrintPreviewUI : public ConstrainedWebDialogUI,
 
   // Store the initiator title, used for populating the print preview dialog
   // title.
-  base::string16 initiator_title_;
+  std::u16string initiator_title_;
 
   // The list of 0-based page numbers that will be rendered.
   std::vector<uint32_t> pages_to_render_;

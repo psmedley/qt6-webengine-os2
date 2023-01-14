@@ -105,7 +105,9 @@ class AX_EXPORT AXTree : public AXNode::OwnerTree {
   // should not be trusted any longer.
   virtual bool Unserialize(const AXTreeUpdate& update);
 
-  virtual void UpdateData(const AXTreeData& data);
+  // Used by tests to update the tree data without changing any of the nodes in
+  // the tree, notifying all tree observers in the process.
+  virtual void UpdateDataForTesting(const AXTreeData& data);
 
   // Convert any rectangle from the local coordinate space of one node in
   // the tree, to bounds in the coordinate space of the tree.
@@ -166,11 +168,6 @@ class AX_EXPORT AXTree : public AXNode::OwnerTree {
 
   int size() { return static_cast<int>(id_map_.size()); }
 
-  // Call this to enable support for extra Mac nodes - for each table,
-  // a table column header and a node for each column.
-  void SetEnableExtraMacNodes(bool enabled);
-  bool enable_extra_mac_nodes() const { return enable_extra_mac_nodes_; }
-
   // Return a negative number that's suitable to use for a node ID for
   // internal nodes created automatically by an AXTree, so as not to
   // conflict with positive-numbered node IDs from tree sources.
@@ -179,11 +176,11 @@ class AX_EXPORT AXTree : public AXNode::OwnerTree {
   // Returns the PosInSet of |node|. Looks in node_set_size_pos_in_set_info_map_
   // for cached value. Calls |ComputeSetSizePosInSetAndCache|if no value is
   // present in the cache.
-  base::Optional<int> GetPosInSet(const AXNode& node) override;
+  absl::optional<int> GetPosInSet(const AXNode& node) override;
   // Returns the SetSize of |node|. Looks in node_set_size_pos_in_set_info_map_
   // for cached value. Calls |ComputeSetSizePosInSetAndCache|if no value is
   // present in the cache.
-  base::Optional<int> GetSetSize(const AXNode& node) override;
+  absl::optional<int> GetSetSize(const AXNode& node) override;
 
   Selection GetUnignoredSelection() const override;
 
@@ -362,20 +359,14 @@ class AX_EXPORT AXTree : public AXNode::OwnerTree {
   // The next negative node ID to use for internal nodes.
   AXNodeID next_negative_internal_node_id_ = -1;
 
-  // Whether we should create extra nodes that
-  // are only useful on macOS. Implemented using this flag to allow
-  // this code to be unit-tested on other platforms (for example, more
-  // code sanitizers run on Linux).
-  bool enable_extra_mac_nodes_ = false;
-
   // Contains pos_in_set and set_size data for an AXNode.
   struct NodeSetSizePosInSetInfo {
     NodeSetSizePosInSetInfo();
     ~NodeSetSizePosInSetInfo();
 
-    base::Optional<int> pos_in_set;
-    base::Optional<int> set_size;
-    base::Optional<int> lowest_hierarchical_level;
+    absl::optional<int> pos_in_set;
+    absl::optional<int> set_size;
+    absl::optional<int> lowest_hierarchical_level;
   };
 
   // Represents the content of an ordered set which includes the ordered set
@@ -402,8 +393,8 @@ class AX_EXPORT AXTree : public AXNode::OwnerTree {
       const AXNode& original_node,
       const AXNode* ordered_set,
       const AXNode* local_parent,
-      base::Optional<int> ordered_set_min_level,
-      base::Optional<int> prev_level,
+      absl::optional<int> ordered_set_min_level,
+      absl::optional<int> prev_level,
       OrderedSetItemsMap* items_map_to_be_populated) const;
 
   // Computes the pos_in_set and set_size values of all items in ordered_set and

@@ -5,10 +5,9 @@
 #include "media/capture/video_capture_types.h"
 
 #include "base/check.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/stringprintf.h"
 #include "media/base/limits.h"
-#include "media/base/video_frame.h"
 
 namespace media {
 
@@ -38,10 +37,6 @@ bool VideoCaptureFormat::IsValid() const {
          (frame_rate <= media::limits::kMaxFramesPerSecond) &&
          (pixel_format >= PIXEL_FORMAT_UNKNOWN &&
           pixel_format <= PIXEL_FORMAT_MAX);
-}
-
-size_t VideoCaptureFormat::ImageAllocationSize() const {
-  return VideoFrame::AllocationSize(pixel_format, frame_size);
 }
 
 // static

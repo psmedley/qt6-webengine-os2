@@ -42,14 +42,13 @@ source_set("google_services") {
     "//components/metrics",
     "//components/password_manager/core/common",
     "//components/prefs",
-    "//components/safe_browsing/core:features",
+    "//components/safe_browsing/core/common",
     "//components/safe_browsing/core/common:safe_browsing_prefs",
     "//components/signin/ios/browser",
     "//components/signin/public/identity_manager",
     "//components/signin/public/identity_manager/objc",
     "//components/strings",
     "//components/sync",
-    "//components/ukm/ios:features",
     "//components/unified_consent",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser",
@@ -60,6 +59,7 @@ source_set("google_services") {
     "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/alert_coordinator",
     "//ios/chrome/browser/ui/authentication",
+    "//ios/chrome/browser/ui/authentication:authentication_constants",
     "//ios/chrome/browser/ui/authentication/cells",
     "//ios/chrome/browser/ui/authentication/signin:signin_headers",
     "//ios/chrome/browser/ui/commands",
@@ -79,8 +79,8 @@ source_set("google_services") {
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/common/ui/colors",
     "//ios/public/provider/chrome/browser",
-    "//ios/public/provider/chrome/browser/images",
     "//ios/public/provider/chrome/browser/signin",
+    "//ios/public/provider/chrome/browser/signin:signin_resources_api",
     "//ios/web/common:features",
     "//ui/base",
   ]
@@ -137,7 +137,6 @@ source_set("eg2_tests") {
   testonly = true
   sources = [
     "accounts_table_egtest.mm",
-    "accounts_table_mice_egtest.mm",
     "google_services_settings_egtest.mm",
   ]
   deps = [
@@ -145,14 +144,20 @@ source_set("eg2_tests") {
     "//base",
     "//base/test:test_support",
     "//components/password_manager/core/common",
-    "//components/safe_browsing/core:features",
+    "//components/policy:generated",
+    "//components/policy/core/common:common_constants",
+    "//components/safe_browsing/core/common",
     "//components/safe_browsing/core/common:safe_browsing_prefs",
     "//components/signin/ios/browser:features",
     "//components/signin/public/base",
+    "//components/strings",
     "//ios/chrome/app/strings",
+    "//ios/chrome/browser/policy:policy_util",
     "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/authentication:eg_test_support+eg2",
     "//ios/chrome/browser/ui/bookmarks:eg_test_support+eg2",
+    "//ios/chrome/browser/ui/bookmarks:eg_test_support+eg2",
+    "//ios/chrome/browser/ui/settings:constants",
     "//ios/chrome/browser/ui/settings/google_services:constants",
     "//ios/chrome/test/earl_grey:eg_test_support+eg2",
     "//ios/public/provider/chrome/browser/signin:fake_chrome_identity",
@@ -166,7 +171,10 @@ source_set("eg2_tests") {
 source_set("unit_tests") {
   configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
-  sources = [ "manage_sync_settings_mediator_unittest.mm" ]
+  sources = [
+    "accounts_table_view_controller_unittest.mm",
+    "manage_sync_settings_mediator_unittest.mm",
+  ]
   deps = [
     ":google_services",
     "//base/test:test_support",
@@ -175,16 +183,25 @@ source_set("unit_tests") {
     "//components/prefs:test_support",
     "//components/sync/driver",
     "//components/sync/driver:test_support",
+    "//components/variations:test_support",
+    "//ios/chrome/app/strings:ios_strings_grit",
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/main:test_support",
+    "//ios/chrome/browser/signin",
+    "//ios/chrome/browser/signin:test_support",
     "//ios/chrome/browser/sync",
     "//ios/chrome/browser/sync:test_support",
+    "//ios/chrome/browser/ui/settings/cells",
     "//ios/chrome/browser/ui/settings/google_services:constants",
     "//ios/chrome/browser/ui/table_view",
+    "//ios/chrome/browser/ui/table_view:test_support",
     "//ios/chrome/browser/ui/table_view/cells",
+    "//ios/public/provider/chrome/browser/signin:fake_chrome_identity",
+    "//ios/public/provider/chrome/browser/signin:test_support",
     "//ios/web/public/test",
     "//ios/web/public/test",
     "//testing/gtest",
     "//third_party/ocmock:ocmock",
+    "//ui/base",
   ]
 }

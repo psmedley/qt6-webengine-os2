@@ -27,7 +27,7 @@ namespace tracing {
 // implement the remaining methods of the ProducerEndpoint interface.
 class COMPONENT_EXPORT(TRACING_CPP) PerfettoProducer {
  public:
-  PerfettoProducer(PerfettoTaskRunner* task_runner);
+  explicit PerfettoProducer(base::tracing::PerfettoTaskRunner*);
 
   virtual ~PerfettoProducer();
 
@@ -120,7 +120,7 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoProducer {
 #endif
 
   // TODO(crbug.com/839071): Figure out a good buffer size.
-  static constexpr size_t kSMBSizeBytes = 4 * 1024 * 1024;
+  static constexpr size_t kDefaultSMBSizeBytes = 4 * 1024 * 1024;
 
   // TODO(lri): replace this constant with its version in the client library,
   // when we move over.
@@ -138,7 +138,9 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoProducer {
   // commits while a datasource is being stopped.
   static constexpr uint32_t kShmArbiterBatchCommitDurationMs = 1000;
 
-  PerfettoTaskRunner* task_runner();
+  base::tracing::PerfettoTaskRunner* task_runner();
+
+  size_t GetPreferredSmbSizeBytes();
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -154,7 +156,7 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoProducer {
   // subprocess to start tracing after it connects).
   base::TimeDelta startup_tracing_timeout_ = base::TimeDelta::FromSeconds(60);
 
-  PerfettoTaskRunner* const task_runner_;
+  base::tracing::PerfettoTaskRunner* const task_runner_;
 
   std::atomic<bool> startup_tracing_active_{false};
 

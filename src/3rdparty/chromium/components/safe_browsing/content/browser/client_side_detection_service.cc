@@ -16,15 +16,22 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/strcat.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/client_side_detection_host.h"
+#include "components/safe_browsing/content/browser/client_side_phishing_model.h"
+#include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/core/common/features.h"
+#include "components/safe_browsing/core/common/proto/client_model.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safebrowsing_constants.h"
 #include "components/safe_browsing/core/common/utils.h"
-#include "components/safe_browsing/core/proto/client_model.pb.h"
-#include "components/safe_browsing/core/proto/csd.pb.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -35,18 +42,20 @@
 #include "net/base/escape.h"
 #include "net/base/ip_address.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
 
 namespace safe_browsing {
 
-const int ClientSideDetectionService::kInitialClientModelFetchDelayMs = 10000;
 const int ClientSideDetectionService::kReportsIntervalDays = 1;
 const int ClientSideDetectionService::kMaxReportsPerInterval = 3;
 const int ClientSideDetectionService::kNegativeCacheIntervalDays = 1;
@@ -112,25 +121,12 @@ void ClientSideDetectionService::OnPrefsUpdated() {
   extended_reporting_ = extended_reporting;
 
   if (enabled_) {
-    if (!model_factory_.is_null()) {
-      model_loader_ = model_factory_.Run();
-    } else {
-      model_loader_ = std::make_unique<ModelLoader>(
-          base::BindRepeating(&ClientSideDetectionService::SendModelToRenderers,
-                              base::Unretained(this)),
-          delegate_->GetURLLoaderFactory(), extended_reporting_);
-    }
-    // Refresh the models when the service is enabled.  This can happen when
-    // either of the preferences are toggled, or early during startup if
-    // safe browsing is already enabled. In a lot of cases the model will be
-    // in the cache so it  won't actually be fetched from the network.
-    // We delay the first model fetches to avoid slowing down browser startup.
-    model_loader_->ScheduleFetch(kInitialClientModelFetchDelayMs);
+    update_model_subscription_ =
+        ClientSidePhishingModel::GetInstance()->RegisterCallback(
+            base::BindRepeating(
+                &ClientSideDetectionService::SendModelToRenderers,
+                base::Unretained(this)));
   } else {
-    if (model_loader_) {
-      // Cancel model loads in progress.
-      model_loader_->CancelFetcher();
-    }
     // Invoke pending callbacks with a false verdict.
     for (auto& client_phishing_report : client_phishing_reports_) {
       ClientPhishingReportInfo* info = client_phishing_report.second.get();
@@ -146,13 +142,15 @@ void ClientSideDetectionService::OnPrefsUpdated() {
 
 void ClientSideDetectionService::SendClientReportPhishingRequest(
     std::unique_ptr<ClientPhishingRequest> verdict,
-    ClientReportPhishingRequestCallback callback) {
+    ClientReportPhishingRequestCallback callback,
+    const std::string& access_token) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(
           &ClientSideDetectionService::StartClientReportPhishingRequest,
-          weak_factory_.GetWeakPtr(), std::move(verdict), std::move(callback)));
+          weak_factory_.GetWeakPtr(), std::move(verdict), std::move(callback),
+          access_token));
 }
 
 bool ClientSideDetectionService::IsPrivateIPAddress(
@@ -202,7 +200,8 @@ void ClientSideDetectionService::SendModelToRenderers() {
 
 void ClientSideDetectionService::StartClientReportPhishingRequest(
     std::unique_ptr<ClientPhishingRequest> request,
-    ClientReportPhishingRequestCallback callback) {
+    ClientReportPhishingRequestCallback callback,
+    const std::string& access_token) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!enabled_) {
@@ -212,7 +211,6 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   }
 
   // Fill in metadata about which model we used.
-  request->set_model_filename(model_loader_->name());
   *request->mutable_population() = delegate_->GetUserPopulation();
 
   std::string request_data;
@@ -254,6 +252,14 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
             }
           })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
+  base::UmaHistogramBoolean("SBClientPhishing.RequestWithToken",
+                            !access_token.empty());
+  if (!access_token.empty()) {
+    resource_request->headers.SetHeader(
+        net::HttpRequestHeaders::kAuthorization,
+        base::StrCat({kAuthHeaderBearer, access_token}));
+  }
+
   resource_request->url = GetClientReportUrl(kClientReportPhishingUrl);
   resource_request->method = "POST";
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
@@ -275,6 +281,15 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
 
   // Record that we made a request
   AddPhishingReport(base::Time::Now());
+
+  // The following is to log this ClientPhishingRequest on any open
+  // chrome://safe-browsing pages. If no such page is open, the request is
+  // dropped and the |request| object deleted.
+  base::PostTask(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(&WebUIInfoSingleton::AddToClientPhishingRequestsSent,
+                     base::Unretained(WebUIInfoSingleton::GetInstance()),
+                     std::move(request), access_token));
 }
 
 void ClientSideDetectionService::HandlePhishingVerdict(
@@ -296,6 +311,13 @@ void ClientSideDetectionService::HandlePhishingVerdict(
         base::WrapUnique(new CacheState(response.phishy(), base::Time::Now()));
     is_phishing = response.phishy();
   }
+
+  base::PostTask(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(&WebUIInfoSingleton::AddToClientPhishingResponsesReceived,
+                     base::Unretained(WebUIInfoSingleton::GetInstance()),
+                     std::make_unique<ClientPhishingResponse>(response)));
+
   if (!info->callback.is_null())
     std::move(info->callback).Run(info->phishing_url, is_phishing);
 }
@@ -392,7 +414,9 @@ void ClientSideDetectionService::LoadPhishingReportTimesFromPrefs() {
 
   phishing_report_times_.clear();
   for (const base::Value& timestamp :
-       *delegate_->GetPrefs()->GetList(prefs::kSafeBrowsingCsdPingTimestamps)) {
+       delegate_->GetPrefs()
+           ->GetList(prefs::kSafeBrowsingCsdPingTimestamps)
+           ->GetList()) {
     phishing_report_times_.push_back(
         base::Time::FromDoubleT(timestamp.GetDouble()));
   }
@@ -409,20 +433,21 @@ GURL ClientSideDetectionService::GetClientReportUrl(
   return url;
 }
 
-ModelLoader::ClientModelStatus
-ClientSideDetectionService::GetLastModelStatus() {
-  // |model_loader_| can be null in tests
-  return model_loader_ ? model_loader_->last_client_model_status()
-                       : ModelLoader::MODEL_NEVER_FETCHED;
+const std::string& ClientSideDetectionService::GetModelStr() {
+  return ClientSidePhishingModel::GetInstance()->GetModelStr();
 }
 
-std::string ClientSideDetectionService::GetModelStr() {
-  return model_loader_ ? model_loader_->model_str() : "";
+CSDModelType ClientSideDetectionService::GetModelType() {
+  return ClientSidePhishingModel::GetInstance()->GetModelType();
 }
 
-void ClientSideDetectionService::SetModelLoaderFactoryForTesting(
-    base::RepeatingCallback<std::unique_ptr<ModelLoader>()> factory) {
-  model_factory_ = factory;
+base::ReadOnlySharedMemoryRegion
+ClientSideDetectionService::GetModelSharedMemoryRegion() {
+  return ClientSidePhishingModel::GetInstance()->GetModelSharedMemoryRegion();
+}
+
+const base::File& ClientSideDetectionService::GetVisualTfLiteModel() {
+  return ClientSidePhishingModel::GetInstance()->GetVisualTfLiteModel();
 }
 
 void ClientSideDetectionService::SetURLLoaderFactoryForTesting(

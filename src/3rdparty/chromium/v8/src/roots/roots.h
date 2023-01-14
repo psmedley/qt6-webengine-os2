@@ -88,6 +88,7 @@ class Symbol;
   V(Map, fixed_double_array_map, FixedDoubleArrayMap)                          \
   V(Map, global_dictionary_map, GlobalDictionaryMap)                           \
   V(Map, many_closures_cell_map, ManyClosuresCellMap)                          \
+  V(Map, mega_dom_handler_map, MegaDomHandlerMap)                              \
   V(Map, module_info_map, ModuleInfoMap)                                       \
   V(Map, name_dictionary_map, NameDictionaryMap)                               \
   V(Map, no_closures_cell_map, NoClosuresCellMap)                              \
@@ -110,7 +111,11 @@ class Symbol;
   V(Map, source_text_module_map, SourceTextModuleMap)                          \
   V(Map, swiss_name_dictionary_map, SwissNameDictionaryMap)                    \
   V(Map, synthetic_module_map, SyntheticModuleMap)                             \
-  V(Map, wasm_type_info_map, WasmTypeInfoMap)                                  \
+  IF_WASM(V, Map, wasm_capi_function_data_map, WasmCapiFunctionDataMap)        \
+  IF_WASM(V, Map, wasm_exported_function_data_map,                             \
+          WasmExportedFunctionDataMap)                                         \
+  IF_WASM(V, Map, wasm_js_function_data_map, WasmJSFunctionDataMap)            \
+  IF_WASM(V, Map, wasm_type_info_map, WasmTypeInfoMap)                         \
   V(Map, weak_fixed_array_map, WeakFixedArrayMap)                              \
   V(Map, weak_array_list_map, WeakArrayListMap)                                \
   V(Map, ephemeron_hash_table_map, EphemeronHashTableMap)                      \
@@ -185,9 +190,9 @@ class Symbol;
   /* Canonical off-heap trampoline data */                                     \
   V(ByteArray, off_heap_trampoline_relocation_info,                            \
     OffHeapTrampolineRelocationInfo)                                           \
-  V(CodeDataContainer, trampoline_trivial_code_data_container,                 \
+  V(HeapObject, trampoline_trivial_code_data_container,                        \
     TrampolineTrivialCodeDataContainer)                                        \
-  V(CodeDataContainer, trampoline_promise_rejection_code_data_container,       \
+  V(HeapObject, trampoline_promise_rejection_code_data_container,              \
     TrampolinePromiseRejectionCodeDataContainer)                               \
   /* Canonical scope infos */                                                  \
   V(ScopeInfo, global_this_binding_scope_info, GlobalThisBindingScopeInfo)     \
@@ -210,6 +215,7 @@ class Symbol;
   /* Protectors */                                                             \
   V(PropertyCell, array_constructor_protector, ArrayConstructorProtector)      \
   V(PropertyCell, no_elements_protector, NoElementsProtector)                  \
+  V(PropertyCell, mega_dom_protector, MegaDOMProtector)                        \
   V(PropertyCell, is_concat_spreadable_protector, IsConcatSpreadableProtector) \
   V(PropertyCell, array_species_protector, ArraySpeciesProtector)              \
   V(PropertyCell, typed_array_species_protector, TypedArraySpeciesProtector)   \
@@ -535,6 +541,10 @@ class ReadOnlyRoots {
   V8_INLINE explicit ReadOnlyRoots(Heap* heap);
   V8_INLINE explicit ReadOnlyRoots(Isolate* isolate);
   V8_INLINE explicit ReadOnlyRoots(LocalIsolate* isolate);
+
+  // For `v8_enable_map_packing=true`, this will return a packed (also untagged)
+  // map-word instead of a tagged heap pointer.
+  MapWord one_pointer_filler_map_word();
 
 #define ROOT_ACCESSOR(Type, name, CamelName)     \
   V8_INLINE class Type name() const;             \

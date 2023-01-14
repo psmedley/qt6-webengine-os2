@@ -31,10 +31,6 @@ class MockTransformableVideoFrame
               GetMetadata,
               (),
               (const, override));
-  MOCK_METHOD(webrtc::TransformableFrameInterface::Direction,
-              GetDirection,
-              (),
-              (const, override));
 };
 
 }  // namespace webrtc

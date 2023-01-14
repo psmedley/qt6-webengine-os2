@@ -25,10 +25,10 @@ class DefaultPlatformConfiguration
 
   // ThreadProfilerPlatformConfiguration:
   RuntimeModuleState GetRuntimeModuleState(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 
   RelativePopulations GetEnableRates(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 
   double GetChildProcessEnableFraction(
       metrics::CallStackProfileParams::Process process) const override;
@@ -39,7 +39,7 @@ class DefaultPlatformConfiguration
 
  protected:
   bool IsSupportedForChannel(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 
   bool browser_test_mode_enabled() const { return browser_test_mode_enabled_; }
 
@@ -53,13 +53,13 @@ DefaultPlatformConfiguration::DefaultPlatformConfiguration(
 
 ThreadProfilerPlatformConfiguration::RuntimeModuleState
 DefaultPlatformConfiguration::GetRuntimeModuleState(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   return RuntimeModuleState::kModuleNotRequired;
 }
 
 ThreadProfilerPlatformConfiguration::RelativePopulations
 DefaultPlatformConfiguration::GetEnableRates(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   CHECK(IsSupportedForChannel(release_channel));
 
   if (!release_channel) {
@@ -81,14 +81,12 @@ double DefaultPlatformConfiguration::GetChildProcessEnableFraction(
     case metrics::CallStackProfileParams::GPU_PROCESS:
     case metrics::CallStackProfileParams::NETWORK_SERVICE_PROCESS:
       return 1.0;
-      break;
 
     case metrics::CallStackProfileParams::RENDERER_PROCESS:
       // Run the profiler in all renderer processes if the browser test mode is
       // enabled, otherwise run in 20% of the processes to collect roughly as
       // many profiles for renderer processes as browser processes.
       return browser_test_mode_enabled() ? 1.0 : 0.2;
-      break;
 
     default:
       return 0.0;
@@ -103,7 +101,7 @@ bool DefaultPlatformConfiguration::IsEnabledForThread(
 }
 
 bool DefaultPlatformConfiguration::IsSupportedForChannel(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   // The profiler is always supported for local builds and the CQ.
   if (!release_channel)
     return true;
@@ -125,10 +123,10 @@ class AndroidPlatformConfiguration : public DefaultPlatformConfiguration {
 
   // DefaultPlatformConfiguration:
   RuntimeModuleState GetRuntimeModuleState(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 
   RelativePopulations GetEnableRates(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 
   void RequestRuntimeModuleInstall() const override;
 
@@ -141,7 +139,7 @@ class AndroidPlatformConfiguration : public DefaultPlatformConfiguration {
 
  protected:
   bool IsSupportedForChannel(
-      base::Optional<version_info::Channel> release_channel) const override;
+      absl::optional<version_info::Channel> release_channel) const override;
 };
 
 AndroidPlatformConfiguration::AndroidPlatformConfiguration(
@@ -150,7 +148,7 @@ AndroidPlatformConfiguration::AndroidPlatformConfiguration(
 
 ThreadProfilerPlatformConfiguration::RuntimeModuleState
 AndroidPlatformConfiguration::GetRuntimeModuleState(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   // The module will be present in releases due to having been installed via
   // RequestRuntimeModuleInstall(), and in local/CQ builds of bundle targets
   // where the module was installed with the bundle.
@@ -180,7 +178,7 @@ AndroidPlatformConfiguration::GetRuntimeModuleState(
 
 ThreadProfilerPlatformConfiguration::RelativePopulations
 AndroidPlatformConfiguration::GetEnableRates(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   if (release_channel) {
     CHECK(*release_channel == version_info::Channel::CANARY ||
           *release_channel == version_info::Channel::DEV);
@@ -229,7 +227,7 @@ bool AndroidPlatformConfiguration::IsEnabledForThread(
 }
 
 bool AndroidPlatformConfiguration::IsSupportedForChannel(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   // Enable on canary, for now.
   if (release_channel && *release_channel == version_info::Channel::CANARY)
     return true;
@@ -254,7 +252,7 @@ ThreadProfilerPlatformConfiguration::Create(bool browser_test_mode_enabled) {
 }
 
 bool ThreadProfilerPlatformConfiguration::IsSupported(
-    base::Optional<version_info::Channel> release_channel) const {
+    absl::optional<version_info::Channel> release_channel) const {
   return base::StackSamplingProfiler::IsSupportedForCurrentPlatform() &&
          IsSupportedForChannel(release_channel);
 }

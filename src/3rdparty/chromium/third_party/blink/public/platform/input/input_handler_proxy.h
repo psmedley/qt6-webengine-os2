@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "cc/input/input_handler.h"
 #include "cc/input/snap_fling_controller.h"
 #include "cc/paint/element_id.h"
@@ -68,6 +67,8 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
  public:
   InputHandlerProxy(cc::InputHandler& input_handler,
                     InputHandlerProxyClient* client);
+  InputHandlerProxy(const InputHandlerProxy&) = delete;
+  InputHandlerProxy& operator=(const InputHandlerProxy&) = delete;
   ~InputHandlerProxy() override;
 
   ElasticOverscrollController* elastic_overscroll_controller() {
@@ -171,6 +172,7 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
   void WillShutdown() override;
   void Animate(base::TimeTicks time) override;
   void ReconcileElasticOverscrollAndRootScroll() override;
+  void SetPrefersReducedMotion(bool prefers_reduced_motion) override;
   void UpdateRootLayerStateForSynchronousInputHandler(
       const gfx::ScrollOffset& total_scroll_offset,
       const gfx::ScrollOffset& max_scroll_offset,
@@ -223,6 +225,7 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
   void DispatchSingleInputEvent(std::unique_ptr<EventWithCallback>,
                                 const base::TimeTicks);
   void DispatchQueuedInputEvents();
+  void UpdateElasticOverscroll();
 
   // Helper functions for handling more complicated input events.
   EventDisposition HandleMouseWheel(const blink::WebMouseWheelEvent& event);
@@ -242,7 +245,8 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
       const gfx::PointF& position);
   const cc::InputHandlerPointerResult HandlePointerMove(
       EventWithCallback* event_with_callback,
-      const gfx::PointF& position);
+      const gfx::PointF& position,
+      bool should_cancel_scrollbar_drag);
   const cc::InputHandlerPointerResult HandlePointerUp(
       EventWithCallback* event_with_callback,
       const gfx::PointF& position);
@@ -307,12 +311,12 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
   // within a single touch sequence. This value will get returned for
   // subsequent TouchMove events to allow passive events not to block
   // scrolling.
-  base::Optional<EventDisposition> touch_result_;
+  absl::optional<EventDisposition> touch_result_;
 
   // The result of the last mouse wheel event in a wheel phase sequence. This
   // value is used to determine whether the next wheel scroll is blocked on the
   // Main thread or not.
-  base::Optional<EventDisposition> mouse_wheel_result_;
+  absl::optional<EventDisposition> mouse_wheel_result_;
 
   // Used to record overscroll notifications while an event is being
   // dispatched.  If the event causes overscroll, the overscroll metadata is
@@ -323,7 +327,7 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
 
   // Set only when the compositor input handler is handling a gesture. Tells
   // which source device is currently performing a gesture based scroll.
-  base::Optional<blink::WebGestureDevice> currently_active_gesture_device_;
+  absl::optional<blink::WebGestureDevice> currently_active_gesture_device_;
 
   // Tracks whether the first scroll update gesture event has been seen after a
   // scroll begin. This is set/reset when scroll gestures are processed in
@@ -362,13 +366,14 @@ class BLINK_PLATFORM_EXPORT InputHandlerProxy
   // hit test information is unnecessary (e.g. tests).
   bool event_attribution_enabled_ = true;
 
+  // This tracks whether the user has set prefers reduced motion.
+  bool prefers_reduced_motion_ = false;
+
   // Helpers for the momentum scroll jank UMAs.
   std::unique_ptr<MomentumScrollJankTracker> momentum_scroll_jank_tracker_;
 
   // Swipe to move cursor feature.
   std::unique_ptr<CursorControlHandler> cursor_control_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(InputHandlerProxy);
 };
 
 }  // namespace blink

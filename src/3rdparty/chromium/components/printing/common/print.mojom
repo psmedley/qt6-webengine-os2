@@ -27,7 +27,6 @@ struct PreviewIds {
 struct RequestPrintPreviewParams {
   bool is_from_arc = false;
   bool is_modifiable = false;
-  bool is_pdf = false;
   bool webnode_only = false;
   bool has_selection = false;
   bool selection_only = false;
@@ -149,6 +148,10 @@ struct PrintParams {
   mojo_base.mojom.String16 footer_template;
   // Whether to rasterize a PDF for printing
   bool rasterize_pdf = false;
+  // Override of the DPI to use if `rasterize_pdf` is true.  A non-positive
+  // value would be an invalid choice of a DPI, and indicates no override
+  // should be applied.
+  int32 rasterize_pdf_dpi = 0;
   // True if print backgrounds is requested by the user.
   bool should_print_backgrounds = false;
   // The document type of printed page(s) from render.
@@ -276,6 +279,7 @@ interface PrintRenderFrame {
   // Tells the RenderFrame to switch the CSS to print media type, render every
   // requested page using the print preview document's frame/node, and then
   // switch the CSS back to display media type.
+  [EnableIf=enable_print_preview]
   PrintForSystemDialog();
 
   // Tells the RenderFrame to initiate print preview for the entire document.
@@ -321,24 +325,9 @@ interface PrintManagerHost {
   // rendered pages according to the specified settings.
   DidGetPrintedPagesCount(int32 cookie, uint32 number_pages);
 
-  // Sends the document cookie of the current printer query to the browser.
-  DidGetDocumentCookie(int32 cookie);
-
-  // Sends the accessibility tree corresponding to a document being
-  // printed, needed for a tagged (accessible) PDF.
-  [EnableIf=enable_tagged_pdf]
-  SetAccessibilityTree(int32 cookie, ax.mojom.AXTreeUpdate accessibility_tree);
-
   // Request the default print settings.
   [Sync]
   GetDefaultPrintSettings() => (PrintParams default_settings);
-
-  // Update the current print settings with new |job_settings|.
-  [Sync]
-  UpdatePrintSettings(
-      int32 cookie,
-      mojo_base.mojom.DictionaryValue job_settings)
-      => (PrintPagesParams current_settings, bool canceled);
 
   // Tells the browser that the print dialog has been shown.
   DidShowPrintDialog();
@@ -359,6 +348,13 @@ interface PrintManagerHost {
 
   // Tells the browser printing failed.
   PrintingFailed(int32 cookie);
+
+  // Update the current print settings with new |job_settings|.
+  [EnableIf=enable_print_preview, Sync]
+  UpdatePrintSettings(
+      int32 cookie,
+      mojo_base.mojom.DictionaryValue job_settings)
+      => (PrintPagesParams current_settings, bool canceled);
 
   // Tells the browser to set up the print preview requested by the script. It
   // runs a nested run loop in the renderer until print preview for
@@ -384,4 +380,11 @@ interface PrintManagerHost {
 
   [EnableIf=enable_print_preview]
   MetafileReadyForPrinting(DidPreviewDocumentParams params, int32 request_id);
+
+  // Sends the accessibility tree corresponding to a document being
+  // printed, needed for a tagged (accessible) PDF. Note that
+  // enable_print_preview must be set to true as well, but Mojo cannot express
+  // that. Instead, this dependency is enforced by GN.
+  [EnableIf=enable_tagged_pdf]
+  SetAccessibilityTree(int32 cookie, ax.mojom.AXTreeUpdate accessibility_tree);
 };

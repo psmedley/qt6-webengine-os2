@@ -341,7 +341,7 @@ int HttpAuthController::HandleAuthChallenge(
         // We are establishing a tunnel, we can't show the error page because an
         // active network attacker could control its contents.  Instead, we just
         // fail to establish the tunnel.
-        DCHECK(target_ == HttpAuth::AUTH_PROXY);
+        DCHECK_EQ(target_, HttpAuth::AUTH_PROXY);
         net_log_.EndEventWithNetErrorCode(
             NetLogEventType::AUTH_HANDLE_CHALLENGE, ERR_PROXY_AUTH_UNSUPPORTED);
         return ERR_PROXY_AUTH_UNSUPPORTED;
@@ -397,7 +397,7 @@ void HttpAuthController::ResetAuth(const AuthCredentials& credentials) {
     identity_.credentials = credentials;
 
     // auth_info_ is no longer necessary.
-    auth_info_ = base::nullopt;
+    auth_info_ = absl::nullopt;
   }
 
   DCHECK(identity_.source != HttpAuth::IDENT_SRC_PATH_LOOKUP);
@@ -510,8 +510,8 @@ bool HttpAuthController::SelectNextAuthIdentityToTry() {
     identity_.source = HttpAuth::IDENT_SRC_URL;
     identity_.invalid = false;
     // Extract the username:password from the URL.
-    base::string16 username;
-    base::string16 password;
+    std::u16string username;
+    std::u16string password;
     GetIdentityFromURL(auth_url_, &username, &password);
     identity_.credentials.Set(username, password);
     embedded_identity_used_ = true;
@@ -623,7 +623,7 @@ void HttpAuthController::OnGenerateAuthTokenDone(int result) {
 }
 
 void HttpAuthController::TakeAuthInfo(
-    base::Optional<AuthChallengeInfo>* other) {
+    absl::optional<AuthChallengeInfo>* other) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   auth_info_.swap(*other);
 }

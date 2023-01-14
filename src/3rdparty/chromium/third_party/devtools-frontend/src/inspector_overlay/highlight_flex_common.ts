@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {PathCommands, Position, Quad} from './common.js';
-import {BoxStyle, buildPath, createPathForQuad, drawPathWithLineStyle, emptyBounds, fillPathWithBoxStyle, hatchFillPath, LineStyle} from './highlight_common.js';
+import type {PathCommands, Position, Quad} from './common.js';
+import type {BoxStyle, LineStyle} from './highlight_common.js';
+import {buildPath, createPathForQuad, drawPathWithLineStyle, emptyBounds, fillPathWithBoxStyle, hatchFillPath} from './highlight_common.js';
 
 type FlexLinesData = FlexItemData[][];
 
@@ -35,6 +36,7 @@ export interface FlexItemHighlight {
   baseSize: number;
   isHorizontalFlow: boolean;
   flexItemHighlightConfig: {baseSizeBox?: BoxStyle, baseSizeBorder?: LineStyle, flexibilityArrow?: LineStyle};
+  boxSizing: 'content'|'border';
 }
 
 interface LineQuads {
@@ -125,6 +127,9 @@ function drawFlexibilityArrow(
                                   y: (itemQuad.p4.y + itemQuad.p3.y) / 2,
                                 };
 
+  if (to.x === from.x && to.y === from.y) {
+    return;
+  }
   // Draw the arrow line.
   const path = segmentToPath([from, to]);
   drawPathWithLineStyle(

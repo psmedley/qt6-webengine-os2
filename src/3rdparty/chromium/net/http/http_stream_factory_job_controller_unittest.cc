@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <list>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,7 @@
 #include "net/base/schemeful_site.h"
 #include "net/base/test_proxy_delegate.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_network_session_peer.h"
 #include "net/http/http_server_properties.h"
@@ -56,6 +58,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/scheme_host_port.h"
 
 using ::testing::_;
 using ::testing::Contains;
@@ -197,6 +200,7 @@ class HttpStreamFactoryJobControllerTest : public TestWithTaskEnvironment {
   HttpStreamFactoryJobControllerTest()
       : TestWithTaskEnvironment(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
+    FLAGS_quic_enable_http3_grease_randomness = false;
     session_deps_.enable_quic = true;
     session_deps_.host_resolver->set_synchronous_mode(true);
   }
@@ -234,9 +238,9 @@ class HttpStreamFactoryJobControllerTest : public TestWithTaskEnvironment {
         test_proxy_delegate_.get());
 
     session_deps_.net_log = net_log_.bound().net_log();
-    HttpNetworkSession::Params params =
+    HttpNetworkSessionParams params =
         SpdySessionDependencies::CreateSessionParams(&session_deps_);
-    HttpNetworkSession::Context session_context =
+    HttpNetworkSessionContext session_context =
         SpdySessionDependencies::CreateSessionContext(&session_deps_);
 
     session_context.quic_crypto_client_stream_factory =
@@ -356,12 +360,13 @@ TEST_F(HttpStreamFactoryJobControllerTest, ProxyResolutionFailsSync) {
   ProxyConfig proxy_config;
   proxy_config.set_pac_url(GURL("http://fooproxyurl"));
   proxy_config.set_pac_mandatory(true);
-  session_deps_.proxy_resolution_service.reset(
-      new ConfiguredProxyResolutionService(
+  session_deps_.proxy_resolution_service =
+      std::make_unique<ConfiguredProxyResolutionService>(
+
           std::make_unique<ProxyConfigServiceFixed>(ProxyConfigWithAnnotation(
               proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS)),
           std::make_unique<FailingProxyResolverFactory>(), nullptr,
-          /*quick_check_enabled=*/true));
+          /*quick_check_enabled=*/true);
   HttpRequestInfo request_info;
   request_info.method = "GET";
   request_info.url = GURL("http://www.google.com");
@@ -395,12 +400,13 @@ TEST_F(HttpStreamFactoryJobControllerTest, ProxyResolutionFailsAsync) {
   MockAsyncProxyResolverFactory* proxy_resolver_factory =
       new MockAsyncProxyResolverFactory(false);
   MockAsyncProxyResolver resolver;
-  session_deps_.proxy_resolution_service.reset(
-      new ConfiguredProxyResolutionService(
+  session_deps_.proxy_resolution_service =
+      std::make_unique<ConfiguredProxyResolutionService>(
+
           std::make_unique<ProxyConfigServiceFixed>(ProxyConfigWithAnnotation(
               proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS)),
           base::WrapUnique(proxy_resolver_factory), nullptr,
-          /*quick_check_enabled=*/true));
+          /*quick_check_enabled=*/true);
   HttpRequestInfo request_info;
   request_info.method = "GET";
   request_info.url = GURL("http://www.google.com");
@@ -2301,7 +2307,7 @@ TEST_F(HttpStreamFactoryJobControllerTest, SpdySessionInterruptsPreconnect) {
               HostPortPair::FromURL(request_info.url), ProxyServer::Direct(),
               request_info.privacy_mode, SpdySessionKey::IsProxySession::kFalse,
               request_info.socket_tag, request_info.network_isolation_key,
-              request_info.disable_secure_dns),
+              request_info.secure_dns_policy),
           false /* enable_ip_based_pooling */, false /* is_websocket */,
           NetLogWithSource());
   EXPECT_TRUE(spdy_session);
@@ -2445,17 +2451,14 @@ TEST_F(JobControllerLimitMultipleH2Requests,
       reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
           HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyServer::Direct()));
   ClientSocketPool::GroupId group_id0(
-      HostPortPair::FromURL(request_info.url),
-      ClientSocketPool::SocketType::kSsl, request_info.privacy_mode,
-      NetworkIsolationKey(), false /* disable_secure_dns */);
+      url::SchemeHostPort(request_info.url), request_info.privacy_mode,
+      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
   ClientSocketPool::GroupId group_id1(
-      HostPortPair::FromURL(request_info.url),
-      ClientSocketPool::SocketType::kSsl, request_info.privacy_mode,
-      kNetworkIsolationKey1, false /* disable_secure_dns */);
+      url::SchemeHostPort(request_info.url), request_info.privacy_mode,
+      kNetworkIsolationKey1, SecureDnsPolicy::kAllow);
   ClientSocketPool::GroupId group_id2(
-      HostPortPair::FromURL(request_info.url),
-      ClientSocketPool::SocketType::kSsl, request_info.privacy_mode,
-      kNetworkIsolationKey2, false /* disable_secure_dns */);
+      url::SchemeHostPort(request_info.url), request_info.privacy_mode,
+      kNetworkIsolationKey2, SecureDnsPolicy::kAllow);
   EXPECT_EQ(static_cast<uint32_t>(kNumRequests),
             socket_pool->NumConnectJobsInGroupForTesting(group_id0));
   EXPECT_EQ(1u, socket_pool->NumConnectJobsInGroupForTesting(group_id1));
@@ -2932,7 +2935,14 @@ TEST_F(HttpStreamFactoryJobControllerTest, GetAlternativeServiceInfoFor) {
       [](const quic::ParsedQuicVersion& a, const quic::ParsedQuicVersion& b) {
         return a.transport_version < b.transport_version;
       });
-  EXPECT_EQ(supported_versions, alt_svc_info.advertised_versions());
+  quic::ParsedQuicVersionVector advertised_versions =
+      alt_svc_info.advertised_versions();
+  std::sort(
+      advertised_versions.begin(), advertised_versions.end(),
+      [](const quic::ParsedQuicVersion& a, const quic::ParsedQuicVersion& b) {
+        return a.transport_version < b.transport_version;
+      });
+  EXPECT_EQ(supported_versions, advertised_versions);
 
   quic::ParsedQuicVersion unsupported_version_1 =
       quic::ParsedQuicVersion::Unsupported();
@@ -3105,8 +3115,15 @@ TEST_F(HttpStreamFactoryJobControllerTest, QuicHostAllowlist) {
       [](const quic::ParsedQuicVersion& a, const quic::ParsedQuicVersion& b) {
         return a.transport_version < b.transport_version;
       });
+  quic::ParsedQuicVersionVector advertised_versions =
+      alt_svc_info.advertised_versions();
+  std::sort(
+      advertised_versions.begin(), advertised_versions.end(),
+      [](const quic::ParsedQuicVersion& a, const quic::ParsedQuicVersion& b) {
+        return a.transport_version < b.transport_version;
+      });
   EXPECT_EQ(kProtoQUIC, alt_svc_info.alternative_service().protocol);
-  EXPECT_EQ(supported_versions, alt_svc_info.advertised_versions());
+  EXPECT_EQ(supported_versions, advertised_versions);
 
   session_->http_server_properties()->SetQuicAlternativeService(
       server, NetworkIsolationKey(),

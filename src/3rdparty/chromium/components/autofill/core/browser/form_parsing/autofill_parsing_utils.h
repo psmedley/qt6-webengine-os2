@@ -5,7 +5,6 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_AUTOFILL_PARSING_UTILS_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_AUTOFILL_PARSING_UTILS_H_
 
-#include <base/optional.h>
 #include <string>
 
 #include "components/autofill/core/common/language_code.h"
@@ -54,8 +53,8 @@ struct MatchingPattern {
   ~MatchingPattern();
 
   LanguageCode language;
-  std::string positive_pattern;
-  std::string negative_pattern;
+  std::u16string positive_pattern;
+  std::u16string negative_pattern;
   float positive_score = 1.1;
   uint8_t match_field_attributes;
   uint16_t match_field_input_types;
@@ -63,4 +62,4 @@ struct MatchingPattern {
 
 }  // namespace autofill
 
-#endif  // COMPONENTS_AUTOFILL_CORE_BROWSER_DATA_MODEL_AUTOFILL_PARSING_UTILS_H_
+#endif  // COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_AUTOFILL_PARSING_UTILS_H_

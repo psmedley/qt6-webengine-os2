@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_handle_timing.h"
 #include "content/public/browser/navigation_throttle.h"
@@ -27,6 +28,7 @@
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 #include "third_party/blink/public/mojom/loader/transferrable_url_loader.mojom.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -38,7 +40,7 @@ class ProxyServer;
 }  // namespace net
 
 namespace content {
-struct GlobalFrameRoutingId;
+struct GlobalRenderFrameHostId;
 struct GlobalRequestID;
 class NavigationEntry;
 class NavigationThrottle;
@@ -53,9 +55,9 @@ class WebContents;
 // references to a NavigationHandle at the time of
 // WebContentsObserver::DidFinishNavigation, just before the handle is
 // destroyed.
-class CONTENT_EXPORT NavigationHandle {
+class CONTENT_EXPORT NavigationHandle : public base::SupportsUserData {
  public:
-  virtual ~NavigationHandle() {}
+  ~NavigationHandle() override = default;
 
   // Parameters available at navigation start time -----------------------------
   //
@@ -89,13 +91,34 @@ class CONTENT_EXPORT NavigationHandle {
   // C, then this returns A.
   virtual SiteInstance* GetSourceSiteInstance() = 0;
 
-  // Whether the navigation is taking place in the main frame or in a subframe.
-  // This remains constant over the navigation lifetime.
-  virtual bool IsInMainFrame() = 0;
+  // Whether the navigation is taking place in a main frame or in a subframe.
+  // This can also return true for navigations in the root of a non-primary
+  // page, so consider whether you want to call IsInPrimaryMainFrame() instead.
+  // See the documentation below for details. The return value remains constant
+  // over the navigation lifetime.
+  virtual bool IsInMainFrame() const = 0;
 
-  // Whether the navigation is taking place in a frame that is a direct child
-  // of the main frame. This remains constant over the navigation lifetime.
-  virtual bool IsParentMainFrame() = 0;
+  // Whether the navigation is taking place in the main frame of the primary
+  // frame tree. With MPArch (crbug.com/1164280), a WebContents may have
+  // additional frame trees for prerendering pages in addition to the primary
+  // frame tree (holding the page currently shown to the user). The return
+  // value remains constant over the navigation lifetime.
+  virtual bool IsInPrimaryMainFrame() const = 0;
+
+  // Prerender2:
+  // Whether the navigation is taking place in the main frame of the
+  // prerendered frame tree. Prerender will create separate frame trees to load
+  // a page in the background, which later then be activated by a separate
+  // prerender page activation navigation in the primary main frame. This
+  // returns false for prerender page activation navigations, which should be
+  // checked by IsPrerenderedPageActivation(). The return value remains
+  // constant over the navigation lifetime.
+  virtual bool IsInPrerenderedMainFrame() = 0;
+
+  // Prerender2
+  // Returns true if this navigation will activate a prerendered page. It is
+  // only meaningful to call this after BeginNavigation().
+  virtual bool IsPrerenderedPageActivation() = 0;
 
   // Whether the navigation was initiated by the renderer process. Examples of
   // renderer-initiated navigations include:
@@ -111,6 +134,16 @@ class CONTENT_EXPORT NavigationHandle {
   //  * using window.history.forward() or window.history.back()
   //  * any other "explicit" URL navigations, e.g. bookmarks
   virtual bool IsRendererInitiated() = 0;
+
+  // Whether the previous document in this frame was same-origin with the new
+  // one created by this navigation.
+  //
+  // |HasCommitted()| must be true before calling this function.
+  //
+  // Note: This doesn't take the initiator of the navigation into consideration.
+  // For instance, a parent (A) can initiate a navigation in its iframe,
+  // replacing document (B) by (C). This methods compare (B) with (C).
+  virtual bool IsSameOrigin() = 0;
 
   // Returns the FrameTreeNode ID for the frame in which the navigation is
   // performed. This ID is browser-global and uniquely identifies a frame that
@@ -191,6 +224,10 @@ class CONTENT_EXPORT NavigationHandle {
   // Whether the navigation is restoring a page from back-forward cache.
   virtual bool IsServedFromBackForwardCache() = 0;
 
+  // Whether this navigation is activating an existing page (e.g. served from
+  // the BackForwardCache or Prerender).
+  virtual bool IsPageActivation() const = 0;
+
   // Navigation control flow --------------------------------------------------
 
   // The net error code if an error happened prior to commit. Otherwise it will
@@ -211,7 +248,7 @@ class CONTENT_EXPORT NavigationHandle {
   // same RenderFrameHost.
   // Note: This is not guaranteed to refer to a RenderFrameHost that still
   // exists.
-  virtual GlobalFrameRoutingId GetPreviousRenderFrameHostId() = 0;
+  virtual GlobalRenderFrameHostId GetPreviousRenderFrameHostId() = 0;
 
   // Whether the navigation happened without changing document. Examples of
   // same document navigations are:
@@ -240,9 +277,6 @@ class CONTENT_EXPORT NavigationHandle {
   //
   // DO NOT use this before the navigation commit. It would always return false.
   // You can use it from WebContentsObserver::DidFinishNavigation().
-  //
-  // Note that if an error page reloads, this will return true even though
-  // GetNetErrorCode will be net::OK.
   virtual bool IsErrorPage() = 0;
 
   // Not all committed subframe navigations (i.e., !IsInMainFrame &&
@@ -312,11 +346,11 @@ class CONTENT_EXPORT NavigationHandle {
   // Returns the SSLInfo for a request that succeeded or failed due to a
   // certificate error. In the case of other request failures or of a non-secure
   // scheme, returns an empty object.
-  virtual const base::Optional<net::SSLInfo>& GetSSLInfo() = 0;
+  virtual const absl::optional<net::SSLInfo>& GetSSLInfo() = 0;
 
   // Returns the AuthChallengeInfo for the request, if the response contained an
   // authentication challenge.
-  virtual const base::Optional<net::AuthChallengeInfo>&
+  virtual const absl::optional<net::AuthChallengeInfo>&
   GetAuthChallengeInfo() = 0;
 
   // Returns host resolution error info associated with the request.
@@ -368,14 +402,14 @@ class CONTENT_EXPORT NavigationHandle {
   // Returns, if available, the impression associated with the link clicked to
   // initiate this navigation. The impression is available for the entire
   // lifetime of the navigation.
-  virtual const base::Optional<blink::Impression>& GetImpression() = 0;
+  virtual const absl::optional<blink::Impression>& GetImpression() = 0;
 
   // Returns the frame token associated with the frame that initiated the
   // navigation. This can be nullptr if the navigation was not associated with a
   // frame, or may return a valid frame token to a frame that no longer exists
   // because it was deleted before the navigation began. This parameter is
   // defined if and only if GetInitiatorProcessID below is.
-  virtual const base::Optional<blink::LocalFrameToken>&
+  virtual const absl::optional<blink::LocalFrameToken>&
   GetInitiatorFrameToken() = 0;
 
   // Return the ID of the renderer process of the frame host that initiated the
@@ -385,7 +419,7 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Returns, if available, the origin of the document that has initiated the
   // navigation for this NavigationHandle.
-  virtual const base::Optional<url::Origin>& GetInitiatorOrigin() = 0;
+  virtual const absl::optional<url::Origin>& GetInitiatorOrigin() = 0;
 
   // Retrieves any DNS aliases for the requested URL. The alias chain order
   // is preserved in reverse, from canonical name (i.e. address record name)
@@ -425,7 +459,6 @@ class CONTENT_EXPORT NavigationHandle {
   // Store whether or not we're overriding the user agent. This may only be
   // called from DidStartNavigation().
   virtual void SetIsOverridingUserAgent(bool override_ua) = 0;
-  virtual bool GetIsOverridingUserAgent() = 0;
 
   // Suppress any errors during a navigation and behave as if the user cancelled
   // the navigation: no error page will commit.
@@ -445,6 +478,14 @@ class CONTENT_EXPORT NavigationHandle {
   // navigation or an error page.
   virtual bool IsWaitingToCommit() = 0;
 
+  // Returns true when at least one preload Link header was received via an
+  // Early Hints response during this navigation. True only for a main frame
+  // navigation.
+  virtual bool WasEarlyHintsPreloadLinkHeaderReceived() = 0;
+
+  // Write a representation of this object into a trace.
+  virtual void WriteIntoTrace(perfetto::TracedValue context) = 0;
+
   // Testing methods ----------------------------------------------------------
   //
   // The following methods should be used exclusively for writing unit tests.
@@ -461,6 +502,7 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Returns whether this navigation is currently deferred.
   virtual bool IsDeferredForTesting() = 0;
+  virtual bool IsCommitDeferringConditionDeferredForTesting() = 0;
 };
 
 }  // namespace content

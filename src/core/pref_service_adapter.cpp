@@ -101,7 +101,6 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     registry->RegisterStringPref(language::prefs::kAcceptLanguages, std::string());
     registry->RegisterListPref(spellcheck::prefs::kSpellCheckDictionaries);
     registry->RegisterListPref(spellcheck::prefs::kSpellCheckForcedDictionaries);
-    registry->RegisterListPref(spellcheck::prefs::kSpellCheckBlacklistedDictionaries);
     registry->RegisterListPref(spellcheck::prefs::kSpellCheckBlocklistedDictionaries);
     registry->RegisterStringPref(spellcheck::prefs::kSpellCheckDictionary, std::string());
     registry->RegisterBooleanPref(spellcheck::prefs::kSpellCheckEnable, false);
@@ -183,9 +182,10 @@ void PrefServiceAdapter::setSpellCheckLanguages(const QStringList &languages)
 QStringList PrefServiceAdapter::spellCheckLanguages() const
 {
     QStringList spellcheck_dictionaries;
-    for (const auto &value : *m_prefService->GetList(spellcheck::prefs::kSpellCheckDictionaries)) {
+    const auto &list = m_prefService->GetList(spellcheck::prefs::kSpellCheckDictionaries);
+    for (size_t i = 0; i < list->GetSize(); ++i) {
         std::string dictionary;
-        if (value.GetAsString(&dictionary))
+        if (list->GetString(i, &dictionary))
             spellcheck_dictionaries.append(QString::fromStdString(dictionary));
     }
 

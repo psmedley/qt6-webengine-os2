@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/execution_context/window_agent_factory.h"
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/renderer/core/execution_context/window_agent.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin_hash.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
@@ -21,6 +23,10 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
     const SecurityOrigin* origin,
     bool is_origin_agent_cluster) {
   if (has_potential_universal_access_privilege) {
+    // We shouldn't have OAC turned on in this case, since we're sharing a
+    // WindowAgent for all file access. This code block must be kept in sync
+    // with DocumentLoader::InitializeWindow().
+    DCHECK(!is_origin_agent_cluster);
     if (!universal_access_agent_) {
       universal_access_agent_ = MakeGarbageCollected<WindowAgent>(isolate);
     }
@@ -29,6 +35,10 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
 
   // For `file:` scheme origins.
   if (origin->IsLocal()) {
+    // We shouldn't have OAC turned on for files, since we're sharing a
+    // WindowAgent for all file access. This code block must be kept in sync
+    // with DocumentLoader::InitializeWindow().
+    DCHECK(!is_origin_agent_cluster);
     if (!file_url_agent_)
       file_url_agent_ = MakeGarbageCollected<WindowAgent>(isolate);
     return file_url_agent_;
@@ -63,7 +73,7 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
 
   // All chrome extensions need to share the same agent because they can
   // access each other's windows directly.
-  if (origin->Protocol() == "chrome-extension") {
+  if (CommonSchemeRegistry::IsExtensionScheme(origin->Protocol().Ascii())) {
     DEFINE_STATIC_LOCAL(Persistent<TupleOriginAgents>, static_origin_agents,
                         (MakeGarbageCollected<TupleOriginAgents>()));
     tuple_origin_agents = static_origin_agents;

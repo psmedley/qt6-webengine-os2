@@ -10,6 +10,7 @@ absl_source_set("stacktrace") {
     "internal/stacktrace_aarch64-inl.inc",
     "internal/stacktrace_arm-inl.inc",
     "internal/stacktrace_config.h",
+    "internal/stacktrace_emscripten-inl.inc",
     "internal/stacktrace_generic-inl.inc",
     "internal/stacktrace_powerpc-inl.inc",
     "internal/stacktrace_unimplemented-inl.inc",
@@ -31,6 +32,7 @@ absl_source_set("symbolize") {
     "symbolize.cc",
     "symbolize_darwin.inc",
     "symbolize_elf.inc",
+    "symbolize_emscripten.inc",
     "symbolize_unimplemented.inc",
     "symbolize_win32.inc",
   ]
@@ -137,7 +139,10 @@ if (is_lsan) {
     sources = [ "leak_check.cc" ]
     public = [ "leak_check.h" ]
     visibility = [ ":*" ]
-    deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+    deps = [
+      "//third_party/abseil-cpp/absl/base:config",
+      "//third_party/abseil-cpp/absl/base:core_headers",
+    ]
   }
 } else {
   absl_source_set("leak_check_api_disabled_for_testing") {
@@ -145,7 +150,10 @@ if (is_lsan) {
     sources = [ "leak_check.cc" ]
     public = [ "leak_check.h" ]
     visibility = [ ":*" ]
-    deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+    deps = [
+      "//third_party/abseil-cpp/absl/base:config",
+      "//third_party/abseil-cpp/absl/base:core_headers",
+    ]
   }
 }
 

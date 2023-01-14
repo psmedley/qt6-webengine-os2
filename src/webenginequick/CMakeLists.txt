@@ -4,6 +4,8 @@ qt_internal_add_qml_module(WebEngineQuick
     URI "QtWebEngine"
     VERSION "${PROJECT_VERSION}"
     CLASS_NAME QtWebEnginePlugin
+    DEPENDENCIES
+        QtQuick/auto
     PLUGIN_TARGET qtwebenginequickplugin
     NO_GENERATE_PLUGIN_SOURCE
     NO_PLUGIN_OPTIONAL
@@ -22,6 +24,9 @@ qt_internal_add_qml_module(WebEngineQuick
         api/qquickwebenginesingleton.cpp api/qquickwebenginesingleton_p.h
         api/qquickwebenginetouchhandleprovider.cpp
         api/qquickwebenginetouchhandleprovider_p_p.h
+        api/qquickwebenginetouchselectionmenurequest.cpp
+        api/qquickwebenginetouchselectionmenurequest_p.h
+        api/qquickwebenginetouchselectionmenurequest_p_p.h
         api/qquickwebengineview.cpp api/qquickwebengineview_p.h
         api/qquickwebengineview_p_p.h
         api/qquickwebengineforeigntypes_p.h

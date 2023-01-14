@@ -27,6 +27,7 @@
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/appcache/appcache.mojom.h"
 #include "third_party/blink/public/mojom/appcache/appcache_info.mojom.h"
 
@@ -73,8 +74,9 @@ bool CanAccessDocumentURL(ChildProcessSecurityPolicyImpl::Handle* handle,
 }
 
 base::debug::CrashKeyString* GetDocumentUrlCrashKey() {
-  static auto* appcache_document_url_key = base::debug::AllocateCrashKeyString(
-      "appcache_document_url", base::debug::CrashKeySize::Size256);
+  static auto* const appcache_document_url_key =
+      base::debug::AllocateCrashKeyString("appcache_document_url",
+                                          base::debug::CrashKeySize::Size256);
   return appcache_document_url_key;
 }
 
@@ -120,8 +122,6 @@ AppCacheHost::~AppCacheHost() {
   if (group_being_updated_.get())
     group_being_updated_->RemoveUpdateObserver(this);
   storage()->CancelDelegateCallbacks(this);
-  if (service()->quota_manager_proxy() && !origin_in_use_.opaque())
-    service()->quota_manager_proxy()->NotifyOriginNoLongerInUse(origin_in_use_);
 
   // Run pending callbacks in case we get destroyed with pending callbacks while
   // the mojo connection is still open.
@@ -187,10 +187,6 @@ void AppCacheHost::SelectCache(const GURL& document_url,
     FinishCacheSelection(nullptr, nullptr, mojo::ReportBadMessageCallback());
     return;
   }
-
-  origin_in_use_ = url::Origin::Create(document_url);
-  if (service()->quota_manager_proxy() && !origin_in_use_.opaque())
-    service()->quota_manager_proxy()->NotifyOriginInUse(origin_in_use_);
 
   if (main_resource_blocked_)
     OnContentBlocked(blocked_manifest_url_);
@@ -405,7 +401,8 @@ void AppCacheHost::GetResourceList(GetResourceListCallback callback) {
 std::unique_ptr<AppCacheRequestHandler> AppCacheHost::CreateRequestHandler(
     std::unique_ptr<AppCacheRequest> request,
     network::mojom::RequestDestination request_destination,
-    bool should_reset_appcache) {
+    bool should_reset_appcache,
+    int frame_tree_node_id) {
   if (AppCacheRequestHandler::IsMainRequestDestination(request_destination)) {
     // Store the first party origin so that it can be used later in SelectCache
     // for checking whether the creation of the appcache is allowed.
@@ -413,13 +410,15 @@ std::unique_ptr<AppCacheRequestHandler> AppCacheHost::CreateRequestHandler(
     site_for_cookies_initialized_ = true;
     top_frame_origin_ = request->GetTopFrameOrigin();
     return base::WrapUnique(new AppCacheRequestHandler(
-        this, request_destination, should_reset_appcache, std::move(request)));
+        this, request_destination, should_reset_appcache, std::move(request),
+        frame_tree_node_id));
   }
 
   if ((associated_cache() && associated_cache()->is_complete()) ||
       is_selection_pending()) {
     return base::WrapUnique(new AppCacheRequestHandler(
-        this, request_destination, should_reset_appcache, std::move(request)));
+        this, request_destination, should_reset_appcache, std::move(request),
+        frame_tree_node_id));
   }
   return nullptr;
 }
@@ -658,7 +657,7 @@ void AppCacheHost::MaybePassSubresourceFactory() {
     GetContentClient()->browser()->WillCreateURLLoaderFactory(
         rfh->GetProcess()->GetBrowserContext(), rfh, process_id_,
         ContentBrowserClient::URLLoaderFactoryType::kDocumentSubResource,
-        origin_for_url_loader_factory_, base::nullopt /* navigation_id */,
+        origin_for_url_loader_factory_, absl::nullopt /* navigation_id */,
         ukm::SourceIdObj::FromInt64(rfh->GetPageUkmSourceId()),
         &factory_receiver, nullptr /* header_client */,
         nullptr /* bypass_redirect_checks */, nullptr /* disable_secure_dns */,

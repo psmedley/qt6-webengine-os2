@@ -7,7 +7,6 @@
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/base/string16_mojom_traits.h"
-#include "third_party/blink/public/mojom/widget/screen_info.mojom.h"
 #include "url/mojom/url_gurl_mojom_traits.h"
 
 namespace mojo {
@@ -48,7 +47,9 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
           &out->low_priority_iframes_threshold) ||
       !data.ReadNetworkQualityEstimatorWebHoldback(
           &out->network_quality_estimator_web_holdback) ||
-      !data.ReadWebAppScope(&out->web_app_scope)
+      !data.ReadWebAppScope(&out->web_app_scope) ||
+      !data.ReadLitepageSubresourceRedirectOrigin(
+          &out->litepage_subresource_redirect_origin)
 #if defined(OS_ANDROID)
       || !data.ReadDefaultVideoPosterUrl(&out->default_video_poster_url)
 #endif
@@ -99,6 +100,7 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->hide_scrollbars = data.hide_scrollbars();
   out->accelerated_2d_canvas_enabled = data.accelerated_2d_canvas_enabled();
   out->new_canvas_2d_api_enabled = data.new_canvas_2d_api_enabled();
+  out->canvas_2d_layers_enabled = data.canvas_2d_layers_enabled();
   out->antialiased_2d_canvas_disabled = data.antialiased_2d_canvas_disabled();
   out->antialiased_clips_2d_canvas_enabled =
       data.antialiased_clips_2d_canvas_enabled();
@@ -151,6 +153,8 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->smart_insert_delete_enabled = data.smart_insert_delete_enabled();
   out->spatial_navigation_enabled = data.spatial_navigation_enabled();
   out->navigate_on_drag_drop = data.navigate_on_drag_drop();
+  out->fake_no_alloc_direct_call_for_testing_enabled =
+      data.fake_no_alloc_direct_call_for_testing_enabled();
   out->v8_cache_options = data.v8_cache_options();
   out->record_whole_document = data.record_whole_document();
   out->cookie_enabled = data.cookie_enabled();
@@ -197,8 +201,6 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       data.embedded_media_experience_enabled();
   out->css_hex_alpha_color_enabled = data.css_hex_alpha_color_enabled();
   out->scroll_top_left_interop_enabled = data.scroll_top_left_interop_enabled();
-  out->disable_features_depending_on_viz =
-      data.disable_features_depending_on_viz();
   out->disable_accelerated_small_canvases =
       data.disable_accelerated_small_canvases();
 #endif

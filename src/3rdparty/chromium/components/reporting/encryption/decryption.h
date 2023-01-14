@@ -11,7 +11,6 @@
 #include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -20,6 +19,7 @@
 #include "components/reporting/util/statusor.h"
 
 namespace reporting {
+namespace test {
 
 // Full implementation of Decryptor, intended for use in tests and potentially
 // in reporting server (wrapped in a Java class).
@@ -113,6 +113,7 @@ class Decryptor : public base::RefCountedThreadSafe<Decryptor> {
   SEQUENCE_CHECKER(keys_sequence_checker_);
 };
 
+}  // namespace test
 }  // namespace reporting
 
 #endif  // COMPONENTS_REPORTING_ENCRYPTION_DECRYPTION_H_

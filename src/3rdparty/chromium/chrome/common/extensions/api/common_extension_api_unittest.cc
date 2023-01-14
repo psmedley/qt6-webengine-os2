@@ -11,12 +11,16 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind_post_task.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
+#include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_features_unittest.h"
@@ -462,17 +466,17 @@ scoped_refptr<Extension> CreateExtensionWithPermissions(
   manifest.SetString("version", "1.0");
   manifest.SetInteger("manifest_version", 2);
   {
-    std::unique_ptr<base::ListValue> permissions_list(new base::ListValue());
+    base::Value permissions_list(base::Value::Type::LIST);
     for (auto i = permissions.begin(); i != permissions.end(); ++i) {
-      permissions_list->AppendString(*i);
+      permissions_list.Append(*i);
     }
-    manifest.Set("permissions", std::move(permissions_list));
+    manifest.SetKey("permissions", std::move(permissions_list));
   }
 
   std::string error;
-  scoped_refptr<Extension> extension(Extension::Create(
-      base::FilePath(), Manifest::UNPACKED,
-      manifest, Extension::NO_FLAGS, &error));
+  scoped_refptr<Extension> extension(
+      Extension::Create(base::FilePath(), mojom::ManifestLocation::kUnpacked,
+                        manifest, Extension::NO_FLAGS, &error));
   CHECK(extension.get());
   CHECK(error.empty());
 
@@ -547,13 +551,13 @@ scoped_refptr<Extension> CreateHostedApp() {
   base::DictionaryValue values;
   values.SetString(manifest_keys::kName, "test");
   values.SetString(manifest_keys::kVersion, "0.1");
-  values.Set(manifest_keys::kWebURLs, std::make_unique<base::ListValue>());
+  values.SetPath(manifest_keys::kWebURLs, base::Value(base::Value::Type::LIST));
   values.SetString(manifest_keys::kLaunchWebURL,
                    "http://www.example.com");
   std::string error;
-  scoped_refptr<Extension> extension(Extension::Create(
-      base::FilePath(), Manifest::INTERNAL, values, Extension::NO_FLAGS,
-      &error));
+  scoped_refptr<Extension> extension(
+      Extension::Create(base::FilePath(), mojom::ManifestLocation::kInternal,
+                        values, Extension::NO_FLAGS, &error));
   CHECK(extension.get());
   return extension;
 }
@@ -566,25 +570,25 @@ scoped_refptr<Extension> CreatePackagedAppWithPermissions(
   values.SetString(manifest_keys::kPlatformAppBackground,
       "http://www.example.com");
 
-  auto app = std::make_unique<base::DictionaryValue>();
-  auto background = std::make_unique<base::DictionaryValue>();
-  auto scripts = std::make_unique<base::ListValue>();
-  scripts->AppendString("test.js");
-  background->Set("scripts", std::move(scripts));
-  app->Set("background", std::move(background));
-  values.Set(manifest_keys::kApp, std::move(app));
+  base::Value app(base::Value::Type::DICTIONARY);
+  base::DictionaryValue background;
+  base::ListValue scripts;
+  scripts.Append("test.js");
+  background.SetKey("scripts", std::move(scripts));
+  app.SetKey("background", std::move(background));
+  values.SetKey(manifest_keys::kApp, std::move(app));
   {
-    auto permissions_list = std::make_unique<base::ListValue>();
+    base::Value permissions_list(base::Value::Type::LIST);
     for (auto i = permissions.begin(); i != permissions.end(); ++i) {
-      permissions_list->AppendString(*i);
+      permissions_list.Append(*i);
     }
-    values.Set("permissions", std::move(permissions_list));
+    values.SetKey("permissions", std::move(permissions_list));
   }
 
   std::string error;
-  scoped_refptr<Extension> extension(Extension::Create(
-      base::FilePath(), Manifest::INTERNAL, values, Extension::NO_FLAGS,
-      &error));
+  scoped_refptr<Extension> extension(
+      Extension::Create(base::FilePath(), mojom::ManifestLocation::kInternal,
+                        values, Extension::NO_FLAGS, &error));
   CHECK(extension.get()) << error;
   return extension;
 }
@@ -835,7 +839,7 @@ TEST(ExtensionAPITest, TypesHaveNamespace) {
       const base::ListValue* list, const std::string& key,
       const std::string& value) -> const base::DictionaryValue* {
     const base::DictionaryValue* ret = nullptr;
-    for (const auto& val : *list) {
+    for (const auto& val : list->GetList()) {
       const base::DictionaryValue* dict = nullptr;
       if (!val.GetAsDictionary(&dict))
         continue;
@@ -982,6 +986,40 @@ TEST(ExtensionAPITest, ManifestKeys) {
                                  Feature::BLESSED_EXTENSION_CONTEXT, GURL(),
                                  CheckAliasStatus::NOT_ALLOWED)
                    .is_available());
+}
+
+// (TSAN) Tests that ExtensionAPI are able to handle GetSchema from different
+// threads.
+TEST(ExtensionAPITest, GetSchemaFromDifferentThreads) {
+  ExtensionAPI* shared_instance = ExtensionAPI::GetSharedInstance();
+  ASSERT_TRUE(shared_instance);
+  base::test::TaskEnvironment task_environment;
+
+  base::Thread t("test_thread");
+  ASSERT_TRUE(t.Start());
+
+  base::RunLoop run_loop;
+  const base::DictionaryValue* another_thread_schema = nullptr;
+
+  auto result_cb =
+      base::BindLambdaForTesting([&](const base::DictionaryValue* res) {
+        another_thread_schema = res;
+        run_loop.Quit();
+      });
+  auto task =
+      base::BindOnce(&ExtensionAPI::GetSchema,
+                     base::Unretained(shared_instance), "storage")
+          .Then(base::BindPostTask(base::SequencedTaskRunnerHandle::Get(),
+                                   std::move(result_cb)));
+  t.task_runner()->PostTask(FROM_HERE, std::move(task));
+
+  const auto* current_thread_schema = shared_instance->GetSchema("storage");
+  EXPECT_TRUE(current_thread_schema);
+
+  run_loop.Run();
+
+  // The pointers (not only the values) must be the same.
+  EXPECT_EQ(another_thread_schema, current_thread_schema);
 }
 
 }  // namespace extensions

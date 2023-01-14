@@ -22,8 +22,6 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.12" CACHE STRING "Minimum OS X deployment ve
 
 project(Vulkan-Loader)
 
-enable_testing()
-
 set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS API_NAME="Vulkan")
 
 # Enable beta Vulkan extensions
@@ -36,6 +34,10 @@ if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/external/googletest)
     option(BUILD_TESTS "Build Tests" ON)
 else()
     option(BUILD_TESTS "Build Tests" OFF)
+endif()
+
+if(BUILD_TESTS)
+    enable_testing()
 endif()
 
 if(APPLE)
@@ -122,6 +124,7 @@ if(UNIX AND NOT APPLE) # i.e.: Linux
     option(BUILD_WSI_XLIB_SUPPORT "Build Xlib WSI support" ON)
     option(BUILD_WSI_WAYLAND_SUPPORT "Build Wayland WSI support" ON)
     option(BUILD_WSI_DIRECTFB_SUPPORT "Build DirectFB WSI support" OFF)
+    option(BUILD_WSI_SCREEN_QNX_SUPPORT "Build QNX Screen WSI support" OFF)
 
     if(BUILD_WSI_XCB_SUPPORT)
         find_package(XCB REQUIRED)
@@ -139,6 +142,10 @@ if(UNIX AND NOT APPLE) # i.e.: Linux
     if(BUILD_WSI_DIRECTFB_SUPPORT)
         find_package(DirectFB REQUIRED)
         include_directories(SYSTEM ${DIRECTFB_INCLUDE_DIR})
+    endif()
+
+    if(BUILD_WSI_SCREEN_QNX_SUPPORT)
+        # Part of OS, no additional include directories are required
     endif()
 endif()
 

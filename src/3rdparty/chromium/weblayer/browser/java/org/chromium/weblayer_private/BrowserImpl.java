@@ -23,6 +23,7 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.embedder_support.view.ContentView;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.IntentRequestTracker;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.weblayer_private.interfaces.APICallException;
 import org.chromium.weblayer_private.interfaces.BrowserEmbeddabilityMode;
@@ -81,6 +82,12 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
     // It's important to only set this to false when isViewAttachedToWindow() is true, as otherwise
     // the WebContents may be prematurely hidden.
     private boolean mInConfigurationChangeAndWasAttached;
+
+    // If true, the WebContents is forced visible. This value may be changed by the embedder for
+    // temporary detach operations (such as fullscreen or rotations) that should not impact the
+    // visibility of the WebContents (otherwise video may stop). As this value is only temporarily
+    // true, the value is implicitly reset on attach.
+    private boolean mForcedVisible = false;
 
     // Cache the value instead of querying system every time.
     private Boolean mPasswordEchoEnabled;
@@ -143,7 +150,9 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
                 ? savedInstanceState.getByteArray(SAVED_STATE_MINIMAL_PERSISTENCE_STATE_KEY)
                 : null;
 
-        windowAndroid.restoreInstanceState(savedInstanceState);
+        IntentRequestTracker tracker = windowAndroid.getIntentRequestTracker();
+        assert tracker != null : "FragmentWindowAndroid must have an IntentRequestTracker";
+        tracker.restoreInstanceState(savedInstanceState);
 
         createAttachmentState(embedderAppContext, windowAndroid);
         mNativeBrowser = BrowserImplJni.get().createBrowser(profile.getNativeProfile(), this);
@@ -203,13 +212,17 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         }
 
         if (mWindowAndroid != null) {
-            mWindowAndroid.saveInstanceState(outState);
+            IntentRequestTracker tracker = mWindowAndroid.getIntentRequestTracker();
+            assert tracker != null;
+            tracker.saveInstanceState(outState);
         }
     }
 
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (mWindowAndroid != null) {
-            mWindowAndroid.onActivityResult(requestCode, resultCode, data);
+            IntentRequestTracker tracker = mWindowAndroid.getIntentRequestTracker();
+            assert tracker != null;
+            tracker.onActivityResult(requestCode, resultCode, data, mWindowAndroid);
         }
     }
 
@@ -269,6 +282,14 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         StrictModeWorkaround.apply();
         getViewController().setEmbeddabilityMode(mode,
                 (ValueCallback<Boolean>) ObjectWrapper.unwrap(valueCallback, ValueCallback.class));
+    }
+
+    @Override
+    public void setChangeVisibilityOnNextDetach(boolean changeVisibility) {
+        StrictModeWorkaround.apply();
+        if (isViewAttachedToWindow()) {
+            mForcedVisible = !changeVisibility;
+        }
     }
 
     @Override
@@ -564,6 +585,7 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         mFragmentStarted = true;
         if (mViewAttachedToWindow) {
             mInConfigurationChangeAndWasAttached = false;
+            mForcedVisible = false;
         }
         BrowserImplJni.get().onFragmentStart(mNativeBrowser);
         updateAllTabs();
@@ -595,10 +617,6 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         return mFragmentResumed;
     }
 
-    public boolean isInConfigurationChangeAndWasAttached() {
-        return mInConfigurationChangeAndWasAttached;
-    }
-
     public FragmentManager getFragmentManager() {
         return mWindowAndroid.getFragmentManager();
     }
@@ -607,11 +625,16 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         return mViewAttachedToWindow;
     }
 
+    long getNativeBrowser() {
+        return mNativeBrowser;
+    }
+
     @Override
     public void onViewAttachedToWindow(View v) {
         mViewAttachedToWindow = true;
         if (mFragmentStarted) {
             mInConfigurationChangeAndWasAttached = false;
+            mForcedVisible = false;
         }
         updateAllTabsViewAttachedState();
     }
@@ -658,6 +681,14 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         }
 
         mVisibleSecurityStateObservers.clear();
+    }
+
+    /**
+     * Returns true if the active tab should be considered visible.
+     */
+    public boolean isActiveTabVisible() {
+        return mForcedVisible || mInConfigurationChangeAndWasAttached
+                || (isStarted() && isViewAttachedToWindow());
     }
 
     private void updateAllTabsAndSetActive() {

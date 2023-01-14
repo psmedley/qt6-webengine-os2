@@ -56,6 +56,68 @@ CSSImageValue::CSSImageValue(const AtomicString& raw_value,
 
 CSSImageValue::~CSSImageValue() = default;
 
+FetchParameters CSSImageValue::PrepareFetch(
+    const Document& document,
+    FetchParameters::ImageRequestBehavior image_request_behavior,
+    CrossOriginAttributeValue cross_origin) const {
+  // The PotentiallyDanglingMarkup() flag is lost when storing the absolute url
+  // as a string from which the KURL is constructed here.
+  // The url passed into the constructor had the PotentiallyDanglingMarkup flag
+  // set. That information needs to be passed on to the fetch code to block such
+  // resources from loading.
+  KURL request_url = potentially_dangling_markup_
+                         ? document.CompleteURL(relative_url_)
+                         : KURL(absolute_url_);
+  SECURITY_CHECK(request_url.PotentiallyDanglingMarkup() ==
+                 potentially_dangling_markup_);
+  ResourceRequest resource_request(request_url);
+  resource_request.SetReferrerPolicy(
+      ReferrerUtils::MojoReferrerPolicyResolveDefault(
+          referrer_.referrer_policy));
+  resource_request.SetReferrerString(referrer_.referrer);
+  if (is_ad_related_)
+    resource_request.SetIsAdResource();
+  ExecutionContext* execution_context = document.GetExecutionContext();
+  ResourceLoaderOptions options(execution_context->GetCurrentWorld());
+  options.initiator_info.name = initiator_name_.IsEmpty()
+                                    ? fetch_initiator_type_names::kCSS
+                                    : initiator_name_;
+  if (referrer_.referrer != Referrer::ClientReferrerString())
+    options.initiator_info.referrer = referrer_.referrer;
+  FetchParameters params(std::move(resource_request), options);
+
+  if (cross_origin != kCrossOriginAttributeNotSet) {
+    params.SetCrossOriginAccessControl(execution_context->GetSecurityOrigin(),
+                                       cross_origin);
+  }
+
+  bool is_lazily_loaded =
+      image_request_behavior == FetchParameters::kDeferImageLoad &&
+      // Only http/https images are eligible to be lazily loaded.
+      params.Url().ProtocolIsInHTTPFamily();
+  if (is_lazily_loaded) {
+    if (document.GetFrame() && document.GetFrame()->Client()) {
+      document.GetFrame()->Client()->DidObserveLazyLoadBehavior(
+          WebLocalFrameClient::LazyLoadBehavior::kDeferredImage);
+    }
+    params.SetLazyImageDeferred();
+  }
+
+  if (base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect) &&
+      params.Url().ProtocolIsInHTTPFamily() &&
+      GetNetworkStateNotifier().SaveDataEnabled()) {
+    auto& subresource_request = params.MutableResourceRequest();
+    subresource_request.SetPreviewsState(
+        subresource_request.GetPreviewsState() |
+        PreviewsTypes::kSubresourceRedirectOn);
+  }
+
+  if (origin_clean_ != OriginClean::kTrue)
+    params.SetFromOriginDirtyStyleSheet(true);
+
+  return params;
+}
+
 StyleImage* CSSImageValue::CacheImage(
     const Document& document,
     FetchParameters::ImageRequestBehavior image_request_behavior,
@@ -63,62 +125,13 @@ StyleImage* CSSImageValue::CacheImage(
   if (!cached_image_) {
     if (absolute_url_.IsEmpty())
       ReResolveURL(document);
-    // The PotentiallyDanglingMarkup() flag is lost when storing the absolute url
-    // as a string from which the KURL is constructed here.
-    // The url passed into the constructor had the PotentiallyDanglingMarkup flag
-    // set. That information needs to be passed on to the fetch code to block such
-    // resources from loading.
-    KURL request_url = potentially_dangling_markup_
-                           ? document.CompleteURL(relative_url_)
-                           : KURL(absolute_url_);
-    SECURITY_CHECK(request_url.PotentiallyDanglingMarkup() ==
-                   potentially_dangling_markup_);
-    ResourceRequest resource_request(request_url);
-    resource_request.SetReferrerPolicy(
-        ReferrerUtils::MojoReferrerPolicyResolveDefault(
-            referrer_.referrer_policy));
-    resource_request.SetReferrerString(referrer_.referrer);
-    if (is_ad_related_)
-      resource_request.SetIsAdResource();
-    ResourceLoaderOptions options(
-        document.GetExecutionContext()->GetCurrentWorld());
-    options.initiator_info.name = initiator_name_.IsEmpty()
-                                      ? fetch_initiator_type_names::kCSS
-                                      : initiator_name_;
-    options.initiator_info.referrer = referrer_.referrer;
-    FetchParameters params(std::move(resource_request), options);
 
-    if (cross_origin != kCrossOriginAttributeNotSet) {
-      params.SetCrossOriginAccessControl(
-          document.GetExecutionContext()->GetSecurityOrigin(), cross_origin);
-    }
-
-    bool is_lazily_loaded =
-        image_request_behavior == FetchParameters::kDeferImageLoad &&
-        // Only http/https images are eligible to be lazily loaded.
-        params.Url().ProtocolIsInHTTPFamily();
-    if (is_lazily_loaded) {
-      if (document.GetFrame() && document.GetFrame()->Client()) {
-        document.GetFrame()->Client()->DidObserveLazyLoadBehavior(
-            WebLocalFrameClient::LazyLoadBehavior::kDeferredImage);
-      }
-      params.SetLazyImageDeferred();
-    }
-
-    if (base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect) &&
-        params.Url().ProtocolIsInHTTPFamily() &&
-        GetNetworkStateNotifier().SaveDataEnabled()) {
-      auto& subresource_request = params.MutableResourceRequest();
-      subresource_request.SetPreviewsState(
-          subresource_request.GetPreviewsState() |
-          PreviewsTypes::kSubresourceRedirectOn);
-    }
-
-    if (origin_clean_ != OriginClean::kTrue)
-      params.SetFromOriginDirtyStyleSheet(true);
-
-    cached_image_ = MakeGarbageCollected<StyleFetchedImage>(document, params,
-                                                            is_lazily_loaded);
+    FetchParameters params =
+        PrepareFetch(document, image_request_behavior, cross_origin);
+    cached_image_ = MakeGarbageCollected<StyleFetchedImage>(
+        ImageResourceContent::Fetch(params, document.Fetcher()), document,
+        params.GetImageRequestBehavior() == FetchParameters::kDeferImageLoad,
+        origin_clean_ == OriginClean::kTrue, is_ad_related_, params.Url());
   }
   return cached_image_.Get();
 }
@@ -154,12 +167,6 @@ bool CSSImageValue::Equals(const CSSImageValue& other) const {
 
 String CSSImageValue::CustomCSSText() const {
   return SerializeURI(relative_url_);
-}
-
-bool CSSImageValue::KnownToBeOpaque(const Document& document,
-                                    const ComputedStyle& style) const {
-  return cached_image_ ? cached_image_->KnownToBeOpaque(document, style)
-                       : false;
 }
 
 void CSSImageValue::TraceAfterDispatch(blink::Visitor* visitor) const {

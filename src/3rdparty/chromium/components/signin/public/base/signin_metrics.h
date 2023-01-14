@@ -148,7 +148,7 @@ enum class AccessPoint : int {
   ACCESS_POINT_SUPERVISED_USER = 4,
   ACCESS_POINT_EXTENSION_INSTALL_BUBBLE = 5,
   ACCESS_POINT_EXTENSIONS = 6,
-  ACCESS_POINT_APPS_PAGE_LINK = 7,
+  // ACCESS_POINT_APPS_PAGE_LINK = 7, no longer used.
   ACCESS_POINT_BOOKMARK_BUBBLE = 8,
   ACCESS_POINT_BOOKMARK_MANAGER = 9,
   ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN = 10,
@@ -213,7 +213,7 @@ enum class PromoAction : int {
   PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT
 };
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 // This class is used to record user action that was taken after
 // receiving the header from Gaia in the web sign-in flow.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
@@ -222,52 +222,51 @@ enum class AccountConsistencyPromoAction : int {
   // Promo is not shown as there are no accounts on device.
   SUPPRESSED_NO_ACCOUNTS = 0,
   // User has dismissed the promo by tapping back button.
-  DISMISSED_BACK,
+  DISMISSED_BACK = 1,
   // User has tapped |Add account to device| from expanded account list.
-  ADD_ACCOUNT_STARTED,
-  // User tapped the button from the expanded account list to open the incognito
-  // interstitial
-  // then confirmed opening the page in the incognito tab by tapping |Continue|
-  // in the incognito
-  // interstitial.
-  STARTED_INCOGNITO_SESSION,
+  ADD_ACCOUNT_STARTED = 2,
+
+  // Deprecated 05/2021, since the Incognito option has been removed from
+  // account picker bottomsheet.
+  // STARTED_INCOGNITO_SESSION = 3,
+
   // User has selected the default account and signed in with it
-  SIGNED_IN_WITH_DEFAULT_ACCOUNT,
+  SIGNED_IN_WITH_DEFAULT_ACCOUNT = 4,
   // User has selected one of the non default accounts and signed in with it.
-  SIGNED_IN_WITH_NON_DEFAULT_ACCOUNT,
+  SIGNED_IN_WITH_NON_DEFAULT_ACCOUNT = 5,
   // The promo was shown to user.
-  SHOWN,
+  SHOWN = 6,
   // Promo is not shown due to sign-in being disallowed either by an enterprise
   // policy
   // or by |Allow Chrome sign-in| toggle.
-  SUPPRESSED_SIGNIN_NOT_ALLOWED,
+  SUPPRESSED_SIGNIN_NOT_ALLOWED = 7,
   // User has added an account and signed in with this account.
   // When this metric is recorded, we won't record
   // SIGNED_IN_WITH_DEFAULT_ACCOUNT or
   // SIGNED_IN_WITH_NON_DEFAULT_ACCOUNT.
-  SIGNED_IN_WITH_ADDED_ACCOUNT,
+  SIGNED_IN_WITH_ADDED_ACCOUNT = 8,
   // User has dismissed the promo by tapping on the scrim above the bottom
   // sheet.
-  DISMISSED_SCRIM,
+  DISMISSED_SCRIM = 9,
   // User has dismissed the promo by swiping down the bottom sheet.
-  DISMISSED_SWIPE_DOWN,
+  DISMISSED_SWIPE_DOWN = 10,
   // User has dismissed the promo by other means.
-  DISMISSED_OTHER,
+  DISMISSED_OTHER = 11,
   // The auth error screen was shown to the user.
-  AUTH_ERROR_SHOWN,
+  AUTH_ERROR_SHOWN = 12,
   // The generic error screen was shown to the user.
-  GENERIC_ERROR_SHOWN,
+  GENERIC_ERROR_SHOWN = 13,
   // User has dismissed the promo by tapping on the dismissal button in the
   // bottom sheet.
-  DISMISSED_BUTTON,
+  DISMISSED_BUTTON = 14,
   // User has completed the account addition flow triggered from the bottom
   // sheet.
-  ADD_ACCOUNT_COMPLETED,
+  ADD_ACCOUNT_COMPLETED = 15,
   // The bottom sheet was suppressed as the user hit consecutive active
   // dismissal limit.
-  SUPPRESSED_CONSECUTIVE_DISMISSALS,
+  SUPPRESSED_CONSECUTIVE_DISMISSALS = 16,
 
-  MAX,
+  MAX = 17,
 };
 
 // This class is used to record web sign-in events within 2 minutes after
@@ -285,34 +284,29 @@ enum class AccountConsistencyPromoAfterDismissal {
 
   kMaxValue = kSignedInOnWebWithOtherAccount,
 };
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 // Enum values which enumerates all reasons to start sign in process.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// Please keep in Sync with "SigninReason" in
+// src/tools/metrics/histograms/enums.xml.
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 // GENERATED_JAVA_CLASS_NAME_OVERRIDE: SigninReason
 enum class Reason : int {
-  REASON_SIGNIN_PRIMARY_ACCOUNT = 0,
-  REASON_ADD_SECONDARY_ACCOUNT,
-  REASON_REAUTHENTICATION,
-  REASON_UNLOCK,
-  REASON_UNKNOWN_REASON,  // This should never have been used to get signin URL.
-  REASON_FORCED_SIGNIN_PRIMARY_ACCOUNT,
-  REASON_FETCH_LST_ONLY,  // Used to simply login and acquire a login scope
-                          // token without actually signing into any profiles on
-                          // Chrome. This allows the chrome signin page to work
-                          // in incognito mode.
-  REASON_MAX,             // This must be last.
-};
-
-// Enum values used for use with the "Signin.Reauth" histogram.
-enum AccountReauth {
-  // The user gave the wrong email when doing a reauthentication.
-  HISTOGRAM_ACCOUNT_MISSMATCH,
-  // The user was shown a reauthentication login screen.
-  HISTOGRAM_REAUTH_SHOWN,
-
-  HISTOGRAM_REAUTH_MAX
+  kSigninPrimaryAccount = 0,
+  kAddSecondaryAccount = 1,
+  kReauthentication = 2,
+  // REASON_UNLOCK = 3,  // DEPRECATED, profile unlocking was removed.
+  // This should never have been used to get signin URL.
+  kUnknownReason = 4,
+  kForcedSigninPrimaryAccount = 5,
+  // Used to simply login and acquire a login scope token without actually
+  // signing into any profiles on Chrome. This allows the chrome signin page to
+  // work in incognito mode.
+  kFetchLstOnly = 6,
+  kMaxValue = kFetchLstOnly,
 };
 
 // Enum values used for "Signin.AccountReconcilorState.OnGaiaResponse"
@@ -351,14 +345,25 @@ enum class AccountEquality : int {
   HISTOGRAM_COUNT,
 };
 
+// Values of Signin.AccountType histogram. This histogram records if the user
+// uses a gmail account or a managed account when signing in.
+enum class SigninAccountType : int {
+  // Gmail account.
+  kRegular = 0,
+  // Managed account.
+  kManaged = 1,
+  // Always the last enumerated type.
+  kMaxValue = kManaged,
+};
+
 // When the user is give a choice of deleting their profile or not when signing
-// out, the |DELETED| or |KEEPING| metric should be used. If the user is not
-// given any option, then use the |IGNORE_METRIC| value should be used.
+// out, the |kDeleted| or |kKeeping| metric should be used. If the user is not
+// given any option, then use the |kIgnoreMetric| value should be used.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 enum class SignoutDelete : int {
-  DELETED = 0,
-  KEEPING,
-  IGNORE_METRIC,
+  kDeleted = 0,
+  kKeeping,
+  kIgnoreMetric,
 };
 
 // This is the relationship between the account used to sign into chrome, and
@@ -427,6 +432,32 @@ enum class SourceForRefreshTokenOperation {
 
 // Different types of reporting. This is used as a histogram suffix.
 enum class ReportingType { PERIODIC, ON_CHANGE };
+
+// Result for fetching account capabilities from the system library, used to
+// record histogram Signin.AccountCapabilities.GetFromSystemLibraryResult.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
+enum class FetchAccountCapabilitiesFromSystemLibraryResult {
+  // Errors common to iOS and Android.
+  kSuccess = 0,
+  kErrorGeneric = 1,
+
+  // Errors from 10 to 19 are reserved for Android.
+  kApiRequestFailed = 10,
+  kApiError = 11,
+  kApiNotPermitted = 12,
+  kApiUnknownCapability = 13,
+  kApiFailedToSync = 14,
+  kApiNotAvailable = 15,
+
+  // Errors after 20 are reserved for iOS.
+  kErrorMissingCapability = 20,
+  kErrorUnexpectedValue = 21,
+
+  kMaxValue = kErrorUnexpectedValue
+};
 
 // -----------------------------------------------------------------------------
 // Histograms
@@ -528,6 +559,9 @@ void RecordRefreshTokenUpdatedFromSource(bool refresh_token_is_valid,
 // Records the source that revoked a refresh token.
 void RecordRefreshTokenRevokedFromSource(SourceForRefreshTokenOperation source);
 
+// Records the account type when the user signs in.
+void RecordSigninAccountType(bool is_signin_and_sync, bool is_managed_account);
+
 // -----------------------------------------------------------------------------
 // User actions
 // -----------------------------------------------------------------------------
@@ -543,6 +577,11 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point);
 void RecordSigninImpressionWithAccountUserActionForAccessPoint(
     AccessPoint access_point,
     bool with_account);
+
+#if defined(OS_IOS)
+// Records |Signin.AccountConsistencyPromoAction| histogram.
+void RecordConsistencyPromoUserAction(AccountConsistencyPromoAction action);
+#endif  // defined(OS_IOS)
 
 }  // namespace signin_metrics
 

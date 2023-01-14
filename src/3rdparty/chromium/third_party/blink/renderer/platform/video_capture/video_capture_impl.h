@@ -8,7 +8,9 @@
 #include <stdint.h>
 #include <map>
 
-#include "base/macros.h"
+#include "base/feature_list.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/unsafe_shared_memory_pool.h"
 #include "base/memory/weak_ptr.h"
 #include "base/thread_annotations.h"
 #include "base/threading/thread_checker.h"
@@ -35,6 +37,8 @@ class GpuVideoAcceleratorFactories;
 
 namespace blink {
 
+class BrowserInterfaceBrokerProxy;
+
 extern const PLATFORM_EXPORT base::Feature kTimeoutHangingVideoCaptureStarts;
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -55,7 +59,10 @@ class PLATFORM_EXPORT VideoCaptureImpl
     : public media::mojom::blink::VideoCaptureObserver {
  public:
   VideoCaptureImpl(media::VideoCaptureSessionId session_id,
-                   scoped_refptr<base::SequencedTaskRunner> main_task_runner);
+                   scoped_refptr<base::SequencedTaskRunner> main_task_runner,
+                   BrowserInterfaceBrokerProxy* browser_interface_broker);
+  VideoCaptureImpl(const VideoCaptureImpl&) = delete;
+  VideoCaptureImpl& operator=(const VideoCaptureImpl&) = delete;
   ~VideoCaptureImpl() override;
 
   // Stop/resume delivering video frames to clients, based on flag |suspend|.
@@ -111,7 +118,10 @@ class PLATFORM_EXPORT VideoCaptureImpl
       Vector<media::mojom::blink::ReadyBufferPtr> scaled_buffers) override;
   void OnBufferDestroyed(int32_t buffer_id) override;
 
-  void ProcessFeedback(const media::VideoFrameFeedback& feedback);
+  void ProcessFeedback(const media::VideoCaptureFeedback& feedback);
+
+  // The returned weak pointer can only be dereferenced on the IO thread.
+  base::WeakPtr<VideoCaptureImpl> GetWeakPtr();
 
   static constexpr base::TimeDelta kCaptureStartTimeout =
       base::TimeDelta::FromSeconds(10);
@@ -266,20 +276,21 @@ class PLATFORM_EXPORT VideoCaptureImpl
 
   std::unique_ptr<gpu::GpuMemoryBufferSupport> gpu_memory_buffer_support_;
 
+  scoped_refptr<base::UnsafeSharedMemoryPool> pool_;
+
   // Stores feedback from the clients, received in |ProcessFeedback()|.
   // Only accessed on the IO thread.
-  media::VideoFrameFeedback feedback_;
+  media::VideoCaptureFeedback feedback_;
 
   THREAD_CHECKER(io_thread_checker_);
 
   base::OneShotTimer startup_timeout_;
 
+  base::WeakPtr<VideoCaptureImpl> weak_this_;
   // WeakPtrFactory pointing back to |this| object, for use with
   // media::VideoFrames constructed in OnBufferReceived() from buffers cached
   // in |client_buffers_|.
   base::WeakPtrFactory<VideoCaptureImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureImpl);
 };
 
 }  // namespace blink

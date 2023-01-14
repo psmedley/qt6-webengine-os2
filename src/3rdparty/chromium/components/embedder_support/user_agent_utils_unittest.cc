@@ -210,9 +210,9 @@ TEST(UserAgentUtilsTest, UserAgentStringOrdering) {
 #endif
 }
 
-TEST(UserAgentUtilsTest, UserAgentStringFrozen) {
+TEST(UserAgentUtilsTest, UserAgentStringReduced) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(blink::features::kFreezeUserAgent);
+  scoped_feature_list.InitAndEnableFeature(blink::features::kReduceUserAgent);
 
 #if defined(OS_ANDROID)
   // Verify the correct user agent is returned when the UseMobileUserAgent
@@ -227,9 +227,12 @@ TEST(UserAgentUtilsTest, UserAgentStringFrozen) {
   ASSERT_FALSE(command_line->HasSwitch(switches::kUseMobileUserAgent));
   {
     std::string buffer = GetUserAgent();
-    EXPECT_EQ(buffer, base::StringPrintf(
-                          content::frozen_user_agent_strings::kAndroid,
-                          version_info::GetMajorVersionNumber().c_str()));
+    std::string device_compat = "";
+    EXPECT_EQ(buffer,
+              base::StringPrintf(content::frozen_user_agent_strings::kAndroid,
+                                 content::GetUnifiedPlatform().c_str(),
+                                 version_info::GetMajorVersionNumber().c_str(),
+                                 device_compat.c_str()));
   }
 
   // Verify the mobile user agent string is returned when using a mobile user
@@ -238,18 +241,24 @@ TEST(UserAgentUtilsTest, UserAgentStringFrozen) {
   ASSERT_TRUE(command_line->HasSwitch(switches::kUseMobileUserAgent));
   {
     std::string buffer = GetUserAgent();
-    EXPECT_EQ(buffer, base::StringPrintf(
-                          content::frozen_user_agent_strings::kAndroidMobile,
-                          version_info::GetMajorVersionNumber().c_str()));
+    std::string device_compat = "Mobile ";
+    EXPECT_EQ(buffer,
+              base::StringPrintf(content::frozen_user_agent_strings::kAndroid,
+                                 content::GetUnifiedPlatform().c_str(),
+                                 version_info::GetMajorVersionNumber().c_str(),
+                                 device_compat.c_str()));
   }
 #else
   {
     std::string buffer = GetUserAgent();
     EXPECT_EQ(buffer, base::StringPrintf(
                           content::frozen_user_agent_strings::kDesktop,
+                          content::GetUnifiedPlatform().c_str(),
                           version_info::GetMajorVersionNumber().c_str()));
   }
 #endif
+
+  EXPECT_EQ(GetUserAgent(), GetReducedUserAgent());
 }
 
 TEST(UserAgentUtilsTest, UserAgentMetadata) {
@@ -282,9 +291,11 @@ TEST(UserAgentUtilsTest, UserAgentMetadata) {
   EXPECT_TRUE(contains_product_brand_version);
 
   EXPECT_EQ(metadata.full_version, version_info::GetVersionNumber());
+
+  int32_t major, minor, bugfix = 0;
+  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
   EXPECT_EQ(metadata.platform_version,
-            content::GetOSVersion(content::IncludeAndroidBuildNumber::Exclude,
-                                  content::IncludeAndroidModel::Exclude));
+            base::StringPrintf("%d.%d.%d", major, minor, bugfix));
   // This makes sure no extra information is added to the platform version.
   EXPECT_EQ(metadata.platform_version.find(";"), std::string::npos);
   // TODO(crbug.com/1103047): This can be removed/re-refactored once we use
@@ -296,32 +307,33 @@ TEST(UserAgentUtilsTest, UserAgentMetadata) {
 #endif
   EXPECT_EQ(metadata.architecture, content::GetLowEntropyCpuArchitecture());
   EXPECT_EQ(metadata.model, content::BuildModelInfo());
+  EXPECT_EQ(metadata.bitness, content::GetLowEntropyCpuBitness());
 }
 
 TEST(UserAgentUtilsTest, GenerateBrandVersionList) {
   blink::UserAgentMetadata metadata;
 
   metadata.brand_version_list =
-      GenerateBrandVersionList(84, base::nullopt, "84", base::nullopt);
+      GenerateBrandVersionList(84, absl::nullopt, "84", absl::nullopt);
   std::string brand_list = metadata.SerializeBrandVersionList();
   EXPECT_EQ(R"(" Not A;Brand";v="99", "Chromium";v="84")", brand_list);
 
   metadata.brand_version_list =
-      GenerateBrandVersionList(85, base::nullopt, "85", base::nullopt);
+      GenerateBrandVersionList(85, absl::nullopt, "85", absl::nullopt);
   std::string brand_list_diff = metadata.SerializeBrandVersionList();
   // Make sure the lists are different for different seeds
   EXPECT_EQ(R"("Chromium";v="85", " Not;A Brand";v="99")", brand_list_diff);
   EXPECT_NE(brand_list, brand_list_diff);
 
   metadata.brand_version_list =
-      GenerateBrandVersionList(84, "Totally A Brand", "84", base::nullopt);
+      GenerateBrandVersionList(84, "Totally A Brand", "84", absl::nullopt);
   std::string brand_list_w_brand = metadata.SerializeBrandVersionList();
   EXPECT_EQ(
       R"(" Not A;Brand";v="99", "Chromium";v="84", "Totally A Brand";v="84")",
       brand_list_w_brand);
 
   metadata.brand_version_list =
-      GenerateBrandVersionList(84, base::nullopt, "84", "Clean GREASE");
+      GenerateBrandVersionList(84, absl::nullopt, "84", "Clean GREASE");
   std::string brand_list_grease_override = metadata.SerializeBrandVersionList();
   EXPECT_EQ(R"("Clean GREASE";v="99", "Chromium";v="84")",
             brand_list_grease_override);
@@ -329,7 +341,7 @@ TEST(UserAgentUtilsTest, GenerateBrandVersionList) {
 
   // Should DCHECK on negative numbers
   EXPECT_DCHECK_DEATH(
-      GenerateBrandVersionList(-1, base::nullopt, "99", base::nullopt));
+      GenerateBrandVersionList(-1, absl::nullopt, "99", absl::nullopt));
 }
 
 }  // namespace embedder_support

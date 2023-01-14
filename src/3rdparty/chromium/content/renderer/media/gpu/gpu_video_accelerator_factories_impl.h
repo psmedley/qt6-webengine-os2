@@ -14,7 +14,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/unguessable_token.h"
@@ -27,6 +26,7 @@
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -78,15 +78,14 @@ class CONTENT_EXPORT GpuVideoAcceleratorFactoriesImpl
   base::UnguessableToken GetChannelToken() override;
   int32_t GetCommandBufferRouteId() override;
   Supported IsDecoderConfigSupported(
-      media::VideoDecoderImplementation implementation,
       const media::VideoDecoderConfig& config) override;
+  media::VideoDecoderType GetDecoderType() override;
   bool IsDecoderSupportKnown() override;
   void NotifyDecoderSupportKnown(base::OnceClosure callback) override;
   std::unique_ptr<media::VideoDecoder> CreateVideoDecoder(
       media::MediaLog* media_log,
-      media::VideoDecoderImplementation implementation,
       media::RequestOverlayInfoCB request_overlay_info_cb) override;
-  base::Optional<media::VideoEncodeAccelerator::SupportedProfiles>
+  absl::optional<media::VideoEncodeAccelerator::SupportedProfiles>
   GetVideoEncodeAcceleratorSupportedProfiles() override;
   bool IsEncoderSupportKnown() override;
   void NotifyEncoderSupportKnown(base::OnceClosure callback) override;
@@ -172,7 +171,8 @@ class CONTENT_EXPORT GpuVideoAcceleratorFactoriesImpl
   void SetContextProviderLostOnMainThread();
 
   void OnSupportedDecoderConfigs(
-      const media::SupportedVideoDecoderConfigMap& supported_configs);
+      const media::SupportedVideoDecoderConfigs& supported_configs,
+      media::VideoDecoderType decoder_type);
   void OnDecoderSupportFailed();
 
   void OnGetVideoEncodeAcceleratorSupportedProfiles(
@@ -217,11 +217,13 @@ class CONTENT_EXPORT GpuVideoAcceleratorFactoriesImpl
   // If the Optional is empty, then we have not yet gotten the configs.  If the
   // Optional contains an empty vector, then we have gotten the result and there
   // are no supported configs.
-  base::Optional<media::SupportedVideoDecoderConfigMap>
-      supported_decoder_configs_ GUARDED_BY(supported_profiles_lock_);
+  absl::optional<media::SupportedVideoDecoderConfigs> supported_decoder_configs_
+      GUARDED_BY(supported_profiles_lock_);
+  media::VideoDecoderType video_decoder_type_
+      GUARDED_BY(supported_profiles_lock_) = media::VideoDecoderType::kUnknown;
   Notifier decoder_support_notifier_ GUARDED_BY(supported_profiles_lock_);
 
-  base::Optional<media::VideoEncodeAccelerator::SupportedProfiles>
+  absl::optional<media::VideoEncodeAccelerator::SupportedProfiles>
       supported_vea_profiles_ GUARDED_BY(supported_profiles_lock_);
   Notifier encoder_support_notifier_ GUARDED_BY(supported_profiles_lock_);
 

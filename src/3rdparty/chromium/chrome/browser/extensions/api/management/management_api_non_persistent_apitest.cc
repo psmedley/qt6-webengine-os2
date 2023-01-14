@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -23,6 +24,14 @@ using ContextType = ExtensionBrowserTest::ContextType;
 class ManagementApiNonPersistentApiTest
     : public ExtensionApiTest,
       public testing::WithParamInterface<ContextType> {
+ public:
+  ManagementApiNonPersistentApiTest() = default;
+  ~ManagementApiNonPersistentApiTest() override = default;
+  ManagementApiNonPersistentApiTest(const ManagementApiNonPersistentApiTest&) =
+      delete;
+  ManagementApiNonPersistentApiTest& operator=(
+      const ManagementApiNonPersistentApiTest&) = delete;
+
  protected:
   const Extension* LoadNonPersistentExtension(const char* relative_path) {
     return LoadExtension(

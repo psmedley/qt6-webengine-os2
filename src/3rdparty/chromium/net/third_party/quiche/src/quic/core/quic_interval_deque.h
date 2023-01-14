@@ -8,12 +8,12 @@
 #include <algorithm>
 
 #include "absl/types/optional.h"
-#include "quic/core/quic_circular_deque.h"
 #include "quic/core/quic_interval.h"
 #include "quic/core/quic_types.h"
 #include "quic/platform/api/quic_bug_tracker.h"
 #include "quic/platform/api/quic_export.h"
 #include "quic/platform/api/quic_logging.h"
+#include "common/quiche_circular_deque.h"
 
 namespace quic {
 
@@ -137,7 +137,7 @@ class QuicIntervalDequePeer;
 //   //   cached_index -> 1
 //   //   container -> {{2, [25, 30)}, {3, [35, 50)}}
 
-template <class T, class C = QUIC_NO_EXPORT QuicCircularDeque<T>>
+template <class T, class C = QUIC_NO_EXPORT quiche::QuicheCircularDeque<T>>
 class QUIC_NO_EXPORT QuicIntervalDeque {
  public:
   class QUIC_NO_EXPORT Iterator {
@@ -162,7 +162,7 @@ class QUIC_NO_EXPORT QuicIntervalDeque {
       // Don't increment when we are at the end.
       const std::size_t container_size = deque_->container_.size();
       if (index_ >= container_size) {
-        QUIC_BUG << "Iterator out of bounds.";
+        QUIC_BUG(quic_bug_10862_1) << "Iterator out of bounds.";
         return *this;
       }
       index_++;
@@ -279,7 +279,7 @@ void QuicIntervalDeque<T, C>::PushBack(const T& item) {
 template <class T, class C>
 void QuicIntervalDeque<T, C>::PopFront() {
   if (container_.size() == 0) {
-    QUIC_BUG << "Trying to pop from an empty container.";
+    QUIC_BUG(quic_bug_10862_2) << "Trying to pop from an empty container.";
     return;
   }
   container_.pop_front();
@@ -362,7 +362,8 @@ void QuicIntervalDeque<T, C>::PushBackUniversal(U&& item) {
   QuicInterval<std::size_t> interval = item.interval();
   // Adding an empty interval is a bug.
   if (interval.Empty()) {
-    QUIC_BUG << "Trying to save empty interval to QuicCircularDeque.";
+    QUIC_BUG(quic_bug_10862_3)
+        << "Trying to save empty interval to quiche::QuicheCircularDeque.";
     return;
   }
   container_.push_back(std::forward<U>(item));

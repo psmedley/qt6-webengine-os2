@@ -44,6 +44,7 @@ const char kAddFileWatchMethod[] = "AddFileWatch";
 const char kRemoveFileWatchMethod[] = "RemoveFileWatch";
 const char kRegisterVshSessionMethod[] = "RegisterVshSession";
 const char kGetVshSessionMethod[] = "GetVshSession";
+const char kFileSelectedMethod[] = "FileSelected";
 
 // Methods to be called from chunneld.
 const char kConnectChunnelMethod[] = "ConnectChunnel";
@@ -69,6 +70,7 @@ const char kApplyAnsiblePlaybookProgressSignal[] =
 const char kUpgradeContainerProgressSignal[] = "UpgradeContainerProgress";
 const char kStartLxdProgressSignal[] = "StartLxdProgress";
 const char kFileWatchTriggeredSignal[] = "FileWatchTriggered";
+const char kLowDiskSpaceTriggeredSignal[] = "LowDiskSpaceTriggered";
 
 }  // namespace cicerone
 }  // namespace vm_tools

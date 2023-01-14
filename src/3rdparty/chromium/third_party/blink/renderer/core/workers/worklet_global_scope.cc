@@ -15,9 +15,11 @@
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
+#include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
@@ -99,7 +101,11 @@ WorkletGlobalScope::WorkletGlobalScope(
       worker_thread_(worker_thread),
       // Worklets should always have a parent LocalFrameToken.
       frame_token_(
-          creation_params->parent_context_token->GetAs<LocalFrameToken>()) {
+          creation_params->parent_context_token->GetAs<LocalFrameToken>()),
+      parent_cross_origin_isolated_capability_(
+          creation_params->parent_cross_origin_isolated_capability),
+      parent_direct_socket_capability_(
+          creation_params->parent_direct_socket_capability) {
   DCHECK((thread_type_ == ThreadType::kMainThread && frame_) ||
          (thread_type_ == ThreadType::kOffMainThread && worker_thread_));
 
@@ -176,6 +182,15 @@ void WorkletGlobalScope::AddInspectorIssue(
   } else {
     worker_thread_->GetInspectorIssueStorage()->AddInspectorIssue(
         this, std::move(info));
+  }
+}
+
+void WorkletGlobalScope::AddInspectorIssue(AuditsIssue issue) {
+  if (IsMainThreadWorkletGlobalScope()) {
+    frame_->DomWindow()->AddInspectorIssue(std::move(issue));
+  } else {
+    worker_thread_->GetInspectorIssueStorage()->AddInspectorIssue(
+        this, std::move(issue));
   }
 }
 
@@ -276,6 +291,14 @@ KURL WorkletGlobalScope::CompleteURL(const String& url) const {
     return KURL();
   // Always use UTF-8 in Worklets.
   return KURL(BaseURL(), url);
+}
+
+bool WorkletGlobalScope::CrossOriginIsolatedCapability() const {
+  return parent_cross_origin_isolated_capability_;
+}
+
+bool WorkletGlobalScope::DirectSocketCapability() const {
+  return parent_direct_socket_capability_;
 }
 
 ukm::UkmRecorder* WorkletGlobalScope::UkmRecorder() {

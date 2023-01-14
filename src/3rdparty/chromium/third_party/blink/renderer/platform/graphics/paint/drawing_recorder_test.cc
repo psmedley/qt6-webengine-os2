@@ -22,22 +22,28 @@ const IntRect kBounds(1, 2, 3, 4);
 TEST_F(DrawingRecorderTest, Nothing) {
   FakeDisplayItemClient client;
   GraphicsContext context(GetPaintController());
-  InitRootChunk();
-  DrawNothing(context, client, kForegroundType);
-  CommitAndFinishCycle();
+  {
+    PaintController::CycleScope cycle_scope(GetPaintController());
+    InitRootChunk();
+    DrawNothing(context, client, kForegroundType);
+    GetPaintController().CommitNewDisplayItems();
+  }
   EXPECT_THAT(GetPaintController().GetDisplayItemList(),
               ElementsAre(IsSameId(&client, kForegroundType)));
-  EXPECT_FALSE(static_cast<const DrawingDisplayItem&>(
-                   GetPaintController().GetDisplayItemList()[0])
-                   .GetPaintRecord());
+  EXPECT_FALSE(
+      To<DrawingDisplayItem>(GetPaintController().GetDisplayItemList()[0])
+          .GetPaintRecord());
 }
 
 TEST_F(DrawingRecorderTest, Rect) {
   FakeDisplayItemClient client;
   GraphicsContext context(GetPaintController());
-  InitRootChunk();
-  DrawRect(context, client, kForegroundType, kBounds);
-  CommitAndFinishCycle();
+  {
+    PaintController::CycleScope cycle_scope(GetPaintController());
+    InitRootChunk();
+    DrawRect(context, client, kForegroundType, kBounds);
+    GetPaintController().CommitNewDisplayItems();
+  }
   EXPECT_THAT(GetPaintController().GetDisplayItemList(),
               ElementsAre(IsSameId(&client, kForegroundType)));
 }
@@ -45,22 +51,28 @@ TEST_F(DrawingRecorderTest, Rect) {
 TEST_F(DrawingRecorderTest, Cached) {
   FakeDisplayItemClient client;
   GraphicsContext context(GetPaintController());
-  InitRootChunk();
-  DrawNothing(context, client, kBackgroundType);
-  DrawRect(context, client, kForegroundType, kBounds);
-  CommitAndFinishCycle();
+  {
+    PaintController::CycleScope cycle_scope(GetPaintController());
+    InitRootChunk();
+    DrawNothing(context, client, kBackgroundType);
+    DrawRect(context, client, kForegroundType, kBounds);
+    GetPaintController().CommitNewDisplayItems();
+  }
 
   EXPECT_THAT(GetPaintController().GetDisplayItemList(),
               ElementsAre(IsSameId(&client, kBackgroundType),
                           IsSameId(&client, kForegroundType)));
 
-  InitRootChunk();
-  DrawNothing(context, client, kBackgroundType);
-  DrawRect(context, client, kForegroundType, kBounds);
+  {
+    PaintController::CycleScope cycle_scope(GetPaintController());
+    InitRootChunk();
+    DrawNothing(context, client, kBackgroundType);
+    DrawRect(context, client, kForegroundType, kBounds);
 
-  EXPECT_EQ(2u, NumCachedNewItems());
+    EXPECT_EQ(2u, NumCachedNewItems());
 
-  CommitAndFinishCycle();
+    GetPaintController().CommitNewDisplayItems();
+  }
 
   EXPECT_THAT(GetPaintController().GetDisplayItemList(),
               ElementsAre(IsSameId(&client, kBackgroundType),

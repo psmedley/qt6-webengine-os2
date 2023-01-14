@@ -4,6 +4,7 @@
 
 #include "base/task_runner_util.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -37,7 +38,7 @@ struct Foo {
 };
 
 std::unique_ptr<Foo> CreateFoo() {
-  return std::unique_ptr<Foo>(new Foo);
+  return std::make_unique<Foo>();
 }
 
 void ExpectFoo(std::unique_ptr<Foo> foo) {
@@ -97,6 +98,19 @@ TEST_F(TaskRunnerTest, PostTaskAndReplyWithResult) {
   test::SingleThreadTaskEnvironment task_environment;
   ThreadTaskRunnerHandle::Get()->PostTaskAndReplyWithResult(
       FROM_HERE, BindOnce(&ReturnFourtyTwo), BindOnce(&StoreValue, &result));
+
+  RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(42, result);
+}
+
+TEST_F(TaskRunnerTest, PostTaskAndReplyWithResultRepeatingCallbacks) {
+  int result = 0;
+
+  test::SingleThreadTaskEnvironment task_environment;
+  ThreadTaskRunnerHandle::Get()->PostTaskAndReplyWithResult(
+      FROM_HERE, BindRepeating(&ReturnFourtyTwo),
+      BindRepeating(&StoreValue, &result));
 
   RunLoop().RunUntilIdle();
 

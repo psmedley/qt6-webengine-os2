@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "ui/accessibility/ax_language_detection.h"
+
 #include <algorithm>
 #include <functional>
+#include <memory>
 
 #include "base/command_line.h"
 #include "base/i18n/unicodestring.h"
@@ -236,7 +238,8 @@ void AXLanguageDetectionManager::RegisterLanguageDetectionObserver() {
 
   // Construct our new Observer as requested.
   // If there is already an Observer on this Manager then this will destroy it.
-  language_detection_observer_.reset(new AXLanguageDetectionObserver(tree_));
+  language_detection_observer_ =
+      std::make_unique<AXLanguageDetectionObserver>(tree_);
 }
 
 // Detect languages for each node.
@@ -420,7 +423,8 @@ AXLanguageDetectionManager::GetLanguageAnnotationForStringAttribute(
   if (node.HasStringAttribute(ax::mojom::StringAttribute::kLanguage)) {
     // Use author-provided language if present.
     language_annotation.push_back(AXLanguageSpan{
-        0 /* start_index */, int(attr_value.length()) /* end_index */,
+        0 /* start_index */,
+        static_cast<int>(attr_value.length()) /* end_index */,
         node.GetStringAttribute(
             ax::mojom::StringAttribute::kLanguage) /* language */,
         1 /* probability */});

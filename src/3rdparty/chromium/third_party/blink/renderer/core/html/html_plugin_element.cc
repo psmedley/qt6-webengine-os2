@@ -22,10 +22,10 @@
 
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
-#include "third_party/blink/public/mojom/feature_policy/policy_value.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/policy_value.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
@@ -110,24 +110,21 @@ void PluginParameters::MapDataParamToSrc() {
   });
 
   if (data != names_.end()) {
-    AppendNameWithValue("src", values_[data - names_.begin()]);
+    AppendNameWithValue(
+        "src", values_[base::checked_cast<wtf_size_t>(data - names_.begin())]);
   }
 }
 
-HTMLPlugInElement::HTMLPlugInElement(
-    const QualifiedName& tag_name,
-    Document& doc,
-    const CreateElementFlags flags,
-    PreferPlugInsForImagesOption prefer_plug_ins_for_images_option)
+HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tag_name,
+                                     Document& doc,
+                                     const CreateElementFlags flags)
     : HTMLFrameOwnerElement(tag_name, doc),
       is_delaying_load_event_(false),
       // needs_plugin_update_(!IsCreatedByParser) allows HTMLObjectElement to
       // delay EmbeddedContentView updates until after all children are
       // parsed. For HTMLEmbedElement this delay is unnecessary, but it is
       // simpler to make both classes share the same codepath in this class.
-      needs_plugin_update_(!flags.IsCreatedByParser()),
-      should_prefer_plug_ins_for_images_(prefer_plug_ins_for_images_option ==
-                                         kShouldPreferPlugInsForImages) {
+      needs_plugin_update_(!flags.IsCreatedByParser()) {
   SetHasCustomStyleCallbacks();
   if (auto* context = doc.GetExecutionContext()) {
     context->GetScheduler()->RegisterStickyFeature(
@@ -269,6 +266,13 @@ void HTMLPlugInElement::UpdatePlugin() {
   }
 }
 
+Node::InsertionNotificationRequest HTMLPlugInElement::InsertedInto(
+    ContainerNode& insertion_point) {
+  if (insertion_point.isConnected())
+    GetDocument().DelayLoadEventUntilLayoutTreeUpdate();
+  return HTMLFrameOwnerElement::InsertedInto(insertion_point);
+}
+
 void HTMLPlugInElement::RemovedFrom(ContainerNode& insertion_point) {
   // Plugins can persist only through reattachment during a lifecycle
   // update. This method shouldn't be called in that lifecycle phase.
@@ -282,15 +286,15 @@ bool HTMLPlugInElement::ShouldAccelerate() const {
   return plugin && plugin->CcLayer();
 }
 
-ParsedFeaturePolicy HTMLPlugInElement::ConstructContainerPolicy() const {
+ParsedPermissionsPolicy HTMLPlugInElement::ConstructContainerPolicy() const {
   // Plugin elements (<object> and <embed>) are not allowed to enable the
   // fullscreen feature. Add an empty allowlist for the fullscreen feature so
   // that the nested browsing context is unable to use the API, regardless of
   // origin.
   // https://fullscreen.spec.whatwg.org/#model
-  ParsedFeaturePolicy container_policy;
-  ParsedFeaturePolicyDeclaration allowlist(
-      mojom::blink::FeaturePolicyFeature::kFullscreen);
+  ParsedPermissionsPolicy container_policy;
+  ParsedPermissionsPolicyDeclaration allowlist(
+      mojom::blink::PermissionsPolicyFeature::kFullscreen);
   container_policy.push_back(allowlist);
   return container_policy;
 }
@@ -490,8 +494,16 @@ LayoutEmbeddedContent* HTMLPlugInElement::LayoutEmbeddedContentForJSBindings()
 bool HTMLPlugInElement::IsKeyboardFocusable() const {
   if (HTMLFrameOwnerElement::IsKeyboardFocusable())
     return true;
-  return GetDocument().IsActive() && PluginEmbeddedContentView() &&
-         PluginEmbeddedContentView()->SupportsKeyboardFocus() && IsFocusable();
+
+  WebPluginContainerImpl* embedded_content_view = nullptr;
+  if (LayoutEmbeddedContent* layout_embedded_content =
+          ExistingLayoutEmbeddedContent()) {
+    embedded_content_view = layout_embedded_content->Plugin();
+  }
+
+  return GetDocument().IsActive() && embedded_content_view &&
+         embedded_content_view->SupportsKeyboardFocus() &&
+         IsBaseElementFocusable();
 }
 
 bool HTMLPlugInElement::HasCustomFocusLogic() const {
@@ -545,9 +557,8 @@ HTMLPlugInElement::ObjectContentType HTMLPlugInElement::GetObjectContentType()
   }
 
   if (MIMETypeRegistry::IsSupportedImageMIMEType(mime_type)) {
-    return should_prefer_plug_ins_for_images_ && plugin_supports_mime_type
-               ? ObjectContentType::kPlugin
-               : ObjectContentType::kImage;
+    return plugin_supports_mime_type ? ObjectContentType::kPlugin
+                                     : ObjectContentType::kImage;
   }
 
   if (plugin_supports_mime_type)
@@ -726,7 +737,7 @@ bool HTMLPlugInElement::AllowedToLoadObject(const KURL& url,
          !MixedContentChecker::ShouldBlockFetch(
              frame, mojom::blink::RequestContextType::OBJECT, url,
              ResourceRequest::RedirectStatus::kNoRedirect, url,
-             /* devtools_id= */ base::nullopt, ReportingDisposition::kReport,
+             /* devtools_id= */ absl::nullopt, ReportingDisposition::kReport,
              GetDocument().Loader()->GetContentSecurityNotifier());
 }
 

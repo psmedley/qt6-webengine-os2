@@ -33,18 +33,10 @@ constexpr auto kSuspendInterval = base::TimeDelta::FromSeconds(30);
 
 constexpr char kLatencyEventCategory[] = "latency";
 
-// The name emitted for a large UI jank event. Also reused as the scope string
-// for these events, to ensure their ID's don't collide with any other event.
-constexpr char kLargeUIJankEvent[] = "Large UI Jank";
-
-// The name emitted for a large IO jank event. Also reused as the scope string
-// for these events, to ensure their ID's don't collide with any other event.
-constexpr char kLargeIOJankEvent[] = "Large IO Jank";
-
 // The names emitted for JankyInterval measurement events.
 constexpr char kJankyIntervalEvent[] = "JankyInterval";
-constexpr char kJankyIntervalsPerThirtySeconds2Event[] =
-    "JankyIntervalsPerThirtySeconds2";
+constexpr char kJankyIntervalsPerThirtySeconds3Event[] =
+    "JankyIntervalsPerThirtySeconds3";
 
 // Given a |jank|, finds each janky slice between |start_time| and |end_time|,
 // and adds it to |janky_slices|.
@@ -88,6 +80,10 @@ Calculator::Calculator()
                                   // Listener is destroyed at destructor, and
                                   // object will be alive for any callback.
                                   base::Unretained(this)))) {
+  // This class assumes construction and access from the UI thread from all
+  // methods that aren't explicitly flagged otherwise (i.e. *OnIOThread()).
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   OnApplicationStateChanged(
       base::android::ApplicationStatusListener::GetState());
 }
@@ -96,28 +92,20 @@ Calculator::Calculator()
 }
 #endif
 
-Calculator::~Calculator() = default;
+Calculator::~Calculator() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+}
 
 void Calculator::TaskOrEventFinishedOnUIThread(
     base::TimeTicks queue_time,
     base::TimeTicks execution_start_time,
     base::TimeTicks execution_finish_time) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_GE(execution_start_time, queue_time);
 
   if (execution_finish_time - queue_time >= kJankThreshold) {
     GetQueueAndExecutionJanksOnUIThread().emplace_back(queue_time,
                                                        execution_finish_time);
-    // Emit a trace event to highlight large janky slices.
-    const auto trace_id = TRACE_ID_WITH_SCOPE(
-        kLargeUIJankEvent, TRACE_ID_LOCAL(g_num_large_ui_janks_));
-    TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
-        kLatencyEventCategory, kLargeUIJankEvent, trace_id, queue_time);
-    TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(kLatencyEventCategory,
-                                                   kLargeUIJankEvent, trace_id,
-                                                   execution_finish_time);
-    g_num_large_ui_janks_++;
-
     if (execution_finish_time - execution_start_time >= kJankThreshold) {
       GetExecutionJanksOnUIThread().emplace_back(execution_start_time,
                                                  execution_finish_time);
@@ -132,23 +120,13 @@ void Calculator::TaskOrEventFinishedOnIOThread(
     base::TimeTicks queue_time,
     base::TimeTicks execution_start_time,
     base::TimeTicks execution_finish_time) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_GE(execution_start_time, queue_time);
 
   if (execution_finish_time - queue_time >= kJankThreshold) {
     base::AutoLock lock(io_thread_lock_);
     queue_and_execution_janks_on_io_thread_.emplace_back(queue_time,
                                                          execution_finish_time);
-    // Emit a trace event to highlight large janky slices.
-    const auto trace_id = TRACE_ID_WITH_SCOPE(
-        kLargeIOJankEvent, TRACE_ID_LOCAL(g_num_large_io_janks_));
-    TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
-        kLatencyEventCategory, kLargeIOJankEvent, trace_id, queue_time);
-    TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(kLatencyEventCategory,
-                                                   kLargeIOJankEvent, trace_id,
-                                                   execution_finish_time);
-    g_num_large_io_janks_++;
-
     if (execution_finish_time - execution_start_time >= kJankThreshold) {
       execution_janks_on_io_thread_.emplace_back(execution_start_time,
                                                  execution_finish_time);
@@ -156,17 +134,17 @@ void Calculator::TaskOrEventFinishedOnIOThread(
   }
 }
 
-void Calculator::SetProcessSuspended(bool suspended) {
-  // Keep track of the current power state.
-  is_process_suspended_ = suspended;
-  // Regardless of whether the process is entering or exiting suspension, the
-  // current 30-second interval should be flagged as containing suspended state.
-  was_process_suspended_ = true;
+void Calculator::OnFirstIdle() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_EQ(startup_stage_, StartupStage::kMessageLoopStarted);
+  startup_stage_ = StartupStage::kPastFirstIdle;
 }
 
 void Calculator::EmitResponsiveness(JankType jank_type,
                                     size_t janky_slices,
-                                    bool was_process_suspended) {
+                                    StartupStage startup_stage) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   constexpr size_t kMaxJankySlices = 300;
   DCHECK_LE(janky_slices, kMaxJankySlices);
   switch (jank_type) {
@@ -174,17 +152,19 @@ void Calculator::EmitResponsiveness(JankType jank_type,
       UMA_HISTOGRAM_COUNTS_1000(
           "Browser.Responsiveness.JankyIntervalsPerThirtySeconds",
           janky_slices);
-      if (!was_process_suspended) {
-        UMA_HISTOGRAM_COUNTS_1000(
-            "Browser.Responsiveness.JankyIntervalsPerThirtySeconds.NoSuspend",
-            janky_slices);
-      }
       break;
     }
     case JankType::kQueueAndExecution: {
+      // TODO(gab): Remove JankyIntervalsPerThirtySeconds2 once
+      // JankyIntervalsPerThirtySeconds3 has fully replaced it.
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Browser.Responsiveness.JankyIntervalsPerThirtySeconds2",
           janky_slices, 1, kMaxJankySlices, 50);
+      if (startup_stage == StartupStage::kRecordingPastFirstIdle) {
+        UMA_HISTOGRAM_CUSTOM_COUNTS(
+            "Browser.Responsiveness.JankyIntervalsPerThirtySeconds3",
+            janky_slices, 1, kMaxJankySlices, 50);
+      }
       break;
     }
   }
@@ -195,8 +175,8 @@ void Calculator::EmitResponsivenessTraceEvents(
     base::TimeTicks start_time,
     base::TimeTicks end_time,
     const std::set<int>& janky_slices) {
-  // Only output JankyIntervalsPerThirtySeconds2 event and only when there are
-  // janky slices during the measurement.
+  // Only output JankyIntervalsPerThirtySeconds3 event when there are janky
+  // slices during the measurement.
   if (janky_slices.empty() || jank_type != JankType::kQueueAndExecution)
     return;
 
@@ -235,10 +215,10 @@ void Calculator::EmitJankyIntervalsMeasurementTraceEvent(
     base::TimeTicks end_time,
     size_t amount_of_slices) {
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP1(
-      kLatencyEventCategory, kJankyIntervalsPerThirtySeconds2Event,
+      kLatencyEventCategory, kJankyIntervalsPerThirtySeconds3Event,
       TRACE_ID_LOCAL(this), start_time, "amount_of_slices", amount_of_slices);
   TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
-      kLatencyEventCategory, kJankyIntervalsPerThirtySeconds2Event,
+      kLatencyEventCategory, kJankyIntervalsPerThirtySeconds3Event,
       TRACE_ID_LOCAL(this), end_time);
 }
 
@@ -253,11 +233,14 @@ void Calculator::EmitJankyIntervalsJankTraceEvent(base::TimeTicks start_time,
 }
 
 base::TimeTicks Calculator::GetLastCalculationTime() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return last_calculation_time_;
 }
 
 void Calculator::CalculateResponsivenessIfNecessary(
     base::TimeTicks current_time) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   base::TimeTicks last_activity_time = most_recent_activity_time_;
   most_recent_activity_time_ = current_time;
 
@@ -318,9 +301,10 @@ void Calculator::CalculateResponsivenessIfNecessary(
       JankType::kQueueAndExecution,
       std::move(queue_and_execution_janks_from_multiple_threads),
       last_calculation_time_, new_calculation_time);
+  if (startup_stage_ == StartupStage::kPastFirstIdle)
+    startup_stage_ = StartupStage::kRecordingPastFirstIdle;
 
   last_calculation_time_ = new_calculation_time;
-  was_process_suspended_ = is_process_suspended_;
 }
 
 void Calculator::CalculateResponsiveness(
@@ -328,6 +312,8 @@ void Calculator::CalculateResponsiveness(
     std::vector<JankList> janks_from_multiple_threads,
     base::TimeTicks start_time,
     base::TimeTicks end_time) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   while (start_time < end_time) {
     const base::TimeTicks current_interval_end_time =
         start_time + kMeasurementInterval;
@@ -349,13 +335,16 @@ void Calculator::CalculateResponsiveness(
       }
     }
 
-    EmitResponsiveness(jank_type, janky_slices.size(), was_process_suspended_);
+    EmitResponsiveness(jank_type, janky_slices.size(), startup_stage_);
 
-    // If the 'latency' tracing category is enabled, emit trace events for the
-    // measurement duration and the janky slices.
-    bool tracing_enabled;
-    TRACE_EVENT_CATEGORY_GROUP_ENABLED(kLatencyEventCategory, &tracing_enabled);
-    if (tracing_enabled) {
+    // If the 'latency' tracing category is enabled and we are ready to emit
+    // JankyIntervalsPerThirtySeconds3, emit trace events for the measurement
+    // duration and the janky slices.
+    bool latency_category_enabled;
+    TRACE_EVENT_CATEGORY_GROUP_ENABLED(kLatencyEventCategory,
+                                       &latency_category_enabled);
+    if (latency_category_enabled &&
+        startup_stage_ == StartupStage::kRecordingPastFirstIdle) {
       EmitResponsivenessTraceEvents(jank_type, start_time,
                                     current_interval_end_time, janky_slices);
     }
@@ -394,6 +383,7 @@ void Calculator::OnApplicationStateChanged(
 }
 #endif
 
+// static
 Calculator::JankList Calculator::TakeJanksOlderThanTime(
     JankList* janks,
     base::TimeTicks end_time) {

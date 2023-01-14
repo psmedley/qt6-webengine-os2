@@ -39,6 +39,9 @@ class PDFiumTestBase : public testing::Test {
     InitializeEngineResult& operator=(InitializeEngineResult&& other) noexcept;
     ~InitializeEngineResult();
 
+    // Completes loading the document.
+    void FinishLoading();
+
     // Initialized engine.
     std::unique_ptr<PDFiumEngine> engine;
 
@@ -50,8 +53,8 @@ class PDFiumTestBase : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  // Initializes a PDFiumEngine for use in testing with |client|. Loads a PDF
-  // named |pdf_name|. See TestDocumentLoader for more info about |pdf_name|.
+  // Initializes a PDFiumEngine for use in testing with `client`. Loads a PDF
+  // named `pdf_name`. See TestDocumentLoader for more info about `pdf_name`.
   std::unique_ptr<PDFiumEngine> InitializeEngine(
       TestClient* client,
       const base::FilePath::CharType* pdf_name);

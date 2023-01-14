@@ -64,7 +64,7 @@ void ScopedRasterFlags::DecodeImageShader(const SkMatrix& ctm) {
   }
 
   uint32_t transfer_cache_entry_id = kInvalidImageTransferCacheEntryId;
-  SkFilterQuality raster_quality = flags()->getFilterQuality();
+  PaintFlags::FilterQuality raster_quality = flags()->getFilterQuality();
   bool transfer_cache_entry_needs_mips = false;
   gpu::Mailbox mailbox;
   auto decoded_shader = flags()->getShader()->CreateDecodedImage(
@@ -101,8 +101,8 @@ void ScopedRasterFlags::DecodeRecordShader(const SkMatrix& ctm,
   gfx::SizeF raster_scale(1.f, 1.f);
   auto decoded_shader = flags()->getShader()->CreateScaledPaintRecord(
       ctm, max_texture_size, &raster_scale);
-  decoded_shader->CreateSkShader(&raster_scale,
-                                 &*decode_stashing_image_provider_);
+  decoded_shader->ResolveSkObjects(&raster_scale,
+                                   &*decode_stashing_image_provider_);
   MutableFlags()->setShader(std::move(decoded_shader));
 }
 

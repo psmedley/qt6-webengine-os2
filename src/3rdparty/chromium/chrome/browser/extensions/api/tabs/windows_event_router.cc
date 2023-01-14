@@ -9,7 +9,8 @@
 #include "base/bind.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/extensions/api/tabs/app_base_window.h"
 #include "chrome/browser/extensions/api/tabs/app_window_controller.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/windows.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "content/public/browser/notification_service.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_util.h"
@@ -133,10 +133,10 @@ bool WillDispatchWindowFocusedEvent(
       window_controller, extension, listener_filter);
 
   if (cant_cross_incognito || !visible_to_listener) {
-    event->event_args->Clear();
+    event->event_args->ClearList();
     event->event_args->AppendInteger(extension_misc::kUnknownWindowId);
   } else {
-    event->event_args->Clear();
+    event->event_args->ClearList();
     event->event_args->AppendInteger(window_id);
   }
   return true;
@@ -150,18 +150,16 @@ WindowsEventRouter::WindowsEventRouter(Profile* profile)
       focused_window_id_(extension_misc::kUnknownWindowId) {
   DCHECK(!profile->IsOffTheRecord());
 
-  observed_app_registry_.Add(AppWindowRegistry::Get(profile_));
-  observed_controller_list_.Add(WindowControllerList::GetInstance());
+  observed_app_registry_.Observe(AppWindowRegistry::Get(profile_));
+  observed_controller_list_.Observe(WindowControllerList::GetInstance());
   // Needed for when no suitable window can be passed to an extension as the
   // currently focused window. On Mac (even in a toolkit-views build) always
   // rely on the notification sent by AppControllerMac after AppKit sends
   // NSWindowDidBecomeKeyNotification and there is no [NSApp keyWindo7w]. This
   // allows windows not created by toolkit-views to be tracked.
-  // TODO(tapted): Remove the ifdefs (and NOTIFICATION_NO_KEY_WINDOW) when
-  // Chrome on Mac only makes windows with toolkit-views.
 #if defined(OS_MAC)
-  registrar_.Add(this, chrome::NOTIFICATION_NO_KEY_WINDOW,
-                 content::NotificationService::AllSources());
+  observed_key_window_notifier_.Observe(
+      &g_browser_process->platform_part()->key_window_notifier());
 #elif defined(TOOLKIT_VIEWS)
   views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
 #else
@@ -271,15 +269,11 @@ void WindowsEventRouter::OnNativeFocusChanged(gfx::NativeView focused_now) {
 }
 #endif
 
-void WindowsEventRouter::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
 #if defined(OS_MAC)
-  DCHECK_EQ(chrome::NOTIFICATION_NO_KEY_WINDOW, type);
+void WindowsEventRouter::OnNoKeyWindow() {
   OnActiveWindowChanged(nullptr);
-#endif
 }
+#endif
 
 void WindowsEventRouter::OnActiveWindowChanged(
     WindowController* window_controller) {
@@ -304,7 +298,7 @@ void WindowsEventRouter::OnActiveWindowChanged(
 
   std::unique_ptr<Event> event = std::make_unique<Event>(
       events::WINDOWS_ON_FOCUS_CHANGED, windows::OnFocusChanged::kEventName,
-      std::make_unique<base::ListValue>());
+      std::vector<base::Value>());
   event->will_dispatch_callback =
       base::BindRepeating(&WillDispatchWindowFocusedEvent, window_controller);
   EventRouter::Get(profile_)->BroadcastEvent(std::move(event));
@@ -314,9 +308,9 @@ void WindowsEventRouter::DispatchEvent(events::HistogramValue histogram_value,
                                        const std::string& event_name,
                                        WindowController* window_controller,
                                        std::unique_ptr<base::ListValue> args) {
-  auto event =
-      std::make_unique<Event>(histogram_value, event_name, std::move(args),
-                              window_controller->profile());
+  auto event = std::make_unique<Event>(histogram_value, event_name,
+                                       std::move(*args).TakeList(),
+                                       window_controller->profile());
   event->will_dispatch_callback =
       base::BindRepeating(&WillDispatchWindowEvent, window_controller);
   EventRouter::Get(profile_)->BroadcastEvent(std::move(event));

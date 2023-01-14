@@ -14,6 +14,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 
 namespace content {
@@ -65,7 +66,7 @@ void WebBundleInterceptorForTrackedNavigationFromTrustableFileOrFromNetwork::
         mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   url_loader_factory_->CreateLoaderAndStart(
-      std::move(receiver), /*routing_id=*/0, /*request_id=*/0,
+      std::move(receiver), /*request_id=*/0,
       /*options=*/0, resource_request, std::move(client),
       net::MutableNetworkTrafficAnnotationTag(
           web_bundle_utils::kTrafficAnnotation));

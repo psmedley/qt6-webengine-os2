@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/supports_user_data.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/renderer/render_frame.h"
@@ -402,7 +403,7 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
 
   const Extension* extension = script_context->extension();
   if (extension) {
-    if (!source->tab.empty() && !extension->is_platform_app()) {
+    if (!source->tab.DictEmpty() && !extension->is_platform_app()) {
       sender_builder.Set("tab", content::V8ValueConverter::Create()->ToV8Value(
                                     &source->tab, v8_context));
     }
@@ -455,7 +456,7 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
       list.emplace_back();
 
     APIActivityLogger::LogEvent(
-        script_context, event_name,
+        bindings_system_->GetIPCMessageSender(), script_context, event_name,
         std::make_unique<base::ListValue>(std::move(list)));
   }
 }

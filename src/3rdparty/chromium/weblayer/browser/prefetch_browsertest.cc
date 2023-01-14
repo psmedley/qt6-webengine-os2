@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/files/file_path.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/test/bind.h"
@@ -50,7 +51,7 @@ class PrefetchBrowserTest : public WebLayerBrowserTest {
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
   }
 
-  bool RunPrefetchExperiment(GURL url, const base::string16 expected_title) {
+  bool RunPrefetchExperiment(GURL url, const std::u16string expected_title) {
     content::TitleWatcher title_watcher(
         static_cast<TabImpl*>(shell()->tab())->web_contents(), expected_title);
     NavigateAndWaitForCompletion(url, shell());
@@ -79,9 +80,8 @@ IN_PROC_BROWSER_TEST_F(PrefetchBrowserTest, PrefetchWorks) {
   std::unique_ptr<net::NetworkChangeNotifier::DisableForTest> disable_for_test(
       new net::NetworkChangeNotifier::DisableForTest);
   ASSERT_FALSE(prefetch_target_request_seen_);
-  EXPECT_TRUE(
-      RunPrefetchExperiment(embedded_test_server()->GetURL(kPrefetchPage),
-                            base::ASCIIToUTF16("link onload")));
+  EXPECT_TRUE(RunPrefetchExperiment(
+      embedded_test_server()->GetURL(kPrefetchPage), u"link onload"));
   EXPECT_TRUE(prefetch_target_request_seen_);
 }
 
@@ -128,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(PrefetchBrowserTest, RedirectedPrefetch) {
   ASSERT_TRUE(https_server.Start());
 
   GURL url = https_server.GetURL("www.google.com", kRedirectPrefetchPage);
-  EXPECT_TRUE(RunPrefetchExperiment(url, base::ASCIIToUTF16("done")));
+  EXPECT_TRUE(RunPrefetchExperiment(url, u"done"));
   {
     base::AutoLock auto_lock(lock_);
     ASSERT_EQ(3U, requests_.size());

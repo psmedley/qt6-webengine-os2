@@ -4,6 +4,7 @@
 
 #include "components/favicon/core/favicon_backend.h"
 
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -478,6 +479,12 @@ bool FaviconBackend::SetFaviconsOutOfDateForPage(const GURL& page_url) {
   return true;
 }
 
+bool FaviconBackend::SetFaviconsOutOfDateBetween(base::Time begin,
+                                                 base::Time end) {
+  TRACE_EVENT0("browser", "FaviconBackend::SetFaviconsOutOfDateForPage");
+  return db_->SetFaviconsOutOfDateBetween(begin, end);
+}
+
 void FaviconBackend::TouchOnDemandFavicon(const GURL& icon_url) {
   TRACE_EVENT0("browser", "FaviconBackend::TouchOnDemandFavicon");
 
@@ -497,12 +504,6 @@ SetFaviconsResult FaviconBackend::SetFavicons(
 
   favicon_base::FaviconID icon_id =
       db_->GetFaviconIDForFaviconURL(icon_url, icon_type);
-
-  if (bitmap_type == FaviconBitmapType::ON_DEMAND) {
-    UMA_HISTOGRAM_BOOLEAN("Favicon.OnDemandIconExistsInDb",
-                          static_cast<bool>(icon_id));
-  }
-
   bool favicon_created = false;
   if (!icon_id) {
     icon_id = db_->AddFavicon(icon_url, icon_type);
@@ -620,7 +621,7 @@ FaviconBackend::GetFaviconsFromDB(const GURL& page_url,
     // host of |page_url| for fuzzy matching. Query the database for a page_url
     // that is known to exist and matches the host of |page_url|. Do this only
     // if we have a HTTP/HTTPS url.
-    base::Optional<GURL> fallback_page_url =
+    absl::optional<GURL> fallback_page_url =
         db_->FindFirstPageURLForHost(page_url, icon_types);
 
     if (fallback_page_url) {

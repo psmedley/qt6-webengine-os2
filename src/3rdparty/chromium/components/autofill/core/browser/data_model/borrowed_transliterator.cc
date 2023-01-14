@@ -5,6 +5,7 @@
 #include "components/autofill/core/browser/data_model/borrowed_transliterator.h"
 
 #include "base/logging.h"
+#include "base/no_destructor.h"
 
 namespace autofill {
 
@@ -50,7 +51,7 @@ BorrowedTransliterator::GetTransliterator() {
   return *instance;
 }
 
-base::string16 RemoveDiacriticsAndConvertToLowerCase(
+std::u16string RemoveDiacriticsAndConvertToLowerCase(
     base::StringPiece16 value) {
   icu::UnicodeString result = icu::UnicodeString(value.data(), value.length());
   BorrowedTransliterator().Transliterate(&result);

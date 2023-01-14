@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CREDENTIALMANAGER_CREDENTIAL_MANAGER_TYPE_CONVERTERS_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CREDENTIALMANAGER_CREDENTIAL_MANAGER_TYPE_CONVERTERS_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "third_party/blink/public/mojom/credentialmanager/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink-forward.h"
@@ -14,7 +14,6 @@
 
 namespace blink {
 class AuthenticatorSelectionCriteria;
-class ArrayBufferOrArrayBufferView;
 class CableAuthenticationData;
 class CableRegistrationData;
 class Credential;
@@ -25,6 +24,7 @@ class PublicKeyCredentialRequestOptions;
 class PublicKeyCredentialRpEntity;
 class PublicKeyCredentialUserEntity;
 class UserVerificationRequirement;
+class V8UnionArrayBufferOrArrayBufferView;
 }  // namespace blink
 
 namespace mojo {
@@ -53,8 +53,10 @@ struct TypeConverter<blink::mojom::blink::CredentialManagerError,
 };
 
 template <>
-struct TypeConverter<Vector<uint8_t>, blink::ArrayBufferOrArrayBufferView> {
-  static Vector<uint8_t> Convert(const blink::ArrayBufferOrArrayBufferView&);
+struct TypeConverter<Vector<uint8_t>,
+                     blink::V8UnionArrayBufferOrArrayBufferView*> {
+  static Vector<uint8_t> Convert(
+      const blink::V8UnionArrayBufferOrArrayBufferView*);
 };
 
 template <>
@@ -64,9 +66,9 @@ struct TypeConverter<blink::mojom::blink::PublicKeyCredentialType, String> {
 
 template <>
 struct TypeConverter<
-    base::Optional<blink::mojom::blink::AuthenticatorTransport>,
+    absl::optional<blink::mojom::blink::AuthenticatorTransport>,
     String> {
-  static base::Optional<blink::mojom::blink::AuthenticatorTransport> Convert(
+  static absl::optional<blink::mojom::blink::AuthenticatorTransport> Convert(
       const String&);
 };
 
@@ -77,9 +79,9 @@ struct TypeConverter<String, blink::mojom::blink::AuthenticatorTransport> {
 
 template <>
 struct TypeConverter<
-    base::Optional<blink::mojom::blink::ResidentKeyRequirement>,
+    absl::optional<blink::mojom::blink::ResidentKeyRequirement>,
     String> {
-  static base::Optional<blink::mojom::blink::ResidentKeyRequirement> Convert(
+  static absl::optional<blink::mojom::blink::ResidentKeyRequirement> Convert(
       const String&);
 };
 
@@ -97,19 +99,19 @@ struct TypeConverter<blink::mojom::blink::AttestationConveyancePreference,
 };
 
 // TODO(crbug.com/1092328): Second template parameter should be
-// base::Optional<blink::V8AuthenticatorAttachment>.
+// absl::optional<blink::V8AuthenticatorAttachment>.
 template <>
 struct TypeConverter<blink::mojom::blink::AuthenticatorAttachment,
-                     base::Optional<String>> {
+                     absl::optional<String>> {
   static blink::mojom::blink::AuthenticatorAttachment Convert(
-      const base::Optional<String>&);
+      const absl::optional<String>&);
 };
 
 template <>
 struct TypeConverter<blink::mojom::blink::LargeBlobSupport,
-                     base::Optional<String>> {
+                     absl::optional<String>> {
   static blink::mojom::blink::LargeBlobSupport Convert(
-      const base::Optional<String>&);
+      const absl::optional<String>&);
 };
 
 template <>

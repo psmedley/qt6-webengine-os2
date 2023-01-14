@@ -134,4 +134,39 @@ TEST_F(ApplyStyleCommandTest, JustifyRightWithSVGForeignObject) {
       "</svg>",
       GetSelectionTextFromBody());
 }
+
+// This is a regression test for https://crbug.com/1188946
+TEST_F(ApplyStyleCommandTest, JustifyCenterWithNonEditable) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody("|x<div contenteditable=false></div>"),
+      SetSelectionOptions());
+
+  auto* style = MakeGarbageCollected<MutableCSSPropertyValueSet>(kUASheetMode);
+  style->SetProperty(CSSPropertyID::kTextAlign, "center",
+                     /* important */ false,
+                     GetFrame().DomWindow()->GetSecureContextMode());
+  MakeGarbageCollected<ApplyStyleCommand>(
+      GetDocument(), MakeGarbageCollected<EditingStyle>(style),
+      InputEvent::InputType::kFormatJustifyCenter,
+      ApplyStyleCommand::kForceBlockProperties)
+      ->Apply();
+
+  EXPECT_EQ("<div style=\"text-align: center;\">|<br>x</div>",
+            GetSelectionTextFromBody());
+}
+
+// This is a regression test for https://crbug.com/1199902
+TEST_F(ApplyStyleCommandTest, StyledInlineElementIsActuallyABlock) {
+  InsertStyleElement("sub { display: block; }");
+  Selection().SetSelection(SetSelectionTextToBody("^<sub>a</sub>|"),
+                           SetSelectionOptions());
+  GetDocument().setDesignMode("on");
+  Element* styled_inline_element = GetDocument().QuerySelector("sub");
+  bool remove_only = true;
+  // Shouldn't crash.
+  MakeGarbageCollected<ApplyStyleCommand>(styled_inline_element, remove_only)
+      ->Apply();
+  EXPECT_EQ("^a|", GetSelectionTextFromBody());
+}
 }  // namespace blink

@@ -21,7 +21,7 @@
 #include "content/test/test_render_view_host.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
@@ -47,7 +47,7 @@ class MockRenderFrameHostDelegate : public RenderFrameHostDelegate {
                void(const MediaStreamRequest& request,
                     MediaResponseCallback* callback));
   MOCK_METHOD3(CheckMediaAccessPermission,
-               bool(RenderFrameHost* render_frame_host,
+               bool(RenderFrameHostImpl* render_frame_host,
                     const url::Origin& security_origin,
                     blink::mojom::MediaStreamType type));
 
@@ -70,16 +70,14 @@ class MockMediaStreamUI : public MediaStreamUI {
                               const std::string& label,
                               std::vector<DesktopMediaID> screen_capture_ids,
                               StateChangeCallback state_change) override {
-    // gmock cannot handle move-only types:
-    return MockOnStarted(base::AdaptCallbackForRepeating(std::move(stop)),
-                         source);
+    return MockOnStarted(std::move(stop), source);
   }
 
   void OnDeviceStopped(const std::string& label,
                        const DesktopMediaID& media_id) override {}
 
   MOCK_METHOD2(MockOnStarted,
-               gfx::NativeViewId(base::RepeatingClosure stop,
+               gfx::NativeViewId(base::OnceClosure stop,
                                  MediaStreamUI::SourceCallback source));
 };
 
@@ -260,8 +258,11 @@ TEST_F(MediaStreamUIProxyTest, StopFromUI) {
   devices.push_back(blink::MediaStreamDevice(
       blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, "Mic", "Mic"));
   auto ui = std::make_unique<MockMediaStreamUI>();
-  EXPECT_CALL(*ui, MockOnStarted(_, _))
-      .WillOnce(testing::DoAll(MoveArg<0>(&stop_callback), Return(0)));
+  EXPECT_CALL(*ui, MockOnStarted(_, _)).WillOnce([&](auto closure, auto) {
+    stop_callback = std::move(closure);
+    return 0;
+  });
+
   std::move(callback).Run(devices, blink::mojom::MediaStreamRequestResult::OK,
                           std::move(ui));
 
@@ -357,8 +358,10 @@ TEST_F(MediaStreamUIProxyTest, ChangeSourceFromUI) {
       blink::mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE,
       "fake_desktop_video_device", "Fake Desktop Video Device"));
   auto ui = std::make_unique<MockMediaStreamUI>();
-  EXPECT_CALL(*ui, MockOnStarted(_, _))
-      .WillOnce(testing::DoAll(SaveArg<1>(&source_callback), Return(0)));
+  EXPECT_CALL(*ui, MockOnStarted(_, _)).WillOnce([&](auto, auto callback) {
+    source_callback = std::move(callback);
+    return 0;
+  });
   std::move(callback).Run(devices, blink::mojom::MediaStreamRequestResult::OK,
                           std::move(ui));
 
@@ -386,11 +389,11 @@ TEST_F(MediaStreamUIProxyTest, ChangeSourceFromUI) {
   base::RunLoop().RunUntilIdle();
 }
 
-// Basic tests for feature policy checks through the MediaStreamUIProxy. These
-// tests are not meant to cover every edge case as the FeaturePolicy class
-// itself is tested thoroughly in feature_policy_unittest.cc and in
-// render_frame_host_feature_policy_unittest.cc.
-class MediaStreamUIProxyFeaturePolicyTest
+// Basic tests for permissions policy checks through the MediaStreamUIProxy.
+// These tests are not meant to cover every edge case as the PermissionsPolicy
+// class itself is tested thoroughly in permissions_policy_unittest.cc and in
+// render_frame_host_permissions_policy_unittest.cc.
+class MediaStreamUIProxyPermissionsPolicyTest
     : public RenderViewHostImplTestHarness {
  public:
   void SetUp() override {
@@ -402,10 +405,10 @@ class MediaStreamUIProxyFeaturePolicyTest
   // The header policy should only be set once on page load, so we refresh the
   // page to simulate that.
   void RefreshPageAndSetHeaderPolicy(
-      blink::mojom::FeaturePolicyFeature feature) {
+      blink::mojom::PermissionsPolicyFeature feature) {
     auto navigation = NavigationSimulator::CreateRendererInitiated(
         main_rfh()->GetLastCommittedURL(), main_rfh());
-    navigation->SetFeaturePolicyHeader({{feature, {}, false, false}});
+    navigation->SetPermissionsPolicyHeader({{feature, {}, false, false}});
     navigation->Commit();
   }
 
@@ -416,10 +419,9 @@ class MediaStreamUIProxyFeaturePolicyTest
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
     GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            &MediaStreamUIProxyFeaturePolicyTest::GetResultForRequestOnIOThread,
-            base::Unretained(this), std::move(request)));
+        FROM_HERE, base::BindOnce(&MediaStreamUIProxyPermissionsPolicyTest::
+                                      GetResultForRequestOnIOThread,
+                                  base::Unretained(this), std::move(request)));
     run_loop.Run();
     *devices_out = devices_;
     *result_out = result_;
@@ -474,9 +476,9 @@ class MediaStreamUIProxyFeaturePolicyTest
     proxy_ = MediaStreamUIProxy::CreateForTests(&delegate_);
     proxy_->RequestAccess(
         std::move(request),
-        base::BindOnce(
-            &MediaStreamUIProxyFeaturePolicyTest::FinishedGetResultOnIOThread,
-            base::Unretained(this)));
+        base::BindOnce(&MediaStreamUIProxyPermissionsPolicyTest::
+                           FinishedGetResultOnIOThread,
+                       base::Unretained(this)));
   }
 
   void FinishedGetResultOnIOThread(
@@ -486,8 +488,9 @@ class MediaStreamUIProxyFeaturePolicyTest
     proxy_.reset();
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,
-        base::BindOnce(&MediaStreamUIProxyFeaturePolicyTest::FinishedGetResult,
-                       base::Unretained(this), devices, result));
+        base::BindOnce(
+            &MediaStreamUIProxyPermissionsPolicyTest::FinishedGetResult,
+            base::Unretained(this), devices, result));
   }
 
   void FinishedGetResult(const blink::MediaStreamDevices& devices,
@@ -508,7 +511,7 @@ class MediaStreamUIProxyFeaturePolicyTest
   std::unique_ptr<MediaStreamUIProxy> proxy_;
 };
 
-TEST_F(MediaStreamUIProxyFeaturePolicyTest, FeaturePolicy) {
+TEST_F(MediaStreamUIProxyPermissionsPolicyTest, PermissionsPolicy) {
   blink::MediaStreamDevices devices;
   blink::mojom::MediaStreamRequestResult result;
 
@@ -527,7 +530,7 @@ TEST_F(MediaStreamUIProxyFeaturePolicyTest, FeaturePolicy) {
 
   // Mic disabled.
   RefreshPageAndSetHeaderPolicy(
-      blink::mojom::FeaturePolicyFeature::kMicrophone);
+      blink::mojom::PermissionsPolicyFeature::kMicrophone);
   GetResultForRequest(
       CreateRequest(main_rfh(),
                     blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
@@ -539,7 +542,8 @@ TEST_F(MediaStreamUIProxyFeaturePolicyTest, FeaturePolicy) {
             devices[0].type);
 
   // Camera disabled.
-  RefreshPageAndSetHeaderPolicy(blink::mojom::FeaturePolicyFeature::kCamera);
+  RefreshPageAndSetHeaderPolicy(
+      blink::mojom::PermissionsPolicyFeature::kCamera);
   GetResultForRequest(
       CreateRequest(main_rfh(),
                     blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
@@ -551,7 +555,8 @@ TEST_F(MediaStreamUIProxyFeaturePolicyTest, FeaturePolicy) {
             devices[0].type);
 
   // Camera disabled resulting in no devices being returned.
-  RefreshPageAndSetHeaderPolicy(blink::mojom::FeaturePolicyFeature::kCamera);
+  RefreshPageAndSetHeaderPolicy(
+      blink::mojom::PermissionsPolicyFeature::kCamera);
   GetResultForRequest(
       CreateRequest(main_rfh(), blink::mojom::MediaStreamType::NO_SERVICE,
                     blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE),

@@ -80,7 +80,7 @@ bool BrowserAccessibilityManagerAndroid::ShouldExposePasswordText() {
 
 BrowserAccessibility* BrowserAccessibilityManagerAndroid::GetFocus() const {
   BrowserAccessibility* focus = BrowserAccessibilityManager::GetFocus();
-  if (focus && !focus->IsPlainTextField())
+  if (focus && !focus->IsAtomicTextField())
     return GetActiveDescendant(focus);
   return focus;
 }
@@ -172,6 +172,9 @@ void BrowserAccessibilityManagerAndroid::FireBlinkEvent(
     case ax::mojom::Event::kClicked:
       wcax->HandleClicked(android_node->unique_id());
       break;
+    case ax::mojom::Event::kEndOfTest:
+      wcax->HandleEndOfTestSignal();
+      break;
     case ax::mojom::Event::kHover:
       HandleHoverEvent(node);
       break;
@@ -205,7 +208,7 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
       // When an alertdialog is shown, we will announce the hint, which
       // (should) contain the description set by the author. If it is
       // empty, then we will try GetInnerText() as a fallback.
-      base::string16 text = android_node->GetHint();
+      std::u16string text = android_node->GetHint();
       if (text.empty())
         text = android_node->GetInnerText();
 
@@ -233,6 +236,13 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
       }
       break;
     }
+    case ui::AXEventGenerator::Event::LIVE_REGION_NODE_CHANGED: {
+      // This event is fired when an object appears in a live region.
+      // Speak its text.
+      std::u16string text = android_node->GetInnerText();
+      wcax->AnnounceLiveRegionText(text);
+      break;
+    }
     case ui::AXEventGenerator::Event::LOAD_COMPLETE:
       if (node->manager() == GetRootManager()) {
         auto* android_focused =
@@ -241,22 +251,24 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
           wcax->HandlePageLoaded(android_focused->unique_id());
       }
       break;
-    case ui::AXEventGenerator::Event::SCROLL_HORIZONTAL_POSITION_CHANGED:
-    case ui::AXEventGenerator::Event::SCROLL_VERTICAL_POSITION_CHANGED:
-      wcax->HandleScrollPositionChanged(android_node->unique_id());
-      break;
-    case ui::AXEventGenerator::Event::LIVE_REGION_NODE_CHANGED: {
-      // This event is fired when an object appears in a live region.
-      // Speak its text.
-      base::string16 text = android_node->GetInnerText();
-      wcax->AnnounceLiveRegionText(text);
-      break;
-    }
     case ui::AXEventGenerator::Event::RANGE_VALUE_CHANGED:
       DCHECK(android_node->GetData().IsRangeValueSupported());
       if (android_node->IsSlider())
         wcax->HandleSliderChanged(android_node->unique_id());
       break;
+    case ui::AXEventGenerator::Event::SCROLL_HORIZONTAL_POSITION_CHANGED:
+    case ui::AXEventGenerator::Event::SCROLL_VERTICAL_POSITION_CHANGED:
+      wcax->HandleScrollPositionChanged(android_node->unique_id());
+      break;
+    case ui::AXEventGenerator::Event::SUBTREE_CREATED: {
+      // When a dialog is shown, we will send a SUBTREE_CREATED event.
+      // When this happens, we want to generate a TYPE_WINDOW_STATE_CHANGED
+      // event and populate the node's paneTitle with the dialog description.
+      if (android_node->GetRole() == ax::mojom::Role::kDialog) {
+        wcax->HandleDialogModalOpened(android_node->unique_id());
+      }
+      break;
+    }
     case ui::AXEventGenerator::Event::VALUE_IN_TEXT_FIELD_CHANGED:
       DCHECK(android_node->IsTextField());
       if (GetFocus() == node)
@@ -271,10 +283,12 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
     case ui::AXEventGenerator::Event::ATOMIC_CHANGED:
     case ui::AXEventGenerator::Event::AUTO_COMPLETE_CHANGED:
     case ui::AXEventGenerator::Event::BUSY_CHANGED:
+    case ui::AXEventGenerator::Event::CHECKED_STATE_DESCRIPTION_CHANGED:
     case ui::AXEventGenerator::Event::CHILDREN_CHANGED:
     case ui::AXEventGenerator::Event::CLASS_NAME_CHANGED:
     case ui::AXEventGenerator::Event::COLLAPSED:
     case ui::AXEventGenerator::Event::CONTROLS_CHANGED:
+    case ui::AXEventGenerator::Event::DETAILS_CHANGED:
     case ui::AXEventGenerator::Event::DESCRIBED_BY_CHANGED:
     case ui::AXEventGenerator::Event::DESCRIPTION_CHANGED:
     case ui::AXEventGenerator::Event::DOCUMENT_TITLE_CHANGED:
@@ -299,6 +313,8 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
     case ui::AXEventGenerator::Event::LIVE_RELEVANT_CHANGED:
     case ui::AXEventGenerator::Event::LIVE_STATUS_CHANGED:
     case ui::AXEventGenerator::Event::LOAD_START:
+    case ui::AXEventGenerator::Event::MENU_POPUP_END:
+    case ui::AXEventGenerator::Event::MENU_POPUP_START:
     case ui::AXEventGenerator::Event::MENU_ITEM_SELECTED:
     case ui::AXEventGenerator::Event::MULTILINE_STATE_CHANGED:
     case ui::AXEventGenerator::Event::MULTISELECTABLE_STATE_CHANGED:
@@ -324,7 +340,6 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
     case ui::AXEventGenerator::Event::SET_SIZE_CHANGED:
     case ui::AXEventGenerator::Event::SORT_CHANGED:
     case ui::AXEventGenerator::Event::STATE_CHANGED:
-    case ui::AXEventGenerator::Event::SUBTREE_CREATED:
     case ui::AXEventGenerator::Event::TEXT_ATTRIBUTE_CHANGED:
     case ui::AXEventGenerator::Event::WIN_IACCESSIBLE_STATE_CHANGED:
       break;
@@ -355,7 +370,7 @@ bool BrowserAccessibilityManagerAndroid::NextAtGranularity(
     int32_t* end_index) {
   switch (granularity) {
     case ANDROID_ACCESSIBILITY_NODE_INFO_MOVEMENT_GRANULARITY_CHARACTER: {
-      base::string16 text = node->GetInnerText();
+      std::u16string text = node->GetInnerText();
       if (cursor_index >= static_cast<int32_t>(text.length()))
         return false;
       base::i18n::UTF16CharIterator iter(text);
@@ -404,7 +419,7 @@ bool BrowserAccessibilityManagerAndroid::PreviousAtGranularity(
     case ANDROID_ACCESSIBILITY_NODE_INFO_MOVEMENT_GRANULARITY_CHARACTER: {
       if (cursor_index <= 0)
         return false;
-      base::string16 text = node->GetInnerText();
+      std::u16string text = node->GetInnerText();
       base::i18n::UTF16CharIterator iter(text);
       int previous_index = 0;
       while (!iter.end() &&
@@ -448,6 +463,11 @@ void BrowserAccessibilityManagerAndroid::ClearNodeInfoCacheForGivenId(
   if (!wcax)
     return;
 
+  // We do not need to clear a node more than once per atomic update.
+  if (nodes_already_cleared_.find(unique_id) != nodes_already_cleared_.end())
+    return;
+
+  nodes_already_cleared_.emplace(unique_id);
   wcax->ClearNodeInfoCacheForGivenId(unique_id);
 }
 
@@ -516,8 +536,45 @@ void BrowserAccessibilityManagerAndroid::OnAtomicUpdateFinished(
   // Reset content changed events counter every time we finish an atomic update.
   wcax->ResetContentChangedEventsCounter();
 
+  // Clear unordered_set of nodes cleared from the cache after atomic update.
+  nodes_already_cleared_.clear();
+
   if (root_changed) {
     wcax->HandleNavigate();
+  }
+}
+
+void BrowserAccessibilityManagerAndroid::OnNodeCreated(ui::AXTree* tree,
+                                                       ui::AXNode* node) {
+  BrowserAccessibilityManager::OnNodeCreated(tree, node);
+  if (node->data().GetBoolAttribute(
+          ax::mojom::BoolAttribute::kTouchPassthrough)) {
+    auto* root =
+        static_cast<BrowserAccessibilityManagerAndroid*>(GetRootManager());
+    if (root)
+      root->EnableTouchPassthrough();
+    else
+      EnableTouchPassthrough();
+  }
+}
+
+void BrowserAccessibilityManagerAndroid::OnBoolAttributeChanged(
+    ui::AXTree* tree,
+    ui::AXNode* node,
+    ax::mojom::BoolAttribute attr,
+    bool new_value) {
+  BrowserAccessibilityManager::OnBoolAttributeChanged(tree, node, attr,
+                                                      new_value);
+  if (new_value && attr == ax::mojom::BoolAttribute::kTouchPassthrough) {
+    // TODO(accessibility): there's a tiny chance we could get this
+    // called on an iframe before it's attached to the root manager.
+    // If this ever becomes an issue in practice, make this more robust.
+    auto* root =
+        static_cast<BrowserAccessibilityManagerAndroid*>(GetRootManager());
+    if (root)
+      root->EnableTouchPassthrough();
+    else
+      EnableTouchPassthrough();
   }
 }
 

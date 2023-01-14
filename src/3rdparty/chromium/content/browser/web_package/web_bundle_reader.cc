@@ -19,6 +19,7 @@
 #include "mojo/public/cpp/system/file_data_source.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "net/base/url_util.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/common/web_package/web_package_request_matcher.h"
 
 namespace content {
@@ -258,12 +259,12 @@ void WebBundleReader::Reconnect() {
 
   GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce(&WebBundleReader::DidReconnect, this,
-                                base::nullopt /* error */));
+                                absl::nullopt /* error */));
 }
 
 void WebBundleReader::ReconnectForFile(base::File file) {
   base::File::Error file_error = parser_->OpenFile(std::move(file));
-  base::Optional<std::string> error;
+  absl::optional<std::string> error;
   if (file_error != base::File::FILE_OK)
     error = base::File::ErrorToString(file_error);
   GetUIThreadTaskRunner({})->PostTask(
@@ -271,7 +272,7 @@ void WebBundleReader::ReconnectForFile(base::File file) {
       base::BindOnce(&WebBundleReader::DidReconnect, this, std::move(error)));
 }
 
-void WebBundleReader::DidReconnect(base::Optional<std::string> error) {
+void WebBundleReader::DidReconnect(absl::optional<std::string> error) {
   DCHECK_EQ(state_, State::kDisconnected);
   DCHECK(parser_);
   auto read_tasks = std::move(pending_read_responses_);

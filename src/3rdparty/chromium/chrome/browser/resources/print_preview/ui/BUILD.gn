@@ -50,7 +50,7 @@ js_type_check("closure_compile_module") {
     ":sidebar",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     deps += [
       ":destination_dialog_cros",
       ":destination_dropdown_cros",
@@ -126,7 +126,7 @@ js_library("button_strip") {
     "//ui/webui/resources/js:plural_string_proxy",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     deps += [ ":pin_settings" ]
   }
 }
@@ -148,7 +148,6 @@ js_library("destination_settings") {
     "..:cloud_print_interface_impl",
     "../data:destination",
     "../data:destination_store",
-    "../data:invitation_store",
     "../data:state",
     "../data:user_manager",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
@@ -157,7 +156,7 @@ js_library("destination_settings") {
     "//ui/webui/resources/js:web_ui_listener_behavior.m",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     deps += [
       ":destination_dialog_cros",
       ":destination_select_cros",
@@ -170,7 +169,7 @@ js_library("destination_settings") {
   }
 }
 
-if (is_chromeos_ash) {
+if (is_chromeos) {
   js_library("destination_select_cros") {
     deps = [
       ":destination_dropdown_cros",
@@ -223,6 +222,7 @@ js_library("pages_settings") {
     "..:print_preview_utils",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/cr_elements/cr_input:cr_input.m",
+    "//ui/webui/resources/js:assert.m",
     "//ui/webui/resources/js:load_time_data.m",
   ]
 }
@@ -438,29 +438,16 @@ js_library("plugin_proxy") {
   ]
 }
 
-js_library("invitation_promo") {
-  deps = [
-    "..:metrics",
-    "../data:invitation",
-    "../data:invitation_store",
-    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
-    "//ui/webui/resources/js:event_tracker.m",
-    "//ui/webui/resources/js:i18n_behavior.m",
-  ]
-}
-
-if (is_chromeos_ash) {
+if (is_chromeos) {
   js_library("destination_dialog_cros") {
     deps = [
       ":destination_list",
-      ":invitation_promo",
       ":print_preview_search_box",
       ":provisional_destination_resolver",
       "..:metrics",
       "..:native_layer",
       "../data:destination",
       "../data:destination_store",
-      "../data:invitation_store",
       "../data:print_server_store",
       "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
       "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
@@ -474,13 +461,11 @@ if (is_chromeos_ash) {
   js_library("destination_dialog") {
     deps = [
       ":destination_list",
-      ":invitation_promo",
       ":print_preview_search_box",
       "..:metrics",
       "..:native_layer",
       "../data:destination",
       "../data:destination_store",
-      "../data:invitation_store",
       "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
       "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
       "//ui/webui/resources/js:event_tracker.m",
@@ -505,7 +490,7 @@ js_library("destination_list_item") {
     "../data:destination",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/js:load_time_data.m",
-    "//ui/webui/resources/js:search_highlight_utils.m",
+    "//ui/webui/resources/js:search_highlight_utils",
   ]
 }
 
@@ -519,7 +504,7 @@ js_library("advanced_settings_dialog") {
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
     "//ui/webui/resources/js:i18n_behavior.m",
-    "//ui/webui/resources/js:search_highlight_utils.m",
+    "//ui/webui/resources/js:search_highlight_utils",
   ]
 }
 
@@ -538,11 +523,11 @@ js_library("print_preview_search_box") {
   deps = [
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/cr_elements/cr_input:cr_input.m",
-    "//ui/webui/resources/cr_elements/cr_search_field:cr_search_field_behavior.m",
+    "//ui/webui/resources/cr_elements/cr_search_field:cr_search_field_behavior",
   ]
 }
 
-if (is_chromeos_ash) {
+if (is_chromeos) {
   js_library("provisional_destination_resolver") {
     deps = [
       "../data:destination",
@@ -559,7 +544,7 @@ if (is_chromeos_ash) {
 js_library("highlight_utils") {
   deps = [
     "//ui/webui/resources/js:assert.m",
-    "//ui/webui/resources/js:search_highlight_utils.m",
+    "//ui/webui/resources/js:search_highlight_utils",
   ]
 }
 
@@ -581,7 +566,6 @@ html_to_js("web_components") {
     "duplex_settings.js",
     "header.js",
     "icons.js",
-    "invitation_promo.js",
     "layout_settings.js",
     "link_container.js",
     "margin_control_container.js",
@@ -603,7 +587,7 @@ html_to_js("web_components") {
     "sidebar.js",
     "throbber_css.js",
   ]
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     js_files += [
       "destination_dialog_cros.js",
       "destination_dropdown_cros.js",

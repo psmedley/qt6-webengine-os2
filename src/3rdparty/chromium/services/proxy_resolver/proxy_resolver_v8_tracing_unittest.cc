@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -80,10 +80,10 @@ class MockBindings {
   explicit MockBindings(ProxyHostResolver* host_resolver)
       : host_resolver_(host_resolver) {}
 
-  void Alert(const base::string16& message) {
+  void Alert(const std::u16string& message) {
     alerts_.push_back(base::UTF16ToASCII(message));
   }
-  void OnError(int line_number, const base::string16& error) {
+  void OnError(int line_number, const std::u16string& error) {
     waiter_.NotifyEvent(EVENT_ERROR);
     errors_.push_back(std::make_pair(line_number, base::UTF16ToASCII(error)));
     if (!error_callback_.is_null())
@@ -111,12 +111,12 @@ class MockBindings {
     explicit ForwardingBindings(MockBindings* bindings) : bindings_(bindings) {}
 
     // ProxyResolverV8Tracing::Bindings overrides.
-    void Alert(const base::string16& message) override {
+    void Alert(const std::u16string& message) override {
       DCHECK(thread_checker_.CalledOnValidThread());
       bindings_->Alert(message);
     }
 
-    void OnError(int line_number, const base::string16& error) override {
+    void OnError(int line_number, const std::u16string& error) override {
       DCHECK(thread_checker_.CalledOnValidThread());
       bindings_->OnError(line_number, error);
     }
@@ -213,8 +213,9 @@ TEST_F(ProxyResolverV8TracingTest, JavascriptError) {
   EXPECT_EQ("Prepare to DIE!", mock_bindings.GetAlerts()[0]);
   ASSERT_EQ(1u, mock_bindings.GetErrors().size());
   EXPECT_EQ(5, mock_bindings.GetErrors()[0].first);
-  EXPECT_EQ("Uncaught TypeError: Cannot read property 'split' of null",
-            mock_bindings.GetErrors()[0].second);
+  EXPECT_EQ(
+      "Uncaught TypeError: Cannot read properties of null (reading 'split')",
+      mock_bindings.GetErrors()[0].second);
 }
 
 TEST_F(ProxyResolverV8TracingTest, TooManyAlerts) {

@@ -5,14 +5,18 @@
 #ifndef CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_MEDIA_LIST_H_
 #define CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_MEDIA_LIST_H_
 
+#include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "ui/gfx/image/image_skia.h"
 
 class DesktopMediaListObserver;
+
+namespace content {
+class WebContents;
+}
 
 // DesktopMediaList provides the list of desktop media source (screens, windows,
 // tabs), and their thumbnails, to the desktop media picker dialog. It
@@ -33,22 +37,25 @@ class DesktopMediaList {
     kCurrentTab,   // TYPE_WEB_CONTENTS of the current tab.
   };
 
+  // A WebContents filter can be applied to DesktopMediaList::Type::kWebContents
+  // MediaList object in order to provide a way to filter out any WebContents
+  // that shouldn't be included.
+  using WebContentsFilter =
+      base::RepeatingCallback<bool(content::WebContents*)>;
+
   // Struct used to represent each entry in the list.
   struct Source {
     // Id of the source.
     content::DesktopMediaID id;
 
     // Name of the source that should be shown to the user.
-    base::string16 name;
+    std::u16string name;
 
     // The thumbnail for the source.
     gfx::ImageSkia thumbnail;
   };
 
   using UpdateCallback = base::OnceClosure;
-
-  // TODO(crbug.com/1136942): Add support for this flow.
-  static constexpr bool kConfirmationOnlyDialogSupported = false;
 
   virtual ~DesktopMediaList() {}
 

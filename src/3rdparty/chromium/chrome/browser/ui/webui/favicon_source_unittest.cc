@@ -36,6 +36,7 @@
 using GotDataCallback = content::URLDataSource::GotDataCallback;
 using WebContentsGetter = content::WebContents::Getter;
 using testing::_;
+using testing::NiceMock;
 using testing::Return;
 using testing::ReturnArg;
 
@@ -80,7 +81,11 @@ class TestFaviconSource : public FaviconSource {
   MOCK_METHOD2(LoadIconBytes, base::RefCountedMemory*(float, int));
 
  protected:
-  ui::NativeTheme* GetNativeTheme() override { return theme_; }
+  // FaviconSource:
+  ui::NativeTheme* GetNativeTheme(
+      const content::WebContents::Getter& wc_getter) override {
+    return theme_;
+  }
 
  private:
   ui::NativeTheme* const theme_;
@@ -95,19 +100,19 @@ class FaviconSourceTestBase : public testing::Test {
         history_ui_favicon_request_handler_factory =
             base::BindRepeating([](content::BrowserContext*) {
               return base::WrapUnique<KeyedService>(
-                  new MockHistoryUiFaviconRequestHandler());
+                  new NiceMock<MockHistoryUiFaviconRequestHandler>());
             });
     mock_history_ui_favicon_request_handler_ =
-        static_cast<MockHistoryUiFaviconRequestHandler*>(
+        static_cast<NiceMock<MockHistoryUiFaviconRequestHandler>*>(
             HistoryUiFaviconRequestHandlerFactory::GetInstance()
                 ->SetTestingFactoryAndUse(
                     &profile_, history_ui_favicon_request_handler_factory));
     BrowserContextKeyedServiceFactory::TestingFactory favicon_service_factory =
         base::BindRepeating([](content::BrowserContext*) {
           return static_cast<std::unique_ptr<KeyedService>>(
-              std::make_unique<favicon::MockFaviconService>());
+              std::make_unique<NiceMock<favicon::MockFaviconService>>());
         });
-    mock_favicon_service_ = static_cast<favicon::MockFaviconService*>(
+    mock_favicon_service_ = static_cast<NiceMock<favicon::MockFaviconService>*>(
         FaviconServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             &profile_, favicon_service_factory));
 
@@ -140,7 +145,7 @@ class FaviconSourceTestBase : public testing::Test {
 
   void SetDarkMode(bool dark_mode) { theme_.SetDarkMode(dark_mode); }
 
-  TestFaviconSource* source() { return &source_; }
+  NiceMock<TestFaviconSource>* source() { return &source_; }
 
  protected:
   const scoped_refptr<base::RefCountedBytes> kDummyIconBytes;
@@ -148,11 +153,12 @@ class FaviconSourceTestBase : public testing::Test {
   content::RenderViewHostTestEnabler test_render_host_factories_;
   ui::TestNativeTheme theme_;
   TestingProfile profile_;
-  MockHistoryUiFaviconRequestHandler* mock_history_ui_favicon_request_handler_;
-  favicon::MockFaviconService* mock_favicon_service_;
+  NiceMock<MockHistoryUiFaviconRequestHandler>*
+      mock_history_ui_favicon_request_handler_;
+  NiceMock<favicon::MockFaviconService>* mock_favicon_service_;
   std::unique_ptr<content::WebContents> test_web_contents_;
   WebContentsGetter test_web_contents_getter_;
-  TestFaviconSource source_;
+  NiceMock<TestFaviconSource> source_;
 };
 
 class FaviconSourceTestWithLegacyFormat : public FaviconSourceTestBase {

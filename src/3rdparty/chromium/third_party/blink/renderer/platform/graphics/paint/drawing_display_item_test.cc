@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/testing/fake_display_item_client.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/skia/include/core/SkTypes.h"
 
 namespace blink {
@@ -67,7 +68,9 @@ TEST_F(DrawingDisplayItemTest, EmptyPaintRecord) {
   EXPECT_FALSE(item.DrawsContent());
 }
 
-TEST_F(DrawingDisplayItemTest, Equals) {
+TEST_F(DrawingDisplayItemTest, EqualsForUnderInvalidation) {
+  ScopedPaintUnderInvalidationCheckingForTest under_invalidation_checking(true);
+
   FloatRect bounds1(100.1, 100.2, 100.3, 100.4);
   DrawingDisplayItem item1(client_, DisplayItem::kDocumentBackground,
                            EnclosingIntRect(bounds1),
@@ -89,35 +92,70 @@ TEST_F(DrawingDisplayItemTest, Equals) {
   DrawingDisplayItem empty_item(client_, DisplayItem::kDocumentBackground,
                                 IntRect(), nullptr);
 
-  EXPECT_TRUE(item1.Equals(item1));
-  EXPECT_FALSE(item1.Equals(item2));
-  EXPECT_FALSE(item1.Equals(translated));
-  EXPECT_TRUE(item1.Equals(zero_translated));
-  EXPECT_FALSE(item1.Equals(empty_item));
+  EXPECT_TRUE(item1.EqualsForUnderInvalidation(item1));
+  EXPECT_FALSE(item1.EqualsForUnderInvalidation(item2));
+  EXPECT_FALSE(item1.EqualsForUnderInvalidation(translated));
+  EXPECT_TRUE(item1.EqualsForUnderInvalidation(zero_translated));
+  EXPECT_FALSE(item1.EqualsForUnderInvalidation(empty_item));
 
-  EXPECT_FALSE(item2.Equals(item1));
-  EXPECT_TRUE(item2.Equals(item2));
-  EXPECT_FALSE(item2.Equals(translated));
-  EXPECT_FALSE(item2.Equals(zero_translated));
-  EXPECT_FALSE(item2.Equals(empty_item));
+  EXPECT_FALSE(item2.EqualsForUnderInvalidation(item1));
+  EXPECT_TRUE(item2.EqualsForUnderInvalidation(item2));
+  EXPECT_FALSE(item2.EqualsForUnderInvalidation(translated));
+  EXPECT_FALSE(item2.EqualsForUnderInvalidation(zero_translated));
+  EXPECT_FALSE(item2.EqualsForUnderInvalidation(empty_item));
 
-  EXPECT_FALSE(translated.Equals(item1));
-  EXPECT_FALSE(translated.Equals(item2));
-  EXPECT_TRUE(translated.Equals(translated));
-  EXPECT_FALSE(translated.Equals(zero_translated));
-  EXPECT_FALSE(translated.Equals(empty_item));
+  EXPECT_FALSE(translated.EqualsForUnderInvalidation(item1));
+  EXPECT_FALSE(translated.EqualsForUnderInvalidation(item2));
+  EXPECT_TRUE(translated.EqualsForUnderInvalidation(translated));
+  EXPECT_FALSE(translated.EqualsForUnderInvalidation(zero_translated));
+  EXPECT_FALSE(translated.EqualsForUnderInvalidation(empty_item));
 
-  EXPECT_TRUE(zero_translated.Equals(item1));
-  EXPECT_FALSE(zero_translated.Equals(item2));
-  EXPECT_FALSE(zero_translated.Equals(translated));
-  EXPECT_TRUE(zero_translated.Equals(zero_translated));
-  EXPECT_FALSE(zero_translated.Equals(empty_item));
+  EXPECT_TRUE(zero_translated.EqualsForUnderInvalidation(item1));
+  EXPECT_FALSE(zero_translated.EqualsForUnderInvalidation(item2));
+  EXPECT_FALSE(zero_translated.EqualsForUnderInvalidation(translated));
+  EXPECT_TRUE(zero_translated.EqualsForUnderInvalidation(zero_translated));
+  EXPECT_FALSE(zero_translated.EqualsForUnderInvalidation(empty_item));
 
-  EXPECT_FALSE(empty_item.Equals(item1));
-  EXPECT_FALSE(empty_item.Equals(item2));
-  EXPECT_FALSE(empty_item.Equals(translated));
-  EXPECT_FALSE(empty_item.Equals(zero_translated));
-  EXPECT_TRUE(empty_item.Equals(empty_item));
+  EXPECT_FALSE(empty_item.EqualsForUnderInvalidation(item1));
+  EXPECT_FALSE(empty_item.EqualsForUnderInvalidation(item2));
+  EXPECT_FALSE(empty_item.EqualsForUnderInvalidation(translated));
+  EXPECT_FALSE(empty_item.EqualsForUnderInvalidation(zero_translated));
+  EXPECT_TRUE(empty_item.EqualsForUnderInvalidation(empty_item));
+}
+
+TEST_F(DrawingDisplayItemTest, SolidColorRect) {
+  FloatRect record_bounds(5, 6, 10, 10);
+  DrawingDisplayItem item(client_, DisplayItem::Type::kDocumentBackground,
+                          EnclosingIntRect(record_bounds),
+                          CreateRectRecord(record_bounds));
+  EXPECT_EQ(IntRect(5, 6, 10, 10), item.VisualRect());
+  EXPECT_TRUE(item.IsSolidColor());
+}
+
+TEST_F(DrawingDisplayItemTest, NonSolidColorSnappedRect) {
+  FloatRect record_bounds(5.1, 6.9, 10, 10);
+  DrawingDisplayItem item(client_, DisplayItem::Type::kDocumentBackground,
+                          EnclosingIntRect(record_bounds),
+                          CreateRectRecord(record_bounds));
+  EXPECT_EQ(IntRect(5, 6, 11, 11), item.VisualRect());
+  // Not solid color if the drawing does not fully cover the visual rect.
+  EXPECT_FALSE(item.IsSolidColor());
+}
+
+TEST_F(DrawingDisplayItemTest, NonSolidColorOval) {
+  FloatRect record_bounds(5, 6, 10, 10);
+
+  PaintRecorder recorder;
+  cc::PaintCanvas* canvas =
+      recorder.beginRecording(record_bounds.Width(), record_bounds.Height());
+  canvas->drawOval(record_bounds, PaintFlags());
+
+  DrawingDisplayItem item(client_, DisplayItem::Type::kDocumentBackground,
+                          EnclosingIntRect(record_bounds),
+                          recorder.finishRecordingAsPicture());
+  EXPECT_EQ(IntRect(5, 6, 10, 10), item.VisualRect());
+  // Not solid color if the drawing does not fully cover the visual rect.
+  EXPECT_FALSE(item.IsSolidColor());
 }
 
 }  // namespace

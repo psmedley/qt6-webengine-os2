@@ -11,10 +11,12 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/viz/test/test_context_provider.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_frame.h"
 #include "media/video/gpu_memory_buffer_video_frame_pool.h"
 #include "media/video/mock_gpu_video_accelerator_factories.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/gfx/buffer_format_util.h"
 
 using ::testing::_;
 using ::testing::AtLeast;
@@ -29,15 +31,15 @@ class GpuMemoryBufferVideoFramePoolTest : public ::testing::Test {
     // empty base::TimeTicks values.
     test_clock_.Advance(base::TimeDelta::FromSeconds(1234));
 
-    sii_.reset(new viz::TestSharedImageInterface);
+    sii_ = std::make_unique<viz::TestSharedImageInterface>();
     media_task_runner_ = base::MakeRefCounted<base::TestSimpleTaskRunner>();
     copy_task_runner_ = base::MakeRefCounted<base::TestSimpleTaskRunner>();
-    media_task_runner_handle_.reset(
-        new base::ThreadTaskRunnerHandle(media_task_runner_));
-    mock_gpu_factories_.reset(new MockGpuVideoAcceleratorFactories(sii_.get()));
-    gpu_memory_buffer_pool_.reset(new GpuMemoryBufferVideoFramePool(
-        media_task_runner_, copy_task_runner_.get(),
-        mock_gpu_factories_.get()));
+    media_task_runner_handle_ =
+        std::make_unique<base::ThreadTaskRunnerHandle>(media_task_runner_);
+    mock_gpu_factories_ =
+        std::make_unique<MockGpuVideoAcceleratorFactories>(sii_.get());
+    gpu_memory_buffer_pool_ = std::make_unique<GpuMemoryBufferVideoFramePool>(
+        media_task_runner_, copy_task_runner_.get(), mock_gpu_factories_.get());
     gpu_memory_buffer_pool_->SetTickClockForTesting(&test_clock_);
   }
 
@@ -306,8 +308,13 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, CreateOneHardwareNV12Frame) {
 
   EXPECT_NE(software_frame.get(), frame.get());
   EXPECT_EQ(PIXEL_FORMAT_NV12, frame->format());
-  EXPECT_EQ(1u, frame->NumTextures());
-  EXPECT_EQ(1u, sii_->shared_image_count());
+  if (GpuMemoryBufferVideoFramePool::MultiPlaneVideoSharedImagesEnabled()) {
+    EXPECT_EQ(2u, frame->NumTextures());
+    EXPECT_EQ(2u, sii_->shared_image_count());
+  } else {
+    EXPECT_EQ(1u, frame->NumTextures());
+    EXPECT_EQ(1u, sii_->shared_image_count());
+  }
   EXPECT_TRUE(frame->metadata().read_lock_fences_enabled);
 }
 
@@ -509,7 +516,23 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, CreateGpuMemoryBufferFail) {
 
   RunUntilIdle();
 
-  EXPECT_NE(software_frame.get(), frame.get());
+  // Software frame should be returned if mapping fails.
+  EXPECT_EQ(software_frame.get(), frame.get());
+  EXPECT_EQ(0u, sii_->shared_image_count());
+}
+
+TEST_F(GpuMemoryBufferVideoFramePoolTest,
+       CreateGpuMemoryBufferFailAfterShutdown) {
+  scoped_refptr<VideoFrame> software_frame = CreateTestYUVVideoFrame(10);
+  scoped_refptr<VideoFrame> frame;
+  mock_gpu_factories_->SetFailToMapGpuMemoryBufferForTesting(true);
+  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
+      software_frame, base::BindOnce(MaybeCreateHardwareFrameCallback, &frame));
+  gpu_memory_buffer_pool_.reset();
+  RunUntilIdle();
+
+  // Software frame should be returned if mapping fails.
+  EXPECT_EQ(software_frame.get(), frame.get());
   EXPECT_EQ(0u, sii_->shared_image_count());
 }
 
@@ -611,13 +634,13 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, PreservesOrder) {
   std::vector<scoped_refptr<VideoFrame>> frame_outputs;
 
   scoped_refptr<VideoFrame> software_frame_1 = CreateTestYUVVideoFrame(10);
-  scoped_refptr<VideoFrame> frame_1 = nullptr;
+  scoped_refptr<VideoFrame> frame_1;
   gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
       software_frame_1,
       base::BindOnce(MaybeCreateHardwareFrameCallback, &frame_1));
 
   scoped_refptr<VideoFrame> software_frame_2 = CreateTestYUVVideoFrame(10);
-  scoped_refptr<VideoFrame> frame_2 = nullptr;
+  scoped_refptr<VideoFrame> frame_2;
   base::TimeTicks time_2;
   gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
       software_frame_2,
@@ -625,7 +648,7 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, PreservesOrder) {
                      &time_2));
 
   scoped_refptr<VideoFrame> software_frame_3 = VideoFrame::CreateEOSFrame();
-  scoped_refptr<VideoFrame> frame_3 = nullptr;
+  scoped_refptr<VideoFrame> frame_3;
   base::TimeTicks time_3;
   gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
       software_frame_3,

@@ -105,7 +105,7 @@ CertNodeBuilder& CertNodeBuilder::ChildIfNotNull(
 
 std::unique_ptr<base::DictionaryValue> CertNodeBuilder::Build() {
   DCHECK(!built_);
-  if (!children_.empty()) {
+  if (!children_.GetList().empty()) {
     node_.SetKey("children", std::move(children_));
   }
   built_ = true;
@@ -174,7 +174,7 @@ ui::ModalType CertificateViewerDialog::GetDialogModalType() const {
   return ui::MODAL_TYPE_NONE;
 }
 
-base::string16 CertificateViewerDialog::GetDialogTitle() const {
+std::u16string CertificateViewerDialog::GetDialogTitle() const {
   return title_;
 }
 

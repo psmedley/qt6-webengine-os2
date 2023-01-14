@@ -69,8 +69,8 @@ void PublisherBase::Publish(
 void PublisherBase::ModifyCapabilityAccess(
     const mojo::RemoteSet<apps::mojom::Subscriber>& subscribers,
     const std::string& app_id,
-    base::Optional<bool> accessing_camera,
-    base::Optional<bool> accessing_microphone) {
+    absl::optional<bool> accessing_camera,
+    absl::optional<bool> accessing_microphone) {
   if (!accessing_camera.has_value() && !accessing_microphone.has_value()) {
     return;
   }
@@ -98,7 +98,6 @@ void PublisherBase::ModifyCapabilityAccess(
 }
 
 void PublisherBase::LaunchAppWithFiles(const std::string& app_id,
-                                       apps::mojom::LaunchContainer container,
                                        int32_t event_flags,
                                        apps::mojom::LaunchSource launch_source,
                                        apps::mojom::FilePathsPtr file_paths) {
@@ -130,7 +129,7 @@ void PublisherBase::PauseApp(const std::string& app_id) {
   NOTIMPLEMENTED();
 }
 
-void PublisherBase::UnpauseApps(const std::string& app_id) {
+void PublisherBase::UnpauseApp(const std::string& app_id) {
   NOTIMPLEMENTED();
 }
 
@@ -161,6 +160,16 @@ void PublisherBase::OnPreferredAppSet(
     apps::mojom::IntentFilterPtr intent_filter,
     apps::mojom::IntentPtr intent,
     apps::mojom::ReplacedAppPreferencesPtr replaced_app_preferences) {
+  NOTIMPLEMENTED();
+}
+
+void PublisherBase::SetResizeLocked(const std::string& app_id,
+                                    apps::mojom::OptionalBool locked) {
+  NOTIMPLEMENTED();
+}
+
+void PublisherBase::SetWindowMode(const std::string& app_id,
+                                  apps::mojom::WindowMode window_mode) {
   NOTIMPLEMENTED();
 }
 

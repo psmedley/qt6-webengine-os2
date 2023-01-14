@@ -57,6 +57,16 @@
 #define MAX_NUM_UNKNOWN_EXTS 250
 #endif
 
+enum vulkan_loader_debug_flags {
+    VULKAN_LOADER_INFO_BIT = 0x01,
+    VULKAN_LOADER_WARN_BIT = 0x02,
+    VULKAN_LOADER_PERF_BIT = 0x04,
+    VULKAN_LOADER_ERROR_BIT = 0x08,
+    VULKAN_LOADER_DEBUG_BIT = 0x10,
+    VULKAN_LOADER_LAYER_BIT = 0x20,
+    VULKAN_LOADER_IMPLEMENTATION_BIT = 0x40,
+};
+
 enum layer_type_flags {
     VK_LAYER_TYPE_FLAG_INSTANCE_LAYER = 0x1,  // If not set, indicates Device layer
     VK_LAYER_TYPE_FLAG_EXPLICIT_LAYER = 0x2,  // If not set, indicates Implicit layer
@@ -347,6 +357,9 @@ struct loader_instance {
 #endif
 #ifdef VK_USE_PLATFORM_FUCHSIA
     bool wsi_imagepipe_surface_enabled;
+#endif
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+    bool wsi_screen_surface_enabled;
 #endif
     bool wsi_display_enabled;
     bool wsi_display_props2_enabled;

@@ -12,6 +12,19 @@
 
 namespace page_load_metrics {
 
+namespace {
+
+template <class Set>
+bool IsSubset(const Set& set1, const Set& set2) {
+  for (const auto& elem : set1) {
+    if (set2.find(elem) == set2.end())
+      return false;
+  }
+  return true;
+}
+
+}  // namespace
+
 PageLoadMetricsTestWaiter::PageLoadMetricsTestWaiter(
     content::WebContents* web_contents)
     : TestingObserver(web_contents) {}
@@ -22,48 +35,50 @@ PageLoadMetricsTestWaiter::~PageLoadMetricsTestWaiter() {
 }
 
 void PageLoadMetricsTestWaiter::AddPageExpectation(TimingField field) {
-  page_expected_fields_.Set(field);
+  expected_.page_fields_.Set(field);
   if (field == TimingField::kLoadTimingInfo) {
     attach_on_tracker_creation_ = true;
   }
 }
 
 void PageLoadMetricsTestWaiter::AddFrameSizeExpectation(const gfx::Size& size) {
-  // If we have already seen this size, don't add it to the expectations.
-  if (observed_frame_sizes_.find(size) != observed_frame_sizes_.end())
-    return;
-  expected_frame_sizes_.insert(size);
+  expected_.frame_sizes_.insert(size);
 }
 
 void PageLoadMetricsTestWaiter::AddMainFrameIntersectionExpectation(
     const gfx::Rect& rect) {
-  expected_main_frame_intersection_ = rect;
+  expected_.did_set_main_frame_intersection_ = true;
+  expected_.main_frame_intersections_.push_back(rect);
 }
 
-void PageLoadMetricsTestWaiter::AddMainFrameIntersectionExpectation() {
-  expected_main_frame_intersection_update_ = true;
+void PageLoadMetricsTestWaiter::SetMainFrameIntersectionExpectation() {
+  expected_.did_set_main_frame_intersection_ = true;
 }
 
 void PageLoadMetricsTestWaiter::AddSubFrameExpectation(TimingField field) {
   CHECK_NE(field, TimingField::kLoadTimingInfo)
       << "LOAD_TIMING_INFO should only be used as a page-level expectation";
-  subframe_expected_fields_.Set(field);
+  expected_.subframe_fields_.Set(field);
 }
 
 void PageLoadMetricsTestWaiter::AddWebFeatureExpectation(
     blink::mojom::WebFeature web_feature) {
-  size_t feature_idx = static_cast<size_t>(web_feature);
-  if (!expected_web_features_.test(feature_idx)) {
-    expected_web_features_.set(feature_idx);
-  }
+  AddUseCounterFeatureExpectation(
+      {blink::mojom::UseCounterFeatureType::kWebFeature,
+       static_cast<blink::UseCounterFeature::EnumValue>(web_feature)});
+}
+
+void PageLoadMetricsTestWaiter::AddUseCounterFeatureExpectation(
+    const blink::UseCounterFeature& feature) {
+  expected_.feature_tracker_.TestAndSet(feature);
 }
 
 void PageLoadMetricsTestWaiter::AddSubframeNavigationExpectation() {
-  expected_subframe_navigation_ = true;
+  expected_.subframe_navigation_ = true;
 }
 
 void PageLoadMetricsTestWaiter::AddSubframeDataExpectation() {
-  expected_subframe_data_ = true;
+  expected_.subframe_data_ = true;
 }
 
 void PageLoadMetricsTestWaiter::AddMinimumCompleteResourcesExpectation(
@@ -82,52 +97,58 @@ void PageLoadMetricsTestWaiter::AddMinimumAggregateCpuTimeExpectation(
 }
 
 void PageLoadMetricsTestWaiter::AddMemoryUpdateExpectation(int routing_id) {
-  expected_memory_update_frame_ids_.insert(routing_id);
+  expected_.memory_update_frame_ids_.insert(routing_id);
+}
+
+void PageLoadMetricsTestWaiter::AddLoadingBehaviorExpectation(
+    int behavior_flags) {
+  expected_.loading_behavior_flags_ |= behavior_flags;
 }
 
 bool PageLoadMetricsTestWaiter::DidObserveInPage(TimingField field) const {
-  return observed_page_fields_.IsSet(field);
+  return observed_.page_fields_.IsSet(field);
 }
 
 bool PageLoadMetricsTestWaiter::DidObserveWebFeature(
     blink::mojom::WebFeature feature) const {
-  return observed_web_features_.test(static_cast<size_t>(feature));
+  return observed_.feature_tracker_.Test(
+      {blink::mojom::UseCounterFeatureType::kWebFeature,
+       static_cast<blink::UseCounterFeature::EnumValue>(feature)});
 }
 
 void PageLoadMetricsTestWaiter::Wait() {
-  if (ExpectationsSatisfied())
-    return;
-
-  run_loop_ = std::make_unique<base::RunLoop>();
-  run_loop_->Run();
-  run_loop_ = nullptr;
-
+  if (!ExpectationsSatisfied()) {
+    run_loop_ = std::make_unique<base::RunLoop>();
+    run_loop_->Run();
+    run_loop_ = nullptr;
+  }
   EXPECT_TRUE(ExpectationsSatisfied());
+  ResetExpectations();
 }
 
 void PageLoadMetricsTestWaiter::OnTimingUpdated(
     content::RenderFrameHost* subframe_rfh,
     const page_load_metrics::mojom::PageLoadTiming& timing) {
-  if (ExpectationsSatisfied())
+  auto* delegate = GetDelegateForCommittedLoad();
+  if (!delegate)
     return;
+
   const page_load_metrics::mojom::FrameMetadata& metadata =
-      subframe_rfh ? GetDelegateForCommittedLoad().GetSubframeMetadata()
-                   : GetDelegateForCommittedLoad().GetMainFrameMetadata();
+      subframe_rfh ? delegate->GetSubframeMetadata()
+                   : delegate->GetMainFrameMetadata();
   // There is no way to get the layout shift score only for a subframe so far.
   // See the score only when the frame is the main frame.
   const PageRenderData* render_data =
-      subframe_rfh ? nullptr
-                   : &GetDelegateForCommittedLoad().GetMainFrameRenderData();
+      subframe_rfh ? nullptr : &delegate->GetMainFrameRenderData();
 
   TimingFieldBitSet matched_bits =
       GetMatchedBits(timing, metadata, render_data);
 
-  if (subframe_rfh) {
-    subframe_expected_fields_.ClearMatching(matched_bits);
-  } else {
-    page_expected_fields_.ClearMatching(matched_bits);
-    observed_page_fields_.Merge(matched_bits);
-  }
+  if (subframe_rfh)
+    observed_.subframe_fields_.Merge(matched_bits);
+  else
+    observed_.page_fields_.Merge(matched_bits);
+
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
 }
@@ -135,9 +156,13 @@ void PageLoadMetricsTestWaiter::OnTimingUpdated(
 void PageLoadMetricsTestWaiter::OnCpuTimingUpdated(
     content::RenderFrameHost* subframe_rfh,
     const page_load_metrics::mojom::CpuTiming& timing) {
-  if (ExpectationsSatisfied())
-    return;
   current_aggregate_cpu_time_ += timing.task_time;
+  if (ExpectationsSatisfied() && run_loop_)
+    run_loop_->Quit();
+}
+
+void PageLoadMetricsTestWaiter::OnLoadingBehaviorObserved(int behavior_flags) {
+  observed_.loading_behavior_flags_ |= behavior_flags;
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
 }
@@ -145,9 +170,6 @@ void PageLoadMetricsTestWaiter::OnCpuTimingUpdated(
 void PageLoadMetricsTestWaiter::OnLoadedResource(
     const page_load_metrics::ExtraRequestCompleteInfo&
         extra_request_complete_info) {
-  if (ExpectationsSatisfied())
-    return;
-
   if (extra_request_complete_info.request_destination !=
       network::mojom::RequestDestination::kDocument) {
     // The waiter confirms loading timing for the main frame only.
@@ -157,8 +179,7 @@ void PageLoadMetricsTestWaiter::OnLoadedResource(
   if (!extra_request_complete_info.load_timing_info->send_start.is_null() &&
       !extra_request_complete_info.load_timing_info->send_end.is_null() &&
       !extra_request_complete_info.load_timing_info->request_start.is_null()) {
-    page_expected_fields_.Clear(TimingField::kLoadTimingInfo);
-    observed_page_fields_.Set(TimingField::kLoadTimingInfo);
+    observed_.page_fields_.Set(TimingField::kLoadTimingInfo);
   }
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
@@ -179,9 +200,9 @@ void PageLoadMetricsTestWaiter::OnResourceDataUseObserved(
     current_network_bytes_ += resource->delta_bytes;
 
     // If |rfh| is a subframe with nonzero bytes, update the subframe
-    // data expectation.
+    // data observation.
     if (rfh->GetParent() && resource->delta_bytes > 0)
-      expected_subframe_data_ = false;
+      observed_.subframe_data_ = true;
   }
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
@@ -189,15 +210,9 @@ void PageLoadMetricsTestWaiter::OnResourceDataUseObserved(
 
 void PageLoadMetricsTestWaiter::OnFeaturesUsageObserved(
     content::RenderFrameHost* rfh,
-    const mojom::PageLoadFeatures& features) {
-  if (WebFeaturesExpectationsSatisfied())
-    return;
-
-  for (blink::mojom::WebFeature feature : features.features) {
-    size_t feature_idx = static_cast<size_t>(feature);
-    if (observed_web_features_.test(feature_idx))
-      continue;
-    observed_web_features_.set(feature_idx);
+    const std::vector<blink::UseCounterFeature>& features) {
+  for (const auto& feature : features) {
+    observed_.feature_tracker_.TestAndSet(feature);
   }
 
   if (ExpectationsSatisfied() && run_loop_)
@@ -208,13 +223,10 @@ void PageLoadMetricsTestWaiter::OnFrameIntersectionUpdate(
     content::RenderFrameHost* rfh,
     const page_load_metrics::mojom::FrameIntersectionUpdate&
         frame_intersection_update) {
-  if (frame_intersection_update.main_frame_intersection_rect)
-    expected_main_frame_intersection_update_ = false;
-
-  if (expected_main_frame_intersection_ &&
-      expected_main_frame_intersection_ ==
-          frame_intersection_update.main_frame_intersection_rect) {
-    expected_main_frame_intersection_.reset();
+  if (frame_intersection_update.main_frame_intersection_rect) {
+    observed_.did_set_main_frame_intersection_ = true;
+    observed_.main_frame_intersections_.push_back(
+        *frame_intersection_update.main_frame_intersection_rect);
   }
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
@@ -222,10 +234,7 @@ void PageLoadMetricsTestWaiter::OnFrameIntersectionUpdate(
 
 void PageLoadMetricsTestWaiter::OnDidFinishSubFrameNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (SubframeNavigationExpectationsSatisfied())
-    return;
-
-  expected_subframe_navigation_ = false;
+  observed_.subframe_navigation_ = true;
 
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
@@ -233,11 +242,9 @@ void PageLoadMetricsTestWaiter::OnDidFinishSubFrameNavigation(
 
 void PageLoadMetricsTestWaiter::OnV8MemoryChanged(
     const std::vector<MemoryUpdate>& memory_updates) {
-  if (MemoryUpdateExpectationsSatisfied())
-    return;
-
   for (const auto& update : memory_updates)
-    expected_memory_update_frame_ids_.erase(update.routing_id.frame_routing_id);
+    observed_.memory_update_frame_ids_.insert(
+        update.routing_id.frame_routing_id);
 
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
@@ -246,8 +253,7 @@ void PageLoadMetricsTestWaiter::OnV8MemoryChanged(
 void PageLoadMetricsTestWaiter::FrameSizeChanged(
     content::RenderFrameHost* render_frame_host,
     const gfx::Size& frame_size) {
-  observed_frame_sizes_.insert(frame_size);
-  expected_frame_sizes_.erase(frame_size);
+  observed_.frame_sizes_.insert(frame_size);
   if (ExpectationsSatisfied() && run_loop_)
     run_loop_->Quit();
 }
@@ -288,6 +294,12 @@ PageLoadMetricsTestWaiter::GetMatchedBits(
       matched_bits.Set(
           TimingField::kFirstInputDelayAfterBackForwardCacheRestore);
     }
+    if (!timing.back_forward_cache_timings.back()
+             ->request_animation_frames_after_back_forward_cache_restore
+             .empty()) {
+      matched_bits.Set(
+          TimingField::kRequestAnimationFrameAfterBackForwardCacheRestore);
+    }
   }
 
   if (render_data) {
@@ -318,7 +330,7 @@ void PageLoadMetricsTestWaiter::OnCommit(
   AddObserver(tracker);
 }
 
-void PageLoadMetricsTestWaiter::OnRestoredFromBackForwardCache(
+void PageLoadMetricsTestWaiter::OnActivate(
     page_load_metrics::PageLoadTracker* tracker) {
   // A PageLoadMetricsWaiter should only wait for events from a single page
   // load.
@@ -339,6 +351,14 @@ bool PageLoadMetricsTestWaiter::CpuTimeExpectationsSatisfied() const {
   return current_aggregate_cpu_time_ >= expected_minimum_aggregate_cpu_time_;
 }
 
+bool PageLoadMetricsTestWaiter::LoadingBehaviorExpectationsSatisfied() const {
+  // Once we've observed everything we've expected, we're satisfied. We allow
+  // other behaviors to be present incidentally.
+  return (expected_.loading_behavior_flags_ &
+          observed_.loading_behavior_flags_) ==
+         expected_.loading_behavior_flags_;
+}
+
 bool PageLoadMetricsTestWaiter::ResourceUseExpectationsSatisfied() const {
   return (expected_minimum_complete_resources_ == 0 ||
           current_complete_resources_ >=
@@ -347,38 +367,69 @@ bool PageLoadMetricsTestWaiter::ResourceUseExpectationsSatisfied() const {
           current_network_bytes_ >= expected_minimum_network_bytes_);
 }
 
-bool PageLoadMetricsTestWaiter::WebFeaturesExpectationsSatisfied() const {
+bool PageLoadMetricsTestWaiter::UseCounterExpectationsSatisfied() const {
   // We are only interested to see if all features being set in
-  // |expected_web_features_| are observed, but don't care about whether extra
-  // features are observed.
-  return (expected_web_features_ & observed_web_features_ ^
-          expected_web_features_)
-      .none();
+  // |expected_.feature_tracker| are observed, but don't care about whether
+  // extra features are observed.
+  return observed_.feature_tracker_.ContainsForTesting(
+      expected_.feature_tracker_);
 }
 
 bool PageLoadMetricsTestWaiter::SubframeNavigationExpectationsSatisfied()
     const {
-  return !expected_subframe_navigation_;
+  return !expected_.subframe_navigation_ || observed_.subframe_navigation_;
 }
 
 bool PageLoadMetricsTestWaiter::SubframeDataExpectationsSatisfied() const {
-  return !expected_subframe_data_;
+  return !expected_.subframe_data_ || observed_.subframe_data_;
+}
+
+bool PageLoadMetricsTestWaiter::MainFrameIntersectionExpectationsSatisfied()
+    const {
+  if (!expected_.did_set_main_frame_intersection_)
+    return true;
+  if (!observed_.did_set_main_frame_intersection_)
+    return false;
+
+  // All expectations must be observed, in the same order.
+  // But extra observations are ok.
+  auto it = observed_.main_frame_intersections_.begin();
+  for (const gfx::Rect& expected : expected_.main_frame_intersections_) {
+    while (true) {
+      if (it == observed_.main_frame_intersections_.end())
+        return false;
+      if (*it++ == expected)
+        break;
+    }
+  }
+  return true;
 }
 
 bool PageLoadMetricsTestWaiter::MemoryUpdateExpectationsSatisfied() const {
-  return expected_memory_update_frame_ids_.empty();
+  return IsSubset(expected_.memory_update_frame_ids_,
+                  observed_.memory_update_frame_ids_);
 }
 
 bool PageLoadMetricsTestWaiter::ExpectationsSatisfied() const {
-  return subframe_expected_fields_.Empty() && page_expected_fields_.Empty() &&
+  return expected_.page_fields_.AreAllSetIn(observed_.page_fields_) &&
+         expected_.subframe_fields_.AreAllSetIn(observed_.subframe_fields_) &&
          ResourceUseExpectationsSatisfied() &&
-         WebFeaturesExpectationsSatisfied() &&
+         UseCounterExpectationsSatisfied() &&
          SubframeNavigationExpectationsSatisfied() &&
-         SubframeDataExpectationsSatisfied() && expected_frame_sizes_.empty() &&
+         SubframeDataExpectationsSatisfied() &&
+         IsSubset(expected_.frame_sizes_, observed_.frame_sizes_) &&
+         LoadingBehaviorExpectationsSatisfied() &&
          CpuTimeExpectationsSatisfied() &&
-         !expected_main_frame_intersection_.has_value() &&
-         !expected_main_frame_intersection_update_ &&
+         MainFrameIntersectionExpectationsSatisfied() &&
          MemoryUpdateExpectationsSatisfied();
+}
+
+void PageLoadMetricsTestWaiter::ResetExpectations() {
+  expected_ = State();
+  observed_ = State();
+  expected_minimum_complete_resources_ = 0;
+  expected_minimum_network_bytes_ = 0;
+  expected_minimum_aggregate_cpu_time_ = base::TimeDelta();
 }
 
 PageLoadMetricsTestWaiter::WaiterMetricsObserver::~WaiterMetricsObserver() =
@@ -402,6 +453,12 @@ void PageLoadMetricsTestWaiter::WaiterMetricsObserver::OnCpuTimingUpdate(
     waiter_->OnCpuTimingUpdated(subframe_rfh, timing);
 }
 
+void PageLoadMetricsTestWaiter::WaiterMetricsObserver::
+    OnLoadingBehaviorObserved(content::RenderFrameHost*, int behavior_flags) {
+  if (waiter_)
+    waiter_->OnLoadingBehaviorObserved(behavior_flags);
+}
+
 void PageLoadMetricsTestWaiter::WaiterMetricsObserver::OnLoadedResource(
     const page_load_metrics::ExtraRequestCompleteInfo&
         extra_request_complete_info) {
@@ -420,7 +477,7 @@ void PageLoadMetricsTestWaiter::WaiterMetricsObserver::
 
 void PageLoadMetricsTestWaiter::WaiterMetricsObserver::OnFeaturesUsageObserved(
     content::RenderFrameHost* rfh,
-    const mojom::PageLoadFeatures& features) {
+    const std::vector<blink::UseCounterFeature>& features) {
   if (waiter_)
     waiter_->OnFeaturesUsageObserved(nullptr, features);
 }
@@ -460,5 +517,9 @@ bool PageLoadMetricsTestWaiter::FrameSizeComparator::operator()(
   return a.width() < b.width() ||
          (a.width() == b.width() && a.height() < b.height());
 }
+
+PageLoadMetricsTestWaiter::State::State() = default;
+
+PageLoadMetricsTestWaiter::State::~State() = default;
 
 }  // namespace page_load_metrics

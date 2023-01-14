@@ -23,7 +23,6 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/numerics/safe_math.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task_runner.h"
@@ -82,7 +81,7 @@ File::Error CreateBlobDirectory(const FilePath& blob_storage_dir) {
 BlobStorageLimits CalculateBlobStorageLimitsImpl(
     const FilePath& storage_dir,
     bool disk_enabled,
-    base::Optional<int64_t> optional_memory_size_for_testing) {
+    absl::optional<int64_t> optional_memory_size_for_testing) {
   int64_t disk_size = 0ull;
   int64_t memory_size = optional_memory_size_for_testing
                             ? optional_memory_size_for_testing.value()

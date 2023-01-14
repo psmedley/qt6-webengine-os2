@@ -152,7 +152,7 @@ class ScrollBehaviorBrowserTest : public ContentBrowserTest,
     RenderWidgetHostImpl* host = GetWidgetHost();
     host->GetView()->SetSize(gfx::Size(400, 400));
 
-    base::string16 ready_title(base::ASCIIToUTF16("ready"));
+    std::u16string ready_title(u"ready");
     TitleWatcher watcher(shell()->web_contents(), ready_title);
     ignore_result(watcher.WaitAndGetTitle());
 
@@ -162,10 +162,7 @@ class ScrollBehaviorBrowserTest : public ContentBrowserTest,
   }
 
   double ExecuteScriptAndExtractDouble(const std::string& script) {
-    double value = 0;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractDouble(
-        shell(), "domAutomationController.send(" + script + ")", &value));
-    return value;
+    return EvalJs(shell(), script).ExtractDouble();
   }
 
   WebContentsImpl* web_contents() const {
@@ -260,9 +257,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
 
   LoadURL(kOverflowScrollDataURL);
 
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    "element.scrollTo({top: 100, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "element.scrollTo({top: 100, behavior: 'smooth'});"));
 
   std::string scroll_top_script = "element.scrollTop";
   WaitForScrollToStart(scroll_top_script);
@@ -272,7 +268,7 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
   ASSERT_LT(scroll_top, kIntermediateScrollOffset);
 
   // When interrupted by an instant scroll, the in-progress smooth scrolls stop.
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), "element.scrollTop = 0;"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), "element.scrollTop = 0;"));
 
   // Instant scroll does not cause animation, it scroll to 0 right away.
   ValueHoldsAt(scroll_top_script, 0);
@@ -284,9 +280,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
                        OverflowScrollInterruptedBySmoothScroll) {
   LoadURL(kOverflowScrollDataURL);
 
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    "element.scrollTo({top: 100, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "element.scrollTo({top: 100, behavior: 'smooth'});"));
 
   std::string scroll_top_script = "element.scrollTop";
   WaitForScrollToStart(scroll_top_script);
@@ -296,8 +291,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
   ASSERT_LT(scroll_top, kIntermediateScrollOffset);
 
   // When interrupted by a smooth scroll, the in-progress smooth scrolls stop.
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
-                            "element.scrollTo({top: 0, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "element.scrollTo({top: 0, behavior: 'smooth'});"));
 
   WaitUntilLessThan(scroll_top_script, scroll_top);
   double new_scroll_top = ExecuteScriptAndExtractDouble(scroll_top_script);
@@ -307,8 +302,10 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
 
 // This tests that a in-progress smooth scroll on an overflow:scroll element
 // stops when interrupted by a touch scroll.
+// Currently only pre-Scroll-Unification main-thread input-handling gets this
+// right (crbug.com/1116647#c5).
 IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
-                       OverflowScrollInterruptedByTouchScroll) {
+                       DISABLED_OverflowScrollInterruptedByTouchScroll) {
   // TODO(crbug.com/1116647): compositing scroll should be able to cancel a
   // running programmatic scroll.
   if (!disable_threaded_scrolling_)
@@ -316,9 +313,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
 
   LoadURL(kOverflowScrollDataURL);
 
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    "element.scrollTo({top: 100, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "element.scrollTo({top: 100, behavior: 'smooth'});"));
 
   std::string scroll_top_script = "element.scrollTop";
   WaitForScrollToStart(scroll_top_script);
@@ -348,9 +344,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
 
   LoadURL(kOverflowScrollDataURL);
 
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    "element.scrollTo({top: 100, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "element.scrollTo({top: 100, behavior: 'smooth'});"));
 
   std::string scroll_top_script = "element.scrollTop";
   WaitForScrollToStart(scroll_top_script);
@@ -380,9 +375,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
                        MainFrameScrollInterruptedBySmoothScroll) {
   LoadURL(kMainFrameScrollDataURL);
 
-  EXPECT_TRUE(
-      ExecuteScript(shell()->web_contents(),
-                    "window.scrollTo({top: 100, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "window.scrollTo({top: 100, behavior: 'smooth'});"));
 
   std::string scroll_top_script = "document.scrollingElement.scrollTop";
   WaitForScrollToStart(scroll_top_script);
@@ -392,8 +386,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
   ASSERT_LT(scroll_top, kIntermediateScrollOffset);
 
   // When interrupted by a smooth scroll, the in-progress smooth scrolls stop.
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
-                            "window.scrollTo({top: 0, behavior: 'smooth'});"));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(),
+                     "window.scrollTo({top: 0, behavior: 'smooth'});"));
 
   WaitUntilLessThan(scroll_top_script, scroll_top);
   double new_scroll_top = ExecuteScriptAndExtractDouble(scroll_top_script);
@@ -407,7 +401,7 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
                        SubframeScrollInterruptedBySmoothScroll) {
   LoadURL(kSubframeScrollDataURL);
 
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       shell()->web_contents(),
       "subframe.contentWindow.scrollTo({top: 100, behavior: 'smooth'});"));
 
@@ -420,9 +414,9 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
   ASSERT_LT(scroll_top, kIntermediateScrollOffset);
 
   // When interrupted by a smooth scroll, the in-progress smooth scrolls stop.
-  EXPECT_TRUE(ExecuteScript(
-      shell()->web_contents(),
-      "subframe.contentWindow.scrollTo({top: 0, behavior: 'smooth'});"));
+  EXPECT_TRUE(
+      ExecJs(shell()->web_contents(),
+             "subframe.contentWindow.scrollTo({top: 0, behavior: 'smooth'});"));
 
   WaitUntilLessThan(scroll_top_script, scroll_top);
   double new_scroll_top = ExecuteScriptAndExtractDouble(scroll_top_script);

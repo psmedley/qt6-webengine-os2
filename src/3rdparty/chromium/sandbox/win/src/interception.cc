@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 
+#include "base/bits.h"
 #include "base/check_op.h"
 #include "base/notreached.h"
 #include "base/scoped_native_library.h"
@@ -388,7 +389,7 @@ ResultCode InterceptionManager::PatchNtdll(bool hot_patch_needed) {
   thunk_offset &= kPageSize - 1;
 
   // Make an aligned, padded allocation, and move the pointer to our chunk.
-  size_t thunk_bytes_padded = (thunk_bytes + kPageSize - 1) & ~(kPageSize - 1);
+  size_t thunk_bytes_padded = base::bits::AlignUp(thunk_bytes, kPageSize);
   thunk_base = reinterpret_cast<BYTE*>(
       ::VirtualAllocEx(child, thunk_base, thunk_bytes_padded, MEM_COMMIT,
                        PAGE_EXECUTE_READWRITE));
@@ -449,7 +450,7 @@ ResultCode InterceptionManager::PatchClientFunctions(
 
   std::unique_ptr<ServiceResolverThunk> thunk;
 #if defined(_WIN64)
-  thunk.reset(new ServiceResolverThunk(child_.Process(), relaxed_));
+  thunk = std::make_unique<ServiceResolverThunk>(child_.Process(), relaxed_);
 #else
   base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
   base::win::Version real_os_version = os_info->Kernel32Version();

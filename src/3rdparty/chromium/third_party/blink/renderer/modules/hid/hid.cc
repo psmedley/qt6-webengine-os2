@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_hid_device_filter.h"
@@ -130,14 +130,12 @@ void HID::AddedEventListener(const AtomicString& event_type,
 
   auto* context = GetExecutionContext();
   if (!context ||
-      !context->IsFeatureEnabled(mojom::blink::FeaturePolicyFeature::kHid,
+      !context->IsFeatureEnabled(mojom::blink::PermissionsPolicyFeature::kHid,
                                  ReportOptions::kDoNotReport)) {
     return;
   }
 
   EnsureServiceConnection();
-  if (!receiver_.is_bound())
-    service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote());
 }
 
 void HID::DeviceAdded(device::mojom::blink::HidDeviceInfoPtr device_info) {
@@ -154,6 +152,18 @@ void HID::DeviceRemoved(device::mojom::blink::HidDeviceInfoPtr device_info) {
       event_type_names::kDisconnect, device));
 }
 
+void HID::DeviceChanged(device::mojom::blink::HidDeviceInfoPtr device_info) {
+  auto it = device_cache_.find(device_info->guid);
+  if (it != device_cache_.end()) {
+    it->value->UpdateDeviceInfo(std::move(device_info));
+    return;
+  }
+
+  // If the GUID is not in the |device_cache_| then this is the first time we
+  // have been notified for this device.
+  DeviceAdded(std::move(device_info));
+}
+
 ScriptPromise HID::getDevices(ScriptState* script_state,
                               ExceptionState& exception_state) {
   auto* context = GetExecutionContext();
@@ -163,7 +173,7 @@ ScriptPromise HID::getDevices(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  if (!context->IsFeatureEnabled(mojom::blink::FeaturePolicyFeature::kHid,
+  if (!context->IsFeatureEnabled(mojom::blink::PermissionsPolicyFeature::kHid,
                                  ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
     return ScriptPromise();
@@ -188,7 +198,7 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
   }
 
   if (!GetExecutionContext()->IsFeatureEnabled(
-          mojom::blink::FeaturePolicyFeature::kHid,
+          mojom::blink::PermissionsPolicyFeature::kHid,
           ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
     return ScriptPromise();
@@ -234,13 +244,15 @@ void HID::Connect(
 }
 
 HIDDevice* HID::GetOrCreateDevice(device::mojom::blink::HidDeviceInfoPtr info) {
-  const String guid = info->guid;
-  HIDDevice* device = device_cache_.at(guid);
-  if (!device) {
-    device = MakeGarbageCollected<HIDDevice>(this, std::move(info),
-                                             GetExecutionContext());
-    device_cache_.insert(guid, device);
+  auto it = device_cache_.find(info->guid);
+  if (it != device_cache_.end()) {
+    return it->value;
   }
+
+  const String guid = info->guid;
+  HIDDevice* device = MakeGarbageCollected<HIDDevice>(this, std::move(info),
+                                                      GetExecutionContext());
+  device_cache_.insert(guid, device);
   return device;
 }
 
@@ -282,10 +294,13 @@ void HID::EnsureServiceConnection() {
       service_.BindNewPipeAndPassReceiver(task_runner));
   service_.set_disconnect_handler(
       WTF::Bind(&HID::OnServiceConnectionError, WrapWeakPersistent(this)));
+  DCHECK(!receiver_.is_bound());
+  service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote());
 }
 
 void HID::OnServiceConnectionError() {
   service_.reset();
+  receiver_.reset();
 
   // Script may execute during a call to Resolve(). Swap these sets to prevent
   // concurrent modification.

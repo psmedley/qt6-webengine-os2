@@ -18,6 +18,8 @@
 #include "content/public/test/test_browser_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 #include "url/origin.h"
 
 namespace content {
@@ -206,6 +208,9 @@ class DevToolsBackgroundServicesContextTest
  private:
   int64_t RegisterServiceWorker() {
     GURL script_url(origin_.GetURL().spec() + "sw.js");
+    // TODO(crbug.com/1199077): Update this when
+    // DevToolsBackgroundServicesContextImpl implements StorageKey.
+    blink::StorageKey key(origin_);
     int64_t service_worker_registration_id =
         blink::mojom::kInvalidServiceWorkerRegistrationId;
 
@@ -214,10 +219,12 @@ class DevToolsBackgroundServicesContextTest
       options.scope = origin_.GetURL();
       base::RunLoop run_loop;
       embedded_worker_test_helper_.context()->RegisterServiceWorker(
-          script_url, options, blink::mojom::FetchClientSettingsObject::New(),
+          script_url, key, options,
+          blink::mojom::FetchClientSettingsObject::New(),
           base::BindOnce(&DidRegisterServiceWorker,
                          &service_worker_registration_id,
-                         run_loop.QuitClosure()));
+                         run_loop.QuitClosure()),
+          /*requesting_frame_id=*/GlobalRenderFrameHostId());
 
       run_loop.Run();
     }
@@ -231,7 +238,7 @@ class DevToolsBackgroundServicesContextTest
     {
       base::RunLoop run_loop;
       embedded_worker_test_helper_.context()->registry()->FindRegistrationForId(
-          service_worker_registration_id, origin_,
+          service_worker_registration_id, key,
           base::BindOnce(&DidFindServiceWorkerRegistration,
                          &service_worker_registration_,
                          run_loop.QuitClosure()));

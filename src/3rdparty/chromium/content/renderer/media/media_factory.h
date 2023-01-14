@@ -8,13 +8,12 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "build/buildflag.h"
 #include "build/chromecast_buildflags.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "media/base/renderer_factory_selector.h"
 #include "media/base/routing_token_callback.h"
-#include "media/blink/url_index.h"
-#include "media/blink/webmediaplayer_params.h"
 #include "media/media_buildflags.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/clients/mojo_renderer_factory.h"
@@ -32,13 +31,16 @@
 
 namespace blink {
 class BrowserInterfaceBrokerProxy;
+class ResourceFetchContext;
+class UrlIndex;
 class WebContentDecryptionModule;
 class WebEncryptedMediaClient;
+class WebEncryptedMediaClientImpl;
 class WebLocalFrame;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
-}
+}  // namespace blink
 
 namespace cc {
 class LayerTreeSettings;
@@ -52,8 +54,7 @@ class MediaLog;
 class MediaObserver;
 class RemotePlaybackClientWrapper;
 class RendererWebMediaPlayerDelegate;
-class WebEncryptedMediaClientImpl;
-}
+}  // namespace media
 
 namespace content {
 
@@ -178,11 +179,11 @@ class MediaFactory {
   std::unique_ptr<media::CdmFactory> cdm_factory_;
 
   // Media resource cache, lazily initialized.
-  std::unique_ptr<media::ResourceFetchContext> fetch_context_;
-  std::unique_ptr<media::UrlIndex> url_index_;
+  std::unique_ptr<blink::ResourceFetchContext> fetch_context_;
+  std::unique_ptr<blink::UrlIndex> url_index_;
 
   // EncryptedMediaClient attached to this frame; lazily initialized.
-  std::unique_ptr<media::WebEncryptedMediaClientImpl>
+  std::unique_ptr<blink::WebEncryptedMediaClientImpl>
       web_encrypted_media_client_;
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)

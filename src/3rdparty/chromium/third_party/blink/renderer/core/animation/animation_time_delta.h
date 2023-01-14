@@ -7,10 +7,7 @@
 
 #include "third_party/blink/renderer/core/animation/buildflags.h"
 
-#if BUILDFLAG(BLINK_ANIMATION_USE_TIME_DELTA)
 #include "base/time/time.h"
-#endif
-
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -93,6 +90,11 @@ class CORE_EXPORT AnimationTimeDelta {
   template <typename T>
   AnimationTimeDelta& operator/=(T a) {
     return *this = (*this / a);
+  }
+  double operator/(AnimationTimeDelta a) const {
+    CHECK(!a.is_zero());
+    CHECK(!is_inf() || !a.is_inf());
+    return delta_ / a.delta_;
   }
 
  protected:

@@ -9,6 +9,11 @@
 #include "media/capture/capture_export.h"
 
 namespace media {
+
+namespace switches {
+CAPTURE_EXPORT extern const char kForceControlFaceAe[];
+}  // namespace switches
+
 namespace features {
 
 CAPTURE_EXPORT extern const base::Feature kDisableCameraFrameRotationAtSource;

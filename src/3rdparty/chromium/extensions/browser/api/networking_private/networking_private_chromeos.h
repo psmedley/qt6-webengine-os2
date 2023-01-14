@@ -10,9 +10,9 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/values.h"
 #include "extensions/browser/api/networking_private/networking_private_delegate.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -83,7 +83,7 @@ class NetworkingPrivateChromeOS : public NetworkingPrivateDelegate {
                                    const std::string& network_id,
                                    VoidCallback success_callback,
                                    FailureCallback failure_callback) override;
-  std::unique_ptr<base::ListValue> GetEnabledNetworkTypes() override;
+  base::Value GetEnabledNetworkTypes() override;
   std::unique_ptr<DeviceStateList> GetDeviceStateList() override;
   std::unique_ptr<base::DictionaryValue> GetGlobalPolicy() override;
   std::unique_ptr<base::DictionaryValue> GetCertificateLists() override;
@@ -98,8 +98,8 @@ class NetworkingPrivateChromeOS : public NetworkingPrivateDelegate {
   void GetPropertiesCallback(const std::string& guid,
                              PropertiesCallback callback,
                              const std::string& service_path,
-                             base::Optional<base::Value> dictionary,
-                             base::Optional<std::string> error);
+                             absl::optional<base::Value> dictionary,
+                             absl::optional<std::string> error);
 
   // Populate ThirdPartyVPN.ProviderName with the provider name for third-party
   // VPNs. The provider name needs to be looked up from the list of extensions

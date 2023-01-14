@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,10 +7,14 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 
-import mock
+if sys.version_info[0] == 2:
+  import mock
+else:
+  import unittest.mock as mock
 
 from pyfakefs import fake_filesystem_unittest
 
@@ -165,7 +169,8 @@ class SkiaGoldSessionRunComparisonTest(fake_filesystem_unittest.TestCase):
     compare_mock.assert_called_with(name=None,
                                     png_file=mock.ANY,
                                     inexact_matching_args=['--inexact'],
-                                    optional_keys=None)
+                                    optional_keys=None,
+                                    force_dryrun=False)
 
   @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Diff')
   @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Compare')
@@ -194,7 +199,35 @@ class SkiaGoldSessionRunComparisonTest(fake_filesystem_unittest.TestCase):
     compare_mock.assert_called_with(name=None,
                                     png_file=mock.ANY,
                                     inexact_matching_args=None,
-                                    optional_keys={'foo': 'bar'})
+                                    optional_keys={'foo': 'bar'},
+                                    force_dryrun=False)
+
+  @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Diff')
+  @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Compare')
+  @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Initialize')
+  @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Authenticate')
+  def test_compareForceDryrun(self, auth_mock, init_mock, compare_mock,
+                              diff_mock):
+    auth_mock.return_value = (0, None)
+    init_mock.return_value = (0, None)
+    compare_mock.return_value = (0, None)
+    diff_mock.return_value = (0, None)
+    args = createSkiaGoldArgs(local_pixel_tests=False)
+    sgp = skia_gold_properties.SkiaGoldProperties(args)
+    session = skia_gold_session.SkiaGoldSession(self._working_dir, sgp,
+                                                self._json_keys, None, None)
+    status, _ = session.RunComparison(None, None, None, force_dryrun=True)
+    self.assertEqual(status,
+                     skia_gold_session.SkiaGoldSession.StatusCodes.SUCCESS)
+    self.assertEqual(auth_mock.call_count, 1)
+    self.assertEqual(init_mock.call_count, 1)
+    self.assertEqual(compare_mock.call_count, 1)
+    self.assertEqual(diff_mock.call_count, 0)
+    compare_mock.assert_called_with(name=None,
+                                    png_file=mock.ANY,
+                                    inexact_matching_args=None,
+                                    optional_keys=None,
+                                    force_dryrun=True)
 
   @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Diff')
   @mock.patch.object(skia_gold_session.SkiaGoldSession, 'Compare')
@@ -533,6 +566,16 @@ class SkiaGoldSessionCompareTest(fake_filesystem_unittest.TestCase):
     session = skia_gold_session.SkiaGoldSession(self._working_dir, sgp,
                                                 self._json_keys, None, None)
     session.Compare(None, None)
+    self.assertIn('--dryrun', cmd_mock.call_args[0][0])
+
+  @mock.patch.object(skia_gold_session.SkiaGoldSession, '_RunCmdForRcAndOutput')
+  def test_commandWithForceDryrunTrue(self, cmd_mock):
+    cmd_mock.return_value = (None, None)
+    args = createSkiaGoldArgs(git_revision='a')
+    sgp = skia_gold_properties.SkiaGoldProperties(args)
+    session = skia_gold_session.SkiaGoldSession(self._working_dir, sgp,
+                                                self._json_keys, None, None)
+    session.Compare(None, None, force_dryrun=True)
     self.assertIn('--dryrun', cmd_mock.call_args[0][0])
 
   @mock.patch.object(skia_gold_session.SkiaGoldSession, '_RunCmdForRcAndOutput')

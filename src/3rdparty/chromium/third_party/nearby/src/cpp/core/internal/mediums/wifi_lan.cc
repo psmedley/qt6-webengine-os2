@@ -44,6 +44,12 @@ bool WifiLan::StartAdvertising(const std::string& service_id,
     return false;
   }
 
+  if (IsAdvertisingLocked(service_id)) {
+    NEARBY_LOGS(INFO)
+        << "Failed to WifiLan advertise because we're already advertising.";
+    return false;
+  }
+
   if (!IsAvailableLocked()) {
     NEARBY_LOG(INFO,
                "Can't turn on WifiLan advertising. WifiLan is not available.");
@@ -222,7 +228,6 @@ bool WifiLan::IsAcceptingConnectionsLocked(const std::string& service_id) {
   return accepting_connections_info_.Existed(service_id);
 }
 
-// TODO(b/169303284): Handles Cancellation and registration.
 WifiLanSocket WifiLan::Connect(WifiLanService& wifi_lan_service,
                                const std::string& service_id,
                                CancellationFlag* cancellation_flag) {

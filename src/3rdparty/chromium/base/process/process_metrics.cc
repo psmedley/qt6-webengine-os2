@@ -17,6 +17,8 @@ namespace base {
 
 namespace {
 
+#if defined(OS_APPLE) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    defined(OS_AIX)
 int CalculateEventsPerSecond(uint64_t event_count,
                              uint64_t* last_event_count,
                              base::TimeTicks* last_calculated) {
@@ -34,12 +36,15 @@ int CalculateEventsPerSecond(uint64_t event_count,
   *last_event_count = event_count;
   return events_per_second;
 }
+#endif
 
 }  // namespace
 
 SystemMemoryInfoKB::SystemMemoryInfoKB() = default;
 
-SystemMemoryInfoKB::SystemMemoryInfoKB(const SystemMemoryInfoKB& other) =
+SystemMemoryInfoKB::SystemMemoryInfoKB(const SystemMemoryInfoKB&) = default;
+
+SystemMemoryInfoKB& SystemMemoryInfoKB::operator=(const SystemMemoryInfoKB&) =
     default;
 
 SystemMetrics::SystemMetrics() {
@@ -65,26 +70,26 @@ SystemMetrics SystemMetrics::Sample() {
   return system_metrics;
 }
 
-std::unique_ptr<Value> SystemMetrics::ToValue() const {
-  std::unique_ptr<DictionaryValue> res(new DictionaryValue());
+Value SystemMetrics::ToValue() const {
+  Value res(Value::Type::DICTIONARY);
 
-  res->SetIntKey("committed_memory", static_cast<int>(committed_memory_));
+  res.SetIntKey("committed_memory", static_cast<int>(committed_memory_));
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
-  std::unique_ptr<DictionaryValue> meminfo = memory_info_.ToValue();
-  std::unique_ptr<DictionaryValue> vmstat = vmstat_info_.ToValue();
-  meminfo->MergeDictionary(vmstat.get());
-  res->Set("meminfo", std::move(meminfo));
-  res->Set("diskinfo", disk_info_.ToValue());
+  Value meminfo = memory_info_.ToValue();
+  Value vmstat = vmstat_info_.ToValue();
+  meminfo.MergeDictionary(&vmstat);
+  res.SetKey("meminfo", std::move(meminfo));
+  res.SetKey("diskinfo", disk_info_.ToValue());
 #endif
 #if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  res->Set("swapinfo", swap_info_.ToValue());
-  res->Set("gpu_meminfo", gpu_memory_info_.ToValue());
+  res.SetKey("swapinfo", swap_info_.ToValue());
+  res.SetKey("gpu_meminfo", gpu_memory_info_.ToValue());
 #endif
 #if defined(OS_WIN)
-  res->Set("perfinfo", performance_.ToValue());
+  res.SetKey("perfinfo", performance_.ToValue());
 #endif
 
-  return std::move(res);
+  return res;
 }
 
 std::unique_ptr<ProcessMetrics> ProcessMetrics::CreateCurrentProcessMetrics() {
@@ -152,12 +157,5 @@ uint64_t ProcessMetrics::GetCumulativeDiskUsageInBytes() {
   return 0;
 }
 #endif
-
-uint64_t ProcessMetrics::GetDiskUsageBytesPerSecond() {
-  uint64_t cumulative_disk_usage = GetCumulativeDiskUsageInBytes();
-  return CalculateEventsPerSecond(cumulative_disk_usage,
-                                  &last_cumulative_disk_usage_,
-                                  &last_disk_usage_time_);
-}
 
 }  // namespace base

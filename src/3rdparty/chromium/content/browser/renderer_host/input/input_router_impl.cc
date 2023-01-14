@@ -88,7 +88,6 @@ InputRouterImpl::InputRouterImpl(
     const Config& config)
     : client_(client),
       disposition_handler_(disposition_handler),
-      frame_tree_node_id_(FrameTreeNode::kFrameTreeNodeInvalidId),
       touch_scroll_started_sent_(false),
       wheel_event_queue_(this),
       touch_event_queue_(this, config.touch_config),
@@ -240,26 +239,23 @@ void InputRouterImpl::SetDeviceScaleFactor(float device_scale_factor) {
   device_scale_factor_ = device_scale_factor;
 }
 
-void InputRouterImpl::SetFrameTreeNodeId(int frame_tree_node_id) {
-  frame_tree_node_id_ = frame_tree_node_id;
-}
-
 void InputRouterImpl::SetForceEnableZoom(bool enabled) {
   touch_action_filter_.SetForceEnableZoom(enabled);
 }
 
-base::Optional<cc::TouchAction> InputRouterImpl::AllowedTouchAction() {
+absl::optional<cc::TouchAction> InputRouterImpl::AllowedTouchAction() {
   return touch_action_filter_.allowed_touch_action();
 }
 
-base::Optional<cc::TouchAction> InputRouterImpl::ActiveTouchAction() {
+absl::optional<cc::TouchAction> InputRouterImpl::ActiveTouchAction() {
   return touch_action_filter_.active_touch_action();
 }
 
 mojo::PendingRemote<blink::mojom::WidgetInputHandlerHost>
-InputRouterImpl::BindNewHost() {
+InputRouterImpl::BindNewHost(
+    scoped_refptr<base::SequencedTaskRunner> task_runner) {
   host_receiver_.reset();
-  return host_receiver_.BindNewPipeAndPassRemote();
+  return host_receiver_.BindNewPipeAndPassRemote(task_runner);
 }
 
 void InputRouterImpl::StopFling() {
@@ -511,12 +507,11 @@ void InputRouterImpl::FilterAndSendWebInputEvent(
   TRACE_EVENT1("input", "InputRouterImpl::FilterAndSendWebInputEvent", "type",
                WebInputEvent::GetName(input_event.GetType()));
   TRACE_EVENT("input,benchmark,devtools.timeline", "LatencyInfo.Flow",
-              [&latency_info, this](perfetto::EventContext ctx) {
+              [&latency_info](perfetto::EventContext ctx) {
                 ChromeLatencyInfo* info =
                     ctx.event()->set_chrome_latency_info();
                 info->set_trace_id(latency_info.trace_id());
                 info->set_step(ChromeLatencyInfo::STEP_SEND_INPUT_EVENT_UI);
-                info->set_frame_tree_node_id(frame_tree_node_id_);
 
                 tracing::FillFlowEvent(
                     ctx,
@@ -587,7 +582,7 @@ void InputRouterImpl::KeyboardEventHandled(
     blink::mojom::InputEventResultState state,
     blink::mojom::DidOverscrollParamsPtr overscroll,
     blink::mojom::TouchActionOptionalPtr touch_action) {
-  TRACE_EVENT2("input", "InputRouterImpl::KeboardEventHandled", "type",
+  TRACE_EVENT2("input", "InputRouterImpl::KeyboardEventHandled", "type",
                WebInputEvent::GetName(event.event.GetType()), "ack",
                InputEventResultStateToString(state));
 
@@ -740,7 +735,7 @@ void InputRouterImpl::UpdateTouchAckTimeoutEnabled() {
   // TouchAction::kNone will prevent scrolling, in which case the timeout serves
   // little purpose. It's also a strong signal that touch handling is critical
   // to page functionality, so the timeout could do more harm than good.
-  base::Optional<cc::TouchAction> allowed_touch_action =
+  absl::optional<cc::TouchAction> allowed_touch_action =
       touch_action_filter_.allowed_touch_action();
   cc::TouchAction compositor_allowed_touch_action =
       touch_action_filter_.compositor_allowed_touch_action();

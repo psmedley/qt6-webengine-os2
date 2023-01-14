@@ -18,10 +18,10 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
+#include "extensions/browser/renderer_startup_helper.h"
 #include "extensions/common/api/declarative/declarative_constants.h"
 #include "extensions/common/extension_messages.h"
-#include "ipc/ipc_message.h"
-#include "ipc/ipc_message_macros.h"
+#include "extensions/common/mojom/renderer.mojom.h"
 
 namespace extensions {
 
@@ -50,14 +50,14 @@ DeclarativeContentCssPredicate::Create(ContentPredicateEvaluator* evaluator,
       if (!css_rules_value->GetString(i, &css_rule)) {
         *error = base::StringPrintf(kCssInvalidTypeOfParameter,
                                     declarative_content_constants::kCss);
-        return std::unique_ptr<DeclarativeContentCssPredicate>();
+        return nullptr;
       }
       css_rules.push_back(css_rule);
     }
   } else {
     *error = base::StringPrintf(kCssInvalidTypeOfParameter,
                                 declarative_content_constants::kCss);
-    return std::unique_ptr<DeclarativeContentCssPredicate>();
+    return nullptr;
   }
 
   return !css_rules.empty()
@@ -104,38 +104,23 @@ OnWebContentsNavigation(content::NavigationHandle* navigation_handle) {
   }
 
   // Top-level navigation produces a new document. Initially, the
-  // document's empty, so no CSS rules match.  The renderer will send
-  // an ExtensionHostMsg_OnWatchedPageChange later if any CSS rules
-  // match.
+  // document's empty, so no CSS rules match.  The renderer will call
+  // 'extensions::mojom::LocalFrameHost::WatchedPageChange()' later if any CSS
+  // rules match.
   matching_css_selectors_.clear();
   request_evaluation_.Run(web_contents());
 }
 
-bool
-DeclarativeContentCssConditionTracker::PerWebContentsTracker::
-OnMessageReceived(
-    const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(PerWebContentsTracker, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_OnWatchedPageChange,
-                        OnWatchedPageChange)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
+void DeclarativeContentCssConditionTracker::PerWebContentsTracker::
+    OnWatchedPageChanged(const std::vector<std::string>& css_selectors) {
+  matching_css_selectors_.clear();
+  matching_css_selectors_.insert(css_selectors.begin(), css_selectors.end());
+  request_evaluation_.Run(web_contents());
 }
 
 void DeclarativeContentCssConditionTracker::PerWebContentsTracker::
 WebContentsDestroyed() {
   std::move(web_contents_destroyed_).Run(web_contents());
-}
-
-void
-DeclarativeContentCssConditionTracker::PerWebContentsTracker::
-OnWatchedPageChange(
-    const std::vector<std::string>& css_selectors) {
-  matching_css_selectors_.clear();
-  matching_css_selectors_.insert(css_selectors.begin(), css_selectors.end());
-  request_evaluation_.Run(web_contents());
 }
 
 //
@@ -233,6 +218,13 @@ void DeclarativeContentCssConditionTracker::OnWebContentsNavigation(
       navigation_handle);
 }
 
+void DeclarativeContentCssConditionTracker::OnWatchedPageChanged(
+    content::WebContents* contents,
+    const std::vector<std::string>& css_selectors) {
+  DCHECK(base::Contains(per_web_contents_tracker_, contents));
+  per_web_contents_tracker_[contents]->OnWatchedPageChanged(css_selectors);
+}
+
 bool DeclarativeContentCssConditionTracker::EvaluatePredicate(
     const ContentPredicate* predicate,
     content::WebContents* tab) const {
@@ -291,9 +283,13 @@ void DeclarativeContentCssConditionTracker::
 InstructRenderProcessIfManagingBrowserContext(
     content::RenderProcessHost* process,
     std::vector<std::string> watched_css_selectors) {
-  if (delegate_->ShouldManageConditionsForBrowserContext(
-          process->GetBrowserContext())) {
-    process->Send(new ExtensionMsg_WatchPages(watched_css_selectors));
+  content::BrowserContext* browser_context = process->GetBrowserContext();
+  if (delegate_->ShouldManageConditionsForBrowserContext(browser_context)) {
+    mojom::Renderer* renderer =
+        RendererStartupHelperFactory::GetForBrowserContext(browser_context)
+            ->GetRenderer(process);
+    if (renderer)
+      renderer->WatchPages(watched_css_selectors);
   }
 }
 

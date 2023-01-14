@@ -217,7 +217,7 @@ void FontBuilder::SetFamilyDescription(
 
   bool is_initial =
       family_description.generic_family == FontDescription::kStandardFamily &&
-      family_description.family.FamilyIsEmpty();
+      family_description.family.Family().IsEmpty();
 
   font_description.SetGenericFamily(family_description.generic_family);
   font_description.SetFamily(is_initial ? StandardFontFamily()
@@ -319,15 +319,19 @@ void FontBuilder::UpdateSpecifiedSize(FontDescription& font_description,
 void FontBuilder::UpdateAdjustedSize(FontDescription& font_description,
                                      const ComputedStyle& style,
                                      FontSelector* font_selector) {
-  const float specified_size = font_description.SpecifiedSize();
-  if (!font_description.HasSizeAdjust() || !specified_size)
+  // Note: the computed_size has scale/zooming applied as well as text auto-
+  // sizing and Android font scaling. That means we operate on the used value
+  // without font-size-adjust applied and apply the font-size-adjust to end up
+  // at a new adjusted_size.
+  const float computed_size = font_description.ComputedSize();
+  if (!font_description.HasSizeAdjust() || !computed_size)
     return;
 
   // We need to create a temporal Font to get xHeight of a primary font.
   // The aspect value is based on the xHeight of the font for the computed font
-  // size, so we need to reset the adjustedSize to computedSize. See
+  // size, so we need to reset the adjusted_size to computed_size. See
   // FontDescription::EffectiveFontSize.
-  font_description.SetAdjustedSize(font_description.ComputedSize());
+  font_description.SetAdjustedSize(computed_size);
 
   Font font(font_description, font_selector);
 
@@ -337,13 +341,8 @@ void FontBuilder::UpdateAdjustedSize(FontDescription& font_description,
     return;
 
   const float size_adjust = font_description.SizeAdjust();
-  float aspect_value = font_data->GetFontMetrics().XHeight() / specified_size;
-  float adjusted_size = (size_adjust / aspect_value) * specified_size;
-  adjusted_size = GetComputedSizeFromSpecifiedSize(
-      font_description, style.EffectiveZoom(), adjusted_size);
-
-  adjusted_size = TextAutosizer::ComputeAutosizedFontSize(
-      adjusted_size, style.TextAutosizingMultiplier(), style.EffectiveZoom());
+  float aspect_value = font_data->GetFontMetrics().XHeight() / computed_size;
+  float adjusted_size = (size_adjust / aspect_value) * computed_size;
   font_description.SetAdjustedSize(adjusted_size);
 }
 
@@ -454,23 +453,23 @@ void FontBuilder::CreateFont(ComputedStyle& style,
   flags_ = 0;
 }
 
-void FontBuilder::CreateFontForDocument(ComputedStyle& document_style) {
+void FontBuilder::CreateInitialFont(ComputedStyle& style) {
   DCHECK(document_);
   FontDescription font_description = FontDescription();
-  font_description.SetLocale(document_style.GetFontDescription().Locale());
+  font_description.SetLocale(style.GetFontDescription().Locale());
 
   SetFamilyDescription(font_description,
                        FontBuilder::InitialFamilyDescription());
   SetSize(font_description,
           FontDescription::Size(FontSizeFunctions::InitialKeywordSize(), 0.0f,
                                 false));
-  UpdateSpecifiedSize(font_description, document_style, &document_style);
-  UpdateComputedSize(font_description, document_style);
+  UpdateSpecifiedSize(font_description, style, &style);
+  UpdateComputedSize(font_description, style);
 
-  font_description.SetOrientation(document_style.ComputeFontOrientation());
+  font_description.SetOrientation(style.ComputeFontOrientation());
 
   FontSelector* font_selector = document_->GetStyleEngine().GetFontSelector();
-  document_style.SetFontInternal(Font(font_description, font_selector));
+  style.SetFontInternal(Font(font_description, font_selector));
 }
 
 }  // namespace blink

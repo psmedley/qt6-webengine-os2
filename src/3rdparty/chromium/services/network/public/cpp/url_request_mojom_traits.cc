@@ -18,128 +18,56 @@
 #include "services/network/public/cpp/isolation_info_mojom_traits.h"
 #include "services/network/public/cpp/network_ipc_param_traits.h"
 #include "services/network/public/cpp/resource_request_body.h"
+#include "services/network/public/cpp/url_request_param_mojom_traits.h"
 #include "services/network/public/mojom/cookie_access_observer.mojom.h"
+#include "services/network/public/mojom/data_pipe_getter.mojom.h"
+#include "services/network/public/mojom/devtools_observer.mojom.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom-shared.h"
+#include "services/network/public/mojom/url_request.mojom.h"
 #include "services/network/public/mojom/web_bundle_handle.mojom.h"
 #include "url/mojom/origin_mojom_traits.h"
 #include "url/mojom/url_gurl_mojom_traits.h"
 
 namespace mojo {
 
-network::mojom::RequestPriority
-EnumTraits<network::mojom::RequestPriority, net::RequestPriority>::ToMojom(
-    net::RequestPriority priority) {
-  switch (priority) {
-    case net::THROTTLED:
-      return network::mojom::RequestPriority::kThrottled;
-    case net::IDLE:
-      return network::mojom::RequestPriority::kIdle;
-    case net::LOWEST:
-      return network::mojom::RequestPriority::kLowest;
-    case net::LOW:
-      return network::mojom::RequestPriority::kLow;
-    case net::MEDIUM:
-      return network::mojom::RequestPriority::kMedium;
-    case net::HIGHEST:
-      return network::mojom::RequestPriority::kHighest;
+network::mojom::SourceType
+EnumTraits<network::mojom::SourceType, net::SourceStream::SourceType>::ToMojom(
+    net::SourceStream::SourceType type) {
+  switch (type) {
+    case net::SourceStream::SourceType::TYPE_BROTLI:
+      return network::mojom::SourceType::kBrotli;
+    case net::SourceStream::SourceType::TYPE_DEFLATE:
+      return network::mojom::SourceType::kDeflate;
+    case net::SourceStream::SourceType::TYPE_GZIP:
+      return network::mojom::SourceType::kGzip;
+    case net::SourceStream::SourceType::TYPE_NONE:
+      return network::mojom::SourceType::kNone;
+    case net::SourceStream::SourceType::TYPE_UNKNOWN:
+      return network::mojom::SourceType::kUnknown;
   }
   NOTREACHED();
-  return static_cast<network::mojom::RequestPriority>(priority);
+  return static_cast<network::mojom::SourceType>(type);
 }
 
-bool EnumTraits<network::mojom::RequestPriority, net::RequestPriority>::
-    FromMojom(network::mojom::RequestPriority in, net::RequestPriority* out) {
+bool EnumTraits<network::mojom::SourceType, net::SourceStream::SourceType>::
+    FromMojom(network::mojom::SourceType in,
+              net::SourceStream::SourceType* out) {
   switch (in) {
-    case network::mojom::RequestPriority::kThrottled:
-      *out = net::THROTTLED;
+    case network::mojom::SourceType::kBrotli:
+      *out = net::SourceStream::SourceType::TYPE_BROTLI;
       return true;
-    case network::mojom::RequestPriority::kIdle:
-      *out = net::IDLE;
+    case network::mojom::SourceType::kDeflate:
+      *out = net::SourceStream::SourceType::TYPE_DEFLATE;
       return true;
-    case network::mojom::RequestPriority::kLowest:
-      *out = net::LOWEST;
+    case network::mojom::SourceType::kGzip:
+      *out = net::SourceStream::SourceType::TYPE_GZIP;
       return true;
-    case network::mojom::RequestPriority::kLow:
-      *out = net::LOW;
+    case network::mojom::SourceType::kNone:
+      *out = net::SourceStream::SourceType::TYPE_NONE;
       return true;
-    case network::mojom::RequestPriority::kMedium:
-      *out = net::MEDIUM;
-      return true;
-    case network::mojom::RequestPriority::kHighest:
-      *out = net::HIGHEST;
-      return true;
-  }
-
-  NOTREACHED();
-  *out = static_cast<net::RequestPriority>(in);
-  return true;
-}
-
-network::mojom::URLRequestReferrerPolicy
-EnumTraits<network::mojom::URLRequestReferrerPolicy,
-           net::ReferrerPolicy>::ToMojom(net::ReferrerPolicy policy) {
-  switch (policy) {
-    case net::ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
-      return network::mojom::URLRequestReferrerPolicy::
-          kClearReferrerOnTransitionFromSecureToInsecure;
-    case net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN:
-      return network::mojom::URLRequestReferrerPolicy::
-          kReduceReferrerGranularityOnTransitionCrossOrigin;
-    case net::ReferrerPolicy::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN:
-      return network::mojom::URLRequestReferrerPolicy::
-          kOriginOnlyOnTransitionCrossOrigin;
-    case net::ReferrerPolicy::NEVER_CLEAR:
-      return network::mojom::URLRequestReferrerPolicy::kNeverClearReferrer;
-    case net::ReferrerPolicy::ORIGIN:
-      return network::mojom::URLRequestReferrerPolicy::kOrigin;
-    case net::ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN:
-      return network::mojom::URLRequestReferrerPolicy::
-          kClearReferrerOnTransitionCrossOrigin;
-    case net::ReferrerPolicy::
-        ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
-      return network::mojom::URLRequestReferrerPolicy::
-          kOriginClearOnTransitionFromSecureToInsecure;
-    case net::ReferrerPolicy::NO_REFERRER:
-      return network::mojom::URLRequestReferrerPolicy::kNoReferrer;
-  }
-  NOTREACHED();
-  return static_cast<network::mojom::URLRequestReferrerPolicy>(policy);
-}
-
-bool EnumTraits<network::mojom::URLRequestReferrerPolicy, net::ReferrerPolicy>::
-    FromMojom(network::mojom::URLRequestReferrerPolicy in,
-              net::ReferrerPolicy* out) {
-  switch (in) {
-    case network::mojom::URLRequestReferrerPolicy::
-        kClearReferrerOnTransitionFromSecureToInsecure:
-      *out = net::ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::
-        kReduceReferrerGranularityOnTransitionCrossOrigin:
-      *out = net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::
-        kOriginOnlyOnTransitionCrossOrigin:
-      *out = net::ReferrerPolicy::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::kNeverClearReferrer:
-      *out = net::ReferrerPolicy::NEVER_CLEAR;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::kOrigin:
-      *out = net::ReferrerPolicy::ORIGIN;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::
-        kClearReferrerOnTransitionCrossOrigin:
-      *out = net::ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::
-        kOriginClearOnTransitionFromSecureToInsecure:
-      *out = net::ReferrerPolicy::
-          ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
-      return true;
-    case network::mojom::URLRequestReferrerPolicy::kNoReferrer:
-      *out = net::ReferrerPolicy::NO_REFERRER;
+    case network::mojom::SourceType::kUnknown:
+      *out = net::SourceStream::SourceType::TYPE_UNKNOWN;
       return true;
   }
 
@@ -158,11 +86,15 @@ bool StructTraits<network::mojom::TrustedUrlRequestParamsDataView,
   out->has_user_activation = data.has_user_activation();
   out->cookie_observer = data.TakeCookieObserver<
       mojo::PendingRemote<network::mojom::CookieAccessObserver>>();
-  out->auth_cert_observer = data.TakeAuthCertObserver<mojo::PendingRemote<
-      network::mojom::AuthenticationAndCertificateObserver>>();
+  out->url_loader_network_observer = data.TakeUrlLoaderNetworkObserver<
+      mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>>();
+  out->devtools_observer = data.TakeDevtoolsObserver<
+      mojo::PendingRemote<network::mojom::DevToolsObserver>>();
   if (!data.ReadClientSecurityState(&out->client_security_state)) {
     return false;
   }
+  out->accept_ch_frame_observer = data.TakeAcceptChFrameObserver<
+      mojo::PendingRemote<network::mojom::AcceptCHFrameObserver>>();
   return true;
 }
 
@@ -225,6 +157,8 @@ bool StructTraits<
       !data.ReadDevtoolsStackId(&out->devtools_stack_id) ||
       !data.ReadRecursivePrefetchToken(&out->recursive_prefetch_token) ||
       !data.ReadWebBundleTokenParams(&out->web_bundle_token_params) ||
+      !data.ReadDevtoolsAcceptedStreamTypes(
+          &out->devtools_accepted_stream_types) ||
       !data.ReadNavigationRedirectChain(&out->navigation_redirect_chain)) {
     // Note that data.ReadTrustTokenParams is temporarily handled below.
     return false;
@@ -234,7 +168,7 @@ bool StructTraits<
   // help debug crbug.com/1062637.
   if (!data.ReadTrustTokenParams(&out->trust_token_params.as_ptr())) {
     // We don't return false here to avoid duplicate reports.
-    out->trust_token_params = base::nullopt;
+    out->trust_token_params = absl::nullopt;
     base::debug::DumpWithoutCrashing();
   }
 
@@ -253,10 +187,8 @@ bool StructTraits<
   out->enable_load_timing = data.enable_load_timing();
   out->enable_upload_progress = data.enable_upload_progress();
   out->do_not_prompt_for_login = data.do_not_prompt_for_login();
-  out->render_frame_id = data.render_frame_id();
   out->is_main_frame = data.is_main_frame();
   out->transition_type = data.transition_type();
-  out->report_raw_headers = data.report_raw_headers();
   out->previews_state = data.previews_state();
   out->upgrade_if_insecure = data.upgrade_if_insecure();
   out->is_revalidating = data.is_revalidating();
@@ -313,8 +245,6 @@ bool StructTraits<network::mojom::DataElementChunkedDataPipeDataView,
          network::DataElementChunkedDataPipe* out) {
   auto data_pipe_getter = data.TakeDataPipeGetter<
       mojo::PendingRemote<network::mojom::ChunkedDataPipeGetter>>();
-  UMA_HISTOGRAM_BOOLEAN("NetworkService.StreamingUploadDataPipeGetterValidity",
-                        data_pipe_getter.is_valid());
   *out = network::DataElementChunkedDataPipe(
       std::move(data_pipe_getter),
       network::DataElementChunkedDataPipe::ReadOnlyOnce(data.read_only_once()));

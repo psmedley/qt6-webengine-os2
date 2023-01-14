@@ -25,13 +25,12 @@
 
 #include <memory>
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/layout/min_max_sizes.h"
 #include "third_party/blink/renderer/core/layout/overflow_model.h"
-#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/platform/graphics/overlay_scrollbar_clip_behavior.h"
@@ -121,8 +120,6 @@ struct LayoutBoxRareData final : public GarbageCollected<LayoutBoxRareData> {
   // last paint invalidation. It's valid if has_previous_content_box_rect_ is
   // true.
   PhysicalRect previous_physical_content_box_rect_;
-
-  PhysicalRect partial_invalidation_rect_;
 
   // Used by CSSLayoutDefinition::Instance::Layout. Represents the script
   // object for this box that web developers can query style, and perform
@@ -570,7 +567,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       return false;
     Length h = StyleRef().LogicalHeight();
     return !StyleRef().AspectRatio().IsAuto() &&
-           (h.IsAuto() ||
+           (h.IsAuto() || h.IsMinContent() || h.IsMaxContent() ||
+            h.IsFitContent() ||
             (!IsOutOfFlowPositioned() && h.IsPercentOrCalc() &&
              ComputePercentageLogicalHeight(h) == kIndefiniteSize));
   }
@@ -617,6 +615,20 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     NOT_DESTROYED();
     return FlipForWritingMode(VisualOverflowRect());
   }
+  // VisualOverflow has DCHECK for reading before it is computed. These
+  // functions pretend there is no visual overflow when it is not computed.
+  // TODO(crbug.com/1205708): Audit the usages and fix issues.
+#if DCHECK_IS_ON()
+  LayoutRect VisualOverflowRectAllowingUnset() const;
+  PhysicalRect PhysicalVisualOverflowRectAllowingUnset() const;
+#else
+  ALWAYS_INLINE LayoutRect VisualOverflowRectAllowingUnset() const {
+    return VisualOverflowRect();
+  }
+  ALWAYS_INLINE PhysicalRect PhysicalVisualOverflowRectAllowingUnset() const {
+    return PhysicalVisualOverflowRect();
+  }
+#endif
   LayoutUnit LogicalLeftVisualOverflow() const {
     NOT_DESTROYED();
     return StyleRef().IsHorizontalWritingMode() ? VisualOverflowRect().X()
@@ -695,6 +707,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   void ClearLayoutOverflow();
   void ClearVisualOverflow();
+
+  bool CanUseFragmentsForVisualOverflow() const;
+  void RecalcFragmentsVisualOverflow();
+  void CopyVisualOverflowFromFragments();
 
   virtual void UpdateAfterLayout();
 
@@ -797,14 +813,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   int PixelSnappedOffsetWidth(const Element*) const final;
   int PixelSnappedOffsetHeight(const Element*) const final;
 
-  bool UsesOverlayScrollbars() const {
-    NOT_DESTROYED();
-    if (StyleRef().HasPseudoElementStyle(kPseudoIdScrollbar))
-      return false;
-    if (GetFrame()->GetPage()->GetScrollbarTheme().UsesOverlayScrollbars())
-      return true;
-    return false;
-  }
+  bool UsesOverlayScrollbars() const;
 
   // Clamps the left scrollbar size so it is not wider than the content box.
   DISABLE_CFI_PERF LayoutUnit LogicalLeftScrollbarWidth() const {
@@ -1209,7 +1218,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       const NGConstraintSpace&,
       const NGBreakToken*,
       const NGEarlyBreak*,
-      base::Optional<NGFragmentGeometry>* initial_fragment_geometry,
+      absl::optional<NGFragmentGeometry>* initial_fragment_geometry,
       NGLayoutCacheStatus* out_cache_status);
 
   using NGLayoutResultList = Vector<scoped_refptr<const NGLayoutResult>, 1>;
@@ -1252,6 +1261,9 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     Iterator begin() const { return Iterator(layout_results_.begin()); }
     Iterator end() const { return Iterator(layout_results_.end()); }
 
+    const NGPhysicalBoxFragment& front() const;
+    const NGPhysicalBoxFragment& back() const;
+
    private:
     const NGLayoutResultList& layout_results_;
   };
@@ -1260,6 +1272,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     NOT_DESTROYED();
     return NGPhysicalFragmentList(layout_results_);
   }
+  scoped_refptr<const NGLayoutResult> GetLayoutResult(wtf_size_t i) const;
   const NGPhysicalBoxFragment* GetPhysicalFragment(wtf_size_t i) const;
   const FragmentData* FragmentDataFromPhysicalFragment(
       const NGPhysicalBoxFragment&) const;
@@ -1605,6 +1618,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // for this object.
   PhysicalRect ClippingRect(const PhysicalOffset& location) const;
 
+  // Adjust the clip rectangle to encompass overflow-clip-margin, and remove
+  // clipping along any axis where we shouldn't clip.
+  void ApplyVisibleOverflowToClipRect(PhysicalRect& clip_rect) const;
+
   virtual void PaintBoxDecorationBackground(
       const PaintInfo&,
       const PhysicalOffset& paint_offset) const;
@@ -1790,14 +1807,14 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // See README.md for an explanation of scroll origin.
   IntSize OriginAdjustmentForScrollbars() const;
   IntPoint ScrollOrigin() const;
-  LayoutSize ScrolledContentOffset() const;
+  PhysicalOffset ScrolledContentOffset() const;
 
   // Scroll offset as snapped to physical pixels. This value should be used in
   // any values used after layout and inside "layout code" that cares about
   // where the content is displayed, rather than what the ideal offset is. For
   // most other cases ScrolledContentOffset is probably more appropriate. This
   // is the offset that's actually drawn to the screen.
-  LayoutSize PixelSnappedScrolledContentOffset() const;
+  IntPoint PixelSnappedScrolledContentOffset() const;
 
   // Maps from scrolling contents space to box space and apply overflow
   // clip if needed. Returns true if no clipping applied or the flattened quad
@@ -2021,43 +2038,35 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   //
   // Also clears the "dirty" flag for the intrinsic logical widths.
   void SetIntrinsicLogicalWidthsFromNG(
-      LayoutUnit intrinsic_logical_widths_percentage_resolution_block_size,
-      bool depends_on_percentage_block_size,
-      bool child_depends_on_percentage_block_size,
+      LayoutUnit intrinsic_logical_widths_initial_block_size,
+      bool depends_on_block_constraints,
+      bool child_depends_on_block_constraints,
       const MinMaxSizes* sizes) {
     NOT_DESTROYED();
-    intrinsic_logical_widths_percentage_resolution_block_size_ =
-        intrinsic_logical_widths_percentage_resolution_block_size;
-    SetIntrinsicLogicalWidthsDependsOnPercentageBlockSize(
-        depends_on_percentage_block_size);
-    SetIntrinsicLogicalWidthsChildDependsOnPercentageBlockSize(
-        child_depends_on_percentage_block_size);
+    intrinsic_logical_widths_initial_block_size_ =
+        intrinsic_logical_widths_initial_block_size;
+    SetIntrinsicLogicalWidthsDependsOnBlockConstraints(
+        depends_on_block_constraints);
+    SetIntrinsicLogicalWidthsChildDependsOnBlockConstraints(
+        child_depends_on_block_constraints);
     if (sizes)
       intrinsic_logical_widths_ = *sizes;
     ClearIntrinsicLogicalWidthsDirty();
   }
 
-  // Returns what %-resolution-block-size was used in the intrinsic logical
-  // widths phase.
+  // Returns what initial block-size was used in the intrinsic logical widths
+  // phase. This is used for caching purposes when %-block-size children with
+  // aspect-ratios are present.
   //
   // For non-LayoutNG code this is always LayoutUnit::Min(), and should not be
   // used for caching purposes.
-  LayoutUnit IntrinsicLogicalWidthsPercentageResolutionBlockSize() const {
+  LayoutUnit IntrinsicLogicalWidthsInitialBlockSize() const {
     NOT_DESTROYED();
-    return intrinsic_logical_widths_percentage_resolution_block_size_;
+    return intrinsic_logical_widths_initial_block_size_;
   }
 
   // Make it public.
   using LayoutObject::BackgroundIsKnownToBeObscured;
-
-  // Invalidate the raster of a specific sub-rectangle within the object. The
-  // rect is in the object's local coordinate space. This is useful e.g. when
-  // a small region of a canvas changes.
-  void InvalidatePaintRectangle(const PhysicalRect&);
-  bool HasPartialInvalidationRect() const {
-    NOT_DESTROYED();
-    return rare_data_ && !rare_data_->partial_invalidation_rect_.IsEmpty();
-  }
 
   // Sets the coordinates of find-in-page scrollbar tickmarks, bypassing
   // DocumentMarkerController.  This is used by the PDF plugin.
@@ -2122,7 +2131,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   bool ColumnFlexItemHasStretchAlignment() const;
   bool IsStretchingColumnFlexItem() const;
-  bool HasStretchedLogicalWidth() const;
+  enum class StretchingMode { Any, Explicit };
+  bool HasStretchedLogicalWidth(StretchingMode = StretchingMode::Any) const;
   bool HasStretchedLogicalHeight() const;
 
   void ExcludeScrollbars(
@@ -2185,10 +2195,21 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     NOT_DESTROYED();
     return overflow_ && overflow_->layout_overflow;
   }
+#if DCHECK_IS_ON()
+  void CheckIsVisualOverflowComputed() const;
+#else
+  ALWAYS_INLINE void CheckIsVisualOverflowComputed() const {}
+#endif
   inline bool VisualOverflowIsSet() const {
     NOT_DESTROYED();
+    CheckIsVisualOverflowComputed();
     return overflow_ && overflow_->visual_overflow;
   }
+
+  void UpdateHasSubpixelVisualEffectOutsets(const LayoutRectOutsets&);
+  void SetVisualOverflow(const PhysicalRect& self,
+                         const PhysicalRect& contents);
+  void CopyVisualOverflowFromFragmentsWithoutInvalidations();
 
   void UpdateShapeOutsideInfoAfterStyleChange(const ComputedStyle&,
                                               const ComputedStyle* old_style);
@@ -2308,10 +2329,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
         Location().Y());
   }
 
-  // DisplayItemClient methods.
-  void ClearPartialInvalidationVisualRect() const final;
-  IntRect PartialInvalidationVisualRect() const final;
-
   // The CSS border box rect for this box.
   //
   // The rectangle is in LocationContainer's physical coordinates in flipped
@@ -2332,7 +2349,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
  protected:
   MinMaxSizes intrinsic_logical_widths_;
-  LayoutUnit intrinsic_logical_widths_percentage_resolution_block_size_;
+  LayoutUnit intrinsic_logical_widths_initial_block_size_;
 
   scoped_refptr<const NGLayoutResult> measure_result_;
   NGLayoutResultList layout_results_;

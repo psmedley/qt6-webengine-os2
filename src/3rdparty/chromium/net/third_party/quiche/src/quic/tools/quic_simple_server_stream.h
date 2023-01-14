@@ -57,9 +57,7 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
   QuicConnectionId connection_id() const override;
   QuicStreamId stream_id() const override;
   std::string peer_host() const override;
-  void OnResponseBackendComplete(
-      const QuicBackendResponse* response,
-      std::list<QuicBackendResponse::ServerPushInfo> resources) override;
+  void OnResponseBackendComplete(const QuicBackendResponse* response) override;
 
  protected:
   // Sends a basic 200 response using SendHeaders for the headers and WriteData
@@ -99,6 +97,8 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
 
  private:
   uint64_t generate_bytes_length_;
+  // Whether response headers have already been sent.
+  bool response_sent_ = false;
 
   QuicSimpleServerBackend* quic_simple_server_backend_;  // Not owned.
 };

@@ -62,7 +62,7 @@
     parser->num_axes    = num_axes;
 
     /* allocate the stack buffer */
-    if ( FT_NEW_ARRAY( parser->stack, stackSize ) )
+    if ( FT_QNEW_ARRAY( parser->stack, stackSize ) )
     {
       FT_FREE( parser->stack );
       goto Exit;
@@ -1516,6 +1516,7 @@
 
               case cff_kind_fixed_thousand:
                 FT_TRACE4(( " %f\n", (double)val / 65536 / 1000 ));
+                break;
 
               default:
                 ; /* never reached */

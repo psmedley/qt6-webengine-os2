@@ -28,11 +28,11 @@
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/element_rule_collector.h"
-#include "third_party/blink/renderer/core/css/pseudo_style_request.h"
 #include "third_party/blink/renderer/core/css/resolver/matched_properties_cache.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
 #include "third_party/blink/renderer/core/css/selector_checker.h"
 #include "third_party/blink/renderer/core/css/selector_filter.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -53,8 +53,6 @@ class StyleCascade;
 class StyleRecalcContext;
 class StyleRuleUsageTracker;
 
-enum RuleMatchingBehavior { kMatchAllRules, kMatchAllRulesExcludingSMIL };
-
 // This class selects a ComputedStyle for a given element in a document based on
 // the document's collection of stylesheets (user styles, author styles, UA
 // style). There is a 1-1 relationship of StyleResolver and Document.
@@ -66,14 +64,21 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
   ~StyleResolver();
   void Dispose();
 
-  scoped_refptr<ComputedStyle> StyleForElement(
+  scoped_refptr<ComputedStyle> ResolveStyle(
       Element*,
       const StyleRecalcContext&,
-      const ComputedStyle* parent_style = nullptr,
-      const ComputedStyle* layout_parent_style = nullptr,
-      RuleMatchingBehavior = kMatchAllRules);
+      const StyleRequest& = StyleRequest());
 
-  static scoped_refptr<ComputedStyle> InitialStyleForElement(Document&);
+  // Return a reference to the initial style singleton.
+  const ComputedStyle& InitialStyle() const;
+
+  // Create a new ComputedStyle copy based on the initial style singleton.
+  scoped_refptr<ComputedStyle> CreateComputedStyle() const;
+
+  // Create a ComputedStyle for initial styles to be used as the basis for the
+  // root element style. In addition to initial values things like zoom, font,
+  // forced color mode etc. is set.
+  scoped_refptr<ComputedStyle> InitialStyleForElement() const;
 
   static CompositorKeyframeValue* CreateCompositorKeyframeValueSnapshot(
       Element&,
@@ -83,18 +88,26 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
       const CSSValue*,
       double offset);
 
-  scoped_refptr<ComputedStyle> PseudoStyleForElement(
-      Element*,
-      const StyleRecalcContext&,
-      const PseudoElementStyleRequest&,
-      const ComputedStyle* parent_style,
-      const ComputedStyle* layout_parent_style);
-
   scoped_refptr<const ComputedStyle> StyleForPage(
       uint32_t page_index,
       const AtomicString& page_name);
   scoped_refptr<const ComputedStyle> StyleForText(Text*);
   scoped_refptr<ComputedStyle> StyleForViewport();
+
+  // Propagate computed values from the root or body element to the viewport
+  // when specified to do so.
+  void PropagateStyleToViewport();
+
+  // Create ComputedStyle for anonymous boxes.
+  scoped_refptr<ComputedStyle> CreateAnonymousStyleWithDisplay(
+      const ComputedStyle& parent_style,
+      EDisplay);
+
+  // Create ComputedStyle for anonymous wrappers between text boxes and
+  // display:contents elements.
+  scoped_refptr<ComputedStyle> CreateInheritedDisplayContentsStyleIfNeeded(
+      const ComputedStyle& parent_style,
+      const ComputedStyle& layout_parent_style);
 
   // TODO(esprehn): StyleResolver should probably not contain tree walking
   // state, instead we should pass a context object during recalcStyle.
@@ -130,6 +143,8 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
       Element*,
       PseudoId);
 
+  Element* FindContainerForElement(Element*, const AtomicString&);
+
   void ComputeFont(Element&, ComputedStyle*, const CSSPropertyValueSet&);
 
   // FIXME: Rename to reflect the purpose, like didChangeFontSize or something.
@@ -137,6 +152,7 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
 
   void SetResizedForViewportUnits();
   void ClearResizedForViewportUnits();
+  bool WasViewportResized() const { return was_viewport_resized_; }
 
   void SetRuleUsageTracker(StyleRuleUsageTracker*);
   void UpdateMediaType();
@@ -146,6 +162,14 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
   static const CSSValue* ComputeValue(Element* element,
                                       const CSSPropertyName&,
                                       const CSSValue&);
+
+  // Compute FilterOperations from the specified CSSValue, using the provided
+  // Font to resolve any font-relative units.
+  //
+  // Triggers loading of any external references held by |CSSValue|.
+  FilterOperations ComputeFilterOperations(Element*,
+                                           const Font&,
+                                           const CSSValue&);
 
   scoped_refptr<ComputedStyle> StyleForInterpolations(
       Element& element,
@@ -161,18 +185,22 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
       const ComputedStyle& base_style,
       ActiveInterpolationsMap& transition_interpolations);
 
+  // Check if the BODY or HTML element's display or containment stops
+  // propagation of BODY style to HTML and viewport.
+  bool ShouldStopBodyPropagation(const Element& body_or_html);
+
   void Trace(Visitor*) const;
 
  private:
   void InitStyleAndApplyInheritance(Element& element,
+                                    const StyleRequest&,
                                     StyleResolverState& state);
+
   void ApplyBaseStyle(Element* element,
                       const StyleRecalcContext&,
+                      const StyleRequest&,
                       StyleResolverState& state,
-                      StyleCascade& cascade,
-                      MatchResult& match_result,
-                      RuleMatchingBehavior matching_behavior,
-                      bool can_cache_animation_base_computed_style);
+                      StyleCascade& cascade);
   void ApplyInterpolations(StyleResolverState& state,
                            StyleCascade& cascade,
                            ActiveInterpolationsMap& interpolations);
@@ -245,20 +273,18 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
   void CascadeAndApplyMatchedProperties(StyleResolverState&,
                                         StyleCascade& cascade);
 
-  void CalculateAnimationUpdate(StyleResolverState&);
-
   bool ApplyAnimatedStyle(StyleResolverState&, StyleCascade&);
 
   void ApplyCallbackSelectors(StyleResolverState&);
 
   Document& GetDocument() const { return *document_; }
-  bool WasViewportResized() const { return was_viewport_resized_; }
 
   bool IsForcedColorsModeEnabled() const;
   bool IsForcedColorsModeEnabled(const StyleResolverState&) const;
 
   MatchedPropertiesCache matched_properties_cache_;
   Member<Document> document_;
+  scoped_refptr<const ComputedStyle> initial_style_;
   SelectorFilter selector_filter_;
 
   Member<StyleRuleUsageTracker> tracker_;

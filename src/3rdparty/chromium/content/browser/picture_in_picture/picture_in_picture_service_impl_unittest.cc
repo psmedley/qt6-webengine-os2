@@ -10,7 +10,6 @@
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "content/browser/picture_in_picture/picture_in_picture_window_controller_impl.h"
-#include "content/common/media/media_player_delegate_messages.h"
 #include "content/public/browser/overlay_window.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_client.h"
@@ -30,15 +29,15 @@ using testing::_;
 
 namespace content {
 
-class DummyPictureInPictureSessionObserver
+class DummyPictureInPictureSessionObserver final
     : public blink::mojom::PictureInPictureSessionObserver {
  public:
   DummyPictureInPictureSessionObserver() = default;
-  ~DummyPictureInPictureSessionObserver() final = default;
+  ~DummyPictureInPictureSessionObserver() override = default;
 
   // Implementation of PictureInPictureSessionObserver.
-  void OnWindowSizeChanged(const gfx::Size&) final {}
-  void OnStopped() final {}
+  void OnWindowSizeChanged(const gfx::Size&) override {}
+  void OnStopped() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DummyPictureInPictureSessionObserver);
@@ -82,6 +81,11 @@ class TestOverlayWindow : public OverlayWindow {
   void SetSkipAdButtonVisibility(bool is_visible) override {}
   void SetNextTrackButtonVisibility(bool is_visible) override {}
   void SetPreviousTrackButtonVisibility(bool is_visible) override {}
+  void SetMicrophoneMuted(bool muted) override {}
+  void SetCameraState(bool turned_on) override {}
+  void SetToggleMicrophoneButtonVisibility(bool is_visible) override {}
+  void SetToggleCameraButtonVisibility(bool is_visible) override {}
+  void SetHangUpButtonVisibility(bool is_visible) override {}
   void SetSurfaceId(const viz::SurfaceId& surface_id) override {}
   cc::Layer* GetLayerForTesting() override { return nullptr; }
 
@@ -119,16 +123,18 @@ class PictureInPictureMediaPlayerReceiver : public media::mojom::MediaPlayer {
   }
 
   // media::mojom::MediaPlayer implementation.
-  void AddMediaPlayerObserver(
-      mojo::PendingAssociatedRemote<media::mojom::MediaPlayerObserver>)
-      override {}
   void RequestPlay() override {}
   void RequestPause(bool triggered_by_user) override {}
   void RequestSeekForward(base::TimeDelta seek_time) override {}
   void RequestSeekBackward(base::TimeDelta seek_time) override {}
+  void RequestSeekTo(base::TimeDelta seek_time) override {}
   void RequestEnterPictureInPicture() override {}
   void RequestExitPictureInPicture() override {}
+  void SetVolumeMultiplier(double multiplier) override {}
+  void SetPersistentState(bool persistent) override {}
+  void SetPowerExperimentState(bool enabled) override {}
   void SetAudioSinkId(const std::string& sink_id) override {}
+  void SuspendForFrameClosed() override {}
 
  private:
   mojo::AssociatedReceiver<media::mojom::MediaPlayer> receiver_{this};
@@ -260,48 +266,6 @@ TEST_F(PictureInPictureServiceImplTest, EnterPictureInPicture_NotSupported) {
 
   service().StartSession(
       kPlayerVideoOnlyId, BindMediaPlayerReceiverAndPassRemote(), surface_id,
-      gfx::Size(42, 42), true /* show_play_pause_button */,
-      std::move(observer_remote),
-      base::BindLambdaForTesting(
-          [&](mojo::PendingRemote<blink::mojom::PictureInPictureSession> remote,
-              const gfx::Size& b) {
-            if (remote.is_valid())
-              session_remote.Bind(std::move(remote));
-            window_size = b;
-          }));
-
-  EXPECT_FALSE(controller->active_session_for_testing());
-
-  // The |session_remote| won't be bound because the |remote| received in the
-  // StartSessionCallback will be invalid due to PictureInPictureSession not
-  // ever being created (meaning the the receiver won't be bound either).
-  EXPECT_FALSE(session_remote);
-  EXPECT_EQ(gfx::Size(), window_size);
-}
-
-// The |surface_id| is an optional parameter in the StartSession() call but
-// needs to be non-null in order to create a session at the moment. The creation
-// will early return if that condition isn't satisfied, failing to create the
-// session.
-TEST_F(PictureInPictureServiceImplTest, EnterPictureInPicture_NoSurfaceId) {
-  const int kPlayerVideoOnlyId = 30;
-  const PictureInPictureWindowControllerImpl* controller =
-      PictureInPictureWindowControllerImpl::GetOrCreateForWebContents(
-          contents());
-
-  ASSERT_TRUE(controller);
-  EXPECT_FALSE(controller->active_session_for_testing());
-
-  mojo::PendingRemote<blink::mojom::PictureInPictureSessionObserver>
-      observer_remote;
-
-  EXPECT_CALL(delegate(), EnterPictureInPicture(_, _, _)).Times(0);
-
-  mojo::Remote<blink::mojom::PictureInPictureSession> session_remote;
-  gfx::Size window_size;
-
-  service().StartSession(
-      kPlayerVideoOnlyId, BindMediaPlayerReceiverAndPassRemote(), base::nullopt,
       gfx::Size(42, 42), true /* show_play_pause_button */,
       std::move(observer_remote),
       base::BindLambdaForTesting(

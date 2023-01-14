@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,10 @@
 #include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_WIN)
+#include "base/win/scoped_com_initializer.h"
+#endif
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -169,6 +174,9 @@ class DownloadFileTest : public testing::Test {
   }
 
   void SetUp() override {
+#if defined(OS_WIN)
+    ASSERT_TRUE(com_initializer_.Succeeded());
+#endif
     EXPECT_CALL(*(observer_.get()), DestinationUpdate(_, _, _))
         .Times(AnyNumber())
         .WillRepeatedly(Invoke(this, &DownloadFileTest::SetUpdateDownloadInfo));
@@ -238,7 +246,8 @@ class DownloadFileTest : public testing::Test {
       int data_len = strlen(kTestData1);
       while (len > 0) {
         int bytes_to_write = len > data_len ? data_len : len;
-        base::AppendToFile(save_info->file_path, kTestData1, bytes_to_write);
+        base::AppendToFile(save_info->file_path,
+                           base::StringPiece(kTestData1, bytes_to_write));
         len -= bytes_to_write;
       }
     }
@@ -246,10 +255,10 @@ class DownloadFileTest : public testing::Test {
     save_info->offset = 0;
     save_info->file_offset = file_offset;
 
-    download_file_.reset(new TestDownloadFileImpl(
+    download_file_ = std::make_unique<TestDownloadFileImpl>(
         std::move(save_info), download_dir_.GetPath(),
         std::unique_ptr<MockInputStream>(input_stream_),
-        DownloadItem::kInvalidId, observer_factory_.GetWeakPtr()));
+        DownloadItem::kInvalidId, observer_factory_.GetWeakPtr());
 
     EXPECT_CALL(*input_stream_, Read(_, _))
         .WillOnce(Return(InputStream::EMPTY))
@@ -264,7 +273,7 @@ class DownloadFileTest : public testing::Test {
         base::BindRepeating(&DownloadFileTest::SetInterruptReasonCallback,
                             weak_ptr_factory.GetWeakPtr(),
                             loop_runner.QuitClosure(), &result),
-        DownloadFile::CancelRequestCallback(), received_slices, true);
+        DownloadFile::CancelRequestCallback(), received_slices);
     loop_runner.Run();
 
     ::testing::Mock::VerifyAndClearExpectations(input_stream_);
@@ -473,6 +482,14 @@ class DownloadFileTest : public testing::Test {
     return download_file_->TotalBytesReceived();
   }
 
+ private:
+#if defined(OS_WIN)
+  // This must occur early in the member list to ensure COM is initialized first
+  // and uninitialized last.
+  base::win::ScopedCOMInitializer com_initializer_;
+#endif
+
+ protected:
   std::unique_ptr<StrictMock<MockDownloadDestinationObserver>> observer_;
   base::WeakPtrFactory<DownloadDestinationObserver> observer_factory_;
 

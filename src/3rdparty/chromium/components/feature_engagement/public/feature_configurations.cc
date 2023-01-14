@@ -10,12 +10,12 @@
 
 namespace feature_engagement {
 
-base::Optional<FeatureConfig> GetClientSideFeatureConfig(
+absl::optional<FeatureConfig> GetClientSideFeatureConfig(
     const base::Feature* feature) {
 #if defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) || \
     defined(OS_CHROMEOS)
   if (kIPHPasswordsAccountStorageFeature.name == feature->name) {
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(ANY, 0);
@@ -28,6 +28,19 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
                     Comparator(EQUAL, 0), 180, 180));
     return config;
   }
+
+  if (kIPHProfileSwitchFeature.name == feature->name) {
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(ANY, 0);
+    // Show the promo once a year if the profile menu was not opened.
+    config->trigger =
+        EventConfig("profile_switch_trigger", Comparator(EQUAL, 0), 360, 360);
+    config->used =
+        EventConfig("profile_menu_shown", Comparator(EQUAL, 0), 360, 360);
+    return config;
+  }
 #endif  // defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) ||
         // defined(OS_CHROMEOS)
 
@@ -36,7 +49,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
   constexpr int k10YearsInDays = 365 * 10;
 
   if (kIPHDataSaverDetailFeature.name == feature->name) {
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(EQUAL, 0);
@@ -50,7 +63,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
   if (kIPHDataSaverPreviewFeature.name == feature->name) {
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(EQUAL, 0);
@@ -61,7 +74,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
   if (kIPHPreviewsOmniboxUIFeature.name == feature->name) {
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(EQUAL, 0);
@@ -74,7 +87,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
   if (kIPHDownloadHomeFeature.name == feature->name) {
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(GREATER_THAN_OR_EQUAL, 14);
     config->session_rate = Comparator(EQUAL, 0);
@@ -89,7 +102,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
   if (kIPHDownloadIndicatorFeature.name == feature->name) {
     // A config that allows the DownloadIndicator IPH to be shown up to 2 times,
     // but only if download home hasn't been opened in the last 90 days.
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(ANY, 0);
@@ -103,7 +116,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
     // A config that allows the ExploreSites IPH to be shown:
     // * Once per day
     // * Up to 3 times but only if unused in the last 90 days.
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
     config->session_rate = Comparator(EQUAL, 0);
@@ -115,12 +128,45 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
                                              Comparator(LESS_THAN, 1), 1, 360));
     return config;
   }
+  if (kIPHAddToHomescreenMessageFeature.name == feature->name) {
+    // A config that allows the Add to homescreen message IPH to be shown:
+    // * Once per 15 days
+    // * Up to 2 times but only if unused in the last 15 days.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(EQUAL, 0);
+    config->trigger = EventConfig("add_to_homescreen_message_iph_trigger",
+                                  Comparator(LESS_THAN, 2), 90, 90);
+    config->used = EventConfig("add_to_homescreen_dialog_shown",
+                               Comparator(EQUAL, 0), 90, 90);
+    config->event_configs.insert(EventConfig(
+        "add_to_homescreen_message_iph_trigger", Comparator(EQUAL, 0), 15, 90));
+    return config;
+  }
+  if (kIPHAddToHomescreenTextBubbleFeature.name == feature->name) {
+    // A config that allows the Add to homescreen text bubble IPH to be shown:
+    // * Once per 15 days
+    // * Up to 2 times but only if unused in the last 15 days.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(EQUAL, 0);
+    config->trigger = EventConfig("add_to_homescreen_text_bubble_iph_trigger",
+                                  Comparator(LESS_THAN, 2), 90, 90);
+    config->used = EventConfig("add_to_homescreen_dialog_shown",
+                               Comparator(EQUAL, 0), 90, 90);
+    config->event_configs.insert(
+        EventConfig("add_to_homescreen_text_bubble_iph_trigger",
+                    Comparator(EQUAL, 0), 15, 90));
+    return config;
+  }
 
   if (kIPHFeedHeaderMenuFeature.name == feature->name) {
     // A config that allows the feed header menu IPH to be shown only once when
     // the user starts using a version of the feed that uploads click and view
     // actions.
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = true;
     config->availability = Comparator(ANY, 0);
 
@@ -143,12 +189,88 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
                     k10YearsInDays, k10YearsInDays);
     return config;
   }
+  if (kIPHFeedSwipeRefresh.name == feature->name) {
+    // A config that allows the feed swipe refresh message IPH to be shown:
+    // * Once per 15 days
+    // * Up to 2 times but only if unused in the last 15 days.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(EQUAL, 0);
+    config->trigger = EventConfig("feed_swipe_refresh_iph_trigger",
+                                  Comparator(LESS_THAN, 2), 90, 90);
+    config->used =
+        EventConfig("feed_swipe_refresh_shown", Comparator(EQUAL, 0), 90, 90);
+    config->event_configs.insert(EventConfig("feed_swipe_refresh_iph_trigger",
+                                             Comparator(EQUAL, 0), 15, 90));
+    return config;
+  }
+  if (kIPHTabSwitcherButtonFeature.name == feature->name) {
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(GREATER_THAN_OR_EQUAL, 14);
+    config->session_rate = Comparator(LESS_THAN, 1);
+    config->trigger =
+        EventConfig("tab_switcher_iph_triggered", Comparator(EQUAL, 0), 90, 90);
+    config->used = EventConfig("tab_switcher_button_clicked",
+                               Comparator(EQUAL, 0), 14, 90);
+    return config;
+  }
+  if (kIPHWebFeedFollowFeature.name == feature->name) {
+    // A config that allows the WebFeed follow intro to be shown up to 5x per
+    // week.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(ANY, 0);
+    config->trigger = EventConfig("web_feed_follow_intro_trigger",
+                                  Comparator(LESS_THAN, 5), 7, 360);
+    config->used = EventConfig("web_feed_follow_intro_clicked",
+                               Comparator(ANY, 0), 360, 360);
+    return config;
+  }
+
+  if (kIPHWebFeedPostFollowDialogFeature.name == feature->name) {
+    // A config that allows one of the WebFeed post follow dialogs to be
+    // presented 3 times.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(ANY, 0);
+    config->trigger = EventConfig("web_feed_post_follow_dialog_trigger",
+                                  Comparator(LESS_THAN, 3), 360, 360);
+    config->used = EventConfig("web_feed_post_follow_dialog_shown",
+                               Comparator(ANY, 0), 360, 360);
+    return config;
+  }
+
+  if (kIPHStartSurfaceTabSwitcherHomeButton.name == feature->name) {
+    // A config that allows the StartSurfaceTabSwitcherHomeButton IPH to be
+    // shown:
+    // * Once per day
+    // * Up to 7 times but only if the home button is not clicked when IPH is
+    // showing.
+    absl::optional<FeatureConfig> config = FeatureConfig();
+    config->valid = true;
+    config->availability = Comparator(ANY, 0);
+    config->session_rate = Comparator(ANY, 0);
+    config->trigger =
+        EventConfig("start_surface_tab_switcher_home_button_iph_trigger",
+                    Comparator(LESS_THAN, 7), k10YearsInDays, k10YearsInDays);
+    config->used =
+        EventConfig("start_surface_tab_switcher_home_button_clicked",
+                    Comparator(EQUAL, 0), k10YearsInDays, k10YearsInDays);
+    config->event_configs.insert(
+        EventConfig("start_surface_tab_switcher_home_button_iph_trigger",
+                    Comparator(EQUAL, 0), 1, 360));
+    return config;
+  }
 #endif  // defined(OS_ANDROID)
 
   if (kIPHDummyFeature.name == feature->name) {
     // Only used for tests. Various magic tricks are used below to ensure this
     // config is invalid and unusable.
-    base::Optional<FeatureConfig> config = FeatureConfig();
+    absl::optional<FeatureConfig> config = FeatureConfig();
     config->valid = false;
     config->availability = Comparator(LESS_THAN, 0);
     config->session_rate = Comparator(LESS_THAN, 0);
@@ -159,7 +281,7 @@ base::Optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 }  // namespace feature_engagement

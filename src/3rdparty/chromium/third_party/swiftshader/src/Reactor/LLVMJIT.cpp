@@ -17,6 +17,7 @@
 #include "Debug.hpp"
 #include "ExecutableMemory.hpp"
 #include "LLVMAsm.hpp"
+#include "PragmaInternals.hpp"
 #include "Routine.hpp"
 
 // TODO(b/143539525): Eliminate when warning has been fixed.
@@ -55,10 +56,8 @@ extern "C" signed __aeabi_idivmod();
 
 #if __has_feature(memory_sanitizer)
 
-// TODO(b/155148722): Remove when we no longer unpoison all writes.
-#	if !REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION
-#		include "sanitizer/msan_interface.h"
-#	endif
+// TODO(b/155148722): Remove when we no longer unpoison any writes.
+#	include "sanitizer/msan_interface.h"
 
 #	include <dlfcn.h>  // dlsym()
 
@@ -97,13 +96,13 @@ static void *getTLSAddress(void *control)
 	switch(tlsIndex)
 	{
 
-		case MSanTLS::param: return reinterpret_cast<void *>(&__msan_param_tls);
-		case MSanTLS::retval: return reinterpret_cast<void *>(&__msan_retval_tls);
-		case MSanTLS::va_arg: return reinterpret_cast<void *>(&__msan_va_arg_tls);
-		case MSanTLS::va_arg_overflow_size: return reinterpret_cast<void *>(&__msan_va_arg_overflow_size_tls);
-		default:
-			UNSUPPORTED("MemorySanitizer used an unrecognized TLS variable: %d", tlsIndex);
-			return nullptr;
+	case MSanTLS::param: return reinterpret_cast<void *>(&__msan_param_tls);
+	case MSanTLS::retval: return reinterpret_cast<void *>(&__msan_retval_tls);
+	case MSanTLS::va_arg: return reinterpret_cast<void *>(&__msan_va_arg_tls);
+	case MSanTLS::va_arg_overflow_size: return reinterpret_cast<void *>(&__msan_va_arg_overflow_size_tls);
+	default:
+		UNSUPPORTED("MemorySanitizer used an unrecognized TLS variable: %d", tlsIndex);
+		return nullptr;
 	}
 }
 
@@ -151,7 +150,15 @@ JITGlobals *JITGlobals::get()
 #if defined(__i386__) || defined(__x86_64__)
 			"-x86-asm-syntax=intel",  // Use Intel syntax rather than the default AT&T
 #endif
+#if LLVM_VERSION_MAJOR <= 12
 			"-warn-stack-size=524288"  // Warn when a function uses more than 512 KiB of stack memory
+#else
+		// TODO(b/191193823): TODO(ndesaulniers): Update this after
+		// go/compilers/fc018ebb608ee0c1239b405460e49f1835ab6175
+#	if LLVM_VERSION_MAJOR < 9999
+#		error Implement stack size checks using the "warn-stack-size" function attribute.
+#	endif
+#endif
 		};
 
 		parseCommandLineOptionsOnce(sizeof(argv) / sizeof(argv[0]), argv);
@@ -236,11 +243,11 @@ llvm::CodeGenOpt::Level JITGlobals::toLLVM(rr::Optimization::Level level)
 
 	switch(level)
 	{
-		case rr::Optimization::Level::None: return llvm::CodeGenOpt::None;
-		case rr::Optimization::Level::Less: return llvm::CodeGenOpt::Less;
-		case rr::Optimization::Level::Default: return llvm::CodeGenOpt::Default;
-		case rr::Optimization::Level::Aggressive: return llvm::CodeGenOpt::Aggressive;
-		default: UNREACHABLE("Unknown Optimization Level %d", int(level));
+	case rr::Optimization::Level::None: return llvm::CodeGenOpt::None;
+	case rr::Optimization::Level::Less: return llvm::CodeGenOpt::Less;
+	case rr::Optimization::Level::Default: return llvm::CodeGenOpt::Default;
+	case rr::Optimization::Level::Aggressive: return llvm::CodeGenOpt::Aggressive;
+	default: UNREACHABLE("Unknown Optimization Level %d", int(level));
 	}
 
 	return llvm::CodeGenOpt::Default;
@@ -385,24 +392,24 @@ class ExternalSymbolGenerator : public llvm::orc::JITDylib::DefinitionGenerator
 		{
 			switch(size)
 			{
-				case 1: atomicLoad<uint8_t>(ptr, ret, ordering); break;
-				case 2: atomicLoad<uint16_t>(ptr, ret, ordering); break;
-				case 4: atomicLoad<uint32_t>(ptr, ret, ordering); break;
-				case 8: atomicLoad<uint64_t>(ptr, ret, ordering); break;
-				default:
-					UNIMPLEMENTED_NO_BUG("Atomic::load(size: %d)", int(size));
+			case 1: atomicLoad<uint8_t>(ptr, ret, ordering); break;
+			case 2: atomicLoad<uint16_t>(ptr, ret, ordering); break;
+			case 4: atomicLoad<uint32_t>(ptr, ret, ordering); break;
+			case 8: atomicLoad<uint64_t>(ptr, ret, ordering); break;
+			default:
+				UNIMPLEMENTED_NO_BUG("Atomic::load(size: %d)", int(size));
 			}
 		}
 		static void store(size_t size, void *ptr, void *ret, llvm::AtomicOrdering ordering)
 		{
 			switch(size)
 			{
-				case 1: atomicStore<uint8_t>(ptr, ret, ordering); break;
-				case 2: atomicStore<uint16_t>(ptr, ret, ordering); break;
-				case 4: atomicStore<uint32_t>(ptr, ret, ordering); break;
-				case 8: atomicStore<uint64_t>(ptr, ret, ordering); break;
-				default:
-					UNIMPLEMENTED_NO_BUG("Atomic::store(size: %d)", int(size));
+			case 1: atomicStore<uint8_t>(ptr, ret, ordering); break;
+			case 2: atomicStore<uint16_t>(ptr, ret, ordering); break;
+			case 4: atomicStore<uint32_t>(ptr, ret, ordering); break;
+			case 8: atomicStore<uint64_t>(ptr, ret, ordering); break;
+			default:
+				UNIMPLEMENTED_NO_BUG("Atomic::store(size: %d)", int(size));
 			}
 		}
 	};
@@ -544,17 +551,15 @@ class ExternalSymbolGenerator : public llvm::orc::JITDylib::DefinitionGenerator
 #	endif
 #endif
 #if __has_feature(memory_sanitizer)
-
-// TODO(b/155148722): Remove when we no longer unpoison all writes.
-#	if !REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION
-			functions.try_emplace("msan_unpoison", reinterpret_cast<void *>(__msan_unpoison));
-#	endif
-
 			functions.try_emplace("emutls_get_address", reinterpret_cast<void *>(rr::getTLSAddress));
 			functions.try_emplace("emutls_v.__msan_retval_tls", reinterpret_cast<void *>(static_cast<uintptr_t>(rr::MSanTLS::retval)));
 			functions.try_emplace("emutls_v.__msan_param_tls", reinterpret_cast<void *>(static_cast<uintptr_t>(rr::MSanTLS::param)));
 			functions.try_emplace("emutls_v.__msan_va_arg_tls", reinterpret_cast<void *>(static_cast<uintptr_t>(rr::MSanTLS::va_arg)));
 			functions.try_emplace("emutls_v.__msan_va_arg_overflow_size_tls", reinterpret_cast<void *>(static_cast<uintptr_t>(rr::MSanTLS::va_arg_overflow_size)));
+
+			// TODO(b/155148722): Remove when we no longer unpoison any writes.
+			functions.try_emplace("msan_unpoison", reinterpret_cast<void *>(__msan_unpoison));
+			functions.try_emplace("msan_unpoison_param", reinterpret_cast<void *>(__msan_unpoison_param));
 #endif
 		}
 	};
@@ -659,21 +664,21 @@ struct FatalDiagnosticsHandler : public llvm::DiagnosticHandler
 	{
 		switch(info.getSeverity())
 		{
-			case llvm::DS_Error:
-				ASSERT_MSG(false, "LLVM JIT compilation failure");
+		case llvm::DS_Error:
+			ASSERT_MSG(false, "LLVM JIT compilation failure");
+			*fatal = true;
+			break;
+		case llvm::DS_Warning:
+			if(info.getKind() == llvm::DK_StackSize)
+			{
+				// Stack size limit exceeded
 				*fatal = true;
-				break;
-			case llvm::DS_Warning:
-				if(info.getKind() == llvm::DK_StackSize)
-				{
-					// Stack size limit exceeded
-					*fatal = true;
-				}
-				break;
-			case llvm::DS_Remark:
-				break;
-			case llvm::DS_Note:
-				break;
+			}
+			break;
+		case llvm::DS_Remark:
+			break;
+		case llvm::DS_Note:
+			break;
 		}
 
 		return true;  // Diagnostic handled, don't let LLVM print it.
@@ -696,6 +701,9 @@ public:
 	    size_t count,
 	    const rr::Config &config)
 	    : name(name)
+#if LLVM_VERSION_MAJOR >= 13
+	    , session(std::move(*llvm::orc::SelfExecutorProcessControl::Create()))
+#endif
 	    , objectLayer(session, []() {
 		    static MemoryMapper memoryMapper;
 		    return std::make_unique<llvm::SectionMemoryManager>(&memoryMapper);
@@ -818,6 +826,12 @@ JITBuilder::JITBuilder(const rr::Config &config)
 {
 	module->setTargetTriple(LLVM_DEFAULT_TARGET_TRIPLE);
 	module->setDataLayout(JITGlobals::get()->getDataLayout());
+
+	if(REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION ||
+	   getPragmaState(MemorySanitizerInstrumentation))
+	{
+		msanInstrumentation = true;
+	}
 }
 
 void JITBuilder::optimize(const rr::Config &cfg)
@@ -831,30 +845,28 @@ void JITBuilder::optimize(const rr::Config &cfg)
 
 	llvm::legacy::PassManager passManager;
 
-#if REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION
-	if(__has_feature(memory_sanitizer))
+	if(__has_feature(memory_sanitizer) && msanInstrumentation)
 	{
 		passManager.add(llvm::createMemorySanitizerLegacyPassPass());
 	}
-#endif
 
 	for(auto pass : cfg.getOptimization().getPasses())
 	{
 		switch(pass)
 		{
-			case rr::Optimization::Pass::Disabled: break;
-			case rr::Optimization::Pass::CFGSimplification: passManager.add(llvm::createCFGSimplificationPass()); break;
-			case rr::Optimization::Pass::LICM: passManager.add(llvm::createLICMPass()); break;
-			case rr::Optimization::Pass::AggressiveDCE: passManager.add(llvm::createAggressiveDCEPass()); break;
-			case rr::Optimization::Pass::GVN: passManager.add(llvm::createGVNPass()); break;
-			case rr::Optimization::Pass::InstructionCombining: passManager.add(llvm::createInstructionCombiningPass()); break;
-			case rr::Optimization::Pass::Reassociate: passManager.add(llvm::createReassociatePass()); break;
-			case rr::Optimization::Pass::DeadStoreElimination: passManager.add(llvm::createDeadStoreEliminationPass()); break;
-			case rr::Optimization::Pass::SCCP: passManager.add(llvm::createSCCPPass()); break;
-			case rr::Optimization::Pass::ScalarReplAggregates: passManager.add(llvm::createSROAPass()); break;
-			case rr::Optimization::Pass::EarlyCSEPass: passManager.add(llvm::createEarlyCSEPass()); break;
-			default:
-				UNREACHABLE("pass: %d", int(pass));
+		case rr::Optimization::Pass::Disabled: break;
+		case rr::Optimization::Pass::CFGSimplification: passManager.add(llvm::createCFGSimplificationPass()); break;
+		case rr::Optimization::Pass::LICM: passManager.add(llvm::createLICMPass()); break;
+		case rr::Optimization::Pass::AggressiveDCE: passManager.add(llvm::createAggressiveDCEPass()); break;
+		case rr::Optimization::Pass::GVN: passManager.add(llvm::createGVNPass()); break;
+		case rr::Optimization::Pass::InstructionCombining: passManager.add(llvm::createInstructionCombiningPass()); break;
+		case rr::Optimization::Pass::Reassociate: passManager.add(llvm::createReassociatePass()); break;
+		case rr::Optimization::Pass::DeadStoreElimination: passManager.add(llvm::createDeadStoreEliminationPass()); break;
+		case rr::Optimization::Pass::SCCP: passManager.add(llvm::createSCCPPass()); break;
+		case rr::Optimization::Pass::ScalarReplAggregates: passManager.add(llvm::createSROAPass()); break;
+		case rr::Optimization::Pass::EarlyCSEPass: passManager.add(llvm::createEarlyCSEPass()); break;
+		default:
+			UNREACHABLE("pass: %d", int(pass));
 		}
 	}
 

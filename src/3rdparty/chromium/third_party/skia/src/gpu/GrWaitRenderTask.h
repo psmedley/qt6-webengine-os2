@@ -25,10 +25,9 @@ private:
     bool onIsUsed(GrSurfaceProxy* proxy) const override {
         return proxy == fWaitedOn.proxy();
     }
-    void handleInternalAllocationFailure() override {}
     void gatherProxyIntervals(GrResourceAllocator*) const override;
 
-    ExpectedOutcome onMakeClosed(const GrCaps&, SkIRect*) override {
+    ExpectedOutcome onMakeClosed(GrRecordingContext*, SkIRect*) override {
         return ExpectedOutcome::kTargetUnchanged;
     }
 
@@ -39,7 +38,7 @@ private:
 #endif
 #ifdef SK_DEBUG
     // No non-dst proxies.
-    void visitProxies_debugOnly(const GrOp::VisitProxyFunc& fn) const override {}
+    void visitProxies_debugOnly(const GrVisitProxyFunc&) const override {}
 #endif
     std::unique_ptr<std::unique_ptr<GrSemaphore>[]> fSemaphores;
     int fNumSemaphores;

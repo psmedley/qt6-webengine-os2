@@ -26,8 +26,6 @@ public:
         return sk_sp<SkImageFilter>(new SkShaderImageFilter(paint, rect));
     }
 
-    bool affectsTransparentBlack() const override;
-
 protected:
     void flatten(SkWriteBuffer&) const override;
     sk_sp<SkSpecialImage> onFilterImage(const Context&, SkIPoint* offset) const override;
@@ -35,6 +33,8 @@ protected:
 private:
     friend void ::SkRegisterShaderImageFilterFlattenable();
     SK_FLATTENABLE_HOOKS(SkShaderImageFilter)
+
+    bool onAffectsTransparentBlack() const override { return true; }
 
     // This filter only applies the shader and dithering policy of the paint.
     SkPaint fPaint;
@@ -57,19 +57,6 @@ sk_sp<SkImageFilter> SkImageFilters::Shader(sk_sp<SkShader> shader, Dither dithe
     return SkShaderImageFilter::Make(paint, cropRect);
 }
 
-#ifdef SK_SUPPORT_LEGACY_IMPLICIT_FILTERQUALITY
-sk_sp<SkImageFilter> SkImageFilters::Shader(sk_sp<SkShader> shader, Dither dither,
-                                            SkFilterQuality filterQuality,
-                                            const CropRect& cropRect) {
-    SkPaint paint;
-    paint.setShader(std::move(shader));
-    paint.setDither((bool) dither);
-    // For SkImage::makeShader() shaders using SkImageShader::kInheritFromPaint sampling options
-    paint.setFilterQuality(filterQuality);
-    return SkShaderImageFilter::Make(paint, cropRect);
-}
-#endif
-
 void SkRegisterShaderImageFilterFlattenable() {
     SK_REGISTER_FLATTENABLE(SkShaderImageFilter);
     // TODO (michaelludwig) - Remove after grace period for SKPs to stop using old name
@@ -79,9 +66,7 @@ void SkRegisterShaderImageFilterFlattenable() {
 
 sk_sp<SkFlattenable> SkShaderImageFilter::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 0);
-    SkPaint paint;
-    buffer.readPaint(&paint, nullptr);
-    return SkShaderImageFilter::Make(paint, common.cropRect());
+    return SkShaderImageFilter::Make(buffer.readPaint(), common.cropRect());
 }
 
 void SkShaderImageFilter::flatten(SkWriteBuffer& buffer) const {
@@ -125,8 +110,4 @@ sk_sp<SkSpecialImage> SkShaderImageFilter::onFilterImage(const Context& ctx,
     offset->fX = bounds.fLeft;
     offset->fY = bounds.fTop;
     return surf->makeImageSnapshot();
-}
-
-bool SkShaderImageFilter::affectsTransparentBlack() const {
-    return true;
 }

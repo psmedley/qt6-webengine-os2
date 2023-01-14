@@ -10,27 +10,26 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/time/time.h"
+#include "base/sequence_checker.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
-#include "services/network/public/mojom/url_loader.mojom.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/dispatch_fetch_event_params.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_event_status.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_fetch_response_callback.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_stream_handle.mojom.h"
 
 namespace content {
 
 class ServiceWorkerContextWrapper;
 class ServiceWorkerVersion;
-class URLLoaderFactoryGetter;
 
 // A helper class to dispatch fetch event to a service worker.
 class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
@@ -65,7 +64,6 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
   // |preload_handle_|. Returns true if it started navigation preload.
   bool MaybeStartNavigationPreload(
       const network::ResourceRequest& original_request,
-      URLLoaderFactoryGetter* url_loader_factory_getter,
       scoped_refptr<ServiceWorkerContextWrapper> context_wrapper,
       int frame_tree_node_id);
 
@@ -131,6 +129,8 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
 
   // Whether to dispatch an offline-capability-check fetch event.
   const bool is_offline_capability_check_ = false;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<ServiceWorkerFetchDispatcher> weak_factory_{this};
 

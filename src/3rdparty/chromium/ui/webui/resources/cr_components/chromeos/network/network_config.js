@@ -217,7 +217,7 @@ Polymer({
      *   Outer: (boolean|undefined),
      *   Inner: (boolean|undefined),
      *   ServerCA: (boolean|undefined),
-     *   SubjectMatch: (boolean|undefined),
+     *   EapServerCertMatch: (boolean|undefined),
      *   UserCert: (boolean|undefined),
      *   Identity: (boolean|undefined),
      *   Password: (boolean|undefined),
@@ -308,6 +308,18 @@ Polymer({
       type: Boolean,
       computed: 'computeConfigRequiresPassphrase_(mojoType_, securityType_)',
     },
+
+    /** @private */
+    serializedDomainSuffixMatch_: {
+      type: String,
+      value: '',
+    },
+
+    /** @private */
+    serializedSubjectAltNameMatch_: {
+      type: String,
+      value: '',
+    },
   },
 
   observers: [
@@ -334,6 +346,8 @@ Polymer({
     'updateIsConfigured_(configProperties_.typeConfig.vpn.*, vpnType_)',
     'updateIsConfigured_(selectedUserCertHash_)',
   ],
+
+  listeners: {'enter': 'onEnterEvent_'},
 
   /** @const */
   MIN_PASSPHRASE_LENGTH: 5,
@@ -386,7 +400,7 @@ Polymer({
 
     if (this.mojoType_ === mojom.NetworkType.kVPN ||
         (this.globalPolicy_ &&
-         this.globalPolicy_.allowOnlyPolicyNetworksToConnect)) {
+         this.globalPolicy_.allowOnlyPolicyWifiNetworksToConnect)) {
       this.autoConnect_ = false;
     } else {
       this.autoConnect_ = true;
@@ -423,7 +437,25 @@ Polymer({
     }
     this.propertiesSent_ = true;
     this.error = '';
+    if (this.eapProperties_) {
+      const dsm = OncMojo.deserializeDomainSuffixMatch(
+          this.serializedDomainSuffixMatch_);
+      if (!dsm) {
+        this.setError_('invalidDomainSuffixMatchEntry');
+        this.propertiesSent_ = false;
+        return;
+      }
+      this.eapProperties_.domainSuffixMatch = dsm;
 
+      const sanm = OncMojo.deserializeSubjectAltNameMatch(
+          this.serializedSubjectAltNameMatch_);
+      if (!sanm) {
+        this.setError_('invalidSubjectAlternativeNameMatchEntry');
+        this.propertiesSent_ = false;
+        return;
+      }
+      this.eapProperties_.subjectAltNameMatch = sanm;
+    }
     const propertiesToSet = this.getPropertiesToSet_();
     if (this.managedProperties_.source === mojom.OncSource.kNone) {
       if (!this.autoConnect_) {
@@ -443,6 +475,7 @@ Polymer({
                 response.success, response.errorMessage, connect);
           });
     }
+    this.fire('properties-set');
   },
 
   /** @private */
@@ -454,6 +487,18 @@ Polymer({
         'network-config-select:not([disabled])');
     if (e) {
       e.focus();
+    }
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onEnterEvent_(event) {
+    if (event.path[0].localName === 'network-config-input' ||
+        event.path[0].localName === 'network-password-input') {
+      this.onEnterPressedInInput_();
+      event.stopPropagation();
     }
   },
 
@@ -507,9 +552,9 @@ Polymer({
       this.set('serverCaCerts_', caCerts);
 
       let userCerts = response.userCerts.slice();
-      // Only hardware backed user certs are supported.
+      // Only certs available for network authentication can be used.
       userCerts.forEach(function(cert) {
-        if (!cert.hardwareBacked) {
+        if (!cert.availableForNetworkAuth) {
           cert.hash = '';
         }  // Clear the hash to invalidate the certificate.
       });
@@ -545,6 +590,7 @@ Polymer({
       issuedBy: desc,
       issuedTo: '',
       pemOrId: '',
+      availableForNetworkAuth: false,
       hardwareBacked: false,
       // Default cert entries should always be shown, even in the login UI,
       // so treat thiem as device-wide.
@@ -583,7 +629,7 @@ Polymer({
   getManagedPropertiesCallback_(managedProperties) {
     if (!managedProperties) {
       // The network no longer exists; close the page.
-      console.error('Network no longer exists: ' + this.guid);
+      console.warn('Network no longer exists: ' + this.guid);
       this.close_();
       return;
     }
@@ -646,11 +692,13 @@ Polymer({
       return;
     }
     if (this.shareAllowEnable) {
-      // New insecure WiFi networks are always shared.
-      if (this.mojoType_ === mojom.NetworkType.kWiFi &&
-          this.managedProperties_.typeProperties.wifi.security ===
-              mojom.SecurityType.kNone) {
-        this.shareNetwork_ = true;
+      // By default, Wi-Fi networks which require passwords are not shared,
+      // but "insecure" networks with no passwords are shared. In either case,
+      // the user can change the sharing setting by updating the toggle in the
+      // UI.
+
+      if (this.mojoType_ === mojom.NetworkType.kWiFi) {
+        this.shareNetwork_ = this.securityType_ === mojom.SecurityType.kNone;
         return;
       }
     }
@@ -672,12 +720,16 @@ Polymer({
       anonymousIdentity: OncMojo.getActiveString(eap.anonymousIdentity),
       clientCertType: OncMojo.getActiveString(eap.clientCertType),
       clientCertPkcs11Id: OncMojo.getActiveString(eap.clientCertPkcs11Id),
+      domainSuffixMatch: this.getActiveStringList_(eap.domainSuffixMatch) || [],
       identity: OncMojo.getActiveString(eap.identity),
       inner: OncMojo.getActiveString(eap.inner),
       outer: OncMojo.getActiveString(eap.outer) || 'LEAP',
       password: OncMojo.getActiveString(eap.password),
       saveCredentials: this.getActiveBoolean_(eap.saveCredentials),
       serverCaPems: this.getActiveStringList_(eap.serverCaPems),
+      subjectAltNameMatch:
+          /** @type {!Array<!chromeos.networkConfig.mojom.SubjectAltName>} */
+          (OncMojo.getActiveValue(eap.subjectAltNameMatch) || []),
       subjectMatch: OncMojo.getActiveString(eap.subjectMatch),
       useSystemCas: this.getActiveBoolean_(eap.useSystemCas),
     };
@@ -812,6 +864,12 @@ Polymer({
     this.set('eapProperties_', this.getEap_(this.configProperties_));
     if (!this.eapProperties_) {
       this.showEap_ = null;
+    } else {
+      this.serializedDomainSuffixMatch_ = OncMojo.serializeDomainSuffixMatch(
+          this.eapProperties_.domainSuffixMatch);
+      this.serializedSubjectAltNameMatch_ =
+          OncMojo.serializeSubjectAltNameMatch(
+              this.eapProperties_.subjectAltNameMatch);
     }
     if (managedProperties.type === mojom.NetworkType.kVPN) {
       this.vpnType_ = this.getVpnTypeFromProperties_(this.configProperties_);
@@ -902,7 +960,8 @@ Polymer({
           Outer: true,
           Inner: outer === 'PEAP' || outer === 'EAP-TTLS',
           ServerCA: outer !== 'LEAP',
-          SubjectMatch: outer === 'EAP-TLS',
+          EapServerCertMatch:
+              outer === 'EAP-TLS' || outer === 'EAP-TTLS' || outer === 'PEAP',
           UserCert: outer === 'EAP-TLS',
           Identity: true,
           Password: outer !== 'EAP-TLS',
@@ -930,6 +989,8 @@ Polymer({
       return eap || {
         saveCredentials: false,
         useSystemCas: false,
+        domainSuffixMatch: [],
+        subjectAltNameMatch: [],
       };
     }
     return eap || null;
@@ -1076,7 +1137,8 @@ Polymer({
     // If |this.error| was set to something other than a cert error, do not
     // change it.
     /** @const */ const noCertsError = 'networkErrorNoUserCertificate';
-    /** @const */ const noValidCertsError = 'networkErrorNotHardwareBacked';
+    /** @const */ const noValidCertsError =
+        'networkErrorNotAvailableForNetworkAuth';
     if (this.error && this.error !== noCertsError &&
         this.error !== noValidCertsError) {
       return;
@@ -1563,7 +1625,7 @@ Polymer({
    */
   setPropertiesCallback_(success, errorMessage, connect) {
     if (!success) {
-      console.error(
+      console.warn(
           'Unable to set properties for: ' + this.guid +
           ' Error: ' + errorMessage);
       this.propertiesSent_ = false;
@@ -1590,7 +1652,7 @@ Polymer({
    */
   createNetworkCallback_(guid, errorMessage, connect) {
     if (!guid) {
-      console.error(
+      console.warn(
           'Unable to configure network: ' + guid + ' Error: ' + errorMessage);
       this.propertiesSent_ = false;
       this.setError_(errorMessage);
@@ -1622,7 +1684,7 @@ Polymer({
         return;
       }
       this.setError_(response.message);
-      console.error(
+      console.warn(
           'Error connecting to network: ' + guid + ': ' + result.toString() +
           ' Message: ' + response.message);
       this.propertiesSent_ = false;
@@ -1747,4 +1809,13 @@ Polymer({
     assertNotReached();
     return undefined;
   },
+
+  /** @private */
+  onWifiPasswordInputKeypress_() {
+    // bad-passphrase corresponds to kErrorBadPassphrase in shill
+    if (this.error === 'bad-passphrase') {
+      // Reset error if user starts typing new password.
+      this.setError_('');
+    }
+  }
 });

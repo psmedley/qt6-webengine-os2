@@ -24,6 +24,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_offset.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
@@ -57,8 +58,8 @@ FloatRect FEOffset::MapEffect(const FloatRect& rect) const {
 }
 
 sk_sp<PaintFilter> FEOffset::CreateImageFilter() {
-  Filter* filter = this->GetFilter();
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  Filter* filter = GetFilter();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   return sk_make_sp<OffsetPaintFilter>(
       SkFloatToScalar(filter->ApplyHorizontalScale(dx_)),
       SkFloatToScalar(filter->ApplyVerticalScale(dy_)),

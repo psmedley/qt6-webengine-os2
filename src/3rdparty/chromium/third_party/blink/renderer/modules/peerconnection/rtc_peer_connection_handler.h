@@ -175,7 +175,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
       const webrtc::PeerConnectionInterface::RTCConfiguration&
           server_configuration,
       const MediaConstraints& options,
-      const base::WeakPtr<PeerConnectionTracker>& peer_connection_tracker,
+      PeerConnectionTracker* peer_connection_tracker,
       ExceptionState& exception_state);
 
   // RTCPeerConnectionHandlerPlatform implementation
@@ -213,7 +213,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   GetConfiguration() const;
   virtual webrtc::RTCErrorType SetConfiguration(
       const webrtc::PeerConnectionInterface::RTCConfiguration& configuration);
-  virtual void AddICECandidate(blink::RTCVoidRequest* request,
+  virtual void AddIceCandidate(blink::RTCVoidRequest* request,
                                RTCIceCandidatePlatform* candidate);
   virtual void RestartIce();
 
@@ -287,10 +287,6 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
     return force_encoded_video_insertable_streams_;
   }
 
-  bool enable_rtp_data_channel() const {
-    return configuration_.enable_rtp_data_channel;
-  }
-
  protected:
   // Constructor to be used for constructing mocks only.
   explicit RTCPeerConnectionHandler(
@@ -343,7 +339,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
                       int component,
                       int address_family);
   void OnIceCandidateError(const String& address,
-                           base::Optional<uint16_t> port,
+                           absl::optional<uint16_t> port,
                            const String& host_candidate,
                            const String& url,
                            int error_code,
@@ -464,9 +460,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   webrtc::PeerConnectionInterface::SignalingState previous_signaling_state_ =
       webrtc::PeerConnectionInterface::kStable;
 
-  // |dependency_factory_| is a raw pointer, and is valid for the lifetime of
-  // RenderThreadImpl.
-  blink::PeerConnectionDependencyFactory* const dependency_factory_ = nullptr;
+  // Will be reset to nullptr when the handler is `StopAndUnregister()`-ed, so
+  // it doesn't prevent the factory from being garbage-collected.
+  Persistent<PeerConnectionDependencyFactory> dependency_factory_;
 
   blink::WebLocalFrame* frame_ = nullptr;
 
@@ -492,7 +488,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // detect any removals during rollback.
   Vector<uintptr_t> previous_transceiver_ids_;
 
-  base::WeakPtr<PeerConnectionTracker> peer_connection_tracker_;
+  WeakPersistent<PeerConnectionTracker> peer_connection_tracker_;
 
   MediaStreamTrackMetrics track_metrics_;
 
@@ -520,9 +516,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // Resources for Adaptation.
   // The Thermal Resource is lazily instantiated on platforms where thermal
   // signals are supported.
-  scoped_refptr<ThermalResource> thermal_resource_ = nullptr;
+  scoped_refptr<ThermalResource> thermal_resource_;
   // ThermalUmaListener is only tracked on peer connection that add a track.
-  std::unique_ptr<ThermalUmaListener> thermal_uma_listener_ = nullptr;
+  std::unique_ptr<ThermalUmaListener> thermal_uma_listener_;
   mojom::blink::DeviceThermalState last_thermal_state_ =
       mojom::blink::DeviceThermalState::kUnknown;
 

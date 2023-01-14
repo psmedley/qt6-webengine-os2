@@ -7,6 +7,7 @@
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -48,6 +49,10 @@ class CaretDisplayItemClientTest : public PaintAndRasterInvalidationTest {
 
   const LayoutBlock* PreviousCaretLayoutBlock() const {
     return GetCaretDisplayItemClient().previous_layout_block_;
+  }
+
+  bool ShouldPaintCursorCaret(const LayoutBlock& block) {
+    return Selection().ShouldPaintCaret(block);
   }
 
   Text* AppendTextNode(const String& data) {
@@ -94,7 +99,7 @@ TEST_P(CaretDisplayItemClientTest, CaretPaintInvalidation) {
   EXPECT_FALSE(GetCaretDisplayItemClient().IsValid());
 
   UpdateAllLifecyclePhasesForCaretTest();
-  EXPECT_TRUE(block->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block));
   EXPECT_TRUE(GetCaretDisplayItemClient().IsValid());
   EXPECT_EQ(PhysicalRect(0, 0, 1, 1), CaretLocalRect());
 
@@ -115,7 +120,7 @@ TEST_P(CaretDisplayItemClientTest, CaretPaintInvalidation) {
   EXPECT_FALSE(GetCaretDisplayItemClient().IsValid());
 
   UpdateAllLifecyclePhasesForCaretTest();
-  EXPECT_TRUE(block->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block));
   EXPECT_TRUE(GetCaretDisplayItemClient().IsValid());
   int delta = CaretLocalRect().X().ToInt();
   EXPECT_GT(delta, 0);
@@ -140,7 +145,7 @@ TEST_P(CaretDisplayItemClientTest, CaretPaintInvalidation) {
   EXPECT_FALSE(GetCaretDisplayItemClient().IsValid());
 
   UpdateAllLifecyclePhasesForCaretTest();
-  EXPECT_FALSE(block->ShouldPaintCursorCaret());
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block));
   // The caret display item client painted nothing, so is not validated.
   EXPECT_FALSE(GetCaretDisplayItemClient().IsValid());
   EXPECT_EQ(PhysicalRect(), CaretLocalRect());
@@ -173,8 +178,8 @@ TEST_P(CaretDisplayItemClientTest, CaretMovesBetweenBlocks) {
   EXPECT_TRUE(GetCaretDisplayItemClient().IsValid());
 
   EXPECT_EQ(PhysicalRect(0, 0, 1, 1), CaretLocalRect());
-  EXPECT_TRUE(block1->ShouldPaintCursorCaret());
-  EXPECT_FALSE(block2->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block1));
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block2));
 
   // Move the caret into block2. Should invalidate both the old and new carets.
   GetDocument().View()->SetTracksRasterInvalidations(true);
@@ -191,8 +196,8 @@ TEST_P(CaretDisplayItemClientTest, CaretMovesBetweenBlocks) {
   EXPECT_TRUE(GetCaretDisplayItemClient().IsValid());
 
   EXPECT_EQ(PhysicalRect(0, 0, 1, 1), CaretLocalRect());
-  EXPECT_FALSE(block1->ShouldPaintCursorCaret());
-  EXPECT_TRUE(block2->ShouldPaintCursorCaret());
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block1));
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block2));
 
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(
@@ -219,8 +224,8 @@ TEST_P(CaretDisplayItemClientTest, CaretMovesBetweenBlocks) {
   EXPECT_TRUE(GetCaretDisplayItemClient().IsValid());
 
   EXPECT_EQ(PhysicalRect(0, 0, 1, 1), CaretLocalRect());
-  EXPECT_TRUE(block1->ShouldPaintCursorCaret());
-  EXPECT_FALSE(block2->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block1));
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block2));
 
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(
@@ -251,9 +256,9 @@ TEST_P(CaretDisplayItemClientTest, UpdatePreviousLayoutBlock) {
           .Build());
   GetDocument().View()->UpdateLifecycleToLayoutClean(
       DocumentUpdateReason::kTest);
-  EXPECT_TRUE(block2->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block2));
   EXPECT_EQ(block2, CaretLayoutBlock());
-  EXPECT_FALSE(block1->ShouldPaintCursorCaret());
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block1));
   EXPECT_FALSE(PreviousCaretLayoutBlock());
 
   // Move caret into block1. Should set previousCaretLayoutBlock to block2.
@@ -263,9 +268,9 @@ TEST_P(CaretDisplayItemClientTest, UpdatePreviousLayoutBlock) {
           .Build());
   GetDocument().View()->UpdateLifecycleToLayoutClean(
       DocumentUpdateReason::kTest);
-  EXPECT_TRUE(block1->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block1));
   EXPECT_EQ(block1, CaretLayoutBlock());
-  EXPECT_FALSE(block2->ShouldPaintCursorCaret());
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block2));
   EXPECT_EQ(block2, PreviousCaretLayoutBlock());
 
   // Move caret into block2. Partial update should not change
@@ -276,9 +281,9 @@ TEST_P(CaretDisplayItemClientTest, UpdatePreviousLayoutBlock) {
           .Build());
   GetDocument().View()->UpdateLifecycleToLayoutClean(
       DocumentUpdateReason::kTest);
-  EXPECT_TRUE(block2->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*block2));
   EXPECT_EQ(block2, CaretLayoutBlock());
-  EXPECT_FALSE(block1->ShouldPaintCursorCaret());
+  EXPECT_FALSE(ShouldPaintCursorCaret(*block1));
   EXPECT_EQ(block2, PreviousCaretLayoutBlock());
 
   // Remove block2. Should clear caretLayoutBlock and previousCaretLayoutBlock.
@@ -360,7 +365,7 @@ TEST_P(CaretDisplayItemClientTest, CompositingChange) {
   UpdateAllLifecyclePhasesExceptPaint();
   EXPECT_FALSE(GetCaretDisplayItemClient().IsValid());
   UpdateAllLifecyclePhasesForCaretTest();
-  EXPECT_TRUE(editor_block->ShouldPaintCursorCaret());
+  EXPECT_TRUE(ShouldPaintCursorCaret(*editor_block));
   EXPECT_EQ(editor_block, CaretLayoutBlock());
   EXPECT_EQ(PhysicalRect(50, 50, 1, 1), CaretLocalRect());
 

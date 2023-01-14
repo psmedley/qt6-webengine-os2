@@ -36,7 +36,7 @@ QuicNetworkBlackholeDetector::QuicNetworkBlackholeDetector(
 void QuicNetworkBlackholeDetector::OnAlarm() {
   QuicTime next_deadline = GetEarliestDeadline();
   if (!next_deadline.IsInitialized()) {
-    QUIC_BUG << "BlackholeDetector alarm fired unexpectedly";
+    QUIC_BUG(quic_bug_10328_1) << "BlackholeDetector alarm fired unexpectedly";
     return;
   }
 
@@ -64,8 +64,12 @@ void QuicNetworkBlackholeDetector::OnAlarm() {
   UpdateAlarm();
 }
 
-void QuicNetworkBlackholeDetector::StopDetection() {
-  alarm_->Cancel();
+void QuicNetworkBlackholeDetector::StopDetection(bool permanent) {
+  if (permanent) {
+    alarm_->PermanentCancel();
+  } else {
+    alarm_->Cancel();
+  }
   path_degrading_deadline_ = QuicTime::Zero();
   blackhole_deadline_ = QuicTime::Zero();
   path_mtu_reduction_deadline_ = QuicTime::Zero();
@@ -79,8 +83,8 @@ void QuicNetworkBlackholeDetector::RestartDetection(
   blackhole_deadline_ = blackhole_deadline;
   path_mtu_reduction_deadline_ = path_mtu_reduction_deadline;
 
-  QUIC_BUG_IF(blackhole_deadline_.IsInitialized() &&
-              blackhole_deadline_ != GetLastDeadline())
+  QUIC_BUG_IF(quic_bug_12708_1, blackhole_deadline_.IsInitialized() &&
+                                    blackhole_deadline_ != GetLastDeadline())
       << "Blackhole detection deadline should be the last deadline.";
 
   UpdateAlarm();
@@ -108,6 +112,12 @@ QuicTime QuicNetworkBlackholeDetector::GetLastDeadline() const {
 }
 
 void QuicNetworkBlackholeDetector::UpdateAlarm() const {
+  // If called after OnBlackholeDetected(), the alarm may have been permanently
+  // cancelled and is not safe to be armed again.
+  if (alarm_->IsPermanentlyCancelled()) {
+    return;
+  }
+
   QuicTime next_deadline = GetEarliestDeadline();
 
   QUIC_DVLOG(1) << "Updating alarm. next_deadline:" << next_deadline

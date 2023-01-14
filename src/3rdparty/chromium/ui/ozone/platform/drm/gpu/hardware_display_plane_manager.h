@@ -20,8 +20,8 @@
 #include "ui/ozone/public/swap_completion_callback.h"
 
 namespace gfx {
-class GpuFence;
 class Rect;
+struct GpuFenceHandle;
 }  // namespace gfx
 
 namespace ui {
@@ -58,6 +58,9 @@ struct HardwareDisplayPlaneList {
 class HardwareDisplayPlaneManager {
  public:
   struct CrtcProperties {
+    CrtcProperties();
+    CrtcProperties(const CrtcProperties& other);
+    ~CrtcProperties();
     // Unique identifier for the CRTC. This must be greater than 0 to be valid.
     uint32_t id;
     // Keeps track of the CRTC state. If a surface has been bound, then the
@@ -141,7 +144,7 @@ class HardwareDisplayPlaneManager {
   // if the system doesn't support out fences.
   virtual bool Commit(HardwareDisplayPlaneList* plane_list,
                       scoped_refptr<PageFlipRequest> page_flip_request,
-                      std::unique_ptr<gfx::GpuFence>* out_fence) = 0;
+                      gfx::GpuFenceHandle* release_fence) = 0;
 
   // Disable all the overlay planes previously submitted and now stored in
   // plane_list->old_plane_list.
@@ -193,6 +196,7 @@ class HardwareDisplayPlaneManager {
   struct ConnectorProperties {
     uint32_t id;
     DrmDevice::Property crtc_id;
+    DrmDevice::Property link_status;
   };
 
   bool InitializeCrtcState();
@@ -230,7 +234,7 @@ class HardwareDisplayPlaneManager {
   // Convert |crtc/connector_id| into an index, returning -1 if the ID couldn't
   // be found.
   int LookupCrtcIndex(uint32_t crtc_id) const;
-  int LookupConnectorIndex(uint32_t connector_idx) const;
+  int LookupConnectorIndex(uint32_t connector_id) const;
 
   // Get Mutable CRTC State.
   CrtcState& CrtcStateForCrtcId(uint32_t crtc_id);

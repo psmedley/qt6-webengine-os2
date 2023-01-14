@@ -2,12 +2,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
 import("//chrome/common/features.gni")
+import("//components/exo/buildflags.gni")
 import("//testing/test.gni")
 import("//ui/base/ui_features.gni")
+
+buildflag_header("buildflags") {
+  header = "buildflags.h"
+  flags = [ "ENABLE_WESTON_TEST=$enable_weston_test" ]
+}
 
 if (use_xkbcommon) {
   pkg_config("xkbcommon") {
@@ -38,6 +45,7 @@ static_library("exo") {
     "frame_sink_resource_manager.cc",
     "frame_sink_resource_manager.h",
     "input_trace.h",
+    "key_state.h",
     "keyboard_delegate.h",
     "keyboard_device_configuration_delegate.h",
     "keyboard_observer.h",
@@ -71,6 +79,8 @@ static_library("exo") {
     "touch_delegate.h",
     "vsync_timing_manager.cc",
     "vsync_timing_manager.h",
+    "window_properties.cc",
+    "window_properties.h",
     "wm_helper.cc",
     "wm_helper.h",
   ]
@@ -92,6 +102,7 @@ static_library("exo") {
     "//ui/accessibility:ax_base",
     "//ui/aura",
     "//ui/base/cursor",
+    "//ui/base/dragdrop:types",
     "//ui/base/dragdrop/mojom",
     "//ui/base/ime",
     "//ui/compositor",
@@ -131,6 +142,9 @@ static_library("exo") {
       "//chromeos/crosapi/cpp",
       "//chromeos/ui/base",
       "//chromeos/ui/frame",
+      "//components/full_restore",
+      "//components/fullscreen_control",
+      "//components/strings",
       "//ui/base",
       "//ui/events/ozone/layout",
     ]
@@ -168,8 +182,6 @@ static_library("exo") {
       "toast_surface.cc",
       "toast_surface.h",
       "toast_surface_manager.h",
-      "ui_lock_bubble.cc",
-      "ui_lock_bubble.h",
       "ui_lock_controller.cc",
       "ui_lock_controller.h",
       "wm_helper_chromeos.cc",
@@ -304,6 +316,7 @@ source_set("unit_tests") {
       "seat_unittest.cc",
       "shared_memory_unittest.cc",
       "shell_surface_unittest.cc",
+      "shell_surface_util_unittest.cc",
       "sub_surface_unittest.cc",
       "surface_unittest.cc",
       "text_input_unittest.cc",
@@ -324,9 +337,12 @@ source_set("unit_tests") {
       "//build:chromeos_buildflags",
       "//chromeos/ui/base",
       "//chromeos/ui/frame",
+      "//components/fullscreen_control",
       "//ui/base:test_support",
       "//ui/base/cursor/mojom:cursor_type",
+      "//ui/base/dragdrop:types",
       "//ui/base/dragdrop/mojom",
+      "//ui/gfx:test_support",
       "//ui/gfx/geometry",
     ]
   }
@@ -357,7 +373,6 @@ test("exo_unittests") {
     "//ui/aura:test_support",
     "//ui/base",
     "//ui/compositor:test_support",
-    "//ui/display:display_manager_test_api",
     "//ui/gl:test_support",
   ]
 
@@ -377,6 +392,7 @@ test("exo_unittests") {
       "//ash:test_support",
       "//ash/public/cpp",
       "//components/exo/server:unit_tests",
+      "//ui/display:display_manager_test_api",
     ]
 
     data_deps += [

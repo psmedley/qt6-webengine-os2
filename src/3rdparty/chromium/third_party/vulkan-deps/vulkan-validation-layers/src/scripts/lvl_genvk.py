@@ -723,58 +723,6 @@ def makeGenOpts(args):
             expandEnumerants = False)
         ]
 
-    # generator for command_counter.h
-    genOpts['command_counter_helper.h'] = [
-          CommandCounterOutputGenerator,
-          CommandCounterOutputGeneratorOptions(
-            conventions       = conventions,
-            filename          = 'command_counter_helper.h',
-            directory         = directory,
-            genpath           = None,
-            apiname           = 'vulkan',
-            profile           = None,
-            versions          = featuresPat,
-            emitversions      = featuresPat,
-            defaultExtensions = 'vulkan',
-            addExtensions     = addExtensionsPat,
-            removeExtensions  = removeExtensionsPat,
-            emitExtensions    = emitExtensionsPat,
-            emitSpirv         = None,
-            prefixText        = prefixStrings + vkPrefixStrings,
-            apicall           = 'VKAPI_ATTR ',
-            apientry          = 'VKAPI_CALL ',
-            apientryp         = 'VKAPI_PTR *',
-            alignFuncParam    = 48,
-            expandEnumerants = False,
-            lvt_file_type  = 'function_pointer_header')
-        ]
-
-    # generator for command_counter.cpp
-    genOpts['command_counter_helper.cpp'] = [
-          CommandCounterOutputGenerator,
-          CommandCounterOutputGeneratorOptions(
-            conventions       = conventions,
-            filename          = 'command_counter_helper.cpp',
-            directory         = directory,
-            genpath           = None,
-            apiname           = 'vulkan',
-            profile           = None,
-            versions          = featuresPat,
-            emitversions      = featuresPat,
-            defaultExtensions = 'vulkan',
-            addExtensions     = addExtensionsPat,
-            removeExtensions  = removeExtensionsPat,
-            emitExtensions    = emitExtensionsPat,
-            emitSpirv         = None,
-            prefixText        = prefixStrings + vkPrefixStrings,
-            apicall           = 'VKAPI_ATTR ',
-            apientry          = 'VKAPI_CALL ',
-            apientryp         = 'VKAPI_PTR *',
-            alignFuncParam    = 48,
-            expandEnumerants = False,
-            lvt_file_type  = 'function_pointer_source')
-        ]
-
     # Options for best practices code-generated source
     genOpts['best_practices.cpp'] = [
           BestPracticesOutputGenerator,
@@ -852,7 +800,8 @@ def makeGenOpts(args):
             apientryp         = 'VKAPI_PTR *',
             alignFuncParam    = 48,
             expandEnumerants  = False,
-            helper_file_type  = 'synchronization_helper_header')
+            helper_file_type  = 'synchronization_helper_header',
+            valid_usage_path  = args.scripts)
         ]
 
     genOpts['synchronization_validation_types.cpp'] = [
@@ -877,7 +826,8 @@ def makeGenOpts(args):
             apientryp         = 'VKAPI_PTR *',
             alignFuncParam    = 48,
             expandEnumerants  = False,
-            helper_file_type  = 'synchronization_helper_source')
+            helper_file_type  = 'synchronization_helper_source',
+            valid_usage_path  = args.scripts)
         ]
 
     # Options for spirv_validation_helper code-generated header
@@ -904,6 +854,59 @@ def makeGenOpts(args):
             apientryp         = 'VKAPI_PTR *',
             alignFuncParam    = 48,
             expandEnumerants  = False)
+        ]
+
+    # Options for command_validation code-generated header
+    genOpts['command_validation.cpp'] = [
+          CommandValidationOutputGenerator,
+          CommandValidationOutputGeneratorOptions(
+            conventions       = conventions,
+            filename          = 'command_validation.cpp',
+            directory         = directory,
+            genpath           = None,
+            apiname           = 'vulkan',
+            profile           = None,
+            versions          = featuresPat,
+            emitversions      = featuresPat,
+            defaultExtensions = 'vulkan',
+            addExtensions     = addExtensionsPat,
+            removeExtensions  = removeExtensionsPat,
+            emitExtensions    = emitExtensionsPat,
+            emitSpirv         = None,
+            prefixText        = prefixStrings + vkPrefixStrings,
+            protectFeature    = False,
+            apicall           = 'VKAPI_ATTR ',
+            apientry          = 'VKAPI_CALL ',
+            apientryp         = 'VKAPI_PTR *',
+            alignFuncParam    = 48,
+            expandEnumerants  = False,
+            valid_usage_path  = args.scripts)
+        ]
+
+    # generator for command_validation.h
+    genOpts['command_validation.h'] = [
+          CommandValidationOutputGenerator,
+          CommandValidationOutputGeneratorOptions(
+            conventions       = conventions,
+            filename          = 'command_validation.h',
+            directory         = directory,
+            genpath           = None,
+            apiname           = 'vulkan',
+            profile           = None,
+            versions          = featuresPat,
+            emitversions      = featuresPat,
+            defaultExtensions = 'vulkan',
+            addExtensions     = addExtensionsPat,
+            removeExtensions  = removeExtensionsPat,
+            emitExtensions    = emitExtensionsPat,
+            emitSpirv         = None,
+            prefixText        = prefixStrings + vkPrefixStrings,
+            apicall           = 'VKAPI_ATTR ',
+            apientry          = 'VKAPI_CALL ',
+            apientryp         = 'VKAPI_PTR *',
+            alignFuncParam    = 48,
+            expandEnumerants = False,
+            valid_usage_path  = args.scripts)
         ]
 
 # Generate a target based on the options in the matching genOpts{} object.
@@ -1032,9 +1035,9 @@ if __name__ == '__main__':
     from layer_chassis_generator import LayerChassisOutputGenerator, LayerChassisGeneratorOptions
     from layer_chassis_dispatch_generator import LayerChassisDispatchOutputGenerator, LayerChassisDispatchGeneratorOptions
     from lvt_file_generator import LvtFileOutputGenerator, LvtFileOutputGeneratorOptions
-    from command_counter_generator import CommandCounterOutputGenerator, CommandCounterOutputGeneratorOptions
     from best_practices_generator import BestPracticesOutputGenerator, BestPracticesOutputGeneratorOptions
     from spirv_validation_generator import SpirvValidationHelperOutputGenerator, SpirvValidationHelperOutputGeneratorOptions
+    from command_validation_generator import CommandValidationOutputGenerator, CommandValidationOutputGeneratorOptions
 
     # Temporary workaround for vkconventions python2 compatibility
     import abc; abc.ABC = abc.ABCMeta('ABC', (object,), {})

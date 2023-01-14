@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_computed_effect_timing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_optional_effect_timing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_unrestricteddouble.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/css/css_animation.h"
@@ -103,7 +104,7 @@ static std::unique_ptr<protocol::Animation::AnimationEffect>
 BuildObjectForAnimationEffect(KeyframeEffect* effect) {
   ComputedEffectTiming* computed_timing = effect->getComputedTiming();
   double delay = computed_timing->delay();
-  double duration = computed_timing->duration().GetAsUnrestrictedDouble();
+  double duration = computed_timing->duration()->GetAsUnrestrictedDouble();
   String easing = effect->SpecifiedTiming().timing_function->ToString();
 
   std::unique_ptr<protocol::Animation::AnimationEffect> animation_object =
@@ -186,7 +187,7 @@ InspectorAnimationAgent::BuildObjectForAnimation(blink::Animation& animation) {
   id_to_animation_.Set(id, &animation);
 
   double current_time = Timing::NullValue();
-  base::Optional<AnimationTimeDelta> animation_current_time =
+  absl::optional<AnimationTimeDelta> animation_current_time =
       animation.CurrentTimeInternal();
   if (animation_current_time) {
     current_time = animation_current_time.value().InMillisecondsF();
@@ -228,22 +229,22 @@ Response InspectorAnimationAgent::getCurrentTime(const String& id,
   Response response = AssertAnimation(id, animation);
   if (!response.IsSuccess())
     return response;
-  if (id_to_animation_clone_.at(id))
-    animation = id_to_animation_clone_.at(id);
+  if (id_to_animation_clone_.DeprecatedAtOrEmptyValue(id))
+    animation = id_to_animation_clone_.DeprecatedAtOrEmptyValue(id);
 
   *current_time = Timing::NullValue();
   if (animation->Paused() || !animation->timeline()->IsActive()) {
-    base::Optional<AnimationTimeDelta> animation_current_time =
+    absl::optional<AnimationTimeDelta> animation_current_time =
         animation->CurrentTimeInternal();
     if (animation_current_time) {
       *current_time = animation_current_time.value().InMillisecondsF();
     }
   } else {
     // Use startTime where possible since currentTime is limited.
-    base::Optional<AnimationTimeDelta> animation_start_time =
+    absl::optional<AnimationTimeDelta> animation_start_time =
         animation->StartTimeInternal();
     if (animation_start_time) {
-      base::Optional<AnimationTimeDelta> timeline_time =
+      absl::optional<AnimationTimeDelta> timeline_time =
           animation->timeline()->CurrentTime();
       // TODO(crbug.com/916117): Handle NaN values for scroll linked animations.
       if (timeline_time) {
@@ -268,14 +269,14 @@ Response InspectorAnimationAgent::setPaused(
       return Response::ServerError("Failed to clone detached animation");
     if (paused && !clone->Paused()) {
       // Ensure we restore a current time if the animation is limited.
-      base::Optional<AnimationTimeDelta> current_time;
+      absl::optional<AnimationTimeDelta> current_time;
       if (!clone->timeline()->IsActive()) {
         current_time = clone->CurrentTimeInternal();
       } else {
-        base::Optional<AnimationTimeDelta> start_time =
+        absl::optional<AnimationTimeDelta> start_time =
             clone->StartTimeInternal();
         if (start_time) {
-          base::Optional<AnimationTimeDelta> timeline_time =
+          absl::optional<AnimationTimeDelta> timeline_time =
               clone->timeline()->CurrentTime();
           // TODO(crbug.com/916117): Handle NaN values.
           if (timeline_time) {
@@ -295,7 +296,7 @@ Response InspectorAnimationAgent::setPaused(
 blink::Animation* InspectorAnimationAgent::AnimationClone(
     blink::Animation* animation) {
   const String id = String::Number(animation->SequenceNumber());
-  if (!id_to_animation_clone_.at(id)) {
+  if (!id_to_animation_clone_.DeprecatedAtOrEmptyValue(id)) {
     auto* old_effect = To<KeyframeEffect>(animation->effect());
     DCHECK(old_effect->Model()->IsKeyframeEffectModel());
     KeyframeEffectModelBase* old_model = old_effect->Model();
@@ -331,13 +332,11 @@ blink::Animation* InspectorAnimationAgent::AnimationClone(
     id_to_animation_clone_.Set(id, clone);
     id_to_animation_.Set(String::Number(clone->SequenceNumber()), clone);
     clone->play();
-    CSSNumberish start_time;
-    animation->startTime(start_time);
-    clone->setStartTime(start_time);
+    clone->setStartTime(animation->startTime(), ASSERT_NO_EXCEPTION);
 
     animation->SetEffectSuppressed(true);
   }
-  return id_to_animation_clone_.at(id);
+  return id_to_animation_clone_.DeprecatedAtOrEmptyValue(id);
 }
 
 Response InspectorAnimationAgent::seekAnimations(
@@ -362,10 +361,12 @@ Response InspectorAnimationAgent::seekAnimations(
 Response InspectorAnimationAgent::releaseAnimations(
     std::unique_ptr<protocol::Array<String>> animation_ids) {
   for (const String& animation_id : *animation_ids) {
-    blink::Animation* animation = id_to_animation_.at(animation_id);
+    blink::Animation* animation =
+        id_to_animation_.DeprecatedAtOrEmptyValue(animation_id);
     if (animation)
       animation->SetEffectSuppressed(false);
-    blink::Animation* clone = id_to_animation_clone_.at(animation_id);
+    blink::Animation* clone =
+        id_to_animation_clone_.DeprecatedAtOrEmptyValue(animation_id);
     if (clone)
       clone->cancel();
     id_to_animation_clone_.erase(animation_id);
@@ -387,9 +388,8 @@ Response InspectorAnimationAgent::setTiming(const String& animation_id,
   NonThrowableExceptionState exception_state;
 
   OptionalEffectTiming* timing = OptionalEffectTiming::Create();
-  UnrestrictedDoubleOrString unrestricted_duration;
-  unrestricted_duration.SetUnrestrictedDouble(duration);
-  timing->setDuration(unrestricted_duration);
+  timing->setDuration(
+      MakeGarbageCollected<V8UnionStringOrUnrestrictedDouble>(duration));
   timing->setDelay(delay);
   animation->effect()->updateTiming(timing, exception_state);
   return Response::Success();
@@ -403,14 +403,13 @@ Response InspectorAnimationAgent::resolveAnimation(
   Response response = AssertAnimation(animation_id, animation);
   if (!response.IsSuccess())
     return response;
-  if (id_to_animation_clone_.at(animation_id))
-    animation = id_to_animation_clone_.at(animation_id);
+  if (id_to_animation_clone_.DeprecatedAtOrEmptyValue(animation_id))
+    animation = id_to_animation_clone_.DeprecatedAtOrEmptyValue(animation_id);
   const Element* element =
       To<KeyframeEffect>(animation->effect())->EffectTarget();
   Document* document = element->ownerDocument();
   LocalFrame* frame = document ? document->GetFrame() : nullptr;
-  ScriptState* script_state =
-      frame ? ToScriptStateForMainWorld(frame) : nullptr;
+  ScriptState* script_state = ToScriptStateForMainWorld(frame);
   if (!script_state)
     return Response::ServerError("Element not associated with a document.");
 
@@ -522,7 +521,7 @@ void InspectorAnimationAgent::DidClearDocumentOfWindowObject(
 
 Response InspectorAnimationAgent::AssertAnimation(const String& id,
                                                   blink::Animation*& result) {
-  result = id_to_animation_.at(id);
+  result = id_to_animation_.DeprecatedAtOrEmptyValue(id);
   if (!result)
     return Response::ServerError("Could not find animation with given id");
   return Response::Success();
@@ -535,7 +534,7 @@ DocumentTimeline& InspectorAnimationAgent::ReferenceTimeline() {
 double InspectorAnimationAgent::NormalizedStartTime(
     blink::Animation& animation) {
   double time_ms = Timing::NullValue();
-  base::Optional<AnimationTimeDelta> start_time = animation.StartTimeInternal();
+  absl::optional<AnimationTimeDelta> start_time = animation.StartTimeInternal();
   if (start_time) {
     time_ms = start_time.value().InMillisecondsF();
   }

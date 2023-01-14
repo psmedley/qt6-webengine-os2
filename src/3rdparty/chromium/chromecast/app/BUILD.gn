@@ -12,9 +12,10 @@ cast_source_set("app") {
     "cast_main_delegate.h",
   ]
 
+  public_deps = [ "//base" ]
+
   deps = [
     ":cast_crash_client",
-    "//base",
     "//chromecast:chromecast_buildflags",
     "//chromecast/base",
     "//chromecast/browser",
@@ -30,8 +31,12 @@ cast_source_set("app") {
     "//ui/base",
   ]
 
+  if (enable_cast_media_runtime) {
+    deps += [ "//chromecast/cast_core" ]
+  }
+
   if (!is_fuchsia) {
-    # TODO(crbug.com/753619): Enable crash reporting on Fuchsia.
+    # TODO(crbug.com/1226159): Complete crash reporting integration on Fuchsia.
     deps += [ "//components/crash/core/app" ]
   }
 }

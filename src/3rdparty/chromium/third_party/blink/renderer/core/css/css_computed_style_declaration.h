@@ -85,9 +85,17 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   // being queried, if any.
   LayoutObject* StyledLayoutObject() const;
 
+  // If we are updating the style/layout-tree/layout with the intent to
+  // retrieve the computed value of a property, the appropriate
+  // property name/instance must be provided.
+  void UpdateStyleAndLayoutTreeIfNeeded(const CSSPropertyName*) const;
+  void UpdateStyleAndLayoutIfNeeded(const CSSProperty*) const;
+
   // CSSOM functions.
   CSSRule* parentRule() const override;
   const ComputedStyle* ComputeComputedStyle() const;
+  const Vector<AtomicString>* GetVariableNames() const;
+  wtf_size_t GetVariableNamesCount() const;
   String getPropertyValue(const String& property_name) override;
   String getPropertyPriority(const String& property_name) override;
   String GetPropertyShorthand(const String& property_name) override;
@@ -119,6 +127,7 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
 
   Member<Node> node_;
   PseudoId pseudo_element_specifier_;
+  AtomicString pseudo_argument_;
   bool allow_visited_style_;
 };
 

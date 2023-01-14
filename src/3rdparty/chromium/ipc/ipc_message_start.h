@@ -14,22 +14,17 @@
 enum IPCMessageStart {
   AutomationMsgStart = 0,
   QtMsgStart,
-  FrameMsgStart,
   TestMsgStart,
   WorkerMsgStart,
   NaClMsgStart,
-  GpuChannelMsgStart,
-  MediaMsgStart,
   PpapiMsgStart,
   ExtensionMsgStart,
   ChromotingMsgStart,
   NaClHostMsgStart,
   EncryptedMediaMsgStart,
   GinJavaBridgeMsgStart,
-  ChromeUtilityPrintingMsgStart,
   ExtensionsGuestViewMsgStart,
   GuestViewMsgStart,
-  MediaPlayerDelegateMsgStart,
   ExtensionWorkerMsgStart,
   LastIPCMsgStart  // Must come last.
 };

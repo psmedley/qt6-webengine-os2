@@ -42,6 +42,14 @@ void GrRenderTask::disown(GrDrawingManager* drawingMgr) {
     }
 }
 
+void GrRenderTask::makeSkippable() {
+    SkASSERT(this->isClosed());
+    if (!this->isSkippable()) {
+        this->setFlag(kSkippable_Flag);
+        this->onMakeSkippable();
+    }
+}
+
 #ifdef SK_DEBUG
 GrRenderTask::~GrRenderTask() {
     SkASSERT(this->isSetFlag(kDisowned_Flag));
@@ -58,13 +66,13 @@ bool GrRenderTask::deferredProxiesAreInstantiated() const {
 }
 #endif
 
-void GrRenderTask::makeClosed(const GrCaps& caps) {
+void GrRenderTask::makeClosed(GrRecordingContext* rContext) {
     if (this->isClosed()) {
         return;
     }
 
     SkIRect targetUpdateBounds;
-    if (ExpectedOutcome::kTargetDirty == this->onMakeClosed(caps, &targetUpdateBounds)) {
+    if (ExpectedOutcome::kTargetDirty == this->onMakeClosed(rContext, &targetUpdateBounds)) {
         GrSurfaceProxy* proxy = this->target(0);
         if (proxy->requiresManualMSAAResolve()) {
             SkASSERT(this->target(0)->asRenderTargetProxy());
@@ -78,7 +86,7 @@ void GrRenderTask::makeClosed(const GrCaps& caps) {
 
     if (fTextureResolveTask) {
         this->addDependency(fTextureResolveTask);
-        fTextureResolveTask->makeClosed(caps);
+        fTextureResolveTask->makeClosed(rContext);
         fTextureResolveTask = nullptr;
     }
 
@@ -141,10 +149,12 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
             return;  // don't add duplicate dependencies
         }
 
-        // We are closing 'dependedOnTask' here bc the current contents of it are what 'this'
-        // renderTask depends on. We need a break in 'dependedOnTask' so that the usage of
-        // that state has a chance to execute.
-        dependedOnTask->makeClosed(caps);
+        if (!dependedOnTask->isSetFlag(kAtlas_Flag)) {
+            // We are closing 'dependedOnTask' here bc the current contents of it are what 'this'
+            // renderTask depends on. We need a break in 'dependedOnTask' so that the usage of
+            // that state has a chance to execute.
+            dependedOnTask->makeClosed(drawingMgr->getContext());
+        }
     }
 
     auto resolveFlags = GrSurfaceProxy::ResolveFlags::kNone;
@@ -212,6 +222,26 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
     }
 }
 
+void GrRenderTask::replaceDependency(const GrRenderTask* toReplace, GrRenderTask* replaceWith) {
+    for (auto& target : fDependencies) {
+        if (target == toReplace) {
+            target = replaceWith;
+            replaceWith->fDependents.push_back(this);
+            break;
+        }
+    }
+}
+
+void GrRenderTask::replaceDependent(const GrRenderTask* toReplace, GrRenderTask* replaceWith) {
+    for (auto& target : fDependents) {
+        if (target == toReplace) {
+            target = replaceWith;
+            replaceWith->fDependencies.push_back(this);
+            break;
+        }
+    }
+}
+
 bool GrRenderTask::dependsOn(const GrRenderTask* dependedOn) const {
     for (int i = 0; i < fDependencies.count(); ++i) {
         if (fDependencies[i] == dependedOn) {
@@ -247,14 +277,6 @@ void GrRenderTask::validate() const {
 }
 #endif
 
-void GrRenderTask::closeThoseWhoDependOnMe(const GrCaps& caps) {
-    for (int i = 0; i < fDependents.count(); ++i) {
-        if (!fDependents[i]->isClosed()) {
-            fDependents[i]->makeClosed(caps);
-        }
-    }
-}
-
 bool GrRenderTask::isInstantiated() const {
     for (const sk_sp<GrSurfaceProxy>& target : fTargets) {
         GrSurfaceProxy* proxy = target.get();
@@ -277,6 +299,7 @@ void GrRenderTask::addTarget(GrDrawingManager* drawingMgr, sk_sp<GrSurfaceProxy>
     SkASSERT(!fDrawingMgr || drawingMgr == fDrawingMgr);
     SkDEBUGCODE(fDrawingMgr = drawingMgr);
     drawingMgr->setLastRenderTask(proxy.get(), this);
+    proxy->isUsedAsTaskTarget();
     fTargets.emplace_back(std::move(proxy));
 }
 

@@ -45,13 +45,14 @@ class PLATFORM_EXPORT GradientGeneratedImage final : public GeneratedImage {
 
   bool ApplyShader(PaintFlags&, const SkMatrix&) override;
 
+  bool IsGradientGeneratedImage() const override { return true; }
+
  protected:
   void Draw(cc::PaintCanvas*,
             const PaintFlags&,
             const FloatRect&,
             const FloatRect&,
-            const SkSamplingOptions&,
-            RespectImageOrientationEnum,
+            const ImageDrawOptions& draw_options,
             ImageClampingMode,
             ImageDecodingMode) override;
   void DrawTile(GraphicsContext&,
@@ -67,4 +68,4 @@ class PLATFORM_EXPORT GradientGeneratedImage final : public GeneratedImage {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GRADIENT_GENERATED_IMAGE_H_

@@ -16,11 +16,15 @@
 #include "net/base/network_isolation_key.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/host_cache.h"
+#include "net/dns/host_resolver.h"
 #include "net/dns/host_resolver_manager.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/public/resolve_error_info.h"
 #include "net/dns/resolve_context.h"
+#include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request_context.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 
@@ -120,19 +124,19 @@ class ContextHostResolver::WrappedResolveHostRequest
     return inner_request_->Start(std::move(callback));
   }
 
-  const base::Optional<AddressList>& GetAddressResults() const override {
+  const absl::optional<AddressList>& GetAddressResults() const override {
     if (!inner_request_) {
-      static base::NoDestructor<base::Optional<AddressList>> nullopt_result;
+      static base::NoDestructor<absl::optional<AddressList>> nullopt_result;
       return *nullopt_result;
     }
 
     return inner_request_->GetAddressResults();
   }
 
-  const base::Optional<std::vector<std::string>>& GetTextResults()
+  const absl::optional<std::vector<std::string>>& GetTextResults()
       const override {
     if (!inner_request_) {
-      static const base::NoDestructor<base::Optional<std::vector<std::string>>>
+      static const base::NoDestructor<absl::optional<std::vector<std::string>>>
           nullopt_result;
       return *nullopt_result;
     }
@@ -140,10 +144,10 @@ class ContextHostResolver::WrappedResolveHostRequest
     return inner_request_->GetTextResults();
   }
 
-  const base::Optional<std::vector<HostPortPair>>& GetHostnameResults()
+  const absl::optional<std::vector<HostPortPair>>& GetHostnameResults()
       const override {
     if (!inner_request_) {
-      static const base::NoDestructor<base::Optional<std::vector<HostPortPair>>>
+      static const base::NoDestructor<absl::optional<std::vector<HostPortPair>>>
           nullopt_result;
       return *nullopt_result;
     }
@@ -151,10 +155,10 @@ class ContextHostResolver::WrappedResolveHostRequest
     return inner_request_->GetHostnameResults();
   }
 
-  const base::Optional<std::vector<std::string>>& GetDnsAliasResults()
+  const absl::optional<std::vector<std::string>>& GetDnsAliasResults()
       const override {
     if (!inner_request_) {
-      static const base::NoDestructor<base::Optional<std::vector<std::string>>>
+      static const base::NoDestructor<absl::optional<std::vector<std::string>>>
           nullopt_result;
       return *nullopt_result;
     }
@@ -169,12 +173,11 @@ class ContextHostResolver::WrappedResolveHostRequest
     return inner_request_->GetResolveErrorInfo();
   }
 
-  const base::Optional<HostCache::EntryStaleness>& GetStaleInfo()
+  const absl::optional<HostCache::EntryStaleness>& GetStaleInfo()
       const override {
     if (!inner_request_) {
-      static const base::NoDestructor<base::Optional<HostCache::EntryStaleness>>
-          nullopt_result;
-      return *nullopt_result;
+      static const absl::optional<HostCache::EntryStaleness> nullopt_result;
+      return nullopt_result;
     }
 
     return inner_request_->GetStaleInfo();
@@ -293,10 +296,33 @@ void ContextHostResolver::OnShutdown() {
 
 std::unique_ptr<HostResolver::ResolveHostRequest>
 ContextHostResolver::CreateRequest(
+    url::SchemeHostPort host,
+    NetworkIsolationKey network_isolation_key,
+    NetLogWithSource source_net_log,
+    absl::optional<ResolveHostParameters> optional_parameters) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  std::unique_ptr<HostResolverManager::CancellableResolveHostRequest>
+      inner_request;
+  if (!shutting_down_) {
+    inner_request = manager_->CreateRequest(
+        std::move(host), std::move(network_isolation_key),
+        std::move(source_net_log), std::move(optional_parameters),
+        resolve_context_.get(), resolve_context_->host_cache());
+  }
+
+  auto request = std::make_unique<WrappedResolveHostRequest>(
+      std::move(inner_request), this, shutting_down_);
+  handed_out_requests_.insert(request.get());
+  return request;
+}
+
+std::unique_ptr<HostResolver::ResolveHostRequest>
+ContextHostResolver::CreateRequest(
     const HostPortPair& host,
     const NetworkIsolationKey& network_isolation_key,
     const NetLogWithSource& source_net_log,
-    const base::Optional<ResolveHostParameters>& optional_parameters) {
+    const absl::optional<ResolveHostParameters>& optional_parameters) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   std::unique_ptr<HostResolverManager::CancellableResolveHostRequest>

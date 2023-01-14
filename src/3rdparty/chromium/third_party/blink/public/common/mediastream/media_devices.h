@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
 #include "media/base/video_facing.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
 #include "third_party/blink/public/common/common_export.h"

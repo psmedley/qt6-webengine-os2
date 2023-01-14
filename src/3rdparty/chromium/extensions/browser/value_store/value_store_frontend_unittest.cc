@@ -13,9 +13,8 @@
 #include "base/path_service.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/value_store/test_value_store_factory.h"
-#include "extensions/common/extension_paths.h"
+#include "extensions/browser/value_store/value_store_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -28,13 +27,13 @@ class ValueStoreFrontendTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     base::FilePath test_data_dir;
-    ASSERT_TRUE(
-        base::PathService::Get(extensions::DIR_TEST_DATA, &test_data_dir));
-    base::FilePath src_db(test_data_dir.AppendASCII("value_store_db"));
+    ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
+    base::FilePath src_db(
+        test_data_dir.AppendASCII("extensions/test/data/value_store_db"));
     db_path_ = temp_dir_.GetPath().AppendASCII("temp_db");
     base::CopyDirectory(src_db, db_path_, true);
 
-    factory_ = new extensions::TestValueStoreFactory(db_path_);
+    factory_ = new TestValueStoreFactory(db_path_);
 
     ResetStorage();
   }
@@ -48,7 +47,7 @@ class ValueStoreFrontendTest : public testing::Test {
   void ResetStorage() {
     storage_ = std::make_unique<ValueStoreFrontend>(
         factory_, ValueStoreFrontend::BackendType::RULES,
-        GetExtensionFileTaskRunner());
+        value_store::GetValueStoreTaskRunner());
   }
 
   bool Get(const std::string& key, std::unique_ptr<base::Value>* output) {
@@ -64,7 +63,7 @@ class ValueStoreFrontendTest : public testing::Test {
     *output = std::move(result);
   }
 
-  scoped_refptr<extensions::TestValueStoreFactory> factory_;
+  scoped_refptr<TestValueStoreFactory> factory_;
   std::unique_ptr<ValueStoreFrontend> storage_;
   base::ScopedTempDir temp_dir_;
   base::FilePath db_path_;
@@ -78,22 +77,20 @@ TEST_F(ValueStoreFrontendTest, GetExistingData) {
   // Test existing keys in the DB.
   {
     ASSERT_TRUE(Get("key1", &value));
-    std::string result;
-    ASSERT_TRUE(value->GetAsString(&result));
-    EXPECT_EQ("value1", result);
+    ASSERT_TRUE(value->is_string());
+    EXPECT_EQ("value1", value->GetString());
   }
 
   {
     ASSERT_TRUE(Get("key2", &value));
-    int result;
-    ASSERT_TRUE(value->GetAsInteger(&result));
-    EXPECT_EQ(2, result);
+    ASSERT_TRUE(value->is_int());
+    EXPECT_EQ(2, value->GetInt());
   }
 }
 
 TEST_F(ValueStoreFrontendTest, ChangesPersistAfterReload) {
-  storage_->Set("key0", std::unique_ptr<base::Value>(new base::Value(0)));
-  storage_->Set("key1", std::unique_ptr<base::Value>(new base::Value("new1")));
+  storage_->Set("key0", std::make_unique<base::Value>(0));
+  storage_->Set("key1", std::make_unique<base::Value>("new1"));
   storage_->Remove("key2");
 
   // Reload the DB and test our changes.
@@ -102,16 +99,14 @@ TEST_F(ValueStoreFrontendTest, ChangesPersistAfterReload) {
   std::unique_ptr<base::Value> value;
   {
     ASSERT_TRUE(Get("key0", &value));
-    int result;
-    ASSERT_TRUE(value->GetAsInteger(&result));
-    EXPECT_EQ(0, result);
+    ASSERT_TRUE(value->is_int());
+    EXPECT_EQ(0, value->GetInt());
   }
 
   {
     ASSERT_TRUE(Get("key1", &value));
-    std::string result;
-    ASSERT_TRUE(value->GetAsString(&result));
-    EXPECT_EQ("new1", result);
+    ASSERT_TRUE(value->is_string());
+    EXPECT_EQ("new1", value->GetString());
   }
 
   ASSERT_FALSE(Get("key2", &value));

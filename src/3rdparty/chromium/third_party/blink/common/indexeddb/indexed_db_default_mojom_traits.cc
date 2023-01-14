@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/stl_util.h"
 #include "mojo/public/cpp/base/string16_mojom_traits.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key_range.h"
@@ -112,7 +111,7 @@ bool UnionTraits<blink::mojom::IDBKeyDataView, blink::IndexedDBKey>::Read(
       return true;
     }
     case blink::mojom::IDBKeyDataView::Tag::STRING: {
-      base::string16 string;
+      std::u16string string;
       if (!data.ReadString(&string))
         return false;
       *out = blink::IndexedDBKey(std::move(string));
@@ -170,14 +169,14 @@ bool StructTraits<blink::mojom::IDBKeyPathDataView, blink::IndexedDBKeyPath>::
 
   switch (data_view.tag()) {
     case blink::mojom::IDBKeyPathDataDataView::Tag::STRING: {
-      base::string16 string;
+      std::u16string string;
       if (!data_view.ReadString(&string))
         return false;
       *out = blink::IndexedDBKeyPath(string);
       return true;
     }
     case blink::mojom::IDBKeyPathDataDataView::Tag::STRING_ARRAY: {
-      std::vector<base::string16> array;
+      std::vector<std::u16string> array;
       if (!data_view.ReadStringArray(&array))
         return false;
       *out = blink::IndexedDBKeyPath(array);

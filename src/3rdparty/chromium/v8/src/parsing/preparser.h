@@ -310,7 +310,6 @@ class PreParserExpression {
 
   // More dummy implementations of things PreParser doesn't need to track:
   void SetShouldEagerCompile() {}
-  void mark_as_oneshot_iife() {}
 
   int position() const { return kNoSourcePosition; }
   void set_function_token_position(int position) {}
@@ -645,6 +644,7 @@ class PreParserFactory {
   }
   PreParserExpression NewCall(PreParserExpression expression,
                               const PreParserExpressionList& arguments, int pos,
+                              bool has_spread,
                               Call::PossiblyEval possibly_eval = Call::NOT_EVAL,
                               bool optional_chain = false) {
     if (possibly_eval == Call::IS_POSSIBLY_EVAL) {
@@ -661,7 +661,7 @@ class PreParserFactory {
   }
   PreParserExpression NewCallNew(const PreParserExpression& expression,
                                  const PreParserExpressionList& arguments,
-                                 int pos) {
+                                 int pos, bool has_spread) {
     return PreParserExpression::Default();
   }
   PreParserStatement NewReturnStatement(
@@ -935,10 +935,9 @@ class PreParser : public ParserBase<PreParser> {
             PendingCompilationErrorHandler* pending_error_handler,
             RuntimeCallStats* runtime_call_stats, Logger* logger,
             UnoptimizedCompileFlags flags, bool parsing_on_main_thread = true)
-      : ParserBase<PreParser>(zone, scanner, stack_limit, nullptr,
-                              ast_value_factory, pending_error_handler,
-                              runtime_call_stats, logger, flags,
-                              parsing_on_main_thread),
+      : ParserBase<PreParser>(zone, scanner, stack_limit, ast_value_factory,
+                              pending_error_handler, runtime_call_stats, logger,
+                              flags, parsing_on_main_thread),
         use_counts_(nullptr),
         preparse_data_builder_(nullptr),
         preparse_data_builder_buffer_() {
@@ -1048,15 +1047,6 @@ class PreParser : public ParserBase<PreParser> {
     scope->SetLanguageMode(mode);
   }
   V8_INLINE void SetAsmModule() {}
-
-  V8_INLINE PreParserExpression SpreadCall(const PreParserExpression& function,
-                                           const PreParserExpressionList& args,
-                                           int pos,
-                                           Call::PossiblyEval possibly_eval,
-                                           bool optional_chain);
-  V8_INLINE PreParserExpression
-  SpreadCallNew(const PreParserExpression& function,
-                const PreParserExpressionList& args, int pos);
 
   V8_INLINE void PrepareGeneratorVariables() {}
   V8_INLINE void RewriteAsyncFunctionBody(
@@ -1332,6 +1322,14 @@ class PreParser : public ParserBase<PreParser> {
   V8_INLINE static bool IsBoilerplateProperty(
       const PreParserExpression& property) {
     // PreParser doesn't count boilerplate properties.
+    return false;
+  }
+
+  V8_INLINE bool ParsingExtension() const {
+    // Preparsing is disabled for extensions (because the extension
+    // details aren't passed to lazily compiled functions), so we
+    // don't accept "native function" in the preparser and there is
+    // no need to keep track of "native".
     return false;
   }
 
@@ -1681,20 +1679,6 @@ class PreParser : public ParserBase<PreParser> {
   PreparseDataBuilder* preparse_data_builder_;
   std::vector<void*> preparse_data_builder_buffer_;
 };
-
-PreParserExpression PreParser::SpreadCall(const PreParserExpression& function,
-                                          const PreParserExpressionList& args,
-                                          int pos,
-                                          Call::PossiblyEval possibly_eval,
-                                          bool optional_chain) {
-  return factory()->NewCall(function, args, pos, possibly_eval, optional_chain);
-}
-
-PreParserExpression PreParser::SpreadCallNew(
-    const PreParserExpression& function, const PreParserExpressionList& args,
-    int pos) {
-  return factory()->NewCallNew(function, args, pos);
-}
 
 }  // namespace internal
 }  // namespace v8

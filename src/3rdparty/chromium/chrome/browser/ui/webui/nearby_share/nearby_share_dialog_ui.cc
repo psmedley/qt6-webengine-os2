@@ -16,14 +16,17 @@
 #include "chrome/browser/nearby_sharing/nearby_sharing_service_impl.h"
 #include "chrome/browser/nearby_sharing/text_attachment.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/nearby_share/shared_resources.h"
 #include "chrome/browser/ui/webui/plural_string_handler.h"
+#include "chrome/browser/ui/webui/sanitized_image_source.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/nearby_share_dialog_resources.h"
 #include "chrome/grit/nearby_share_dialog_resources_map.h"
 #include "chrome/grit/theme_resources.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -46,6 +49,9 @@ NearbyShareDialogUI::NearbyShareDialogUI(content::WebUI* web_ui)
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(chrome::kChromeUINearbyShareHost);
 
+  content::URLDataSource::Add(profile,
+                              std::make_unique<SanitizedImageSource>(profile));
+
   webui::SetupWebUIDataSource(html_source,
                               base::make_span(kNearbyShareDialogResources,
                                               kNearbyShareDialogResourcesSize),
@@ -62,6 +68,7 @@ NearbyShareDialogUI::NearbyShareDialogUI(content::WebUI* web_ui)
   RegisterNearbySharedStrings(html_source);
   html_source->UseStringsJs();
 
+  // Register callback to handle "cancel-button-event" from nearby_*.html files.
   web_ui->RegisterMessageCallback(
       "close", base::BindRepeating(&NearbyShareDialogUI::HandleClose,
                                    base::Unretained(this)));
@@ -71,6 +78,8 @@ NearbyShareDialogUI::NearbyShareDialogUI(content::WebUI* web_ui)
       "nearbyShareContactVisibilityNumUnreachable",
       IDS_NEARBY_CONTACT_VISIBILITY_NUM_UNREACHABLE);
   web_ui->AddMessageHandler(std::move(plural_string_handler));
+  // Add the metrics handler to write uma stats.
+  web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 
   content::WebUIDataSource::Add(profile, html_source);
 
@@ -79,15 +88,6 @@ NearbyShareDialogUI::NearbyShareDialogUI(content::WebUI* web_ui)
 }
 
 NearbyShareDialogUI::~NearbyShareDialogUI() = default;
-
-void NearbyShareDialogUI::AddObserver(NearbyShareDialogUI::Observer* observer) {
-  observers_.AddObserver(observer);
-}
-
-void NearbyShareDialogUI::RemoveObserver(
-    NearbyShareDialogUI::Observer* observer) {
-  observers_.RemoveObserver(observer);
-}
 
 void NearbyShareDialogUI::SetAttachments(
     std::vector<std::unique_ptr<Attachment>> attachments) {
@@ -119,8 +119,12 @@ void NearbyShareDialogUI::BindInterface(
 }
 
 void NearbyShareDialogUI::HandleClose(const base::ListValue* args) {
-  for (auto& observer : observers_) {
-    observer.OnClose();
+  if (sharesheet_controller_) {
+    sharesheet_controller_->CloseBubble(sharesheet::SharesheetResult::kCancel);
+
+    // We need to clear out the controller here to protect against calling
+    // CloseBubble() more than once, which will cause a crash.
+    sharesheet_controller_ = nullptr;
   }
 }
 
@@ -135,8 +139,8 @@ void NearbyShareDialogUI::SetAttachmentFromQueryParameter(const GURL& url) {
            {"text", TextAttachment::Type::kText}}) {
     if (net::GetValueForKeyInQuery(url, text_type.first, &value)) {
       attachments.push_back(std::make_unique<TextAttachment>(
-          text_type.second, value, /*title=*/base::nullopt,
-          /*mime_type=*/base::nullopt));
+          text_type.second, value, /*title=*/absl::nullopt,
+          /*mime_type=*/absl::nullopt));
       SetAttachments(std::move(attachments));
       return;
     }

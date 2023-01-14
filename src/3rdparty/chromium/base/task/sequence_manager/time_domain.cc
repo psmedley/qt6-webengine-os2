@@ -9,6 +9,7 @@
 #include "base/task/sequence_manager/task_queue_impl.h"
 #include "base/task/sequence_manager/work_queue.h"
 #include "base/threading/thread_checker.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 namespace sequence_manager {
@@ -50,19 +51,18 @@ void TimeDomain::UnregisterQueue(internal::TaskQueueImpl* queue) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   DCHECK_EQ(queue->GetTimeDomain(), this);
   LazyNow lazy_now(CreateLazyNow());
-  SetNextWakeUpForQueue(queue, nullopt, &lazy_now);
+  SetNextWakeUpForQueue(queue, absl::nullopt, &lazy_now);
 }
 
-void TimeDomain::SetNextWakeUpForQueue(
-    internal::TaskQueueImpl* queue,
-    Optional<internal::DelayedWakeUp> wake_up,
-    LazyNow* lazy_now) {
+void TimeDomain::SetNextWakeUpForQueue(internal::TaskQueueImpl* queue,
+                                       absl::optional<DelayedWakeUp> wake_up,
+                                       LazyNow* lazy_now) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   DCHECK_EQ(queue->GetTimeDomain(), this);
   DCHECK(queue->IsQueueEnabled() || !wake_up);
 
-  Optional<TimeTicks> previous_wake_up;
-  Optional<internal::WakeUpResolution> previous_queue_resolution;
+  absl::optional<TimeTicks> previous_wake_up;
+  absl::optional<WakeUpResolution> previous_queue_resolution;
   if (!delayed_wake_up_queue_.empty())
     previous_wake_up = delayed_wake_up_queue_.Min().wake_up.time;
   if (queue->heap_handle().IsValid()) {
@@ -86,15 +86,15 @@ void TimeDomain::SetNextWakeUpForQueue(
       delayed_wake_up_queue_.erase(queue->heap_handle());
   }
 
-  Optional<TimeTicks> new_wake_up;
+  absl::optional<TimeTicks> new_wake_up;
   if (!delayed_wake_up_queue_.empty())
     new_wake_up = delayed_wake_up_queue_.Min().wake_up.time;
 
   if (previous_queue_resolution &&
-      *previous_queue_resolution == internal::WakeUpResolution::kHigh) {
+      *previous_queue_resolution == WakeUpResolution::kHigh) {
     pending_high_res_wake_up_count_--;
   }
-  if (wake_up && wake_up->resolution == internal::WakeUpResolution::kHigh)
+  if (wake_up && wake_up->resolution == WakeUpResolution::kHigh)
     pending_high_res_wake_up_count_++;
   DCHECK_GE(pending_high_res_wake_up_count_, 0);
 
@@ -121,20 +121,40 @@ void TimeDomain::SetNextWakeUpForQueue(
 
 void TimeDomain::MoveReadyDelayedTasksToWorkQueues(LazyNow* lazy_now) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
-  // Wake up any queues with pending delayed work.  Note std::multimap stores
-  // the elements sorted by key, so the begin() iterator points to the earliest
-  // queue to wake-up.
+  // Wake up any queues with pending delayed work.
+  bool update_needed = false;
   while (!delayed_wake_up_queue_.empty() &&
          delayed_wake_up_queue_.Min().wake_up.time <= lazy_now->Now()) {
     internal::TaskQueueImpl* queue = delayed_wake_up_queue_.Min().queue;
-    queue->MoveReadyDelayedTasksToWorkQueue(lazy_now);
+    // OnWakeUp() is expected to update the next wake-up for this queue with
+    // SetNextWakeUpForQueue(), thus allowing us to make progress.
+    queue->OnWakeUp(lazy_now);
+    update_needed = true;
+  }
+  if (!update_needed || delayed_wake_up_queue_.empty())
+    return;
+  // If any queue was notified, possibly update following queues. This ensures
+  // the wake up is up to date, which is necessary because calling OnWakeUp() on
+  // a throttled queue may affect state that is shared between other related
+  // throttled queues. The wake up for an affected queue might be pushed back
+  // and needs to be updated. This is done lazily only once the related queue
+  // becomes the next one to wake up, since that wake up can't be moved up.
+  // |delayed_wake_up_queue_| is non-empty here, per the condition above.
+  internal::TaskQueueImpl* queue = delayed_wake_up_queue_.Min().queue;
+  queue->UpdateDelayedWakeUp(lazy_now);
+  while (!delayed_wake_up_queue_.empty()) {
+    internal::TaskQueueImpl* old_queue =
+        std::exchange(queue, delayed_wake_up_queue_.Min().queue);
+    if (old_queue == queue)
+      break;
+    queue->UpdateDelayedWakeUp(lazy_now);
   }
 }
 
-Optional<TimeTicks> TimeDomain::NextScheduledRunTime() const {
+absl::optional<TimeTicks> TimeDomain::NextScheduledRunTime() const {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   if (delayed_wake_up_queue_.empty())
-    return nullopt;
+    return absl::nullopt;
   return delayed_wake_up_queue_.Min().wake_up.time;
 }
 

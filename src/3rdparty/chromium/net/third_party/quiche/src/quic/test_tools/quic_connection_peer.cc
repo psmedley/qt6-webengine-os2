@@ -10,6 +10,7 @@
 #include "quic/core/quic_received_packet_manager.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_socket_address.h"
+#include "quic/test_tools/quic_connection_id_manager_peer.h"
 #include "quic/test_tools/quic_framer_peer.h"
 #include "quic/test_tools/quic_sent_packet_manager_peer.h"
 
@@ -161,6 +162,25 @@ QuicAlarm* QuicConnectionPeer::GetDiscardPreviousOneRttKeysAlarm(
 QuicAlarm* QuicConnectionPeer::GetDiscardZeroRttDecryptionKeysAlarm(
     QuicConnection* connection) {
   return connection->discard_zero_rtt_decryption_keys_alarm_.get();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetRetirePeerIssuedConnectionIdAlarm(
+    QuicConnection* connection) {
+  if (connection->peer_issued_cid_manager_ == nullptr) {
+    return nullptr;
+  }
+  return QuicConnectionIdManagerPeer::GetRetirePeerIssuedConnectionIdAlarm(
+      connection->peer_issued_cid_manager_.get());
+}
+// static
+QuicAlarm* QuicConnectionPeer::GetRetireSelfIssuedConnectionIdAlarm(
+    QuicConnection* connection) {
+  if (connection->self_issued_cid_manager_ == nullptr) {
+    return nullptr;
+  }
+  return QuicConnectionIdManagerPeer::GetRetireSelfIssuedConnectionIdAlarm(
+      connection->self_issued_cid_manager_.get());
 }
 
 // static
@@ -378,7 +398,7 @@ QuicIdleNetworkDetector& QuicConnectionPeer::GetIdleNetworkDetector(
 void QuicConnectionPeer::SetServerConnectionId(
     QuicConnection* connection,
     const QuicConnectionId& server_connection_id) {
-  connection->server_connection_id_ = server_connection_id;
+  connection->default_path_.server_connection_id = server_connection_id;
   connection->InstallInitialCrypters(server_connection_id);
 }
 
@@ -406,7 +426,7 @@ void QuicConnectionPeer::SendPing(QuicConnection* connection) {
 void QuicConnectionPeer::SetLastPacketDestinationAddress(
     QuicConnection* connection,
     const QuicSocketAddress& address) {
-  connection->last_packet_destination_address_ = address;
+  connection->last_received_packet_info_.destination_address = address;
 }
 
 // static
@@ -428,6 +448,18 @@ QuicByteCount QuicConnectionPeer::BytesReceivedOnAlternativePath(
 }
 
 // static
+QuicConnectionId QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+    const QuicConnection* connection) {
+  return connection->alternative_path_.client_connection_id;
+}
+
+// static
+QuicConnectionId QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+    const QuicConnection* connection) {
+  return connection->alternative_path_.server_connection_id;
+}
+
+// static
 bool QuicConnectionPeer::IsAlternativePathValidated(
     QuicConnection* connection) {
   return connection->alternative_path_.validated;
@@ -445,6 +477,55 @@ bool QuicConnectionPeer::IsAlternativePath(
 QuicByteCount QuicConnectionPeer::BytesReceivedBeforeAddressValidation(
     QuicConnection* connection) {
   return connection->default_path_.bytes_received_before_address_validation;
+}
+
+// static
+void QuicConnectionPeer::EnableMultipleConnectionIdSupport(
+    QuicConnection* connection) {
+  connection->support_multiple_connection_ids_ = true;
+}
+
+// static
+void QuicConnectionPeer::ResetPeerIssuedConnectionIdManager(
+    QuicConnection* connection) {
+  connection->peer_issued_cid_manager_ = nullptr;
+}
+
+// static
+QuicConnection::PathState* QuicConnectionPeer::GetDefaultPath(
+    QuicConnection* connection) {
+  return &connection->default_path_;
+}
+
+// static
+QuicConnection::PathState* QuicConnectionPeer::GetAlternativePath(
+    QuicConnection* connection) {
+  return &connection->alternative_path_;
+}
+
+// static
+void QuicConnectionPeer::RetirePeerIssuedConnectionIdsNoLongerOnPath(
+    QuicConnection* connection) {
+  connection->RetirePeerIssuedConnectionIdsNoLongerOnPath();
+}
+
+// static
+bool QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(
+    const QuicConnection* connection) {
+  return connection->peer_issued_cid_manager_->HasUnusedConnectionId();
+}
+
+// static
+bool QuicConnectionPeer::HasSelfIssuedConnectionIdToConsume(
+    const QuicConnection* connection) {
+  return connection->self_issued_cid_manager_->HasConnectionIdToConsume();
+}
+
+// static
+QuicSelfIssuedConnectionIdManager*
+QuicConnectionPeer::GetSelfIssuedConnectionIdManager(
+    QuicConnection* connection) {
+  return connection->self_issued_cid_manager_.get();
 }
 
 }  // namespace test

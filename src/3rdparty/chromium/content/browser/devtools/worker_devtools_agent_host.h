@@ -16,6 +16,10 @@ namespace content {
 
 class DedicatedWorkerHost;
 
+namespace protocol {
+class TargetAutoAttacher;
+}  // namespace protocol
+
 // The WorkerDevToolsAgentHost is the devtools host class for dedicated workers,
 // (but not shared or service workers), and worklets. It does not have a pointer
 // to a DedicatedWorkerHost object, but in case the host is for a dedicated
@@ -42,7 +46,7 @@ class WorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   bool Activate() override;
   void Reload() override;
   bool Close() override;
-  base::Optional<network::CrossOriginEmbedderPolicy>
+  absl::optional<network::CrossOriginEmbedderPolicy>
   cross_origin_embedder_policy(const std::string& id) override;
 
  private:
@@ -58,6 +62,7 @@ class WorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   const GURL url_;
   const std::string name_;
   const std::string parent_id_;
+  std::unique_ptr<protocol::TargetAutoAttacher> auto_attacher_;
   base::OnceCallback<void(DevToolsAgentHostImpl*)> destroyed_callback_;
   const base::UnguessableToken devtools_worker_token_;
 
@@ -66,4 +71,4 @@ class WorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_DEVTOOLS_DEDICATED_WORKER_DEVTOOLS_AGENT_HOST_H_
+#endif  // CONTENT_BROWSER_DEVTOOLS_WORKER_DEVTOOLS_AGENT_HOST_H_

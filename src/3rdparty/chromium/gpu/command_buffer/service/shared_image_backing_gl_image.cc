@@ -14,6 +14,7 @@
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
+#include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_gl_api_implementation.h"
@@ -278,7 +279,8 @@ bool SharedImageRepresentationOverlayImpl::BeginReadAccess(
 
 void SharedImageRepresentationOverlayImpl::EndReadAccess(
     gfx::GpuFenceHandle release_fence) {
-  DCHECK(release_fence.is_null());
+  auto* gl_backing = static_cast<SharedImageBackingGLImage*>(backing());
+  gl_backing->SetReleaseFence(std::move(release_fence));
 }
 
 gl::GLImage* SharedImageRepresentationOverlayImpl::GetGLImage() {
@@ -373,8 +375,16 @@ void SharedImageBackingGLImage::ReleaseGLTexture(bool have_context) {
   }
   if (IsPassthrough()) {
     if (passthrough_texture_) {
-      if (!have_context)
+      if (have_context) {
+        if (!passthrough_texture_->is_bind_pending()) {
+          const GLenum target = GetGLTarget();
+          gl::ScopedTextureBinder binder(target,
+                                         passthrough_texture_->service_id());
+          image_->ReleaseTexImage(target);
+        }
+      } else {
         passthrough_texture_->MarkContextLost();
+      }
       passthrough_texture_.reset();
     }
   } else {
@@ -401,6 +411,11 @@ GLuint SharedImageBackingGLImage::GetGLServiceId() const {
 std::unique_ptr<gfx::GpuFence>
 SharedImageBackingGLImage::GetLastWriteGpuFence() {
   return last_write_gl_fence_ ? last_write_gl_fence_->GetGpuFence() : nullptr;
+}
+
+void SharedImageBackingGLImage::SetReleaseFence(
+    gfx::GpuFenceHandle release_fence) {
+  release_fence_ = std::move(release_fence);
 }
 
 scoped_refptr<gfx::NativePixmap> SharedImageBackingGLImage::GetNativePixmap() {
@@ -477,18 +492,19 @@ SharedImageBackingGLImage::ProduceGLTexturePassthrough(
 std::unique_ptr<SharedImageRepresentationOverlay>
 SharedImageBackingGLImage::ProduceOverlay(SharedImageManager* manager,
                                           MemoryTypeTracker* tracker) {
-#if defined(OS_MAC) || defined(USE_OZONE)
+#if defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN)
   return std::make_unique<SharedImageRepresentationOverlayImpl>(
       manager, this, tracker, image_);
-#else   // !(defined(OS_MAC) || defined(USE_OZONE))
+#else   // !(defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN))
   return SharedImageBacking::ProduceOverlay(manager, tracker);
-#endif  // defined(OS_MAC) || defined(USE_OZONE)
+#endif  // defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN)
 }
 
 std::unique_ptr<SharedImageRepresentationDawn>
 SharedImageBackingGLImage::ProduceDawn(SharedImageManager* manager,
                                        MemoryTypeTracker* tracker,
-                                       WGPUDevice device) {
+                                       WGPUDevice device,
+                                       WGPUBackendType backend_type) {
 #if defined(OS_MAC)
   auto result = SharedImageBackingFactoryIOSurface::ProduceDawn(
       manager, this, tracker, device, image_);
@@ -501,7 +517,7 @@ SharedImageBackingGLImage::ProduceDawn(SharedImageManager* manager,
   }
 
   return SharedImageBackingGLCommon::ProduceDawnCommon(
-      factory(), manager, tracker, device, this, IsPassthrough());
+      factory(), manager, tracker, device, backend_type, this, IsPassthrough());
 }
 
 std::unique_ptr<SharedImageRepresentationSkia>
@@ -528,7 +544,9 @@ SharedImageBackingGLImage::ProduceSkia(
     } else {
       GrBackendTexture backend_texture;
       GetGrBackendTexture(context_state->feature_info(), GetGLTarget(), size(),
-                          GetGLServiceId(), format(), &backend_texture);
+                          GetGLServiceId(), format(),
+                          context_state->gr_context()->threadSafeProxy(),
+                          &backend_texture);
       cached_promise_texture_ = SkPromiseImageTexture::Make(backend_texture);
     }
   }
@@ -635,6 +653,14 @@ void SharedImageBackingGLImage::Update(
 
 bool SharedImageBackingGLImage::
     SharedImageRepresentationGLTextureBeginAccess() {
+  if (!release_fence_.is_null()) {
+    auto fence = gfx::GpuFence(std::move(release_fence_));
+    if (gl::GLFence::IsGpuFenceSupported()) {
+      gl::GLFence::CreateFromGpuFence(std::move(fence))->ServerWait();
+    } else {
+      fence.Wait();
+    }
+  }
   return BindOrCopyImageIfNeeded();
 }
 
@@ -661,6 +687,7 @@ void SharedImageBackingGLImage::SharedImageRepresentationGLTextureEndAccess(
     if (!passthrough_texture_->is_bind_pending()) {
       image_->ReleaseTexImage(target);
       image_bind_or_copy_needed_ = true;
+      passthrough_texture_->set_is_bind_pending(true);
     }
   }
 #else

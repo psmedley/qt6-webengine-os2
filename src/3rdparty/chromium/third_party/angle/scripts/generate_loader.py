@@ -155,9 +155,6 @@ def gen_gles_loader(gles_preamble, path, header_lib, export, internal_prefix, fi
 
     all_cmds = xml.all_cmd_names.get_all_commands()
 
-    if registry_xml.support_EGL_ANGLE_explicit_context:
-        all_cmds += [cmd + "ContextANGLE" for cmd in xml.all_cmd_names.get_all_commands()]
-
     # Ensure there are no duplicates
     assert (len(all_cmds) == len(set(all_cmds))), "Duplicate command names found"
 
@@ -266,14 +263,7 @@ def main():
 
     # Handle inputs/outputs for run_code_generation.py's auto_script
     if len(sys.argv) > 1:
-        inputs = [
-            'gl.xml',
-            'gl_angle_ext.xml',
-            'egl.xml',
-            'egl_angle_ext.xml',
-            'registry_xml.py',
-            'wgl.xml',
-        ]
+        inputs = registry_xml.xml_inputs
         outputs = [
             '../src/libEGL/egl_loader_autogen.cpp',
             '../src/libEGL/egl_loader_autogen.h',

@@ -109,7 +109,7 @@ hb_set_destroy (hb_set_t *set)
 
   set->fini_shallow ();
 
-  free (set);
+  hb_free (set);
 }
 
 /**
@@ -173,6 +173,24 @@ hb_set_allocation_successful (const hb_set_t  *set)
 }
 
 /**
+ * hb_set_copy:
+ * @set: A set
+ *
+ * Allocate a copy of @set.
+ *
+ * Return value: Newly-allocated set.
+ *
+ * Since: 2.8.2
+ **/
+hb_set_t *
+hb_set_copy (const hb_set_t *set)
+{
+  hb_set_t *copy = hb_set_create ();
+  copy->set (*set);
+  return copy;
+}
+
+/**
  * hb_set_clear:
  * @set: A set
  *
@@ -183,6 +201,9 @@ hb_set_allocation_successful (const hb_set_t  *set)
 void
 hb_set_clear (hb_set_t *set)
 {
+  if (unlikely (hb_object_is_immutable (set)))
+    return;
+
   set->clear ();
 }
 
@@ -280,6 +301,9 @@ hb_set_del (hb_set_t       *set,
  * Removes all of the elements from @first to @last
  * (inclusive) from @set.
  *
+ * If @last is #HB_SET_VALUE_INVALID, then all values
+ * greater than or equal to @first are removed.
+ *
  * Since: 0.9.7
  **/
 void
@@ -306,7 +330,7 @@ hb_bool_t
 hb_set_is_equal (const hb_set_t *set,
 		 const hb_set_t *other)
 {
-  return set->is_equal (other);
+  return set->is_equal (*other);
 }
 
 /**
@@ -324,7 +348,7 @@ hb_bool_t
 hb_set_is_subset (const hb_set_t *set,
 		  const hb_set_t *larger_set)
 {
-  return set->is_subset (larger_set);
+  return set->is_subset (*larger_set);
 }
 
 /**
@@ -340,7 +364,7 @@ void
 hb_set_set (hb_set_t       *set,
 	    const hb_set_t *other)
 {
-  set->set (other);
+  set->set (*other);
 }
 
 /**
@@ -356,7 +380,7 @@ void
 hb_set_union (hb_set_t       *set,
 	      const hb_set_t *other)
 {
-  set->union_ (other);
+  set->union_ (*other);
 }
 
 /**
@@ -372,7 +396,7 @@ void
 hb_set_intersect (hb_set_t       *set,
 		  const hb_set_t *other)
 {
-  set->intersect (other);
+  set->intersect (*other);
 }
 
 /**
@@ -388,7 +412,7 @@ void
 hb_set_subtract (hb_set_t       *set,
 		 const hb_set_t *other)
 {
-  set->subtract (other);
+  set->subtract (*other);
 }
 
 /**
@@ -405,7 +429,7 @@ void
 hb_set_symmetric_difference (hb_set_t       *set,
 			     const hb_set_t *other)
 {
-  set->symmetric_difference (other);
+  set->symmetric_difference (*other);
 }
 
 #ifndef HB_DISABLE_DEPRECATED

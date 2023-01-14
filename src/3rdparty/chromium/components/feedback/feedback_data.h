@@ -18,11 +18,14 @@
 namespace base {
 class RefCountedString;
 }
+
+class TracingManager;
+
 namespace feedback {
 
 class FeedbackData : public FeedbackCommon {
  public:
-  FeedbackData(feedback::FeedbackUploader* uploader);
+  FeedbackData(FeedbackUploader* uploader, TracingManager* tracing_manager);
 
   // Called once we've updated all the data from the feedback page.
   void OnFeedbackPageDataComplete();
@@ -46,6 +49,10 @@ class FeedbackData : public FeedbackCommon {
   void SendReport();
 
   // Getters
+  const std::string& attached_filename() const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return attached_filename_;
+  }
   const std::string& attached_file_uuid() const {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return attached_file_uuid_;
@@ -53,6 +60,10 @@ class FeedbackData : public FeedbackCommon {
   const std::string& screenshot_uuid() const {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return screenshot_uuid_;
+  }
+  int trace_id() const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return trace_id_;
   }
   bool from_assistant() const {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -100,19 +111,20 @@ class FeedbackData : public FeedbackCommon {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  feedback::FeedbackUploader* const uploader_
-      GUARDED_BY_CONTEXT(sequence_checker_);  // Not owned.
+  feedback::FeedbackUploader* const uploader_ = nullptr;  // Not owned.
 
   std::string attached_filename_ GUARDED_BY_CONTEXT(sequence_checker_);
   std::string attached_file_uuid_ GUARDED_BY_CONTEXT(sequence_checker_);
   std::string screenshot_uuid_ GUARDED_BY_CONTEXT(sequence_checker_);
 
-  int trace_id_ GUARDED_BY_CONTEXT(sequence_checker_);
+  TracingManager* const tracing_manager_ = nullptr;  // Not owned.
+  int trace_id_ GUARDED_BY_CONTEXT(sequence_checker_) = 0;
 
-  int pending_op_count_ GUARDED_BY_CONTEXT(sequence_checker_);
-  bool report_sent_ GUARDED_BY_CONTEXT(sequence_checker_);
-  bool from_assistant_ GUARDED_BY_CONTEXT(sequence_checker_);
-  bool assistant_debug_info_allowed_ GUARDED_BY_CONTEXT(sequence_checker_);
+  int pending_op_count_ GUARDED_BY_CONTEXT(sequence_checker_) = 1;
+  bool report_sent_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+  bool from_assistant_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+  bool assistant_debug_info_allowed_ GUARDED_BY_CONTEXT(sequence_checker_) =
+      false;
 
   DISALLOW_COPY_AND_ASSIGN(FeedbackData);
 };

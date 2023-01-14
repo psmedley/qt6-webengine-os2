@@ -7,12 +7,13 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "content/browser/webid/idp_network_request_manager.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/frame_service_base.h"
+#include "content/public/browser/document_service_base.h"
 #include "content/public/browser/identity_request_dialog_controller.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/webid/federated_auth_request.mojom.h"
@@ -20,18 +21,20 @@
 
 namespace content {
 
+class FederatedIdentityRequestPermissionContextDelegate;
+class FederatedIdentitySharingPermissionContextDelegate;
 class RenderFrameHost;
 
 // FederatedAuthRequestImpl handles mojo connections from the renderer to
 // fulfill WebID-related requests.
 //
 // In practice, it is owned and managed by a RenderFrameHost. It accomplishes
-// that via subclassing FrameServiceBase, which observes the lifecycle of a
-// RenderFrameHost and manages it own memory.
+// that via subclassing DocumentServiceBase, which observes the lifecycle of a
+// RenderFrameHost and manages its own memory.
 // Create() creates a self-managed instance of FederatedAuthRequestImpl and
 // binds it to the receiver.
 class CONTENT_EXPORT FederatedAuthRequestImpl
-    : public FrameServiceBase<blink::mojom::FederatedAuthRequest> {
+    : public DocumentServiceBase<blink::mojom::FederatedAuthRequest> {
  public:
   static void Create(RenderFrameHost*,
                      mojo::PendingReceiver<blink::mojom::FederatedAuthRequest>);
@@ -47,34 +50,54 @@ class CONTENT_EXPORT FederatedAuthRequestImpl
 
   // blink::mojom::FederatedAuthRequest:
   void RequestIdToken(const GURL& provider,
-                      const std::string& id_request,
+                      const std::string& client_id,
+                      const std::string& nonce,
+                      blink::mojom::RequestMode mode,
                       RequestIdTokenCallback) override;
+  void Logout(const std::vector<std::string>& logout_endpoints,
+              LogoutCallback) override;
 
   void SetNetworkManagerForTests(
       std::unique_ptr<IdpNetworkRequestManager> manager);
   void SetDialogControllerForTests(
       std::unique_ptr<IdentityRequestDialogController> controller);
+  void SetRequestPermissionDelegateForTests(
+      FederatedIdentityRequestPermissionContextDelegate*);
+  void SetSharingPermissionDelegateForTests(
+      FederatedIdentitySharingPermissionContextDelegate*);
 
  private:
-
   void OnWellKnownFetched(IdpNetworkRequestManager::FetchStatus status,
-                          const std::string& idp_endpoint);
+                          IdpNetworkRequestManager::Endpoints);
 
   void OnSigninApproved(IdentityRequestDialogController::UserApproval approval);
   void OnSigninResponseReceived(IdpNetworkRequestManager::SigninResponse status,
-                                const std::string& response);
+                                const std::string& url_or_token);
   void OnTokenProvided(const std::string& id_token);
   void OnIdpPageClosed();
   void OnTokenProvisionApproved(
       IdentityRequestDialogController::UserApproval approval);
-
+  void OnAccountsResponseReceived(
+      IdpNetworkRequestManager::AccountsResponse status,
+      IdpNetworkRequestManager::AccountList accounts);
+  void OnAccountSelected(const std::string& account_id);
+  void OnTokenResponseReceived(IdpNetworkRequestManager::TokenResponse status,
+                               const std::string& id_token);
+  void DispatchOneLogout();
+  void OnLogoutCompleted(IdpNetworkRequestManager::LogoutResponse status);
   std::unique_ptr<WebContents> CreateIdpWebContents();
   void CompleteRequest(blink::mojom::RequestIdTokenStatus,
                        const std::string& id_token);
+  void CompleteLogoutRequest(blink::mojom::LogoutStatus);
 
   std::unique_ptr<IdpNetworkRequestManager> CreateNetworkManager(
       const GURL& provider);
   std::unique_ptr<IdentityRequestDialogController> CreateDialogController();
+
+  FederatedIdentityRequestPermissionContextDelegate*
+  GetRequestPermissionContext();
+  FederatedIdentitySharingPermissionContextDelegate*
+  GetSharingPermissionContext();
 
   std::unique_ptr<IdpNetworkRequestManager> network_manager_;
   std::unique_ptr<IdentityRequestDialogController> request_dialog_controller_;
@@ -85,21 +108,47 @@ class CONTENT_EXPORT FederatedAuthRequestImpl
 
   // Parameters of auth request.
   GURL provider_;
-  std::string id_request_;
+
+  // The federated auth request parameters provided by RP. Note that these
+  // parameters will uniquely identify the users so they should only be passed
+  // to IDP after user permission has been granted.
+  //
+  // TODO(majidvp): Implement a mechanism (e.g., a getter) that checks the
+  // request permission is granted before providing access to this parameter
+  // this way we avoid accidentally sharing these values.
+  std::string client_id_;
+  std::string nonce_;
+
+  blink::mojom::RequestMode mode_;
 
   // Fetched from the IDP well-known configuration.
-  // TODO(kenrb): This will expand to multiple fields at some point, and
-  // should be wrapped in a struct at that time.
-  GURL idp_endpoint_url_;
+  struct {
+    GURL idp;
+    GURL token;
+    GURL accounts;
+  } endpoints_;
 
-  // The WebContents that is used to load the IDP sign-up page. This is created
-  // here to allow us to setup proper callbacks on it using
-  // |IdTokenRequestCallbackData|. It is then passed along to chrome/browser/ui
-  // machinery to be used to load IDP sign-in content.
+  // The WebContents that is used to load the IDP sign-up page. This is
+  // created here to allow us to setup proper callbacks on it using
+  // |IdTokenRequestCallbackData|. It is then passed along to
+  // chrome/browser/ui machinery to be used to load IDP sign-in content.
   std::unique_ptr<WebContents> idp_web_contents_;
 
+  FederatedIdentityRequestPermissionContextDelegate*
+      request_permission_delegate_ = nullptr;
+  FederatedIdentitySharingPermissionContextDelegate*
+      sharing_permission_delegate_ = nullptr;
+
+  // The account that was selected by the user. This is only applicable to the
+  // mediation flow.
+  std::string account_id_;
   std::string id_token_;
-  RequestIdTokenCallback callback_;
+  RequestIdTokenCallback auth_request_callback_;
+
+  std::vector<std::string> logout_endpoints_;
+  blink::mojom::LogoutStatus logout_status_ =
+      blink::mojom::LogoutStatus::kSuccess;
+  LogoutCallback logout_callback_;
 
   base::WeakPtrFactory<FederatedAuthRequestImpl> weak_ptr_factory_{this};
 };

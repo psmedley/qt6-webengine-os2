@@ -4,8 +4,8 @@
 
 #include "media/audio/android/opensles_input.h"
 
+#include "base/cxx17_backports.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "media/audio/android/audio_manager_android.h"
 #include "media/base/audio_bus.h"
@@ -63,18 +63,17 @@ OpenSLESInputStream::~OpenSLESInputStream() {
   DCHECK(!audio_data_[0]);
 }
 
-bool OpenSLESInputStream::Open() {
+AudioInputStream::OpenOutcome OpenSLESInputStream::Open() {
   DVLOG(2) << __PRETTY_FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
   if (engine_object_.Get())
-    return false;
+    return AudioInputStream::OpenOutcome::kFailed;
 
   if (!CreateRecorder())
-    return false;
+    return AudioInputStream::OpenOutcome::kFailed;
 
   SetupAudioBuffer();
-
-  return true;
+  return AudioInputStream::OpenOutcome::kSuccess;
 }
 
 void OpenSLESInputStream::Start(AudioInputCallback* callback) {

@@ -6,10 +6,6 @@
 
 #include "build/chromeos_buildflags.h"
 
-#if !defined(OS_IOS)
-#include "media/media_buildflags.h"  // nogncheck
-#endif
-
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
@@ -24,12 +20,13 @@ namespace features {
 // If enabled, calculate native window occlusion - Windows-only.
 const base::Feature kCalculateNativeWinOcclusion{
     "CalculateNativeWinOcclusion", base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // OW_WIN
 
-// Whether or not filenames are supported on the clipboard.
-// https://crbug.com/1175483
-const base::Feature kClipboardFilenames{"ClipboardFilenames",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
+// If enabled, listen for screen power state change and factor into the native
+// window occlusion detection - Windows-only.
+const base::Feature kScreenPowerListenerForNativeWinOcclusion{
+    "ScreenPowerListenerForNativeWinOcclusion",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+#endif  // OW_WIN
 
 // Whether or not to delegate color queries to the color provider.
 const base::Feature kColorProviderRedirection = {
@@ -52,12 +49,18 @@ bool IsNewShortcutMappingEnabled() {
          base::FeatureList::IsEnabled(kNewShortcutMapping);
 }
 
-// This feature supercedes kNewShortcutMapping.
-const base::Feature kImprovedKeyboardShortcuts = {
-    "ImprovedKeyboardShortcuts", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDeprecateAltClick = {"DeprecateAltClick",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
-bool IsImprovedKeyboardShortcutsEnabled() {
-  return base::FeatureList::IsEnabled(kImprovedKeyboardShortcuts);
+bool IsDeprecateAltClickEnabled() {
+  return base::FeatureList::IsEnabled(kDeprecateAltClick);
+}
+
+const base::Feature kShortcutCustomizationApp = {
+    "ShortcutCustomizationApp", base::FEATURE_DISABLED_BY_DEFAULT};
+
+bool IsShortcutCustomizationAppEnabled() {
+  return base::FeatureList::IsEnabled(kShortcutCustomizationApp);
 }
 
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
@@ -84,8 +87,8 @@ const base::Feature kSystemCaptionStyle{"SystemCaptionStyle",
 const base::Feature kSystemKeyboardLock{"SystemKeyboardLock",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kNotificationIndicator = {
-    "EnableNotificationIndicator", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kNotificationIndicator = {"EnableNotificationIndicator",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
 bool IsNotificationIndicatorEnabled() {
   return base::FeatureList::IsEnabled(kNotificationIndicator);
@@ -135,10 +138,23 @@ const base::Feature kExperimentalFlingAnimation {
 #endif
 };
 
-#if defined(OS_WIN)
-const base::Feature kElasticOverscrollWin = {"ElasticOverscrollWin",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+#if defined(OS_WIN) || defined(OS_ANDROID)
+// Cached in Java as well, make sure defaults are updated together.
+const base::Feature kElasticOverscroll = {"ElasticOverscroll",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // defined(OS_WIN) || defined(OS_ANDROID)
 
+#if defined(OS_ANDROID)
+const char kElasticOverscrollType[] = "type";
+const char kElasticOverscrollTypeFilter[] = "filter";
+const char kElasticOverscrollTypeTransform[] = "transform";
+#endif  // defined(OS_ANDROID)
+
+// Enables focus follow follow cursor (sloppyfocus).
+const base::Feature kFocusFollowsCursor = {"FocusFollowsCursor",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+#if defined(OS_WIN)
 // Enables InputPane API for controlling on screen keyboard.
 const base::Feature kInputPaneOnScreenKeyboard = {
     "InputPaneOnScreenKeyboard", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -160,19 +176,27 @@ const base::Feature kPrecisionTouchpadLogging{
     "PrecisionTouchpadLogging", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif  // defined(OS_WIN)
 
-#if defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) || \
-    defined(OS_CHROMEOS)
-// Enables stylus appearing as touch when in contact with digitizer.
-const base::Feature kDirectManipulationStylus = {
-    "DirectManipulationStylus",
-#if defined(OS_WIN)
-    base::FEATURE_ENABLED_BY_DEFAULT
-#else
-    base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-};
-#endif  // defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) ||
-        // defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+// This feature supercedes kNewShortcutMapping.
+const base::Feature kImprovedKeyboardShortcuts = {
+    "ImprovedKeyboardShortcuts", base::FEATURE_ENABLED_BY_DEFAULT};
+
+bool IsImprovedKeyboardShortcutsEnabled() {
+  return base::FeatureList::IsEnabled(kImprovedKeyboardShortcuts);
+}
+
+// Whether to deprecate the Alt-Based event rewrites that map to the
+// Page Up/Down, Home/End, Insert/Delete keys. This feature was a
+// part of kImprovedKeyboardShortcuts, but it is being postponed until
+// the new shortcut customization app ships.
+// TODO(crbug.com/1179893): Remove after the customization app ships.
+const base::Feature kDeprecateAltBasedSixPack = {
+    "DeprecateAltBasedSixPack", base::FEATURE_DISABLED_BY_DEFAULT};
+
+bool IsDeprecateAltBasedSixPackEnabled() {
+  return base::FeatureList::IsEnabled(kDeprecateAltBasedSixPack);
+}
+#endif  // defined(OS_CHROMEOS)
 
 // Enables forced colors mode for web content.
 const base::Feature kForcedColors{"ForcedColors",
@@ -184,11 +208,12 @@ bool IsForcedColorsEnabled() {
   return forced_colors_enabled;
 }
 
-// Enables the eye-dropper in the refresh color-picker for Windows and Mac.
-// This feature will be released for other platforms in later milestones.
+// Enables the eye-dropper in the refresh color-picker for Windows, Mac
+// and Linux. This feature will be released for other platforms in later
+// milestones.
 const base::Feature kEyeDropper {
   "EyeDropper",
-#if defined(OS_WIN) || defined(OS_MAC)
+#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
@@ -196,46 +221,7 @@ const base::Feature kEyeDropper {
 };
 
 bool IsEyeDropperEnabled() {
-  return IsFormControlsRefreshEnabled() &&
-         base::FeatureList::IsEnabled(features::kEyeDropper);
-}
-
-// Enable the CSSColorSchemeUARendering feature for Windows, ChromeOS, Linux,
-// and Mac. This feature will be released for Android in later milestones. See
-// crbug.com/1086530 for the Desktop launch bug.
-const base::Feature kCSSColorSchemeUARendering = {
-    "CSSColorSchemeUARendering",
-#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX) || \
-    defined(OS_APPLE)
-                                            base::FEATURE_ENABLED_BY_DEFAULT
-#else
-    base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-};
-
-bool IsCSSColorSchemeUARenderingEnabled() {
-  static const bool css_color_scheme_ua_rendering_enabled =
-      base::FeatureList::IsEnabled(features::kCSSColorSchemeUARendering);
-  return css_color_scheme_ua_rendering_enabled;
-}
-
-// Enable the FormControlsRefresh feature for Windows, ChromeOS, Linux, and Mac.
-// This feature will be released for Android in later milestones. See
-// crbug.com/1012106 for the Windows launch bug, and crbug.com/1012108 for the
-// Mac launch bug.
-const base::Feature kFormControlsRefresh = {"FormControlsRefresh",
-#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX) || \
-    defined(OS_APPLE)
-                                            base::FEATURE_ENABLED_BY_DEFAULT
-#else
-                                            base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-};
-
-bool IsFormControlsRefreshEnabled() {
-  static const bool form_controls_refresh_enabled =
-      base::FeatureList::IsEnabled(features::kFormControlsRefresh);
-  return form_controls_refresh_enabled;
+  return base::FeatureList::IsEnabled(features::kEyeDropper);
 }
 
 // Enable the common select popup.
@@ -248,7 +234,7 @@ bool IsUseCommonSelectPopupEnabled() {
 
 // Enables keyboard accessible tooltip.
 const base::Feature kKeyboardAccessibleTooltip{
-    "KeyboardAccessibleTooltip", base::FEATURE_ENABLED_BY_DEFAULT};
+    "KeyboardAccessibleTooltip", base::FEATURE_DISABLED_BY_DEFAULT};
 
 bool IsKeyboardAccessibleTooltipEnabled() {
   static const bool keyboard_accessible_tooltip_enabled =
@@ -262,18 +248,7 @@ const base::Feature kHandwritingGesture = {"HandwritingGesture",
 #endif
 
 const base::Feature kSynchronousPageFlipTesting{
-  "SynchronousPageFlipTesting",
-#if defined(OS_IOS)
-      base::FEATURE_DISABLED_BY_DEFAULT
-#else
-// We can't combine these directives because BUILDFLAG won't be defined on iOS.
-#if BUILDFLAG(USE_CHROMEOS_PROTECTED_MEDIA)
-      base::FEATURE_ENABLED_BY_DEFAULT
-#else
-      base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-#endif
-};
+    "SynchronousPageFlipTesting", base::FEATURE_ENABLED_BY_DEFAULT};
 
 bool IsSynchronousPageFlipTestingEnabled() {
   return base::FeatureList::IsEnabled(kSynchronousPageFlipTesting);

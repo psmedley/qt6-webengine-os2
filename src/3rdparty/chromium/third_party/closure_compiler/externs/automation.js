@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.automation.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: automation */
 
@@ -30,11 +30,13 @@ chrome.automation.EventType = {
   BLUR: 'blur',
   BUSY_CHANGED: 'busyChanged',
   CHECKED_STATE_CHANGED: 'checkedStateChanged',
+  CHECKED_STATE_DESCRIPTION_CHANGED: 'checkedStateDescriptionChanged',
   CHILDREN_CHANGED: 'childrenChanged',
   CLASS_NAME_CHANGED: 'classNameChanged',
   CLICKED: 'clicked',
   COLLAPSED: 'collapsed',
   CONTROLS_CHANGED: 'controlsChanged',
+  DETAILS_CHANGED: 'detailsChanged',
   DESCRIBED_BY_CHANGED: 'describedByChanged',
   DESCRIPTION_CHANGED: 'descriptionChanged',
   DOCUMENT_SELECTION_CHANGED: 'documentSelectionChanged',
@@ -145,7 +147,6 @@ chrome.automation.RoleType = {
   ABBR: 'abbr',
   ALERT: 'alert',
   ALERT_DIALOG: 'alertDialog',
-  ANCHOR: 'anchor',
   APPLICATION: 'application',
   ARTICLE: 'article',
   AUDIO: 'audio',
@@ -241,9 +242,7 @@ chrome.automation.RoleType = {
   HEADING: 'heading',
   IFRAME: 'iframe',
   IFRAME_PRESENTATIONAL: 'iframePresentational',
-  IGNORED: 'ignored',
   IMAGE: 'image',
-  IMAGE_MAP: 'imageMap',
   IME_CANDIDATE: 'imeCandidate',
   INLINE_TEXT_BOX: 'inlineTextBox',
   INPUT_TIME: 'inputTime',
@@ -284,7 +283,6 @@ chrome.automation.RoleType = {
   POP_UP_BUTTON: 'popUpButton',
   PORTAL: 'portal',
   PRE: 'pre',
-  PRESENTATIONAL: 'presentational',
   PROGRESS_INDICATOR: 'progressIndicator',
   RADIO_BUTTON: 'radioButton',
   RADIO_GROUP: 'radioGroup',
@@ -381,6 +379,7 @@ chrome.automation.ActionType = {
   INTERNAL_INVALIDATE_TREE: 'internalInvalidateTree',
   LOAD_INLINE_TEXT_BOXES: 'loadInlineTextBoxes',
   REPLACE_SELECTED_TEXT: 'replaceSelectedText',
+  RESUME_MEDIA: 'resumeMedia',
   SCROLL_BACKWARD: 'scrollBackward',
   SCROLL_DOWN: 'scrollDown',
   SCROLL_FORWARD: 'scrollForward',
@@ -397,6 +396,9 @@ chrome.automation.ActionType = {
   SHOW_CONTEXT_MENU: 'showContextMenu',
   SIGNAL_END_OF_TEST: 'signalEndOfTest',
   SHOW_TOOLTIP: 'showTooltip',
+  START_DUCKING_MEDIA: 'startDuckingMedia',
+  STOP_DUCKING_MEDIA: 'stopDuckingMedia',
+  SUSPEND_MEDIA: 'suspendMedia',
 };
 
 /**
@@ -433,10 +435,12 @@ chrome.automation.NameFromType = {
  * @see https://developer.chrome.com/extensions/automation#type-DescriptionFromType
  */
 chrome.automation.DescriptionFromType = {
-  UNINITIALIZED: 'uninitialized',
-  ATTRIBUTE: 'attribute',
-  CONTENTS: 'contents',
+  ARIA_DESCRIPTION: 'ariaDescription',
+  BUTTON_LABEL: 'buttonLabel',
   RELATED_ELEMENT: 'relatedElement',
+  RUBY_ANNOTATION: 'rubyAnnotation',
+  SUMMARY: 'summary',
+  TABLE_CAPTION: 'tableCaption',
   TITLE: 'title',
 };
 
@@ -454,12 +458,27 @@ chrome.automation.Restriction = {
  * @see https://developer.chrome.com/extensions/automation#type-HasPopup
  */
 chrome.automation.HasPopup = {
+  FALSE: 'false',
   TRUE: 'true',
   MENU: 'menu',
   LISTBOX: 'listbox',
   TREE: 'tree',
   GRID: 'grid',
   DIALOG: 'dialog',
+};
+
+/**
+ * @enum {string}
+ * @see https://developer.chrome.com/extensions/automation#type-AriaCurrentState
+ */
+chrome.automation.AriaCurrentState = {
+  FALSE: 'false',
+  TRUE: 'true',
+  PAGE: 'page',
+  STEP: 'step',
+  LOCATION: 'location',
+  DATE: 'date',
+  TIME: 'time',
 };
 
 /**
@@ -568,6 +587,8 @@ chrome.automation.IntentTextBoundaryType = {
   PAGE_START_OR_END: 'pageStartOrEnd',
   PARAGRAPH_END: 'paragraphEnd',
   PARAGRAPH_START: 'paragraphStart',
+  PARAGRAPH_START_SKIPPING_EMPTY_PARAGRAPHS:
+      'paragraphStartSkippingEmptyParagraphs',
   PARAGRAPH_START_OR_END: 'paragraphStartOrEnd',
   SENTENCE_END: 'sentenceEnd',
   SENTENCE_START: 'sentenceStart',
@@ -1263,15 +1284,7 @@ chrome.automation.AutomationNode.prototype.wordEnds;
 chrome.automation.AutomationNode.prototype.sentenceStarts;
 
 /**
- * The end indexes of each sentence within the node's name. For most nodes, the
- * size of sentenceStarts array should be equal to the size of sentenceEnds
- * array. Two exceptions are (1) node at the begining of a paragraph but the end
- * of the node's sentences is in its following node. Such a node has one more
- * start index. (2) Node at the end of a paragraph but the start of the node's
- * sentences is in its previous node. Such a node has one more end index. For
- * example, <p><b>Hello</b> world.</p> has two nodes. The first one has one
- * start index (i.e., 0) but no end index. The second node has one end index
- * (i.e., 7) but no start index.
+ * The end indexes of each sentence within the node's name. For most nodes, the size of sentenceStarts array should be equal to the size of sentenceEnds array. Two exceptions are (1) node at the begining of a paragraph but the end of the node's sentences is in its following node. Such a node has one more start index. (2) Node at the end of a paragraph but the start of the node's sentences is in its previous node. Such a node has one more end index. For example, <p><b>Hello</b> world.</p> has two nodes. The first one has one start index (i.e., 0) but no end index. The second node has one end index (i.e., 7) but no start index.
  * @type {(!Array<number>|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-sentenceEnds
  */
@@ -1523,13 +1536,6 @@ chrome.automation.AutomationNode.prototype.textSelStart;
  * @see https://developer.chrome.com/extensions/automation#type-textSelEnd
  */
 chrome.automation.AutomationNode.prototype.textSelEnd;
-
-/**
- * The input type, like email or number.
- * @type {(string|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-textInputType
- */
-chrome.automation.AutomationNode.prototype.textInputType;
 
 /**
  * An array of Marker objects for this node.
@@ -1903,8 +1909,8 @@ chrome.automation.AutomationNode.prototype.language;
 chrome.automation.AutomationNode.prototype.detectedLanguage;
 
 /**
- * Indicates the availability and type of interactive popup element true - the popup is a menu menu - the popup is a menu listbox - the popup is a listbox tree - the popup is a tree grid - the popup is a grid dialog - the popup is a dialog
- * @type {(string|undefined)}
+ * Indicates the availability and type of an interactive popup element.
+ * @type {(!chrome.automation.HasPopup|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-hasPopup
  */
 chrome.automation.AutomationNode.prototype.hasPopup;
@@ -2015,11 +2021,25 @@ chrome.automation.AutomationNode.prototype.fontSize;
 chrome.automation.AutomationNode.prototype.fontFamily;
 
 /**
- * Indicates whether this is a root of an editable subtree.
+ * Indicates whether the object functions as a text field which exposes its descendants. Use cases include the root of a content-editable region, an ARIA textbox which isn't currently editable and which has interactive descendants, and a <body> element that has "design-mode" set to "on".
  * @type {boolean}
- * @see https://developer.chrome.com/extensions/automation#type-editableRoot
+ * @see https://developer.chrome.com/extensions/automation#type-nonAtomicTextFieldRoot
  */
-chrome.automation.AutomationNode.prototype.editableRoot;
+chrome.automation.AutomationNode.prototype.nonAtomicTextFieldRoot;
+
+/**
+ * Indicates aria-current state.
+ * @type {(!chrome.automation.AriaCurrentState|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-ariaCurrentState
+ */
+chrome.automation.AutomationNode.prototype.ariaCurrentState;
+
+/**
+ * The application id for a tree rooted at this node.
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-appId
+ */
+chrome.automation.AutomationNode.prototype.appId;
 
 /**
  * Walking the tree.

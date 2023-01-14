@@ -6,9 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_
 
 #include "base/macros.h"
+#include "cc/paint/paint_flags.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/clip_list.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector_client.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_filter.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
@@ -20,6 +22,7 @@ namespace blink {
 
 class BaseRenderingContext2D;
 class CanvasRenderingContext2D;
+class CanvasFilter;
 class CanvasStyle;
 class CSSValue;
 class Element;
@@ -35,10 +38,15 @@ class CanvasRenderingContext2DState final
       public FontSelectorClient {
  public:
   enum ClipListCopyMode { kCopyClipList, kDontCopyClipList };
+  // SaveType indicates whether the state was pushed to the state stack by Save
+  // or by BeginLayer. The first state on the state stack, which is created in 
+  // the canvas constructor and not by Save or BeginLayer, has SaveType kInitial.
+  enum class SaveType { kSaveRestore, kBeginEndLayer, kInitial };
 
   CanvasRenderingContext2DState();
   CanvasRenderingContext2DState(const CanvasRenderingContext2DState&,
-                                ClipListCopyMode);
+                                ClipListCopyMode,
+                                SaveType);
   ~CanvasRenderingContext2DState() override;
 
   void Trace(Visitor*) const override;
@@ -51,11 +59,6 @@ class CanvasRenderingContext2DState final
 
   // FontSelectorClient implementation
   void FontsNeedUpdate(FontSelector*, FontInvalidationReason) override;
-
-  bool HasUnrealizedSaves() const { return unrealized_save_count_; }
-  void Save() { ++unrealized_save_count_; }
-  void Restore() { --unrealized_save_count_; }
-  void ResetUnrealizedSaveCount() { unrealized_save_count_ = 0; }
 
   void SetLineDash(const Vector<double>&);
   const Vector<double>& LineDash() const { return line_dash_; }
@@ -78,35 +81,40 @@ class CanvasRenderingContext2DState final
   void PlaybackClips(cc::PaintCanvas* canvas) const {
     clip_list_.Playback(canvas);
   }
-  const SkPath& GetCurrentClipPath() const {
-    return clip_list_.GetCurrentClipPath();
+  SkPath IntersectPathWithClip(const SkPath& path) const {
+    return clip_list_.IntersectPathWithClip(path);
   }
 
   void SetFont(const FontDescription&, FontSelector*);
   const Font& GetFont() const;
   const FontDescription& GetFontDescription() const;
-  bool HasRealizedFont() const { return realized_font_; }
+  inline bool HasRealizedFont() const { return realized_font_; }
   void SetUnparsedFont(const String& font) { unparsed_font_ = font; }
   const String& UnparsedFont() const { return unparsed_font_; }
 
   void SetFontForFilter(const Font& font) { font_for_filter_ = font; }
 
-  void SetFilter(const CSSValue*);
-  void SetUnparsedFilter(const String& filter_string) {
-    unparsed_filter_ = filter_string;
+  void SetCSSFilter(const CSSValue*);
+  void SetUnparsedCSSFilter(const String& filter_string) {
+    unparsed_css_filter_ = filter_string;
   }
-  const String& UnparsedFilter() const { return unparsed_filter_; }
+  const String& UnparsedCSSFilter() const { return unparsed_css_filter_; }
+  void SetCanvasFilter(CanvasFilter* filter_value);
+  CanvasFilter* GetCanvasFilter() const { return canvas_filter_; }
   sk_sp<PaintFilter> GetFilter(Element*,
                                IntSize canvas_size,
-                               CanvasRenderingContext2D*) const;
+                               CanvasRenderingContext2D*);
   sk_sp<PaintFilter> GetFilterForOffscreenCanvas(IntSize canvas_size,
-                                                 BaseRenderingContext2D*) const;
-  bool HasFilterForOffscreenCanvas(IntSize canvas_size,
-                                   BaseRenderingContext2D*) const;
-  bool HasFilter(Element*,
-                 IntSize canvas_size,
-                 CanvasRenderingContext2D*) const;
-  void ClearResolvedFilter() const;
+                                                 BaseRenderingContext2D*);
+  ALWAYS_INLINE bool IsFilterUnresolved() const {
+    return filter_state_ == FilterState::kUnresolved;
+  }
+  ALWAYS_INLINE bool IsFilterResolved() const {
+    return filter_state_ == FilterState::kResolved;
+  }
+
+  void ClearResolvedFilter();
+  void ValidateFilterState() const;
 
   void SetStrokeStyle(CanvasStyle*);
   CanvasStyle* StrokeStyle() const { return stroke_style_.Get(); }
@@ -136,11 +144,11 @@ class CanvasRenderingContext2DState final
   void SetTextBaseline(TextBaseline baseline) { text_baseline_ = baseline; }
   TextBaseline GetTextBaseline() const { return text_baseline_; }
 
-  void SetTextLetterSpacing(float letter_space, FontSelector* selector);
-  float GetTextLetterSpacing() const { return letter_spacing_; }
+  void SetLetterSpacing(float letter_space, FontSelector* selector);
+  float GetLetterSpacing() const { return letter_spacing_; }
 
-  void SetTextWordSpacing(float word_space, FontSelector* selector);
-  float GetTextWordSpacing() const { return word_spacing_; }
+  void SetWordSpacing(float word_space, FontSelector* selector);
+  float GetWordSpacing() const { return word_spacing_; }
 
   void SetTextRendering(TextRenderingMode text_rendering,
                         FontSelector* selector);
@@ -222,20 +230,26 @@ class CanvasRenderingContext2DState final
   // Opaque.
   const PaintFlags* GetFlags(PaintType, ShadowMode, ImageType = kNoImage) const;
 
+  SaveType GetSaveType() const { return save_type_; }
+
+  void setRestoreToCount(absl::optional<int> count) {
+    restore_to_count_ = count;
+  }
+
+  absl::optional<int> getRestoreToCount() { return restore_to_count_; }
+
  private:
   void UpdateLineDash() const;
   void UpdateStrokeStyle() const;
   void UpdateFillStyle() const;
   void UpdateFilterQuality() const;
-  void UpdateFilterQualityWithSkFilterQuality(const SkFilterQuality&) const;
+  void UpdateFilterQuality(cc::PaintFlags::FilterQuality) const;
   void ShadowParameterChanged();
-  SkDrawLooper* EmptyDrawLooper() const;
-  SkDrawLooper* ShadowOnlyDrawLooper() const;
-  SkDrawLooper* ShadowAndForegroundDrawLooper() const;
-  sk_sp<PaintFilter> ShadowOnlyImageFilter() const;
-  sk_sp<PaintFilter> ShadowAndForegroundImageFilter() const;
-
-  unsigned unrealized_save_count_;
+  sk_sp<SkDrawLooper>& EmptyDrawLooper() const;
+  sk_sp<SkDrawLooper>& ShadowOnlyDrawLooper() const;
+  sk_sp<SkDrawLooper>& ShadowAndForegroundDrawLooper() const;
+  sk_sp<PaintFilter>& ShadowOnlyImageFilter() const;
+  sk_sp<PaintFilter>& ShadowAndForegroundImageFilter() const;
 
   String unparsed_stroke_color_;
   String unparsed_fill_color_;
@@ -264,9 +278,17 @@ class CanvasRenderingContext2DState final
   Font font_;
   Font font_for_filter_;
 
-  String unparsed_filter_;
-  Member<const CSSValue> filter_value_;
-  mutable sk_sp<PaintFilter> resolved_filter_;
+  enum class FilterState {
+    kNone,
+    kUnresolved,
+    kResolved,
+    kInvalid,
+  };
+  FilterState filter_state_ = FilterState::kNone;
+  Member<CanvasFilter> canvas_filter_;
+  String unparsed_css_filter_;
+  Member<const CSSValue> css_filter_value_;
+  sk_sp<PaintFilter> resolved_filter_;
 
   // Text state.
   TextAlign text_align_;
@@ -289,13 +311,24 @@ class CanvasRenderingContext2DState final
   mutable bool line_dash_dirty_ : 1;
 
   bool image_smoothing_enabled_;
-  SkFilterQuality image_smoothing_quality_;
+  cc::PaintFlags::FilterQuality image_smoothing_quality_;
 
   ClipList clip_list_;
 
+  const SaveType save_type_ = SaveType::kInitial;
+
   DISALLOW_COPY_AND_ASSIGN(CanvasRenderingContext2DState);
+
+  // Some endlayer calls need to restore to a specific save count.
+  // If no such restore is needed, restore_to_count_ is set to nullopt.
+  absl::optional<int> restore_to_count_ = absl::nullopt;
 };
+
+ALWAYS_INLINE bool CanvasRenderingContext2DState::ShouldDrawShadows() const {
+  return AlphaChannel(shadow_color_) &&
+         (shadow_blur_ || !shadow_offset_.IsZero());
+}
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_

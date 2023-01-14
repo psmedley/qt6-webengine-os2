@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/check.h"
+#include "base/check_op.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -25,16 +26,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/ash/certificate_provider/certificate_provider.h"
 #include "chrome/browser/ash/certificate_provider/certificate_provider_service.h"
 #include "chrome/browser/ash/certificate_provider/certificate_provider_service_factory.h"
 #include "chrome/browser/ash/certificate_provider/test_certificate_provider_extension.h"
-#include "chrome/browser/chromeos/ui/request_pin_view.h"
+#include "chrome/browser/ash/notifications/request_pin_view.h"
 #include "chrome/browser/extensions/api/certificate_provider/certificate_provider_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -43,6 +42,9 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -53,6 +55,7 @@
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/notification_types.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/extension.h"
@@ -172,14 +175,15 @@ std::string GetCertFingerprint1(const net::X509Certificate& cert) {
   return base::ToLowerASCII(base::HexEncode(hash, base::kSHA1Length));
 }
 
-class CertificateProviderApiTest : public extensions::ExtensionApiTest {
+class CertificateProviderApiTest : public extensions::ExtensionApiTest,
+                                   public content::NotificationObserver {
  public:
   CertificateProviderApiTest() {}
 
   void SetUpInProcessBrowserTestFixture() override {
-    ON_CALL(provider_, IsInitializationComplete(_)).WillByDefault(Return(true));
-    ON_CALL(provider_, IsFirstPolicyLoadComplete(_))
-        .WillByDefault(Return(true));
+    provider_.SetDefaultReturns(
+        /*is_initialization_complete_return=*/true,
+        /*is_first_policy_load_complete_return=*/true);
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 
     extensions::ExtensionApiTest::SetUpInProcessBrowserTestFixture();
@@ -187,6 +191,13 @@ class CertificateProviderApiTest : public extensions::ExtensionApiTest {
 
   void SetUpOnMainThread() override {
     extensions::ExtensionApiTest::SetUpOnMainThread();
+
+    // Observe all assertion failures in the JS code, even those that happen
+    // when there's no active `ResultCatcher`.
+    notification_registrar_.Add(this,
+                                extensions::NOTIFICATION_EXTENSION_TEST_FAILED,
+                                content::NotificationService::AllSources());
+
     // Set up the AutoSelectCertificateForUrls policy to avoid the client
     // certificate selection dialog.
     const std::string autoselect_pattern = R"({"pattern": "*", "filter": {}})";
@@ -270,6 +281,14 @@ class CertificateProviderApiTest : public extensions::ExtensionApiTest {
  private:
   const char* const kClientCertUrl = "/client-cert";
 
+  // content::NotificationObserver:
+  void Observe(int type,
+               const content::NotificationSource&,
+               const content::NotificationDetails&) override {
+    DCHECK_EQ(type, extensions::NOTIFICATION_EXTENSION_TEST_FAILED);
+    ADD_FAILURE() << "Received failure notification from the JS side";
+  }
+
   std::unique_ptr<net::test_server::HttpResponse> OnHttpsServerRequested(
       const net::test_server::HttpRequest& request) const {
     if (request.relative_url != kClientCertUrl)
@@ -285,6 +304,7 @@ class CertificateProviderApiTest : public extensions::ExtensionApiTest {
     return response;
   }
 
+  content::NotificationRegistrar notification_registrar_;
   std::unique_ptr<net::EmbeddedTestServer> https_server_;
 };
 
@@ -341,8 +361,8 @@ class CertificateProviderApiMockedExtensionTest
   // chrome/test/data/extensions/api_test/certificate_provider
   scoped_refptr<net::X509Certificate> GetCertificate() const {
     std::string raw_certificate = GetCertificateData();
-    return net::X509Certificate::CreateFromBytes(raw_certificate.data(),
-                                                 raw_certificate.size());
+    return net::X509Certificate::CreateFromBytes(
+        base::as_bytes(base::make_span(raw_certificate)));
   }
 
   // Tests the api by navigating to a webpage that requests to perform a
@@ -387,7 +407,7 @@ class CertificateProviderApiMockedExtensionTest
     {
       base::RunLoop run_loop;
       GetExtensionMainFrame()->ExecuteJavaScriptForTests(
-          base::ASCIIToUTF16("signatureRequestData;"),
+          u"signatureRequestData;",
           base::BindOnce(&StoreDigest, &request_data, run_loop.QuitClosure()));
       run_loop.Run();
     }
@@ -421,6 +441,26 @@ class CertificateProviderApiMockedExtensionTest
         GetCertFingerprint1(*certificate);
     EXPECT_EQ(GetPageTextContent(https_contents),
               "got client cert with fingerprint: " + client_cert_fingerprint);
+  }
+
+  void SetInterstitialBypass() {
+    // Navigate to the test server in a new tab (to not clobber the test
+    // fixture setup.
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), GetHttpsClientCertUrl(),
+        WindowOpenDisposition::NEW_FOREGROUND_TAB,
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+    auto* tab = browser()->tab_strip_model()->GetActiveWebContents();
+
+    // Proceed through the interstitial to set an SSL bypass for this host.
+    content::TestNavigationObserver nav_observer(tab,
+                                                 /*number_of_navigations=*/1);
+    ASSERT_TRUE(content::ExecuteScript(
+        tab, "window.certificateErrorPageController.proceed();"));
+    nav_observer.Wait();
+
+    // Close the new tab to go back to the state set up by SetUpOnMainThread().
+    tab->Close();
   }
 
  private:
@@ -474,7 +514,7 @@ class CertificateProviderRequestPinTest : public CertificateProviderApiTest {
         browser(), extension_->GetResourceURL(test_page_file_name));
   }
 
-  chromeos::RequestPinView* GetActivePinDialogView() {
+  ash::RequestPinView* GetActivePinDialogView() {
     return cert_provider_service_->pin_dialog_manager()
         ->default_dialog_host_for_testing()
         ->active_view_for_testing();
@@ -686,22 +726,13 @@ IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest,
 
 // Tests the RSA MD5/SHA-1 signature algorithm. Note that TLS 1.1 is used in
 // order to make this algorithm employed.
-// TODO(cthomp): The SSLVersionMin policy will be removed in M-91, making these
-// algorithms unsupported.
 IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest, RsaMd5Sha1) {
-  // This test requires the SSLVersionMin policy is set to allow TLS 1.0.
-  base::Value ssl_policy("tls1");  // TLS 1.0
-  policy_map_.Set(policy::key::kSSLVersionMin, policy::POLICY_LEVEL_MANDATORY,
-                  policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
-                  std::move(ssl_policy), nullptr);
-  EXPECT_NO_FATAL_FAILURE(provider_.UpdateChromePolicy(policy_map_));
-
-  // Wait for the updated SSL configuration to be sent to the network service,
-  // to avoid a race.
-  g_browser_process->system_network_context_manager()
-      ->FlushSSLConfigManagerForTesting();
-
   ASSERT_TRUE(StartHttpsServer(net::SSL_PROTOCOL_VERSION_TLS1_1));
+
+  // Bypass the legacy TLS interstitial. Future connections to the test server
+  // will now succeed.
+  SetInterstitialBypass();
+
   ExecuteJavascript("supportedAlgorithms = ['RSASSA_PKCS1_v1_5_MD5_SHA1'];");
   ExecuteJavascript("registerForSignatureRequests();");
   ExecuteJavascriptAndWaitForCallback("setCertificates();");
@@ -712,23 +743,14 @@ IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest, RsaMd5Sha1) {
 
 // Tests the RSA MD5/SHA-1 signature algorithm using the legacy version of the
 // API. Note that TLS 1.1 is used in order to make this algorithm employed.
-// TODO(cthomp): The SSLVersionMin policy will be removed in M-91, making these
-// algorithms unsupported.
 IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest,
                        LegacyRsaMd5Sha1) {
-  // This test requires the SSLVersionMin policy is set to allow TLS 1.0.
-  base::Value ssl_policy("tls1");  // TLS 1.0
-  policy_map_.Set(policy::key::kSSLVersionMin, policy::POLICY_LEVEL_MANDATORY,
-                  policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
-                  std::move(ssl_policy), nullptr);
-  EXPECT_NO_FATAL_FAILURE(provider_.UpdateChromePolicy(policy_map_));
-
-  // Wait for the updated SSL configuration to be sent to the network service,
-  // to avoid a race.
-  g_browser_process->system_network_context_manager()
-      ->FlushSSLConfigManagerForTesting();
-
   ASSERT_TRUE(StartHttpsServer(net::SSL_PROTOCOL_VERSION_TLS1_1));
+
+  // Bypass the legacy TLS interstitial. Future connections to the test server
+  // will now succeed.
+  SetInterstitialBypass();
+
   ExecuteJavascript("supportedLegacyHashes = ['MD5_SHA1'];");
   ExecuteJavascript("registerAsLegacyCertificateProvider();");
   ExecuteJavascript("registerForLegacySignatureRequests();");
@@ -849,23 +871,14 @@ IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest,
 // Tests that the RSA MD5/SHA-1 signature algorithm is used in case of TLS 1.1,
 // even when there are other algorithms specified (which are stronger but aren't
 // supported on TLS 1.1).
-// TODO(cthomp): The SSLVersionMin policy will be removed in M-91, making these
-// algorithms unsupported.
 IN_PROC_BROWSER_TEST_F(CertificateProviderApiMockedExtensionTest,
                        RsaMd5Sha1AndOthers) {
-  // This test requires the SSLVersionMin policy is set to allow TLS 1.0.
-  base::Value ssl_policy("tls1");  // TLS 1.0
-  policy_map_.Set(policy::key::kSSLVersionMin, policy::POLICY_LEVEL_MANDATORY,
-                  policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
-                  std::move(ssl_policy), nullptr);
-  EXPECT_NO_FATAL_FAILURE(provider_.UpdateChromePolicy(policy_map_));
-
-  // Wait for the updated SSL configuration to be sent to the network service,
-  // to avoid a race.
-  g_browser_process->system_network_context_manager()
-      ->FlushSSLConfigManagerForTesting();
-
   ASSERT_TRUE(StartHttpsServer(net::SSL_PROTOCOL_VERSION_TLS1_1));
+
+  // Bypass the legacy TLS interstitial. Future connections to the test server
+  // will now succeed.
+  SetInterstitialBypass();
+
   ExecuteJavascript(
       "supportedAlgorithms = ['RSASSA_PKCS1_v1_5_SHA512', "
       "'RSASSA_PKCS1_v1_5_SHA1', 'RSASSA_PKCS1_v1_5_MD5_SHA1'];");

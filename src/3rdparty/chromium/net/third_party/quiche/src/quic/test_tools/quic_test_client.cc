@@ -20,7 +20,6 @@
 #include "quic/core/quic_utils.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
-#include "quic/platform/api/quic_ptr_util.h"
 #include "quic/platform/api/quic_stack_trace.h"
 #include "quic/test_tools/crypto_test_utils.h"
 #include "quic/test_tools/quic_client_peer.h"
@@ -29,7 +28,7 @@
 #include "quic/test_tools/quic_spdy_stream_peer.h"
 #include "quic/test_tools/quic_test_utils.h"
 #include "quic/tools/quic_url.h"
-#include "common/platform/api/quiche_text_utils.h"
+#include "common/quiche_text_utils.h"
 
 namespace quic {
 namespace test {
@@ -236,7 +235,7 @@ MockableQuicClient::MockableQuicClient(
           epoll_server,
           std::make_unique<MockableQuicClientEpollNetworkHelper>(epoll_server,
                                                                  this),
-          QuicWrapUnique(new RecordingProofVerifier(std::move(proof_verifier))),
+          std::make_unique<RecordingProofVerifier>(std::move(proof_verifier)),
           std::move(session_cache)),
       override_server_connection_id_(EmptyQuicConnectionId()),
       server_connection_id_overridden_(false),
@@ -311,6 +310,9 @@ void MockableQuicClient::UseWriter(QuicPacketWriterWrapper* writer) {
 
 void MockableQuicClient::set_peer_address(const QuicSocketAddress& address) {
   mockable_network_helper()->set_peer_address(address);
+  if (client_session() != nullptr) {
+    client_session()->AddKnownServerAddress(address);
+  }
 }
 
 const QuicReceivedPacket* MockableQuicClient::last_incoming_packet() {
@@ -616,16 +618,12 @@ const std::string& QuicTestClient::cert_sct() const {
       ->cert_sct();
 }
 
-QuicTagValueMap QuicTestClient::GetServerConfig() const {
+const QuicTagValueMap& QuicTestClient::GetServerConfig() const {
   QuicCryptoClientConfig* config = client_->crypto_config();
-  QuicCryptoClientConfig::CachedState* state =
+  const QuicCryptoClientConfig::CachedState* state =
       config->LookupOrCreate(client_->server_id());
   const CryptoHandshakeMessage* handshake_msg = state->GetServerConfig();
-  if (handshake_msg != nullptr) {
-    return handshake_msg->tag_value_map();
-  } else {
-    return QuicTagValueMap();
-  }
+  return handshake_msg->tag_value_map();
 }
 
 bool QuicTestClient::connected() const {
@@ -634,7 +632,7 @@ bool QuicTestClient::connected() const {
 
 void QuicTestClient::Connect() {
   if (connected()) {
-    QUIC_BUG << "Cannot connect already-connected client";
+    QUIC_BUG(quic_bug_10133_1) << "Cannot connect already-connected client";
     return;
   }
   if (!connect_attempted_) {
@@ -784,7 +782,7 @@ void QuicTestClient::OnClose(QuicSpdyStream* stream) {
   // written.
   client()->OnClose(stream);
   ++num_responses_;
-  if (!QuicContainsKey(open_streams_, stream->id())) {
+  if (open_streams_.find(stream->id()) == open_streams_.end()) {
     return;
   }
   if (latest_created_stream_ == stream) {
@@ -796,7 +794,8 @@ void QuicTestClient::OnClose(QuicSpdyStream* stream) {
   closed_stream_states_.insert(std::make_pair(
       id,
       PerStreamState(
-          client_stream->stream_error(), true,
+          // Set response_complete to true iff stream is closed while connected.
+          client_stream->stream_error(), connected(),
           client_stream->headers_decompressed(),
           client_stream->response_headers(),
           client_stream->preliminary_headers(),

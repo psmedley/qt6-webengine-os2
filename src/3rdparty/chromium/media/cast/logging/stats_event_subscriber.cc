@@ -79,7 +79,7 @@ StatsEventSubscriber::SimpleHistogram::GetHistogram() const {
   for (size_t i = 1; i < buckets_.size() - 1; i++) {
     if (!buckets_[i])
       continue;
-    bucket.reset(new base::DictionaryValue);
+    bucket = std::make_unique<base::DictionaryValue>();
     int64_t lower = min_ + (i - 1) * width_;
     int64_t upper = lower + width_ - 1;
     bucket->SetInteger(
@@ -89,7 +89,7 @@ StatsEventSubscriber::SimpleHistogram::GetHistogram() const {
   }
 
   if (buckets_.back()) {
-    bucket.reset(new base::DictionaryValue);
+    bucket = std::make_unique<base::DictionaryValue>();
     bucket->SetInteger(base::StringPrintf(">=%" PRId64, max_),
                        buckets_.back());
     histo->Append(std::move(bucket));
@@ -230,21 +230,22 @@ std::unique_ptr<base::DictionaryValue> StatsEventSubscriber::GetStats() const {
   GetStatsInternal(&stats_map);
   auto ret = std::make_unique<base::DictionaryValue>();
 
-  auto stats = std::make_unique<base::DictionaryValue>();
+  base::DictionaryValue stats;
   for (StatsMap::const_iterator it = stats_map.begin(); it != stats_map.end();
        ++it) {
     // Round to 3 digits after the decimal point.
-    stats->SetDouble(CastStatToString(it->first),
-                     round(it->second * 1000.0) / 1000.0);
+    stats.SetDouble(CastStatToString(it->first),
+                    round(it->second * 1000.0) / 1000.0);
   }
 
   // Populate all histograms.
   for (auto it = histograms_.begin(); it != histograms_.end(); ++it) {
-    stats->Set(CastStatToString(it->first), it->second->GetHistogram());
+    stats.SetKey(CastStatToString(it->first),
+                 base::Value::FromUniquePtrValue(it->second->GetHistogram()));
   }
 
-  ret->Set(event_media_type_ == AUDIO_EVENT ? "audio" : "video",
-           std::move(stats));
+  ret->SetKey(event_media_type_ == AUDIO_EVENT ? "audio" : "video",
+              std::move(stats));
 
   return ret;
 }

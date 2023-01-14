@@ -9,14 +9,13 @@
 #include "quic/core/quic_connection_id.h"
 #include "quic/core/quic_error_codes.h"
 #include "quic/core/quic_utils.h"
-#include "quic/platform/api/quic_uint128.h"
 
 namespace quic {
 
 QuicConnectionIdData::QuicConnectionIdData(
     const QuicConnectionId& connection_id,
     uint64_t sequence_number,
-    QuicUint128 stateless_reset_token)
+    const StatelessResetToken& stateless_reset_token)
     : connection_id(connection_id),
       sequence_number(sequence_number),
       stateless_reset_token(stateless_reset_token) {}
@@ -71,9 +70,10 @@ QuicPeerIssuedConnectionIdManager::QuicPeerIssuedConnectionIdManager(
           new RetirePeerIssuedConnectionIdAlarm(visitor))) {
   QUICHE_DCHECK_GE(active_connection_id_limit_, 2u);
   QUICHE_DCHECK(!initial_peer_issued_connection_id.IsEmpty());
-  active_connection_id_data_.emplace_back(initial_peer_issued_connection_id,
-                                          /*sequence_number=*/0u,
-                                          QuicUint128());
+  active_connection_id_data_.emplace_back<const QuicConnectionId&, uint64_t,
+                                          const StatelessResetToken&>(
+      initial_peer_issued_connection_id,
+      /*sequence_number=*/0u, {});
   recent_new_connection_id_sequence_numbers_.Add(0u, 1u);
 }
 
@@ -199,6 +199,22 @@ void QuicPeerIssuedConnectionIdManager::PrepareToRetireActiveConnectionId(
   }
 }
 
+void QuicPeerIssuedConnectionIdManager::MaybeRetireUnusedConnectionIds(
+    const std::vector<QuicConnectionId>& active_connection_ids_on_path) {
+  std::vector<QuicConnectionId> cids_to_retire;
+  for (const auto& cid_data : active_connection_id_data_) {
+    if (std::find(active_connection_ids_on_path.begin(),
+                  active_connection_ids_on_path.end(),
+                  cid_data.connection_id) ==
+        active_connection_ids_on_path.end()) {
+      cids_to_retire.push_back(cid_data.connection_id);
+    }
+  }
+  for (const auto& cid : cids_to_retire) {
+    PrepareToRetireActiveConnectionId(cid);
+  }
+}
+
 bool QuicPeerIssuedConnectionIdManager::IsConnectionIdActive(
     const QuicConnectionId& cid) const {
   return FindConnectionIdData(active_connection_id_data_, cid) !=
@@ -263,7 +279,8 @@ QuicSelfIssuedConnectionIdManager::QuicSelfIssuedConnectionIdManager(
       retire_connection_id_alarm_(alarm_factory->CreateAlarm(
           new RetireSelfIssuedConnectionIdAlarmDelegate(this))),
       last_connection_id_(initial_connection_id),
-      next_connection_id_sequence_number_(1u) {
+      next_connection_id_sequence_number_(1u),
+      last_connection_id_consumed_by_self_sequence_number_(0u) {
   active_connection_ids_.emplace_back(initial_connection_id, 0u);
 }
 
@@ -357,7 +374,7 @@ QuicSelfIssuedConnectionIdManager::GetUnretiredConnectionIds() const {
 
 void QuicSelfIssuedConnectionIdManager::RetireConnectionId() {
   if (to_be_retired_connection_ids_.empty()) {
-    QUIC_BUG
+    QUIC_BUG(quic_bug_12420_1)
         << "retire_connection_id_alarm fired but there is no connection ID "
            "to be retired.";
     return;
@@ -384,6 +401,47 @@ void QuicSelfIssuedConnectionIdManager::MaybeSendNewConnectionIds() {
       break;
     }
   }
+}
+
+bool QuicSelfIssuedConnectionIdManager::HasConnectionIdToConsume() const {
+  for (const auto& active_cid_data : active_connection_ids_) {
+    if (active_cid_data.second >
+        last_connection_id_consumed_by_self_sequence_number_) {
+      return true;
+    }
+  }
+  return false;
+}
+
+absl::optional<QuicConnectionId>
+QuicSelfIssuedConnectionIdManager::ConsumeOneConnectionId() {
+  for (const auto& active_cid_data : active_connection_ids_) {
+    if (active_cid_data.second >
+        last_connection_id_consumed_by_self_sequence_number_) {
+      // Since connection IDs in active_connection_ids_ has monotonically
+      // increasing sequence numbers, the returned connection ID has the
+      // smallest sequence number among all unconsumed active connection IDs.
+      last_connection_id_consumed_by_self_sequence_number_ =
+          active_cid_data.second;
+      return active_cid_data.first;
+    }
+  }
+  return absl::nullopt;
+}
+
+bool QuicSelfIssuedConnectionIdManager::IsConnectionIdInUse(
+    const QuicConnectionId& cid) const {
+  for (const auto& active_cid_data : active_connection_ids_) {
+    if (active_cid_data.first == cid) {
+      return true;
+    }
+  }
+  for (const auto& to_be_retired_cid_data : to_be_retired_connection_ids_) {
+    if (to_be_retired_cid_data.first == cid) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace quic

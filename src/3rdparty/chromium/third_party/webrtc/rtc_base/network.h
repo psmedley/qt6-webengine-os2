@@ -175,14 +175,14 @@ class RTC_EXPORT NetworkManagerBase : public NetworkManager {
 
  protected:
   typedef std::map<std::string, Network*> NetworkMap;
-  // Updates |networks_| with the networks listed in |list|. If
-  // |network_map_| already has a Network object for a network listed
-  // in the |list| then it is reused. Accept ownership of the Network
-  // objects in the |list|. |changed| will be set to true if there is
+  // Updates `networks_` with the networks listed in `list`. If
+  // `network_map_` already has a Network object for a network listed
+  // in the `list` then it is reused. Accept ownership of the Network
+  // objects in the `list`. `changed` will be set to true if there is
   // any change in the network list.
   void MergeNetworkList(const NetworkList& list, bool* changed);
 
-  // |stats| will be populated even if |*changed| is false.
+  // `stats` will be populated even if |*changed| is false.
   void MergeNetworkList(const NetworkList& list,
                         bool* changed,
                         NetworkManager::Stats* stats);
@@ -194,10 +194,10 @@ class RTC_EXPORT NetworkManagerBase : public NetworkManager {
   void set_default_local_addresses(const IPAddress& ipv4,
                                    const IPAddress& ipv6);
 
+  Network* GetNetworkFromAddress(const rtc::IPAddress& ip) const;
+
  private:
   friend class NetworkTest;
-
-  Network* GetNetworkFromAddress(const rtc::IPAddress& ip) const;
 
   EnumerationPermission enumeration_permission_;
 
@@ -225,6 +225,7 @@ class RTC_EXPORT NetworkManagerBase : public NetworkManager {
 // of networks using OS APIs.
 class RTC_EXPORT BasicNetworkManager : public NetworkManagerBase,
                                        public MessageHandlerAutoCleanup,
+                                       public NetworkBinderInterface,
                                        public sigslot::has_slots<> {
  public:
   BasicNetworkManager();
@@ -247,6 +248,15 @@ class RTC_EXPORT BasicNetworkManager : public NetworkManagerBase,
     RTC_DCHECK(thread_ == nullptr);
     network_ignore_list_ = list;
   }
+
+  // Bind a socket to interface that ip address belong to.
+  // Implementation look up interface name and calls
+  // BindSocketToNetwork on NetworkMonitor.
+  // The interface name is needed as e.g ipv4 over ipv6 addresses
+  // are not exposed using Android functions, but it is possible
+  // bind an ipv4 address to the interface.
+  NetworkBindingResult BindSocketToNetwork(int socket_fd,
+                                           const IPAddress& address) override;
 
  protected:
 #if defined(WEBRTC_POSIX)
@@ -293,7 +303,8 @@ class RTC_EXPORT BasicNetworkManager : public NetworkManagerBase,
       nullptr;
   std::unique_ptr<NetworkMonitorInterface> network_monitor_
       RTC_GUARDED_BY(thread_);
-  bool allow_mac_based_ipv6_ = false;
+  bool allow_mac_based_ipv6_ RTC_GUARDED_BY(thread_) = false;
+  bool bind_using_ifname_ RTC_GUARDED_BY(thread_) = false;
 };
 
 // Represents a Unix-type network interface, with a name and single address.
@@ -342,7 +353,7 @@ class RTC_EXPORT Network {
   // Returns the length, in bits, of this network's prefix.
   int prefix_length() const { return prefix_length_; }
 
-  // |key_| has unique value per network interface. Used in sorting network
+  // `key_` has unique value per network interface. Used in sorting network
   // interfaces. Key is derived from interface name and it's prefix.
   std::string key() const { return key_; }
 

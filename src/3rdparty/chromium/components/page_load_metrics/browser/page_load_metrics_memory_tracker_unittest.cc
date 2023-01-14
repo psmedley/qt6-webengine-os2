@@ -21,7 +21,7 @@
 
 using V8DetailedMemoryExecutionContextData =
     performance_manager::v8_memory::V8DetailedMemoryExecutionContextData;
-using FrameDataMap = base::flat_map<content::GlobalFrameRoutingId,
+using FrameDataMap = base::flat_map<content::GlobalRenderFrameHostId,
                                     V8DetailedMemoryExecutionContextData>;
 
 const char kMainUrl[] = "https://main.com/";
@@ -44,7 +44,7 @@ class TestPageLoadMetricsEmbedder
 
   // page_load_metrics::PageLoadMetricsEmbedderBase:
   bool IsNewTabPageUrl(const GURL& url) override { return false; }
-  bool IsPrerender(content::WebContents* web_contents) override {
+  bool IsNoStatePrefetch(content::WebContents* web_contents) override {
     return false;
   }
   bool IsExtensionUrl(const GURL& url) override { return false; }
@@ -62,7 +62,6 @@ class TestPageLoadMetricsEmbedder
   // page_load_metrics::PageLoadMetricsEmbedderBase:
   void RegisterEmbedderObservers(
       page_load_metrics::PageLoadTracker* tracker) override {}
-  bool IsPrerendering() const override { return false; }
 
  private:
   page_load_metrics::PageLoadMetricsMemoryTracker memory_tracker_;
@@ -171,8 +170,8 @@ class PageLoadMetricsMemoryTrackerTest
     if (!render_frame_host || !render_frame_host->GetProcess())
       return;
 
-    content::GlobalFrameRoutingId global_routing_id =
-        render_frame_host->GetGlobalFrameRoutingId();
+    content::GlobalRenderFrameHostId global_routing_id =
+        render_frame_host->GetGlobalId();
     int process_id = render_frame_host->GetProcess()->GetID();
 
     performance_manager::RenderProcessHostId pm_process_id =

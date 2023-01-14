@@ -5,8 +5,6 @@
 #ifndef NET_QUIC_MOCK_CRYPTO_CLIENT_STREAM_H_
 #define NET_QUIC_MOCK_CRYPTO_CLIENT_STREAM_H_
 
-#include <string>
-
 #include "base/macros.h"
 #include "net/quic/crypto/proof_verifier_chromium.h"
 #include "net/third_party/quiche/src/quic/core/crypto/crypto_handshake.h"
@@ -67,6 +65,7 @@ class MockCryptoClientStream : public quic::QuicCryptoClientStream,
   bool CryptoConnect() override;
   bool encryption_established() const override;
   bool one_rtt_keys_available() const override;
+  quic::HandshakeState GetHandshakeState() const override;
   const quic::QuicCryptoNegotiatedParameters& crypto_negotiated_params()
       const override;
   quic::CryptoMessageParser* crypto_message_parser() override;

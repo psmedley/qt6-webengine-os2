@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -18,6 +19,7 @@
 #include "content/browser/file_system_access/fixed_file_system_access_permission_grant.h"
 #include "content/browser/file_system_access/mock_file_system_access_permission_context.h"
 #include "content/browser/file_system_access/mock_file_system_access_permission_grant.h"
+#include "content/browser/renderer_host/back_forward_cache_disable.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_process_host.h"
@@ -206,9 +208,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -277,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, SaveFile_NonExistingFile) {
                    "  self.entry = e;"
                    "  return e.name; })()"));
   EXPECT_EQ(ui::SelectFileDialog::SELECT_SAVEAS_FILE, dialog_params.type);
-  EXPECT_EQ(int{file_contents.size()},
+  EXPECT_EQ(static_cast<int>(file_contents.size()),
             EvalJs(shell(),
                    JsReplace("(async () => {"
                              "  const w = await self.entry.createWritable();"
@@ -324,9 +327,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -445,9 +449,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -472,9 +477,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, OpenDirectory_DenyAccess) {
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -485,7 +491,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, OpenDirectory_DenyAccess) {
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
 
@@ -541,6 +547,185 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, OpenDirectory_DenyAccess) {
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
+                       OpenDirectoryWithReadAccess) {
+  base::FilePath test_dir = CreateTestDir();
+  SelectFileDialogParams dialog_params;
+  ui::SelectFileDialog::SetFactory(
+      new FakeSelectFileDialogFactory({test_dir}, &dialog_params));
+
+  testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
+  static_cast<FileSystemAccessManagerImpl*>(
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
+          ->GetFileSystemAccessEntryFactory())
+      ->SetPermissionContextForTesting(&permission_context);
+
+  auto read_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+  auto write_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+
+  auto origin =
+      url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
+  auto frame_id = GlobalRenderFrameHostId(
+      shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
+      shell()->web_contents()->GetMainFrame()->GetRoutingID());
+
+  EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(
+      permission_context,
+      GetWellKnownDirectoryPath(blink::mojom::WellKnownDirectory::kDefault))
+      .WillOnce(testing::Return(base::FilePath()));
+  EXPECT_CALL(permission_context, GetLastPickedDirectory(origin, std::string()))
+      .WillOnce(testing::Return(PathInfo()));
+  EXPECT_CALL(permission_context,
+              SetLastPickedDirectory(origin, std::string(), test_dir,
+                                     PathType::kLocal));
+
+  EXPECT_CALL(permission_context,
+              ConfirmSensitiveDirectoryAccess_(
+                  origin, PathType::kLocal, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  frame_id, testing::_))
+      .WillOnce(RunOnceCallback<5>(SensitiveDirectoryResult::kAllowed));
+
+  EXPECT_CALL(permission_context,
+              GetReadPermissionGrant(
+                  origin, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  FileSystemAccessPermissionContext::UserAction::kOpen))
+      .WillOnce(testing::Return(read_grant));
+  EXPECT_CALL(permission_context,
+              GetWritePermissionGrant(
+                  origin, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  FileSystemAccessPermissionContext::UserAction::kOpen))
+      .WillOnce(testing::Return(write_grant));
+
+  EXPECT_CALL(
+      *read_grant,
+      RequestPermission_(
+          frame_id,
+          FileSystemAccessPermissionGrant::UserActivationState::kNotRequired,
+          testing::_))
+      .WillOnce(RunOnceCallback<2>(FileSystemAccessPermissionGrant::
+                                       PermissionRequestOutcome::kUserGranted));
+  EXPECT_CALL(*read_grant, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  ASSERT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
+  EXPECT_EQ(test_dir.BaseName().AsUTF8Unsafe(),
+            EvalJs(shell(),
+                   "(async () => {"
+                   "  let e = await self.showDirectoryPicker({mode: 'read'});"
+                   "  self.selected_entry = e;"
+                   "  return e.name; })()"));
+  EXPECT_EQ(ui::SelectFileDialog::SELECT_FOLDER, dialog_params.type);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
+                       OpenDirectoryWithReadWriteAccess) {
+  base::FilePath test_dir = CreateTestDir();
+  SelectFileDialogParams dialog_params;
+  ui::SelectFileDialog::SetFactory(
+      new FakeSelectFileDialogFactory({test_dir}, &dialog_params));
+
+  testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
+  static_cast<FileSystemAccessManagerImpl*>(
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
+          ->GetFileSystemAccessEntryFactory())
+      ->SetPermissionContextForTesting(&permission_context);
+
+  auto read_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+  auto write_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+
+  auto origin =
+      url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
+  auto frame_id = GlobalRenderFrameHostId(
+      shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
+      shell()->web_contents()->GetMainFrame()->GetRoutingID());
+
+  EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
+      .WillOnce(testing::Return(true));
+  // Write permission should be requested alongside read permission.
+  EXPECT_CALL(permission_context, CanObtainWritePermission(origin))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(
+      permission_context,
+      GetWellKnownDirectoryPath(blink::mojom::WellKnownDirectory::kDefault))
+      .WillOnce(testing::Return(base::FilePath()));
+  EXPECT_CALL(permission_context, GetLastPickedDirectory(origin, std::string()))
+      .WillOnce(testing::Return(PathInfo()));
+  EXPECT_CALL(permission_context,
+              SetLastPickedDirectory(origin, std::string(), test_dir,
+                                     PathType::kLocal));
+
+  EXPECT_CALL(permission_context,
+              ConfirmSensitiveDirectoryAccess_(
+                  origin, PathType::kLocal, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  frame_id, testing::_))
+      .WillOnce(RunOnceCallback<5>(SensitiveDirectoryResult::kAllowed));
+
+  EXPECT_CALL(permission_context,
+              GetReadPermissionGrant(
+                  origin, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  FileSystemAccessPermissionContext::UserAction::kOpen))
+      .WillOnce(testing::Return(read_grant));
+  EXPECT_CALL(permission_context,
+              GetWritePermissionGrant(
+                  origin, test_dir,
+                  FileSystemAccessPermissionContext::HandleType::kDirectory,
+                  FileSystemAccessPermissionContext::UserAction::kOpen))
+      .WillOnce(testing::Return(write_grant));
+
+  EXPECT_CALL(
+      *read_grant,
+      RequestPermission_(
+          frame_id,
+          FileSystemAccessPermissionGrant::UserActivationState::kNotRequired,
+          testing::_))
+      .WillOnce(RunOnceCallback<2>(FileSystemAccessPermissionGrant::
+                                       PermissionRequestOutcome::kUserGranted));
+  EXPECT_CALL(*read_grant, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+  // Write permission should be requested alongside read permission.
+  EXPECT_CALL(
+      *write_grant,
+      RequestPermission_(
+          frame_id,
+          FileSystemAccessPermissionGrant::UserActivationState::kNotRequired,
+          testing::_))
+      .WillOnce(RunOnceCallback<2>(FileSystemAccessPermissionGrant::
+                                       PermissionRequestOutcome::kUserGranted));
+  EXPECT_CALL(*write_grant, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  ASSERT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
+  EXPECT_EQ(
+      test_dir.BaseName().AsUTF8Unsafe(),
+      EvalJs(shell(),
+             "(async () => {"
+             "  let e = await self.showDirectoryPicker({mode: 'readwrite'});"
+             "  self.selected_entry = e;"
+             "  return e.name; })()"));
+  EXPECT_EQ(ui::SelectFileDialog::SELECT_FOLDER, dialog_params.type);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
                        SaveFile_SensitiveDirectory_ExistingFile) {
   const std::string file_contents = "Hello World";
   const base::FilePath test_file = CreateTestFile(file_contents);
@@ -551,15 +736,16 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
 
@@ -613,15 +799,16 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
 
@@ -690,10 +877,9 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, AcceptsOptions) {
 
   ASSERT_EQ(3u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::ASCIIToUTF16("foo"),
+  EXPECT_EQ(u"foo",
             dialog_params.file_types->extension_description_overrides[0]);
-  EXPECT_EQ(base::ASCIIToUTF16(""),
-            dialog_params.file_types->extension_description_overrides[1]);
+  EXPECT_EQ(u"", dialog_params.file_types->extension_description_overrides[1]);
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
@@ -715,7 +901,8 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
   EXPECT_TRUE(tester.IsDisabledForFrameWithReason(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID(),
-      "FileSystemAccess"));
+      BackForwardCacheDisable::DisabledReason(
+          BackForwardCacheDisable::DisabledReasonId::kFileSystemAccess)));
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
@@ -728,9 +915,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -741,7 +929,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
   EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
@@ -810,9 +998,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -823,7 +1012,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
   EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
@@ -899,9 +1088,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -912,7 +1102,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
   EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
@@ -983,9 +1173,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -996,7 +1187,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
   EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
@@ -1073,9 +1264,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   testing::StrictMock<MockFileSystemAccessPermissionContext> permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -1086,7 +1278,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
 
   auto origin =
       url::Origin::Create(embedded_test_server()->GetURL("/title1.html"));
-  auto frame_id = GlobalFrameRoutingId(
+  auto frame_id = GlobalRenderFrameHostId(
       shell()->web_contents()->GetMainFrame()->GetProcess()->GetID(),
       shell()->web_contents()->GetMainFrame()->GetRoutingID());
   EXPECT_CALL(permission_context, CanObtainReadPermission(origin))
@@ -1266,19 +1458,6 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest,
   EXPECT_EQ(temp_dir_.GetPath(), dialog_params.default_path);
 }
 
-IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, StartIn_Nulled) {
-  SelectFileDialogParams dialog_params;
-  ui::SelectFileDialog::SetFactory(
-      new CancellingSelectFileDialogFactory(&dialog_params));
-  ASSERT_TRUE(
-      NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
-  auto result = EvalJs(shell(), "self.showOpenFilePicker({ startIn: null })");
-  // Specifying |null| should not throw an exception.
-  EXPECT_TRUE(result.error.find("aborted") != std::string::npos)
-      << result.error;
-  EXPECT_EQ(ui::SelectFileDialog::SELECT_OPEN_FILE, dialog_params.type);
-}
-
 IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, SuggestedName) {
   const base::FilePath test_file = CreateTestFile("");
   SelectFileDialogParams dialog_params;
@@ -1430,9 +1609,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, StartIn_ID) {
 
   FakeFileSystemAccessPermissionContext permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 
@@ -1501,9 +1681,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemChooserBrowserTest, StartIn_Priority) {
 
   FakeFileSystemAccessPermissionContext permission_context;
   static_cast<FileSystemAccessManagerImpl*>(
-      BrowserContext::GetStoragePartition(
-          shell()->web_contents()->GetBrowserContext(),
-          shell()->web_contents()->GetSiteInstance())
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetStoragePartition(shell()->web_contents()->GetSiteInstance())
           ->GetFileSystemAccessEntryFactory())
       ->SetPermissionContextForTesting(&permission_context);
 

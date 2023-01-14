@@ -17,6 +17,9 @@
 namespace chrome_pdf {
 
 struct AccessibilityDocInfo {
+  bool operator==(const AccessibilityDocInfo& other) const;
+  bool operator!=(const AccessibilityDocInfo& other) const;
+
   uint32_t page_count = 0;
   bool text_accessible = false;
   bool text_copyable = false;
@@ -106,7 +109,7 @@ struct AccessibilityCharInfo {
 struct AccessibilityTextRunRangeInfo {
   // Index of the starting text run of the annotation in the collection of all
   // text runs in the page.
-  uint32_t index = 0;
+  size_t index = 0;
   // Count of the text runs spanning the annotation.
   uint32_t count = 0;
 };
@@ -218,6 +221,7 @@ struct AccessibilityChoiceFieldOptionInfo {
 enum class ChoiceFieldType {
   kListBox = 0,
   kComboBox = 1,
+  kMinValue = kListBox,
   kMaxValue = kComboBox,
 };
 
@@ -266,6 +270,7 @@ enum class ButtonType {
   kPushButton = 1,
   kCheckBox = 2,
   kRadioButton = 3,
+  kMinValue = kPushButton,
   kMaxValue = kRadioButton,
 };
 
@@ -297,13 +302,13 @@ struct AccessibilityButtonInfo {
   // Represents count of controls in the control group. A group of interactive
   // form annotations is collectively called a form control group. Here, an
   // interactive form annotation, should be either a radio button or a
-  // checkbox. Value of |control_count| is >= 1.
+  // checkbox. Value of `control_count` is >= 1.
   uint32_t control_count = 0;
   // Represents index of the control in the control group. A group of
   // interactive form annotations is collectively called a form control group.
   // Here, an interactive form annotation, should be either a radio button or
-  // a checkbox. Value of |control_index| should always be less than
-  // |control_count|.
+  // a checkbox. Value of `control_index` should always be less than
+  // `control_count`.
   uint32_t control_index = 0;
   // Index of this button in the collection of buttons in the page.
   uint32_t index_in_page = 0;

@@ -10,16 +10,18 @@
 
 #include "base/bind.h"
 #include "base/containers/flat_set.h"
+#include "base/cxx17_backports.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/numerics/ranges.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
@@ -39,10 +41,13 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_pre_target_handler.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
+#include "ui/views/controls/menu/menu_types.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/drag_utils.h"
+#include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/mouse_constants.h"
 #include "ui/views/view.h"
+#include "ui/views/view_class_properties.h"
 #include "ui/views/view_constants.h"
 #include "ui/views/view_tracker.h"
 #include "ui/views/views_delegate.h"
@@ -61,6 +66,7 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
+#include "ui/aura/window_delegate.h"
 #endif
 
 #if defined(USE_OZONE)
@@ -75,7 +81,7 @@ namespace views {
 
 namespace {
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 bool AcceleratorShouldCancelMenu(const ui::Accelerator& accelerator) {
   // Since AcceleratorShouldCancelMenu() is called quite early in key
   // event handling, it is actually invoked for modifier keys themselves
@@ -147,17 +153,17 @@ constexpr base::TimeDelta kAlertAnimationThrobDuration =
     base::TimeDelta::FromMilliseconds(1000);
 
 // Returns true if the mnemonic of |menu| matches key.
-bool MatchesMnemonic(MenuItemView* menu, base::char16 key) {
+bool MatchesMnemonic(MenuItemView* menu, char16_t key) {
   return key != 0 && menu->GetMnemonic() == key;
 }
 
 // Returns true if |menu| doesn't have a mnemonic and first character of the its
 // title is |key|.
-bool TitleMatchesMnemonic(MenuItemView* menu, base::char16 key) {
+bool TitleMatchesMnemonic(MenuItemView* menu, char16_t key) {
   if (menu->GetMnemonic())
     return false;
 
-  base::string16 lower_title = base::i18n::ToLower(menu->title());
+  std::u16string lower_title = base::i18n::ToLower(menu->title());
   return !lower_title.empty() && lower_title[0] == key;
 }
 
@@ -466,7 +472,8 @@ void MenuController::Run(Widget* parent,
                          const gfx::Rect& bounds,
                          MenuAnchorPosition position,
                          bool context_menu,
-                         bool is_nested_drag) {
+                         bool is_nested_drag,
+                         gfx::NativeView native_view_for_gestures) {
   exit_type_ = ExitType::kNone;
   possible_drag_ = false;
   drag_in_progress_ = false;
@@ -512,12 +519,14 @@ void MenuController::Run(Widget* parent,
     if (owner_)
       owner_->AddObserver(this);
 
+    native_view_for_gestures_ = native_view_for_gestures;
+
     // Only create a MenuPreTargetHandler for non-nested menus. Nested menus
     // will use the existing one.
     menu_pre_target_handler_ = MenuPreTargetHandler::Create(this, owner_);
   }
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   menu_cocoa_watcher_ = std::make_unique<MenuCocoaWatcherMac>(base::BindOnce(
       &MenuController::Cancel, this->AsWeakPtr(), ExitType::kAll));
 #endif
@@ -549,7 +558,7 @@ void MenuController::Run(Widget* parent,
 }
 
 void MenuController::Cancel(ExitType type) {
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   menu_closure_animation_.reset();
 #endif
 
@@ -885,13 +894,16 @@ bool MenuController::OnMouseWheel(SubmenuView* source,
 void MenuController::OnGestureEvent(SubmenuView* source,
                                     ui::GestureEvent* event) {
   if (owner_ && send_gesture_events_to_owner()) {
-#if defined(OS_APPLE)
-    NOTIMPLEMENTED();
-#else   // !defined(OS_APPLE)
+#if defined(USE_AURA)
+    gfx::NativeView target = native_view_for_gestures_
+                                 ? native_view_for_gestures_
+                                 : owner()->GetNativeWindow();
     event->ConvertLocationToTarget(source->GetWidget()->GetNativeWindow(),
-                                   owner()->GetNativeWindow());
-#endif  // defined(OS_APPLE)
+                                   target);
+    target->delegate()->OnGestureEvent(event);
+#else
     owner()->OnGestureEvent(event);
+#endif  // defined(USE_AURA)
     // Reset |send_gesture_events_to_owner_| when the first gesture ends.
     if (event->type() == ui::ET_GESTURE_END)
       send_gesture_events_to_owner_ = false;
@@ -1197,7 +1209,7 @@ ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
   base::WeakPtr<MenuController> this_ref = AsWeakPtr();
   if (event->type() == ui::ET_KEY_PRESSED) {
     bool key_handled = false;
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
     // Special handling for Option-Up and Option-Down, which should behave like
     // Home and End respectively in menus.
     if ((event->flags() & ui::EF_ALT_DOWN)) {
@@ -1231,7 +1243,7 @@ ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
           ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN;
       const int flags = event->flags();
       if (exit_type() == ExitType::kNone && (flags & kKeyFlagsMask) == 0) {
-        base::char16 c = event->GetCharacter();
+        char16_t c = event->GetCharacter();
         SelectByChar(c);
         // SelectByChar can lead to this being deleted.
         if (!this_ref) {
@@ -1244,7 +1256,7 @@ ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
 
   ui::Accelerator accelerator(*event);
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   if (AcceleratorShouldCancelMenu(accelerator)) {
     Cancel(ExitType::kAll);
     return ui::POST_DISPATCH_PERFORM_DEFAULT;
@@ -1293,6 +1305,7 @@ void MenuController::OnWidgetDestroying(Widget* widget) {
   DCHECK_EQ(owner_, widget);
   owner_->RemoveObserver(this);
   owner_ = nullptr;
+  native_view_for_gestures_ = nullptr;
 }
 
 bool MenuController::IsCancelAllTimerRunningForTest() {
@@ -1310,7 +1323,7 @@ void MenuController::TurnOffMenuSelectionHoldForTest() {
 }
 
 void MenuController::OnMenuItemDestroying(MenuItemView* menu_item) {
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   if (menu_closure_animation_ && menu_closure_animation_->item() == menu_item)
     menu_closure_animation_.reset();
 #endif
@@ -1555,7 +1568,7 @@ bool MenuController::OnKeyPressed(const ui::KeyEvent& event) {
       break;
 
 // On Mac, treat space the same as return.
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
     case ui::VKEY_SPACE:
       SendAcceleratorToHotTrackedView(event.flags());
       break;
@@ -1567,7 +1580,7 @@ bool MenuController::OnKeyPressed(const ui::KeyEvent& event) {
       // Fallthrough to accept or dismiss combobox menus on F4, like windows.
       FALLTHROUGH;
     case ui::VKEY_RETURN:
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
     case ui::VKEY_SPACE:
 #endif
       // An odd special case: if a prefix selection is in flight, space should
@@ -1611,7 +1624,7 @@ bool MenuController::OnKeyPressed(const ui::KeyEvent& event) {
       CloseSubmenu();
       break;
 
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
     case ui::VKEY_APPS: {
       Button* hot_view = GetFirstHotTrackedView(pending_state_.item);
       if (hot_view) {
@@ -1690,16 +1703,7 @@ void MenuController::UpdateInitialLocation(const gfx::Rect& bounds,
                                            bool context_menu) {
   pending_state_.context_menu = context_menu;
   pending_state_.initial_bounds = bounds;
-
-  // Reverse anchor position for RTL languages.
-  if (base::i18n::IsRTL() && (position == MenuAnchorPosition::kTopRight ||
-                              position == MenuAnchorPosition::kTopLeft)) {
-    pending_state_.anchor = position == MenuAnchorPosition::kTopRight
-                                ? MenuAnchorPosition::kTopLeft
-                                : MenuAnchorPosition::kTopRight;
-  } else {
-    pending_state_.anchor = position;
-  }
+  pending_state_.anchor = AdjustAnchorPositionForRtl(position);
 
   // Calculate the bounds of the monitor we'll show menus on. Do this once to
   // avoid repeated system queries for the info.
@@ -1718,8 +1722,46 @@ void MenuController::UpdateInitialLocation(const gfx::Rect& bounds,
   }
 }
 
+// static
+MenuAnchorPosition MenuController::AdjustAnchorPositionForRtl(
+    MenuAnchorPosition position) {
+  if (!base::i18n::IsRTL())
+    return position;
+  // Reverse anchor position for RTL languages.
+  switch (position) {
+    case MenuAnchorPosition::kTopLeft:
+      return MenuAnchorPosition::kTopRight;
+    case MenuAnchorPosition::kTopRight:
+      return MenuAnchorPosition::kTopLeft;
+    case MenuAnchorPosition::kBubbleTopLeft:
+      return MenuAnchorPosition::kBubbleTopRight;
+    case MenuAnchorPosition::kBubbleTopRight:
+      return MenuAnchorPosition::kBubbleTopLeft;
+    case MenuAnchorPosition::kBubbleLeft:
+      return MenuAnchorPosition::kBubbleRight;
+    case MenuAnchorPosition::kBubbleRight:
+      return MenuAnchorPosition::kBubbleLeft;
+    case MenuAnchorPosition::kBubbleBottomLeft:
+      return MenuAnchorPosition::kBubbleBottomRight;
+    case MenuAnchorPosition::kBubbleBottomRight:
+      return MenuAnchorPosition::kBubbleBottomLeft;
+    case MenuAnchorPosition::kBottomCenter:
+      return position;
+  }
+}
+
 void MenuController::Accept(MenuItemView* item, int event_flags) {
-#if defined(OS_APPLE)
+  // This counts as activation of a menu item. We don't put this logic in
+  // ReallyAccept() because we expect activation to happen while the element is
+  // visible to the user, but ReallyAccept() is called on Mac *after* the menu
+  // is closed.
+  if (item) {
+    const ui::ElementIdentifier id = item->GetProperty(kElementIdentifierKey);
+    if (id)
+      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(id, item);
+  }
+
+#if defined(OS_MAC)
   menu_closure_animation_ = std::make_unique<MenuClosureAnimationMac>(
       item, item->GetParentMenuItem()->GetSubmenu(),
       base::BindOnce(&MenuController::ReallyAccept, base::Unretained(this),
@@ -1733,7 +1775,7 @@ void MenuController::Accept(MenuItemView* item, int event_flags) {
 void MenuController::ReallyAccept(MenuItemView* item, int event_flags) {
   DCHECK(!for_drop_);
   result_ = item;
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // Reset the closure animation since it's now finished - this also unblocks
   // input events for the menu.
   menu_closure_animation_.reset();
@@ -2116,7 +2158,31 @@ void MenuController::OpenMenuImpl(MenuItemView* item, bool show) {
   }
 
   if (show) {
-    item->GetSubmenu()->ShowAt(owner_, bounds, do_capture);
+    MenuHost::InitParams params;
+    params.parent = owner_;
+    params.bounds = bounds;
+    params.do_capture = do_capture;
+    params.native_view_for_gestures = native_view_for_gestures_;
+
+    if (item->GetParentMenuItem()) {
+      params.context = state_.item->GetWidget();
+      params.menu_type = ui::MenuType::kChildMenu;
+    } else if (state_.context_menu) {
+      if (!menu_stack_.empty()) {
+        auto* last_menu_item = menu_stack_.back().first.item;
+        if (last_menu_item->SubmenuIsShowing())
+          params.context = last_menu_item->GetSubmenu()->GetWidget();
+        else
+          params.context = last_menu_item->GetWidget();
+      } else {
+        params.context = owner_;
+      }
+      params.menu_type = ui::MenuType::kRootContextMenu;
+    } else {
+      params.context = owner_;
+      params.menu_type = ui::MenuType::kRootMenu;
+    }
+    item->GetSubmenu()->ShowAt(params);
 
     // Figure out if the mouse is under the menu; if so, remember the mouse
     // location so we can ignore the first mouse move event(s) with that
@@ -2264,7 +2330,7 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
 
     MenuScrollViewContainer* container =
         item->GetParentMenuItem()->GetSubmenu()->GetScrollViewContainer();
-    menu_bounds.set_y(item_loc.y() - container->border()->GetInsets().top());
+    menu_bounds.set_y(item_loc.y() - container->GetInsets().top());
 
     // Assume the menu can be placed in the preferred location.
     menu_bounds.set_x(create_on_right ? right_of_parent : left_of_parent);
@@ -2367,12 +2433,11 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
   }
 
   // Ensure the menu is not displayed off screen.
-  menu_bounds.set_x(
-      base::ClampToRange(menu_bounds.x(), monitor_bounds.x(),
-                         monitor_bounds.right() - menu_bounds.width()));
+  menu_bounds.set_x(base::clamp(menu_bounds.x(), monitor_bounds.x(),
+                                monitor_bounds.right() - menu_bounds.width()));
   menu_bounds.set_y(
-      base::ClampToRange(menu_bounds.y(), monitor_bounds.y(),
-                         monitor_bounds.bottom() - menu_bounds.height()));
+      base::clamp(menu_bounds.y(), monitor_bounds.y(),
+                  monitor_bounds.bottom() - menu_bounds.height()));
 
   return menu_bounds;
 }
@@ -2412,7 +2477,7 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
       int max_height = monitor_bounds.height();
       // In case of bubbles, the maximum width is limited by the space
       // between the display corner and the target area + the tip size.
-      if (state_.anchor == MenuAnchorPosition::kBubbleAbove ||
+      if (MenuItemView::IsBubble(state_.anchor) ||
           item->actual_menu_position() == MenuPosition::kAboveBounds) {
         // Don't consider |border_and_shadow_insets| because when the max size
         // is enforced, the scroll view is shown and the md shadows are not
@@ -2431,120 +2496,121 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
     menu_size.set_width(std::min(
         menu_size.width(), item->GetDelegate()->GetMaxWidthForMenu(item)));
 
-    if (state_.anchor == MenuAnchorPosition::kBubbleAbove ||
-        state_.anchor == MenuAnchorPosition::kBubbleBelow) {
-      // Align the left edges of the menu and anchor.
-      x = std::max(monitor_bounds.x(),
-                   anchor_bounds.x() - border_and_shadow_insets.left());
-      if (x + menu_size.width() > monitor_bounds.right()) {
-        // Align the right of the menu with the right of the anchor.
-        x = anchor_bounds.right() - menu_size.width() +
-            border_and_shadow_insets.right();
-      }
+    // Calculate possible coordinates. Do not clamp values; that happens later.
+    int x_menu_on_left = 0;
+    int x_menu_on_right = 0;
+    int y_menu_above = 0;
+    int y_menu_below = 0;
+    switch (state_.anchor) {
+      case MenuAnchorPosition::kBubbleTopLeft:
+      case MenuAnchorPosition::kBubbleTopRight:
+      case MenuAnchorPosition::kBubbleBottomLeft:
+      case MenuAnchorPosition::kBubbleBottomRight:
+        // Align the right edges of the menu and anchor.
+        x_menu_on_left = anchor_bounds.right() - menu_size.width() +
+                         border_and_shadow_insets.right();
+        // Align the left edges of the menu and anchor.
+        x_menu_on_right = anchor_bounds.x() - border_and_shadow_insets.left();
+        // Align the bottom of the menu with the top of the anchor.
+        y_menu_above = anchor_bounds.y() - menu_size.height() +
+                       border_and_shadow_insets.bottom() -
+                       menu_config.touchable_anchor_offset;
+        // Align the top of the menu with the bottom of the anchor.
+        y_menu_below = anchor_bounds.bottom() - border_and_shadow_insets.top() +
+                       menu_config.touchable_anchor_offset;
+        break;
+      case MenuAnchorPosition::kBubbleLeft:
+      case MenuAnchorPosition::kBubbleRight:
+        // Align the right edge of the menu with the left edge of the anchor.
+        x_menu_on_left = anchor_bounds.x() - menu_size.width() +
+                         border_and_shadow_insets.right() -
+                         menu_config.touchable_anchor_offset;
+        // Align the left edge of the menu with the right edge of the anchor.
+        x_menu_on_right = anchor_bounds.right() -
+                          border_and_shadow_insets.left() +
+                          menu_config.touchable_anchor_offset;
+        // Align the bottom of the menu with the bottom of the anchor.
+        y_menu_above = anchor_bounds.bottom() - menu_size.height() +
+                       border_and_shadow_insets.bottom();
+        // Align the top of the menu with the top of the anchor.
+        y_menu_below = anchor_bounds.y() - border_and_shadow_insets.top();
+        break;
+      case MenuAnchorPosition::kTopLeft:
+      case MenuAnchorPosition::kTopRight:
+      case MenuAnchorPosition::kBottomCenter:
+        NOTREACHED();
+    }
 
-      const int y_for_menu_below = anchor_bounds.bottom() -
-                                   border_and_shadow_insets.top() +
-                                   menu_config.touchable_anchor_offset;
-      const int y_for_menu_above = anchor_bounds.y() - menu_size.height() +
-                                   border_and_shadow_insets.bottom() -
-                                   menu_config.touchable_anchor_offset;
-      if (state_.anchor == MenuAnchorPosition::kBubbleAbove) {
-        y = y_for_menu_above;
-        item->set_actual_menu_position(MenuPosition::kAboveBounds);
-        if (y < monitor_bounds.y()) {
-          y = y_for_menu_below;
-          item->set_actual_menu_position(MenuPosition::kBelowBounds);
-        }
-      } else if (state_.anchor == MenuAnchorPosition::kBubbleBelow) {
-        // Respect the previous MenuPosition. The menu contents could change
-        // while the menu is shown, the menu position should not change.
-        const bool able_to_show_menu_below =
-            (y_for_menu_below + menu_size.height() <= monitor_bounds.bottom());
-        const bool able_to_show_menu_above =
-            y_for_menu_above >= monitor_bounds.y();
-        if (item->actual_menu_position() == MenuPosition::kBelowBounds &&
-            able_to_show_menu_below) {
-          y = y_for_menu_below;
-        } else if (item->actual_menu_position() == MenuPosition::kAboveBounds &&
-                   able_to_show_menu_above) {
-          y = y_for_menu_above;
-        } else if (able_to_show_menu_below) {
-          y = y_for_menu_below;
+    // Choose the most appropriate x coordinate.
+    switch (state_.anchor) {
+      case MenuAnchorPosition::kBubbleTopLeft:
+      case MenuAnchorPosition::kBubbleLeft:
+      case MenuAnchorPosition::kBubbleBottomLeft:
+        x = x_menu_on_left >= monitor_bounds.x() ? x_menu_on_left
+                                                 : x_menu_on_right;
+        break;
+      case MenuAnchorPosition::kBubbleTopRight:
+      case MenuAnchorPosition::kBubbleRight:
+      case MenuAnchorPosition::kBubbleBottomRight:
+        x = x_menu_on_right + menu_size.width() <= monitor_bounds.right()
+                ? x_menu_on_right
+                : x_menu_on_left;
+        break;
+      case MenuAnchorPosition::kTopLeft:
+      case MenuAnchorPosition::kTopRight:
+      case MenuAnchorPosition::kBottomCenter:
+        NOTREACHED();
+    }
+
+    // Choose the most appropriate y coordinate.
+    const bool able_to_show_menu_below =
+        y_menu_below + menu_size.height() <= monitor_bounds.bottom();
+    const bool able_to_show_menu_above = y_menu_above >= monitor_bounds.y();
+    switch (state_.anchor) {
+      case MenuAnchorPosition::kBubbleLeft:
+      case MenuAnchorPosition::kBubbleRight:
+      case MenuAnchorPosition::kBubbleBottomLeft:
+      case MenuAnchorPosition::kBubbleBottomRight:
+        // Respect the actual menu position calculated earlier if possible, to
+        // prevent changing positions during menu size updates.
+        if (able_to_show_menu_below &&
+            (item->actual_menu_position() != MenuPosition::kAboveBounds ||
+             !able_to_show_menu_above)) {
+          y = y_menu_below;
           item->set_actual_menu_position(MenuPosition::kBelowBounds);
         } else if (able_to_show_menu_above) {
-          // No room below, but there is room above. Show above the anchor.
-          // Align the bottom of the menu with the bottom of the anchor.
-          y = y_for_menu_above;
+          y = y_menu_above;
           item->set_actual_menu_position(MenuPosition::kAboveBounds);
         } else {
-          // No room above or below. Show as low as possible. Align the bottom
-          // of the menu with the bottom of the screen.
+          // No room above or below. Show the menu as low as possible.
           y = monitor_bounds.bottom() - menu_size.height();
           item->set_actual_menu_position(MenuPosition::kBestFit);
         }
-      }
-    } else if (state_.anchor == MenuAnchorPosition::kBubbleLeft ||
-               state_.anchor == MenuAnchorPosition::kBubbleRight) {
-      if (state_.anchor == MenuAnchorPosition::kBubbleLeft) {
-        // Align the right of the menu with the left of the anchor, and the top
-        // of the menu with the top of the anchor.
-        x = anchor_bounds.x() - menu_size.width() +
-            border_and_shadow_insets.right() -
-            menu_config.touchable_anchor_offset;
-        // Align the left of the menu with the right of the anchor.
-        if (x < monitor_bounds.x()) {
-          x = anchor_bounds.right() - border_and_shadow_insets.left() +
-              menu_config.touchable_anchor_offset;
+        break;
+      case MenuAnchorPosition::kBubbleTopLeft:
+      case MenuAnchorPosition::kBubbleTopRight:
+        // Respect the actual menu position calculated earlier if possible, to
+        // prevent changing positions during menu size updates.
+        if (able_to_show_menu_above &&
+            (item->actual_menu_position() != MenuPosition::kBelowBounds ||
+             !able_to_show_menu_below)) {
+          y = y_menu_above;
+          item->set_actual_menu_position(MenuPosition::kAboveBounds);
+        } else if (able_to_show_menu_below) {
+          y = y_menu_below;
+          item->set_actual_menu_position(MenuPosition::kBelowBounds);
+        } else {
+          // No room above or below. Show the menu as high as possible.
+          y = monitor_bounds.y();
+          item->set_actual_menu_position(MenuPosition::kBestFit);
         }
-      } else {
-        // Align the left of the menu with the right of the anchor, and the top
-        // of the menu with the top of the anchor.
-        x = anchor_bounds.right() - border_and_shadow_insets.left() +
-            menu_config.touchable_anchor_offset;
-        if (x + menu_size.width() > monitor_bounds.right()) {
-          // Align the right of the menu with the left of the anchor.
-          x = anchor_bounds.x() - menu_size.width() +
-              border_and_shadow_insets.right() -
-              menu_config.touchable_anchor_offset;
-        }
-      }
-
-      const int y_for_menu_below =
-          anchor_bounds.y() - border_and_shadow_insets.top();
-      const int y_for_menu_above = anchor_bounds.bottom() - menu_size.height() +
-                                   border_and_shadow_insets.bottom();
-
-      const bool able_to_show_menu_below =
-          (y_for_menu_below + menu_size.height() <= monitor_bounds.bottom());
-      const bool able_to_show_menu_above =
-          (y_for_menu_above >= monitor_bounds.y());
-
-      // Respect the actual menu position calculated earlier if possible, to
-      // prevent changing positions during menu size updates.
-
-      if (item->actual_menu_position() == MenuPosition::kBelowBounds &&
-          able_to_show_menu_below) {
-        y = y_for_menu_below;
-      } else if (item->actual_menu_position() == MenuPosition::kAboveBounds &&
-                 able_to_show_menu_above) {
-        y = y_for_menu_above;
-      } else if (able_to_show_menu_below) {
-        // Show below the anchor. Align the top of the menu with the top of the
-        // anchor.
-        y = y_for_menu_below;
-        item->set_actual_menu_position(MenuPosition::kBelowBounds);
-      } else if (able_to_show_menu_above) {
-        // No room below, but there is room above. Show above the anchor. Align
-        // the bottom of the menu with the bottom of the anchor.
-        y = y_for_menu_above;
-        item->set_actual_menu_position(MenuPosition::kAboveBounds);
-      } else {
-        // No room above or below. Show as low as possible. Align the bottom of
-        // the menu with the bottom of the screen.
-        y = monitor_bounds.bottom() - menu_size.height();
-        item->set_actual_menu_position(MenuPosition::kBestFit);
-      }
+        break;
+      case MenuAnchorPosition::kTopLeft:
+      case MenuAnchorPosition::kTopRight:
+      case MenuAnchorPosition::kBottomCenter:
+        NOTREACHED();
     }
+
     // The above adjustments may have shifted a large menu off the screen.
     // Clamp the menu origin to the valid range.
     const int x_min = monitor_bounds.x() - border_and_shadow_insets.left();
@@ -2555,8 +2621,8 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
                       border_and_shadow_insets.bottom();
     DCHECK_LE(x_min, x_max);
     DCHECK_LE(y_min, y_max);
-    x = base::ClampToRange(x, x_min, x_max);
-    y = base::ClampToRange(y, y_min, y_max);
+    x = base::clamp(x, x_min, x_max);
+    y = base::clamp(y, y_min, y_max);
   } else {
     if (!use_touchable_layout_) {
       NOTIMPLEMENTED()
@@ -2603,10 +2669,9 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
     }
     y = item_bounds.y() - border_and_shadow_insets.top() -
         menu_config.vertical_touchable_menu_item_padding;
-    y = base::ClampToRange(y,
-                           monitor_bounds.y() - border_and_shadow_insets.top(),
-                           monitor_bounds.bottom() - menu_size.height() +
-                               border_and_shadow_insets.top());
+    y = base::clamp(y, monitor_bounds.y() - border_and_shadow_insets.top(),
+                    monitor_bounds.bottom() - menu_size.height() +
+                        border_and_shadow_insets.top());
   }
   return gfx::Rect(x, y, menu_size.width(), menu_size.height());
 }
@@ -2711,7 +2776,8 @@ MenuItemView* MenuController::FindNextSelectableMenuItem(
     int index,
     SelectionIncrementDirectionType direction,
     bool is_initial) {
-  int parent_count = int{parent->GetSubmenu()->GetMenuItems().size()};
+  int parent_count =
+      static_cast<int>(parent->GetSubmenu()->GetMenuItems().size());
   int stop_index = (index + parent_count) % parent_count;
   bool include_all_items =
       (index == -1 && direction == INCREMENT_SELECTION_DOWN) ||
@@ -2768,8 +2834,8 @@ void MenuController::CloseSubmenu() {
 
 MenuController::SelectByCharDetails MenuController::FindChildForMnemonic(
     MenuItemView* parent,
-    base::char16 key,
-    bool (*match_function)(MenuItemView* menu, base::char16 mnemonic)) {
+    char16_t key,
+    bool (*match_function)(MenuItemView* menu, char16_t mnemonic)) {
   SubmenuView* submenu = parent->GetSubmenu();
   DCHECK(submenu);
   SelectByCharDetails details;
@@ -2779,15 +2845,15 @@ MenuController::SelectByCharDetails MenuController::FindChildForMnemonic(
     MenuItemView* child = menu_items[i];
     if (child->GetEnabled() && child->GetVisible()) {
       if (child == pending_state_.item)
-        details.index_of_item = int{i};
+        details.index_of_item = static_cast<int>(i);
       if (match_function(child, key)) {
         if (details.first_match == -1)
-          details.first_match = int{i};
+          details.first_match = static_cast<int>(i);
         else
           details.has_multiple = true;
         if (details.next_match == -1 && details.index_of_item != -1 &&
-            int{i} > details.index_of_item)
-          details.next_match = int{i};
+            static_cast<int>(i) > details.index_of_item)
+          details.next_match = static_cast<int>(i);
       }
     }
   }
@@ -2817,15 +2883,15 @@ void MenuController::AcceptOrSelect(MenuItemView* parent,
   }
 }
 
-void MenuController::SelectByChar(base::char16 character) {
+void MenuController::SelectByChar(char16_t character) {
   // Do not process while performing drag-and-drop.
   if (for_drop_)
     return;
   if (!character)
     return;
 
-  base::char16 char_array[] = {character, 0};
-  base::char16 key = base::i18n::ToLower(char_array)[0];
+  char16_t char_array[] = {character, 0};
+  char16_t key = base::i18n::ToLower(char_array)[0];
   MenuItemView* item = pending_state_.item;
   if (!item->SubmenuIsShowing())
     item = item->GetParentMenuItem();
@@ -2905,7 +2971,7 @@ void MenuController::RepostEventAndCancel(SubmenuView* source,
     if (last_part.type != MenuPart::Type::kNone)
       exit_type = ExitType::kOutermost;
   }
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // When doing a menu closure animation, target the deepest submenu - that way
   // MenuClosureAnimationMac will fade out all the menus in sync, rather than
   // the shallowest menu only.
@@ -3233,7 +3299,7 @@ void MenuController::UnregisterAlertedItem(MenuItemView* item) {
 }
 
 bool MenuController::CanProcessInputEvents() const {
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   return !menu_closure_animation_;
 #else
   return true;

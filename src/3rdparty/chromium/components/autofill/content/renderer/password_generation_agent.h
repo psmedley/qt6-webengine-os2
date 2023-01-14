@@ -10,13 +10,12 @@
 #include <map>
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/macros.h"
 #include "components/autofill/content/common/mojom/autofill_agent.mojom.h"
 #include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/autofill/content/renderer/renderer_save_password_progress_logger.h"
-#include "components/autofill/core/common/renderer_id.h"
+#include "components/autofill/core/common/unique_ids.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -54,7 +53,7 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
           pending_receiver);
 
   // mojom::PasswordGenerationAgent:
-  void GeneratedPasswordAccepted(const base::string16& password) override;
+  void GeneratedPasswordAccepted(const std::u16string& password) override;
   void FoundFormEligibleForGeneration(
       const PasswordFormGenerationData& form) override;
   // Sets |generation_element_| to the focused password field and responds back
@@ -91,7 +90,11 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   }
 #endif
 
+  bool IsPrerendering() const;
+
  private:
+  class DeferringPasswordGenerationDriver;
+
   // Contains information about generation status for an element for the
   // lifetime of the possible interaction.
   struct GenerationItemInfo;
@@ -101,11 +104,9 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   void DidChangeScrollOffset() override;
   void OnDestruct() override;
 
-  const mojo::AssociatedRemote<mojom::PasswordManagerDriver>&
-  GetPasswordManagerDriver();
+  mojom::PasswordManagerDriver& GetPasswordManagerDriver();
 
-  const mojo::AssociatedRemote<mojom::PasswordGenerationDriver>&
-  GetPasswordGenerationDriver();
+  mojom::PasswordGenerationDriver& GetPasswordGenerationDriver();
 
   // Helper function which takes care of the form processing and collecting the
   // information which is required to show the generation popup. Returns true if
@@ -173,6 +174,10 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
 
   mojo::AssociatedRemote<mojom::PasswordGenerationDriver>
       password_generation_client_;
+
+  // Used for deferring messages while prerendering.
+  std::unique_ptr<DeferringPasswordGenerationDriver>
+      deferring_password_generation_driver_;
 
   mojo::AssociatedReceiver<mojom::PasswordGenerationAgent> receiver_{this};
 

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/metrics/field_trial.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -17,6 +18,7 @@
 #include "components/variations/variations_associated_data.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/host_port_pair.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_stream_factory.h"
 #include "net/third_party/quiche/src/quic/core/crypto/crypto_protocol.h"
 #include "net/third_party/quiche/src/quic/core/quic_packets.h"
@@ -52,7 +54,7 @@ class NetworkSessionConfiguratorTest : public testing::Test {
 
   std::string quic_user_agent_id_;
   base::test::ScopedFeatureList scoped_feature_list_;
-  net::HttpNetworkSession::Params params_;
+  net::HttpNetworkSessionParams params_;
   net::QuicParams quic_params_;
 };
 
@@ -68,7 +70,7 @@ TEST_F(NetworkSessionConfiguratorTest, Defaults) {
   EXPECT_TRUE(params_.http2_settings.empty());
   EXPECT_FALSE(params_.greased_http2_frame);
   EXPECT_FALSE(params_.http2_end_stream_with_data_frame);
-  EXPECT_FALSE(params_.enable_websocket_over_http2);
+  EXPECT_TRUE(params_.enable_websocket_over_http2);
 
   EXPECT_TRUE(params_.enable_quic);
   EXPECT_TRUE(quic_params_.retry_without_alt_svc_on_quic_errors);
@@ -890,28 +892,6 @@ TEST_F(NetworkSessionConfiguratorTest,
   ParseFieldTrials();
 
   ASSERT_TRUE(params_.http2_end_stream_with_data_frame);
-}
-
-TEST_F(NetworkSessionConfiguratorTest,
-       WebsocketOverHttp2EnabledFromCommandLine) {
-  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitch(switches::kEnableWebsocketOverHttp2);
-
-  ParseCommandLineAndFieldTrials(command_line);
-
-  EXPECT_TRUE(params_.enable_websocket_over_http2);
-}
-
-TEST_F(NetworkSessionConfiguratorTest,
-       WebsocketOverHttp2EnabledFromFieldTrial) {
-  std::map<std::string, std::string> field_trial_params;
-  field_trial_params["websocket_over_http2"] = "true";
-  variations::AssociateVariationParams("HTTP2", "Enabled", field_trial_params);
-  base::FieldTrialList::CreateFieldTrial("HTTP2", "Enabled");
-
-  ParseFieldTrials();
-
-  EXPECT_TRUE(params_.enable_websocket_over_http2);
 }
 
 TEST_F(NetworkSessionConfiguratorTest,

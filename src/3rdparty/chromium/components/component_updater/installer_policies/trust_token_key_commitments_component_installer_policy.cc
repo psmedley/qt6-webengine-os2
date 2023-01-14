@@ -11,14 +11,15 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/version.h"
 #include "components/component_updater/component_updater_paths.h"
 #include "components/component_updater/component_updater_switches.h"
@@ -26,11 +27,6 @@
 using component_updater::ComponentUpdateService;
 
 namespace {
-
-// This file name must be in sync with the server-side configuration, or updates
-// will fail.
-const base::FilePath::CharType kTrustTokenKeyCommitmentsFileName[] =
-    FILE_PATH_LITERAL("keys.json");
 
 // The SHA256 of the SubjectPublicKeyInfo used to sign the extension.
 // The extension id is: kiabhabjdbkjdpjbpigfodbdjmbglcoo
@@ -44,17 +40,17 @@ const char kTrustTokenKeyCommitmentsManifestName[] =
 
 // Attempts to load key commitments as raw JSON from their storage file,
 // returning the loaded commitments on success and nullopt on failure.
-base::Optional<std::string> LoadKeyCommitmentsFromDisk(
+absl::optional<std::string> LoadKeyCommitmentsFromDisk(
     const base::FilePath& path) {
   if (path.empty())
-    return base::nullopt;
+    return absl::nullopt;
 
   VLOG(1) << "Reading trust token key commitments from file: " << path.value();
 
   std::string ret;
   if (!base::ReadFileToString(path, &ret)) {
     VLOG(1) << "Failed reading from " << path.value();
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   return ret;
@@ -115,21 +111,9 @@ void TrustTokenKeyCommitmentsComponentInstallerPolicy::ComponentReady(
   VLOG(1) << "Component ready, version " << version.GetString() << " in "
           << install_dir.value();
 
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(&LoadKeyCommitmentsFromDisk,
-                     GetInstalledPath(install_dir)),
-      base::BindOnce(
-          // Only bother sending commitments to the network service if we loaded
-          // them successfully.
-          [](base::RepeatingCallback<void(const std::string&)>
-                 on_commitments_ready,
-             base::Optional<std::string> loaded_commitments) {
-            if (loaded_commitments.has_value()) {
-              on_commitments_ready.Run(*loaded_commitments);
-            }
-          },
-          on_commitments_ready_));
+  LoadTrustTokensFromString(base::BindOnce(&LoadKeyCommitmentsFromDisk,
+                                           GetInstalledPath(install_dir)),
+                            on_commitments_ready_);
 }
 
 // Called during startup and installation before ComponentReady().
@@ -149,9 +133,7 @@ TrustTokenKeyCommitmentsComponentInstallerPolicy::GetRelativeInstallDir()
 
 void TrustTokenKeyCommitmentsComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(kTrustTokenKeyCommitmentsPublicKeySHA256,
-               kTrustTokenKeyCommitmentsPublicKeySHA256 +
-                   base::size(kTrustTokenKeyCommitmentsPublicKeySHA256));
+  GetPublicKeyHash(hash);
 }
 
 std::string TrustTokenKeyCommitmentsComponentInstallerPolicy::GetName() const {
@@ -162,6 +144,35 @@ update_client::InstallerAttributes
 TrustTokenKeyCommitmentsComponentInstallerPolicy::GetInstallerAttributes()
     const {
   return update_client::InstallerAttributes();
+}
+
+// static
+void TrustTokenKeyCommitmentsComponentInstallerPolicy::GetPublicKeyHash(
+    std::vector<uint8_t>* hash) {
+  DCHECK(hash);
+  hash->assign(kTrustTokenKeyCommitmentsPublicKeySHA256,
+               kTrustTokenKeyCommitmentsPublicKeySHA256 +
+                   base::size(kTrustTokenKeyCommitmentsPublicKeySHA256));
+}
+
+// static
+void TrustTokenKeyCommitmentsComponentInstallerPolicy::
+    LoadTrustTokensFromString(
+        base::OnceCallback<absl::optional<std::string>()> load_keys_from_disk,
+        base::OnceCallback<void(const std::string&)> on_commitments_ready) {
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+      std::move(load_keys_from_disk),
+      base::BindOnce(
+          // Only bother sending commitments to the network service if we loaded
+          // them successfully.
+          [](base::OnceCallback<void(const std::string&)> on_commitments_ready,
+             absl::optional<std::string> loaded_commitments) {
+            if (loaded_commitments.has_value()) {
+              std::move(on_commitments_ready).Run(loaded_commitments.value());
+            }
+          },
+          std::move(on_commitments_ready)));
 }
 
 }  // namespace component_updater

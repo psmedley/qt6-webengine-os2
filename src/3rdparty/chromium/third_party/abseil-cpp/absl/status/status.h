@@ -80,7 +80,7 @@ ABSL_NAMESPACE_BEGIN
 // `kFailedPrecondition` if both codes apply. Similarly prefer `kNotFound` or
 // `kAlreadyExists` over `kFailedPrecondition`.
 //
-// Because these errors may travel RPC boundaries, these codes are tied to the
+// Because these errors may cross RPC boundaries, these codes are tied to the
 // `google.rpc.Code` definitions within
 // https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 // The string value of these RPC codes is denoted within each enum below.
@@ -114,10 +114,10 @@ enum class StatusCode : int {
   // StatusCode::kInvalidArgument
   //
   // kInvalidArgument (gRPC code "INVALID_ARGUMENT") indicates the caller
-  // specified an invalid argument, such a malformed filename. Note that such
-  // errors should be narrowly limited to indicate to the invalid nature of the
-  // arguments themselves. Errors with validly formed arguments that may cause
-  // errors with the state of the receiving system should be denoted with
+  // specified an invalid argument, such as a malformed filename. Note that use
+  // of such errors should be narrowly limited to indicate the invalid nature of
+  // the arguments themselves. Errors with validly formed arguments that may
+  // cause errors with the state of the receiving system should be denoted with
   // `kFailedPrecondition` instead.
   kInvalidArgument = 3,
 
@@ -137,14 +137,15 @@ enum class StatusCode : int {
   //
   // `kNotFound` is useful if a request should be denied for an entire class of
   // users, such as during a gradual feature rollout or undocumented allow list.
-  // If, instead, a request should be denied for specific sets of users, such as
-  // through user-based access control, use `kPermissionDenied` instead.
+  // If a request should be denied for specific sets of users, such as through
+  // user-based access control, use `kPermissionDenied` instead.
   kNotFound = 5,
 
   // StatusCode::kAlreadyExists
   //
-  // kAlreadyExists (gRPC code "ALREADY_EXISTS") indicates the entity that a
-  // caller attempted to create (such as file or directory) is already present.
+  // kAlreadyExists (gRPC code "ALREADY_EXISTS") indicates that the entity a
+  // caller attempted to create (such as a file or directory) is already
+  // present.
   kAlreadyExists = 6,
 
   // StatusCode::kPermissionDenied
@@ -183,7 +184,7 @@ enum class StatusCode : int {
   //      level (such as when a client-specified test-and-set fails, indicating
   //      the client should restart a read-modify-write sequence).
   //  (c) Use `kFailedPrecondition` if the client should not retry until
-  //      the system state has been explicitly fixed. For example, if an "rmdir"
+  //      the system state has been explicitly fixed. For example, if a "rmdir"
   //      fails because the directory is non-empty, `kFailedPrecondition`
   //      should be returned since the client should not retry unless
   //      the files are deleted from the directory.
@@ -280,6 +281,59 @@ std::string StatusCodeToString(StatusCode code);
 // Streams StatusCodeToString(code) to `os`.
 std::ostream& operator<<(std::ostream& os, StatusCode code);
 
+// absl::StatusToStringMode
+//
+// An `absl::StatusToStringMode` is an enumerated type indicating how
+// `absl::Status::ToString()` should construct the output string for a non-ok
+// status.
+enum class StatusToStringMode : int {
+  // ToString will not contain any extra data (such as payloads). It will only
+  // contain the error code and message, if any.
+  kWithNoExtraData = 0,
+  // ToString will contain the payloads.
+  kWithPayload = 1 << 0,
+  // ToString will include all the extra data this Status has.
+  kWithEverything = ~kWithNoExtraData,
+  // Default mode used by ToString. Its exact value might change in the future.
+  kDefault = kWithPayload,
+};
+
+// absl::StatusToStringMode is specified as a bitmask type, which means the
+// following operations must be provided:
+inline constexpr StatusToStringMode operator&(StatusToStringMode lhs,
+                                              StatusToStringMode rhs) {
+  return static_cast<StatusToStringMode>(static_cast<int>(lhs) &
+                                         static_cast<int>(rhs));
+}
+inline constexpr StatusToStringMode operator|(StatusToStringMode lhs,
+                                              StatusToStringMode rhs) {
+  return static_cast<StatusToStringMode>(static_cast<int>(lhs) |
+                                         static_cast<int>(rhs));
+}
+inline constexpr StatusToStringMode operator^(StatusToStringMode lhs,
+                                              StatusToStringMode rhs) {
+  return static_cast<StatusToStringMode>(static_cast<int>(lhs) ^
+                                         static_cast<int>(rhs));
+}
+inline constexpr StatusToStringMode operator~(StatusToStringMode arg) {
+  return static_cast<StatusToStringMode>(~static_cast<int>(arg));
+}
+inline StatusToStringMode& operator&=(StatusToStringMode& lhs,
+                                      StatusToStringMode rhs) {
+  lhs = lhs & rhs;
+  return lhs;
+}
+inline StatusToStringMode& operator|=(StatusToStringMode& lhs,
+                                      StatusToStringMode rhs) {
+  lhs = lhs | rhs;
+  return lhs;
+}
+inline StatusToStringMode& operator^=(StatusToStringMode& lhs,
+                                      StatusToStringMode rhs) {
+  lhs = lhs ^ rhs;
+  return lhs;
+}
+
 // absl::Status
 //
 // The `absl::Status` class is generally used to gracefully handle errors
@@ -361,7 +415,12 @@ std::ostream& operator<<(std::ostream& os, StatusCode code);
 //     return result;
 //   }
 //
-class ABSL_MUST_USE_RESULT Status final {
+// For documentation see https://abseil.io/docs/cpp/guides/status.
+//
+// Returned Status objects may not be ignored. status_internal.h has a forward
+// declaration of the form
+// class ABSL_MUST_USE_RESULT Status;
+class Status final {
  public:
   // Constructors
 
@@ -443,15 +502,17 @@ class ABSL_MUST_USE_RESULT Status final {
 
   // Status::ToString()
   //
-  // Returns a combination of the error code name, the message and any
-  // associated payload messages. This string is designed simply to be human
-  // readable and its exact format should not be load bearing. Do not depend on
-  // the exact format of the result of `ToString()` which is subject to change.
+  // Returns a string based on the `mode`. By default, it returns combination of
+  // the error code name, the message and any associated payload messages. This
+  // string is designed simply to be human readable and its exact format should
+  // not be load bearing. Do not depend on the exact format of the result of
+  // `ToString()` which is subject to change.
   //
   // The printed code name and the message are generally substrings of the
   // result, and the payloads to be printed use the status payload printer
   // mechanism (which is internal).
-  std::string ToString() const;
+  std::string ToString(
+      StatusToStringMode mode = StatusToStringMode::kDefault) const;
 
   // Status::IgnoreError()
   //
@@ -582,8 +643,7 @@ class ABSL_MUST_USE_RESULT Status final {
   static uintptr_t PointerToRep(status_internal::StatusRep* r);
   static status_internal::StatusRep* RepToPointer(uintptr_t r);
 
-  // Returns string for non-ok Status.
-  std::string ToStringSlow() const;
+  std::string ToStringSlow(StatusToStringMode mode) const;
 
   // Status supports two different representations.
   //  - When the low bit is off it is an inlined representation.
@@ -747,8 +807,8 @@ inline bool operator!=(const Status& lhs, const Status& rhs) {
   return !(lhs == rhs);
 }
 
-inline std::string Status::ToString() const {
-  return ok() ? "OK" : ToStringSlow();
+inline std::string Status::ToString(StatusToStringMode mode) const {
+  return ok() ? "OK" : ToStringSlow(mode);
 }
 
 inline void Status::IgnoreError() const {

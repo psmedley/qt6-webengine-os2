@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "net/base/proxy_server.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -293,12 +293,6 @@ TEST(ProxyServerTest, ComparatorAndEquality) {
       {// Scheme is different.
        ProxyServer::FromURI("socks4://foo:33", ProxyServer::SCHEME_HTTP),
        ProxyServer::FromURI("http://foo:33", ProxyServer::SCHEME_HTTP), 1},
-      {// Trusted is different.
-       ProxyServer(ProxyServer::SCHEME_HTTPS, HostPortPair("foo", 33),
-                   false /* is_trusted_proxy */),
-       ProxyServer(ProxyServer::SCHEME_HTTPS, HostPortPair("foo", 33),
-                   true /* is_trusted_proxy */),
-       -1},
   };
 
   for (const auto& test : kTests) {

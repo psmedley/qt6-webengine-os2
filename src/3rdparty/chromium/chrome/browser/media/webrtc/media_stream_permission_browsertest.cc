@@ -58,6 +58,44 @@ class MediaStreamPermissionTest : public WebRtcTestBase {
     return LoadTestPageInBrowser(CreateIncognitoBrowser());
   }
 
+  void TestPermissionDenialEffectOnStream(std::string constraints,
+                                          ContentSettingsType setting_to_clear,
+                                          bool should_video_stop) {
+    HostContentSettingsMap* settings_map =
+        HostContentSettingsMapFactory::GetForProfile(browser()->profile());
+
+    content::WebContents* tab_contents = LoadTestPageInTab();
+
+    EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
+        tab_contents, constraints));
+
+    StartDetectingVideo(tab_contents, "local-view");
+    {
+      SCOPED_TRACE("Wait for video to play");
+      EXPECT_TRUE(WaitForVideoToPlay(tab_contents));
+    }
+
+    settings_map->ClearSettingsForOneType(setting_to_clear);
+
+    // Let all the cross-thread tasks do their work.
+    base::RunLoop().RunUntilIdle();
+
+    StartDetectingVideo(tab_contents, "local-view");
+
+    if (should_video_stop) {
+      SCOPED_TRACE("Wait for video to stop");
+      EXPECT_TRUE(WaitForVideoToStop(tab_contents));
+    } else {
+      SCOPED_TRACE("Wait for video to play 2");
+      EXPECT_TRUE(WaitForVideoToPlay(tab_contents));
+    }
+
+    // Clean up settings.
+    settings_map->ClearSettingsForOneType(ContentSettingsType::MEDIASTREAM_MIC);
+    settings_map->ClearSettingsForOneType(
+        ContentSettingsType::MEDIASTREAM_CAMERA);
+  }
+
   // Returns the URL of the main test page.
   GURL test_page_url() const {
     const char kMainWebrtcTestHtmlPage[] = "/webrtc/webrtc_jsep01_test.html";
@@ -169,49 +207,33 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
       tab_contents, kAudioOnlyCallConstraints));
 }
 
+// TODO(crbug.com/1204412) Disabled because the original test was only passing
+// due to a bug in the code. Now that the bug is fixed, the test is not passing
+// anymore.
 IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
-                       DenyingPermissionStopsStreamWhenRelevant) {
-  struct {
-    std::string constraints;
-    ContentSettingsType setting_to_clear;
-    bool should_video_stop;
-  } kTests[] = {
-      {kAudioVideoCallConstraints, ContentSettingsType::MEDIASTREAM_CAMERA,
-       true},
-      {kAudioVideoCallConstraints, ContentSettingsType::MEDIASTREAM_MIC, true},
-      {kVideoOnlyCallConstraints, ContentSettingsType::MEDIASTREAM_CAMERA,
-       true},
-      {kVideoOnlyCallConstraints, ContentSettingsType::MEDIASTREAM_MIC, false},
-  };
+                       DenyingCameraPermissionStopsAVStream) {
+  TestPermissionDenialEffectOnStream(kAudioVideoCallConstraints,
+                                     ContentSettingsType::MEDIASTREAM_CAMERA,
+                                     true /* should_video_stop */);
+}
 
-  HostContentSettingsMap* settings_map =
-      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
+IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
+                       DenyingMicPermissionStopsAVStream) {
+  TestPermissionDenialEffectOnStream(kAudioVideoCallConstraints,
+                                     ContentSettingsType::MEDIASTREAM_MIC,
+                                     true /* should_video_stop */);
+}
 
-  for (const auto& kTest : kTests) {
-    content::WebContents* tab_contents = LoadTestPageInTab();
+IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
+                       DenyingCameraPermissionStopsVideoOnlyStream) {
+  TestPermissionDenialEffectOnStream(kVideoOnlyCallConstraints,
+                                     ContentSettingsType::MEDIASTREAM_CAMERA,
+                                     true /* should_video_stop */);
+}
 
-    EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
-        tab_contents, kTest.constraints));
-
-    StartDetectingVideo(tab_contents, "local-view");
-    EXPECT_TRUE(WaitForVideoToPlay(tab_contents));
-
-    settings_map->ClearSettingsForOneType(kTest.setting_to_clear);
-
-    // Let all the cross-thread tasks do their work.
-    base::RunLoop().RunUntilIdle();
-
-    StartDetectingVideo(tab_contents, "local-view");
-
-    if (kTest.should_video_stop) {
-      EXPECT_TRUE(WaitForVideoToStop(tab_contents));
-    } else {
-      EXPECT_TRUE(WaitForVideoToPlay(tab_contents));
-    }
-
-    // Clean up settings for the following tests.
-    settings_map->ClearSettingsForOneType(ContentSettingsType::MEDIASTREAM_MIC);
-    settings_map->ClearSettingsForOneType(
-        ContentSettingsType::MEDIASTREAM_CAMERA);
-  }
+IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
+                       DenyingMicPermissionDoesntStopVideoOnlyStream) {
+  TestPermissionDenialEffectOnStream(kVideoOnlyCallConstraints,
+                                     ContentSettingsType::MEDIASTREAM_MIC,
+                                     false /* should_video_stop */);
 }

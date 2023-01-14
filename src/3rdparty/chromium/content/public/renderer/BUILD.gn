@@ -48,19 +48,24 @@ target(link_target_type, "renderer_sources") {
     "render_view.h",
     "render_view_visitor.h",
     "renderer_ppapi_host.h",
-    "url_loader_throttle_provider.h",
     "v8_value_converter.h",
     "video_encode_accelerator.cc",
     "video_encode_accelerator.h",
-    "websocket_handshake_throttle_provider.h",
     "window_features_converter.cc",
     "window_features_converter.h",
     "worker_thread.h",
   ]
 
+  if (enable_plugins) {
+    sources += [ "ppapi_gfx_conversion.h" ]
+  }
+
   configs += [ "//content:content_implementation" ]
 
-  public_deps = [ "//media" ]
+  public_deps = [
+    "//media",
+    "//ui/accessibility",
+  ]
 
   deps = [
     "//content/public/child:child_sources",

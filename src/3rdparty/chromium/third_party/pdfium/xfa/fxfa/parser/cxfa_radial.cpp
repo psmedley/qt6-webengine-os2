@@ -6,9 +6,12 @@
 
 #include "xfa/fxfa/parser/cxfa_radial.h"
 
+#include <math.h>
+
 #include <utility>
 
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fgas/graphics/cfgas_gegraphics.h"
 #include "xfa/fgas/graphics/cfgas_geshading.h"
 #include "xfa/fxfa/parser/cxfa_color.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
@@ -54,7 +57,7 @@ CXFA_Color* CXFA_Radial::GetColorIfExists() {
 }
 
 void CXFA_Radial::Draw(CFGAS_GEGraphics* pGS,
-                       CFGAS_GEPath* fillPath,
+                       const CFGAS_GEPath& fillPath,
                        FX_ARGB crStart,
                        const CFX_RectF& rtFill,
                        const CFX_Matrix& matrix) {
@@ -63,14 +66,12 @@ void CXFA_Radial::Draw(CFGAS_GEGraphics* pGS,
   if (!IsToEdge())
     std::swap(crStart, crEnd);
 
-  float endRadius = sqrt(rtFill.Width() * rtFill.Width() +
-                         rtFill.Height() * rtFill.Height()) /
-                    2;
-  CFGAS_GEShading shading(rtFill.Center(), rtFill.Center(), 0, endRadius, true,
+  float end_radius = FXSYS_sqrt2(rtFill.Width(), rtFill.Height()) / 2;
+  CFGAS_GEShading shading(rtFill.Center(), rtFill.Center(), 0, end_radius, true,
                           true, crStart, crEnd);
 
   pGS->SaveGraphState();
   pGS->SetFillColor(CFGAS_GEColor(&shading));
-  pGS->FillPath(fillPath, CFX_FillRenderOptions::FillType::kWinding, &matrix);
+  pGS->FillPath(fillPath, CFX_FillRenderOptions::FillType::kWinding, matrix);
   pGS->RestoreGraphState();
 }

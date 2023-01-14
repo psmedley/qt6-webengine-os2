@@ -98,9 +98,9 @@ void Serializer::OutputStatistics(const char* name) {
   }
   INSTANCE_TYPE_LIST(PRINT_INSTANCE_TYPE)
 #undef PRINT_INSTANCE_TYPE
+#endif  // OBJECT_PRINT
 
   PrintF("\n");
-#endif  // OBJECT_PRINT
 }
 
 void Serializer::SerializeDeferredObjects() {
@@ -316,6 +316,23 @@ void Serializer::ResolvePendingForwardReference(int forward_reference_id) {
   if (unresolved_forward_refs_ == 0) {
     next_forward_ref_id_ = 0;
   }
+}
+
+ExternalReferenceEncoder::Value Serializer::EncodeExternalReference(
+    Address addr) {
+  Maybe<ExternalReferenceEncoder::Value> result =
+      external_reference_encoder_.TryEncode(addr);
+  if (result.IsNothing()) {
+#ifdef DEBUG
+    PrintStack(std::cerr);
+#endif
+    void* addr_ptr = reinterpret_cast<void*>(addr);
+    v8::base::OS::PrintError("Unknown external reference %p.\n", addr_ptr);
+    v8::base::OS::PrintError("%s\n",
+                             ExternalReferenceTable::ResolveSymbol(addr_ptr));
+    v8::base::OS::Abort();
+  }
+  return result.FromJust();
 }
 
 void Serializer::RegisterObjectIsPending(Handle<HeapObject> obj) {
@@ -703,7 +720,7 @@ void Serializer::ObjectSerializer::Serialize() {
 
 namespace {
 SnapshotSpace GetSnapshotSpace(Handle<HeapObject> object) {
-#if V8_ENABLE_THIRD_PARTY_HEAP_BOOL
+  if (V8_ENABLE_THIRD_PARTY_HEAP_BOOL) {
     if (object->IsCode()) {
       return SnapshotSpace::kCode;
     } else if (ReadOnlyHeap::Contains(*object)) {
@@ -713,8 +730,7 @@ SnapshotSpace GetSnapshotSpace(Handle<HeapObject> object) {
     } else {
       return SnapshotSpace::kOld;
     }
-#else
-  if (ReadOnlyHeap::Contains(*object)) {
+  } else if (ReadOnlyHeap::Contains(*object)) {
     return SnapshotSpace::kReadOnlyHeap;
   } else {
     AllocationSpace heap_space =
@@ -742,7 +758,6 @@ SnapshotSpace GetSnapshotSpace(Handle<HeapObject> object) {
         UNREACHABLE();
     }
   }
-#endif
 }
 }  // namespace
 
@@ -875,6 +890,26 @@ void Serializer::ObjectSerializer::VisitPointers(HeapObject host,
   }
 }
 
+void Serializer::ObjectSerializer::VisitCodePointer(HeapObject host,
+                                                    CodeObjectSlot slot) {
+  CHECK(V8_EXTERNAL_CODE_SPACE_BOOL);
+  // A version of VisitPointers() customized for CodeObjectSlot.
+  HandleScope scope(isolate());
+  DisallowGarbageCollection no_gc;
+
+  // TODO(v8:11880): support external code space.
+  PtrComprCageBase code_cage_base = GetPtrComprCageBase(host);
+  Object contents = slot.load(code_cage_base);
+  DCHECK(HAS_STRONG_HEAP_OBJECT_TAG(contents.ptr()));
+  DCHECK(contents.IsCode());
+
+  Handle<HeapObject> obj = handle(HeapObject::cast(contents), isolate());
+  if (!serializer_->SerializePendingObject(obj)) {
+    serializer_->SerializeObject(obj);
+  }
+  bytes_processed_so_far_ += kTaggedSize;
+}
+
 void Serializer::ObjectSerializer::OutputExternalReference(Address target,
                                                            int target_size,
                                                            bool sandboxify) {
@@ -1000,16 +1035,17 @@ void Serializer::ObjectSerializer::VisitRuntimeEntry(Code host,
 
 void Serializer::ObjectSerializer::VisitOffHeapTarget(Code host,
                                                       RelocInfo* rinfo) {
-  STATIC_ASSERT(EmbeddedData::kTableSize == Builtins::builtin_count);
+  STATIC_ASSERT(EmbeddedData::kTableSize == Builtins::kBuiltinCount);
 
   Address addr = rinfo->target_off_heap_target();
   CHECK_NE(kNullAddress, addr);
 
-  Code target = InstructionStream::TryLookupCode(isolate(), addr);
-  CHECK(Builtins::IsIsolateIndependentBuiltin(target));
+  Builtin builtin = InstructionStream::TryLookupCode(isolate(), addr);
+  CHECK(Builtins::IsBuiltinId(builtin));
+  CHECK(Builtins::IsIsolateIndependent(builtin));
 
   sink_->Put(kOffHeapTarget, "OffHeapTarget");
-  sink_->PutInt(target.builtin_index(), "builtin index");
+  sink_->PutInt(static_cast<int>(builtin), "builtin index");
 }
 
 void Serializer::ObjectSerializer::VisitCodeTarget(Code host,
@@ -1080,13 +1116,19 @@ void Serializer::ObjectSerializer::OutputRawData(Address up_to) {
     } else if (object_->IsDescriptorArray()) {
       // The number of marked descriptors field can be changed by GC
       // concurrently.
-      byte field_value[2];
-      field_value[0] = 0;
-      field_value[1] = 0;
+      static byte field_value[2] = {0};
       OutputRawWithCustomField(
           sink_, object_start, base, bytes_to_output,
           DescriptorArray::kRawNumberOfMarkedDescriptorsOffset,
           sizeof(field_value), field_value);
+    } else if (V8_EXTERNAL_CODE_SPACE_BOOL && object_->IsCodeDataContainer()) {
+      // The CodeEntryPoint field is just a cached value which will be
+      // recomputed after deserialization, so write zeros to keep the snapshot
+      // deterministic.
+      static byte field_value[kExternalPointerSize] = {0};
+      OutputRawWithCustomField(sink_, object_start, base, bytes_to_output,
+                               CodeDataContainer::kCodeEntryPointOffset,
+                               sizeof(field_value), field_value);
     } else {
       sink_->PutRaw(reinterpret_cast<byte*>(object_start + base),
                     bytes_to_output, "Bytes");
@@ -1191,9 +1233,9 @@ void Serializer::ObjectSerializer::SerializeCode(Map map, int size) {
 }
 
 Serializer::HotObjectsList::HotObjectsList(Heap* heap) : heap_(heap) {
-  strong_roots_entry_ =
-      heap->RegisterStrongRoots(FullObjectSlot(&circular_queue_[0]),
-                                FullObjectSlot(&circular_queue_[kSize]));
+  strong_roots_entry_ = heap->RegisterStrongRoots(
+      "Serializer::HotObjectsList", FullObjectSlot(&circular_queue_[0]),
+      FullObjectSlot(&circular_queue_[kSize]));
 }
 Serializer::HotObjectsList::~HotObjectsList() {
   heap_->UnregisterStrongRoots(strong_roots_entry_);

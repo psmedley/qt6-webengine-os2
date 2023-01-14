@@ -14,11 +14,11 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/containers/stack.h"
+#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/scoped_feature_list.h"
@@ -706,7 +706,8 @@ class AppCacheRequestHandlerTest : public ::testing::Test {
     auto request = std::make_unique<AppCacheRequest>(resource_request);
     request_ = request.get();
     handler_ =
-        host->CreateRequestHandler(std::move(request), destination, false);
+        host->CreateRequestHandler(std::move(request), destination, false,
+                                   FrameTreeNode::kFrameTreeNodeInvalidId);
   }
 
   // Data members --------------------------------------------------

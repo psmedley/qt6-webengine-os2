@@ -48,7 +48,7 @@
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 
 // See
-// https://chromium.googlesource.com/chromium/src/+/master/docs/linux/zygote.md
+// https://chromium.googlesource.com/chromium/src/+/main/docs/linux/zygote.md
 
 namespace content {
 
@@ -100,7 +100,7 @@ bool Zygote::ProcessRequests() {
   // browser on it.
   // A SOCK_DGRAM is installed in fd 5. This is the sandbox IPC channel.
   // See
-  // https://chromium.googlesource.com/chromium/src/+/master/docs/linux/sandbox_ipc.md
+  // https://chromium.googlesource.com/chromium/src/+/main/docs/linux/sandbox_ipc.md
 
   // We need to accept SIGCHLD, even though our handler is a no-op because
   // otherwise we cannot wait on children. (According to POSIX 2001.)
@@ -234,7 +234,6 @@ bool Zygote::HandleRequestFromBrowser(int fd) {
     // coverage for the Zygote. Currently it's not possible because of
     // confusion over who is responsible for closing the file descriptor.
     _exit(0);
-    return false;
   }
 
   if (len == -1) {
@@ -554,7 +553,7 @@ base::ProcessId Zygote::ReadArgsAndFork(base::PickleIterator iter,
   // timezone_id is obtained from ICU in zygote host so that it can't be
   // invalid. For an unknown reason, if an invalid ID is passed down here, the
   // worst result would be that timezone would be set to Etc/Unknown.
-  base::string16 timezone_id;
+  std::u16string timezone_id;
   if (!iter.ReadString16(&timezone_id))
     return -1;
   icu::TimeZone::adoptDefault(icu::TimeZone::createTimeZone(

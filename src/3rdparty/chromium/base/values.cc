@@ -4,24 +4,35 @@
 
 #include "base/values.h"
 
-#include <string.h>
+// values.h is a widely included header and its size has significant impact on
+// build time. Try not to raise this limit unless absolutely necessary. See
+// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+#ifndef NACL_TC_REV
+#pragma clang max_tokens_here 400000
+#endif
 
+#include <algorithm>
 #include <cmath>
-#include <new>
 #include <ostream>
+#include <tuple>
 #include <utility>
 
+#include "base/as_const.h"
 #include "base/bit_cast.h"
 #include "base/check_op.h"
 #include "base/containers/checked_iterators.h"
+#include "base/containers/contains.h"
+#include "base/cxx17_backports.h"
 #include "base/json/json_writer.h"
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
 #include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/base_tracing.h"
 #include "base/tracing_buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 
 #if BUILDFLAG(ENABLE_BASE_TRACING)
@@ -57,7 +68,7 @@ std::unique_ptr<Value> CopyListWithoutEmptyChildren(const Value& list) {
 std::unique_ptr<DictionaryValue> CopyDictionaryWithoutEmptyChildren(
     const DictionaryValue& dict) {
   std::unique_ptr<DictionaryValue> copy;
-  for (const auto& it : dict.DictItems()) {
+  for (auto it : dict.DictItems()) {
     std::unique_ptr<Value> child_copy = CopyWithoutEmptyChildren(it.second);
     if (child_copy) {
       if (!copy)
@@ -174,14 +185,9 @@ Value::Value(Type type) {
     case Type::LIST:
       data_.emplace<ListStorage>();
       return;
-    // TODO(crbug.com/859477): Remove after root cause is found.
-    case Type::DEAD:
-      CHECK(false);
-      return;
   }
 
-  // TODO(crbug.com/859477): Revert to NOTREACHED() after root cause is found.
-  CHECK(false);
+  NOTREACHED();
 }
 
 Value::Value(bool in_bool) : data_(in_bool) {}
@@ -196,7 +202,7 @@ Value::Value(double in_double) : data_(bit_cast<DoubleStorage>(in_double)) {
   }
 }
 
-Value::Value(const char* in_string) : Value(in_string ? std::string(in_string) : std::string()) {}
+Value::Value(const char* in_string) : Value(std::string(in_string)) {}
 
 Value::Value(StringPiece in_string) : Value(std::string(in_string)) {}
 
@@ -204,7 +210,7 @@ Value::Value(std::string&& in_string) noexcept : data_(std::move(in_string)) {
   DCHECK(IsStringUTF8AllowingNoncharacters(GetString()));
 }
 
-Value::Value(const char16* in_string16) : Value(StringPiece16(in_string16)) {}
+Value::Value(const char16_t* in_string16) : Value(StringPiece16(in_string16)) {}
 
 Value::Value(StringPiece16 in_string16) : Value(UTF16ToUTF8(in_string16)) {}
 
@@ -282,16 +288,17 @@ const char* Value::GetTypeName(Value::Type type) {
   return kTypeNames[static_cast<size_t>(type)];
 }
 
-Optional<bool> Value::GetIfBool() const {
-  return is_bool() ? make_optional(GetBool()) : nullopt;
+absl::optional<bool> Value::GetIfBool() const {
+  return is_bool() ? absl::make_optional(GetBool()) : absl::nullopt;
 }
 
-Optional<int> Value::GetIfInt() const {
-  return is_int() ? make_optional(GetInt()) : nullopt;
+absl::optional<int> Value::GetIfInt() const {
+  return is_int() ? absl::make_optional(GetInt()) : absl::nullopt;
 }
 
-Optional<double> Value::GetIfDouble() const {
-  return (is_int() || is_double()) ? make_optional(GetDouble()) : nullopt;
+absl::optional<double> Value::GetIfDouble() const {
+  return (is_int() || is_double()) ? absl::make_optional(GetDouble())
+                                   : absl::nullopt;
 }
 
 const std::string* Value::GetIfString() const {
@@ -339,7 +346,7 @@ Value::ConstListView Value::GetList() const {
   return list();
 }
 
-Value::ListStorage Value::TakeList() {
+Value::ListStorage Value::TakeList() && {
   return std::exchange(list(), {});
 }
 
@@ -367,7 +374,7 @@ void Value::Append(std::string&& value) {
   list().emplace_back(std::move(value));
 }
 
-void Value::Append(const char16* value) {
+void Value::Append(const char16_t* value) {
   list().emplace_back(value);
 }
 
@@ -427,23 +434,23 @@ const Value* Value::FindKeyOfType(StringPiece key, Type type) const {
   return result;
 }
 
-base::Optional<bool> Value::FindBoolKey(StringPiece key) const {
+absl::optional<bool> Value::FindBoolKey(StringPiece key) const {
   const Value* result = FindKeyOfType(key, Type::BOOLEAN);
-  return result ? base::make_optional(result->GetBool()) : base::nullopt;
+  return result ? absl::make_optional(result->GetBool()) : absl::nullopt;
 }
 
-base::Optional<int> Value::FindIntKey(StringPiece key) const {
+absl::optional<int> Value::FindIntKey(StringPiece key) const {
   const Value* result = FindKeyOfType(key, Type::INTEGER);
-  return result ? base::make_optional(result->GetInt()) : base::nullopt;
+  return result ? absl::make_optional(result->GetInt()) : absl::nullopt;
 }
 
-base::Optional<double> Value::FindDoubleKey(StringPiece key) const {
+absl::optional<double> Value::FindDoubleKey(StringPiece key) const {
   if (const Value* cur = FindKey(key)) {
     if (cur->is_int() || cur->is_double())
       return cur->GetDouble();
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 const std::string* Value::FindStringKey(StringPiece key) const {
@@ -523,10 +530,10 @@ bool Value::RemoveKey(StringPiece key) {
   return dict().erase(key) != 0;
 }
 
-Optional<Value> Value::ExtractKey(StringPiece key) {
+absl::optional<Value> Value::ExtractKey(StringPiece key) {
   auto found = dict().find(key);
   if (found == dict().end())
-    return nullopt;
+    return absl::nullopt;
 
   Value value = std::move(*found->second);
   dict().erase(found);
@@ -559,27 +566,27 @@ const Value* Value::FindPathOfType(StringPiece path, Type type) const {
   return cur;
 }
 
-base::Optional<bool> Value::FindBoolPath(StringPiece path) const {
+absl::optional<bool> Value::FindBoolPath(StringPiece path) const {
   const Value* cur = FindPath(path);
   if (!cur || !cur->is_bool())
-    return base::nullopt;
+    return absl::nullopt;
   return cur->GetBool();
 }
 
-base::Optional<int> Value::FindIntPath(StringPiece path) const {
+absl::optional<int> Value::FindIntPath(StringPiece path) const {
   const Value* cur = FindPath(path);
   if (!cur || !cur->is_int())
-    return base::nullopt;
+    return absl::nullopt;
   return cur->GetInt();
 }
 
-base::Optional<double> Value::FindDoublePath(StringPiece path) const {
+absl::optional<double> Value::FindDoublePath(StringPiece path) const {
   if (const Value* cur = FindPath(path)) {
     if (cur->is_int() || cur->is_double())
       return cur->GetDouble();
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 const std::string* Value::FindStringPath(StringPiece path) const {
@@ -648,9 +655,9 @@ bool Value::RemovePath(StringPiece path) {
   return ExtractPath(path).has_value();
 }
 
-Optional<Value> Value::ExtractPath(StringPiece path) {
+absl::optional<Value> Value::ExtractPath(StringPiece path) {
   if (!is_dict() || path.empty())
-    return nullopt;
+    return absl::nullopt;
 
   // NOTE: PathSplitter is not being used here because recursion is used to
   // ensure that dictionaries that become empty due to this operation are
@@ -661,9 +668,10 @@ Optional<Value> Value::ExtractPath(StringPiece path) {
 
   auto found = dict().find(path.substr(0, pos));
   if (found == dict().end() || !found->second->is_dict())
-    return nullopt;
+    return absl::nullopt;
 
-  Optional<Value> extracted = found->second->ExtractPath(path.substr(pos + 1));
+  absl::optional<Value> extracted =
+      found->second->ExtractPath(path.substr(pos + 1));
   if (extracted && found->second->dict().empty())
     dict().erase(found);
 
@@ -686,7 +694,7 @@ const Value* Value::FindPath(std::initializer_list<StringPiece> path) const {
 
 const Value* Value::FindPath(span<const StringPiece> path) const {
   const Value* cur = this;
-  for (const StringPiece component : path) {
+  for (const StringPiece& component : path) {
     if (!cur->is_dict() || (cur = cur->FindKey(component)) == nullptr)
       return nullptr;
   }
@@ -759,7 +767,7 @@ Value::const_dict_iterator_proxy Value::DictItems() const {
   return const_dict_iterator_proxy(&dict());
 }
 
-Value::DictStorage Value::TakeDict() {
+Value::DictStorage Value::TakeDict() && {
   DictStorage storage;
   storage.reserve(dict().size());
   for (auto& pair : dict()) {
@@ -809,23 +817,6 @@ bool Value::GetAsBoolean(bool* out_value) const {
   return is_bool();
 }
 
-bool Value::GetAsInteger(int* out_value) const {
-  if (out_value && is_int()) {
-    *out_value = GetInt();
-    return true;
-  }
-  return is_int();
-}
-
-bool Value::GetAsDouble(double* out_value) const {
-  if (out_value && (is_double() || is_int())) {
-    *out_value = GetDouble();
-    return true;
-  }
-
-  return is_double() || is_int();
-}
-
 bool Value::GetAsString(std::string* out_value) const {
   if (out_value && is_string()) {
     *out_value = GetString();
@@ -834,7 +825,7 @@ bool Value::GetAsString(std::string* out_value) const {
   return is_string();
 }
 
-bool Value::GetAsString(string16* out_value) const {
+bool Value::GetAsString(std::u16string* out_value) const {
   if (out_value && is_string()) {
     *out_value = UTF8ToUTF16(GetString());
     return true;
@@ -927,14 +918,9 @@ bool operator==(const Value& lhs, const Value& rhs) {
           });
     case Value::Type::LIST:
       return lhs.list() == rhs.list();
-      // TODO(crbug.com/859477): Remove after root cause is found.
-    case Value::Type::DEAD:
-      CHECK(false);
-      return false;
   }
 
-  // TODO(crbug.com/859477): Revert to NOTREACHED() after root cause is found.
-  CHECK(false);
+  NOTREACHED();
   return false;
 }
 
@@ -971,14 +957,9 @@ bool operator<(const Value& lhs, const Value& rhs) {
           });
     case Value::Type::LIST:
       return lhs.list() < rhs.list();
-      // TODO(crbug.com/859477): Remove after root cause is found.
-    case Value::Type::DEAD:
-      CHECK(false);
-      return false;
   }
 
-  // TODO(crbug.com/859477): Revert to NOTREACHED() after root cause is found.
-  CHECK(false);
+  NOTREACHED();
   return false;
 }
 
@@ -1021,6 +1002,43 @@ std::string Value::DebugString() const {
   JSONWriter::WriteWithOptions(*this, JSONWriter::OPTIONS_PRETTY_PRINT, &json);
   return json;
 }
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+void Value::WriteIntoTrace(perfetto::TracedValue context) const {
+  switch (type()) {
+    case Type::BOOLEAN:
+      std::move(context).WriteBoolean(GetBool());
+      return;
+    case Type::INTEGER:
+      std::move(context).WriteInt64(GetInt());
+      return;
+    case Type::DOUBLE:
+      std::move(context).WriteDouble(GetDouble());
+      return;
+    case Type::STRING:
+      std::move(context).WriteString(GetString());
+      return;
+    case Type::BINARY:
+      std::move(context).WriteString("<binary data not supported>");
+      return;
+    case Type::DICTIONARY: {
+      perfetto::TracedDictionary dict = std::move(context).WriteDictionary();
+      for (auto kv : DictItems())
+        dict.Add(perfetto::DynamicString{kv.first}, kv.second);
+      return;
+    }
+    case Type::LIST: {
+      perfetto::TracedArray array = std::move(context).WriteArray();
+      for (const auto& item : GetList())
+        array.Append(item);
+      return;
+    }
+    case Type::NONE:
+      std::move(context).WriteString("<none>");
+      return;
+  }
+}
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 Value* Value::SetKeyInternal(StringPiece key,
                              std::unique_ptr<Value>&& val_ptr) {
@@ -1144,7 +1162,8 @@ Value* DictionaryValue::SetString(StringPiece path, StringPiece in_value) {
   return Set(path, std::make_unique<Value>(in_value));
 }
 
-Value* DictionaryValue::SetString(StringPiece path, const string16& in_value) {
+Value* DictionaryValue::SetString(StringPiece path,
+                                  const std::u16string& in_value) {
   return Set(path, std::make_unique<Value>(in_value));
 }
 
@@ -1199,7 +1218,10 @@ bool DictionaryValue::GetInteger(StringPiece path, int* out_value) const {
   if (!Get(path, &value))
     return false;
 
-  return value->GetAsInteger(out_value);
+  bool is_int = value->is_int();
+  if (is_int && out_value)
+    *out_value = value->GetInt();
+  return is_int;
 }
 
 bool DictionaryValue::GetDouble(StringPiece path, double* out_value) const {
@@ -1207,7 +1229,12 @@ bool DictionaryValue::GetDouble(StringPiece path, double* out_value) const {
   if (!Get(path, &value))
     return false;
 
-  return value->GetAsDouble(out_value);
+  const bool is_convertible_to_double = value->is_double() || value->is_int();
+  if (out_value && is_convertible_to_double) {
+    *out_value = value->GetDouble();
+  }
+
+  return is_convertible_to_double;
 }
 
 bool DictionaryValue::GetString(StringPiece path,
@@ -1219,7 +1246,8 @@ bool DictionaryValue::GetString(StringPiece path,
   return value->GetAsString(out_value);
 }
 
-bool DictionaryValue::GetString(StringPiece path, string16* out_value) const {
+bool DictionaryValue::GetString(StringPiece path,
+                                std::u16string* out_value) const {
   const Value* value;
   if (!Get(path, &value))
     return false;
@@ -1296,76 +1324,11 @@ bool DictionaryValue::GetList(StringPiece path, ListValue** out_value) {
                                  const_cast<const ListValue**>(out_value));
 }
 
-bool DictionaryValue::GetWithoutPathExpansion(StringPiece key,
-                                              const Value** out_value) const {
-  DCHECK(IsStringUTF8AllowingNoncharacters(key));
-  auto entry_iterator = dict().find(key);
-  if (entry_iterator == dict().end())
-    return false;
-
-  if (out_value)
-    *out_value = entry_iterator->second.get();
-  return true;
-}
-
-bool DictionaryValue::GetWithoutPathExpansion(StringPiece key,
-                                              Value** out_value) {
-  return as_const(*this).GetWithoutPathExpansion(
-      key, const_cast<const Value**>(out_value));
-}
-
-bool DictionaryValue::GetBooleanWithoutPathExpansion(StringPiece key,
-                                                     bool* out_value) const {
-  const Value* value;
-  if (!GetWithoutPathExpansion(key, &value))
-    return false;
-
-  return value->GetAsBoolean(out_value);
-}
-
-bool DictionaryValue::GetIntegerWithoutPathExpansion(StringPiece key,
-                                                     int* out_value) const {
-  const Value* value;
-  if (!GetWithoutPathExpansion(key, &value))
-    return false;
-
-  return value->GetAsInteger(out_value);
-}
-
-bool DictionaryValue::GetDoubleWithoutPathExpansion(StringPiece key,
-                                                    double* out_value) const {
-  const Value* value;
-  if (!GetWithoutPathExpansion(key, &value))
-    return false;
-
-  return value->GetAsDouble(out_value);
-}
-
-bool DictionaryValue::GetStringWithoutPathExpansion(
-    StringPiece key,
-    std::string* out_value) const {
-  const Value* value;
-  if (!GetWithoutPathExpansion(key, &value))
-    return false;
-
-  return value->GetAsString(out_value);
-}
-
-bool DictionaryValue::GetStringWithoutPathExpansion(StringPiece key,
-                                                    string16* out_value) const {
-  const Value* value;
-  if (!GetWithoutPathExpansion(key, &value))
-    return false;
-
-  return value->GetAsString(out_value);
-}
-
 bool DictionaryValue::GetDictionaryWithoutPathExpansion(
     StringPiece key,
     const DictionaryValue** out_value) const {
-  const Value* value;
-  bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->is_dict())
+  const Value* value = FindKey(key);
+  if (!value || !value->is_dict())
     return false;
 
   if (out_value)
@@ -1384,9 +1347,8 @@ bool DictionaryValue::GetDictionaryWithoutPathExpansion(
 bool DictionaryValue::GetListWithoutPathExpansion(
     StringPiece key,
     const ListValue** out_value) const {
-  const Value* value;
-  bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->is_list())
+  const Value* value = FindKey(key);
+  if (!value || !value->is_list())
     return false;
 
   if (out_value)
@@ -1399,56 +1361,6 @@ bool DictionaryValue::GetListWithoutPathExpansion(StringPiece key,
                                                   ListValue** out_value) {
   return as_const(*this).GetListWithoutPathExpansion(
       key, const_cast<const ListValue**>(out_value));
-}
-
-bool DictionaryValue::Remove(StringPiece path,
-                             std::unique_ptr<Value>* out_value) {
-  DCHECK(IsStringUTF8AllowingNoncharacters(path));
-  StringPiece current_path(path);
-  DictionaryValue* current_dictionary = this;
-  size_t delimiter_position = current_path.rfind('.');
-  if (delimiter_position != StringPiece::npos) {
-    if (!GetDictionary(current_path.substr(0, delimiter_position),
-                       &current_dictionary))
-      return false;
-    current_path = current_path.substr(delimiter_position + 1);
-  }
-
-  return current_dictionary->RemoveWithoutPathExpansion(current_path,
-                                                        out_value);
-}
-
-bool DictionaryValue::RemoveWithoutPathExpansion(
-    StringPiece key,
-    std::unique_ptr<Value>* out_value) {
-  DCHECK(IsStringUTF8AllowingNoncharacters(key));
-  auto entry_iterator = dict().find(key);
-  if (entry_iterator == dict().end())
-    return false;
-
-  if (out_value)
-    *out_value = std::move(entry_iterator->second);
-  dict().erase(entry_iterator);
-  return true;
-}
-
-bool DictionaryValue::RemovePath(StringPiece path,
-                                 std::unique_ptr<Value>* out_value) {
-  bool result = false;
-  size_t delimiter_position = path.find('.');
-
-  if (delimiter_position == std::string::npos)
-    return RemoveWithoutPathExpansion(path, out_value);
-
-  StringPiece subdict_path = path.substr(0, delimiter_position);
-  DictionaryValue* subdict = nullptr;
-  if (!GetDictionary(subdict_path, &subdict))
-    return false;
-  result = subdict->RemovePath(path.substr(delimiter_position + 1), out_value);
-  if (result && subdict->empty())
-    RemoveKey(subdict_path);
-
-  return result;
 }
 
 std::unique_ptr<DictionaryValue> DictionaryValue::DeepCopyWithoutEmptyChildren()
@@ -1466,7 +1378,7 @@ void DictionaryValue::Swap(DictionaryValue* other) {
 }
 
 DictionaryValue::Iterator::Iterator(const DictionaryValue& target)
-    : target_(target), it_(target.dict().begin()) {}
+    : target_(target), it_(target.DictItems().begin()) {}
 
 DictionaryValue::Iterator::Iterator(const Iterator& other) = default;
 
@@ -1496,10 +1408,6 @@ ListValue::ListValue() : Value(Type::LIST) {}
 ListValue::ListValue(span<const Value> in_list) : Value(in_list) {}
 ListValue::ListValue(ListStorage&& in_list) noexcept
     : Value(std::move(in_list)) {}
-
-void ListValue::Clear() {
-  list().clear();
-}
 
 bool ListValue::Set(size_t index, std::unique_ptr<Value> in_value) {
   if (!in_value)
@@ -1534,22 +1442,6 @@ bool ListValue::GetBoolean(size_t index, bool* bool_value) const {
   return value->GetAsBoolean(bool_value);
 }
 
-bool ListValue::GetInteger(size_t index, int* out_value) const {
-  const Value* value;
-  if (!Get(index, &value))
-    return false;
-
-  return value->GetAsInteger(out_value);
-}
-
-bool ListValue::GetDouble(size_t index, double* out_value) const {
-  const Value* value;
-  if (!Get(index, &value))
-    return false;
-
-  return value->GetAsDouble(out_value);
-}
-
 bool ListValue::GetString(size_t index, std::string* out_value) const {
   const Value* value;
   if (!Get(index, &value))
@@ -1558,7 +1450,7 @@ bool ListValue::GetString(size_t index, std::string* out_value) const {
   return value->GetAsString(out_value);
 }
 
-bool ListValue::GetString(size_t index, string16* out_value) const {
+bool ListValue::GetString(size_t index, std::u16string* out_value) const {
   const Value* value;
   if (!Get(index, &value))
     return false;
@@ -1584,58 +1476,6 @@ bool ListValue::GetDictionary(size_t index, DictionaryValue** out_value) {
       index, const_cast<const DictionaryValue**>(out_value));
 }
 
-bool ListValue::GetList(size_t index, const ListValue** out_value) const {
-  const Value* value;
-  bool result = Get(index, &value);
-  if (!result || !value->is_list())
-    return false;
-
-  if (out_value)
-    *out_value = static_cast<const ListValue*>(value);
-
-  return true;
-}
-
-bool ListValue::GetList(size_t index, ListValue** out_value) {
-  return as_const(*this).GetList(index,
-                                 const_cast<const ListValue**>(out_value));
-}
-
-bool ListValue::Remove(size_t index, std::unique_ptr<Value>* out_value) {
-  if (index >= list().size())
-    return false;
-
-  if (out_value)
-    *out_value = std::make_unique<Value>(std::move(list()[index]));
-
-  list().erase(list().begin() + index);
-  return true;
-}
-
-bool ListValue::Remove(const Value& value, size_t* index) {
-  auto it = ranges::find(list(), value);
-
-  if (it == list().end())
-    return false;
-
-  if (index)
-    *index = std::distance(list().begin(), it);
-
-  list().erase(it);
-  return true;
-}
-
-ListValue::iterator ListValue::Erase(iterator iter,
-                                     std::unique_ptr<Value>* out_value) {
-  if (out_value)
-    *out_value = std::make_unique<Value>(std::move(*iter));
-
-  auto list_iter = list().begin() + (iter - GetList().begin());
-  CHECK(list_iter != list().end());
-  list_iter = list().erase(list_iter);
-  return GetList().begin() + (list_iter - list().begin());
-}
-
 void ListValue::Append(std::unique_ptr<Value> in_value) {
   list().push_back(std::move(*in_value));
 }
@@ -1648,53 +1488,17 @@ void ListValue::AppendInteger(int in_value) {
   list().emplace_back(in_value);
 }
 
-void ListValue::AppendDouble(double in_value) {
-  list().emplace_back(in_value);
-}
-
 void ListValue::AppendString(StringPiece in_value) {
   list().emplace_back(in_value);
 }
 
-void ListValue::AppendString(const string16& in_value) {
+void ListValue::AppendString(const std::u16string& in_value) {
   list().emplace_back(in_value);
-}
-
-void ListValue::AppendStrings(const std::vector<std::string>& in_values) {
-  list().reserve(list().size() + in_values.size());
-  for (const auto& in_value : in_values)
-    list().emplace_back(in_value);
-}
-
-bool ListValue::AppendIfNotPresent(std::unique_ptr<Value> in_value) {
-  DCHECK(in_value);
-  if (Contains(list(), *in_value))
-    return false;
-
-  list().push_back(std::move(*in_value));
-  return true;
-}
-
-bool ListValue::Insert(size_t index, std::unique_ptr<Value> in_value) {
-  DCHECK(in_value);
-  if (index > list().size())
-    return false;
-
-  list().insert(list().begin() + index, std::move(*in_value));
-  return true;
-}
-
-ListValue::const_iterator ListValue::Find(const Value& value) const {
-  return ranges::find(GetList(), value);
 }
 
 void ListValue::Swap(ListValue* other) {
   CHECK(other->is_list());
   list().swap(other->list());
-}
-
-ListValue* ListValue::DeepCopy() const {
-  return new ListValue(list());
 }
 
 std::unique_ptr<ListValue> ListValue::CreateDeepCopy() const {

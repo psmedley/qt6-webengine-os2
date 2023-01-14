@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <cmath>
+#include <math.h>
+
 #include <limits>
 #include <memory>
 #include <string>
@@ -23,7 +24,7 @@
 #include "testing/utils/hash.h"
 #include "testing/utils/path_service.h"
 #include "third_party/base/check.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/cxx17_backports.h"
 
 using pdfium::kManyRectanglesChecksum;
 
@@ -91,7 +92,7 @@ class MockDownloadHints final : public FX_DOWNLOADHINTS {
     FX_DOWNLOADHINTS::AddSegment = SAddSegment;
   }
 
-  ~MockDownloadHints() {}
+  ~MockDownloadHints() = default;
 };
 
 }  // namespace
@@ -363,6 +364,11 @@ TEST_F(FPDFViewEmbedderTest, LoadNonexistentDocument) {
   FPDF_DOCUMENT doc = FPDF_LoadDocument("nonexistent_document.pdf", "");
   ASSERT_FALSE(doc);
   EXPECT_EQ(static_cast<int>(FPDF_GetLastError()), FPDF_ERR_FILE);
+}
+
+TEST_F(FPDFViewEmbedderTest, DocumentWithNoPageCount) {
+  ASSERT_TRUE(OpenDocument("no_page_count.pdf"));
+  ASSERT_EQ(6, FPDF_GetPageCount(document()));
 }
 
 // See https://crbug.com/pdfium/465

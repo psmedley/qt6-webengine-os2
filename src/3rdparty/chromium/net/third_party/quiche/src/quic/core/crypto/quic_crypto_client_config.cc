@@ -9,6 +9,7 @@
 #include <string>
 
 #include "absl/base/macros.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
@@ -32,9 +33,6 @@
 #include "quic/platform/api/quic_client_stats.h"
 #include "quic/platform/api/quic_hostname_utils.h"
 #include "quic/platform/api/quic_logging.h"
-#include "quic/platform/api/quic_map_util.h"
-#include "quic/platform/api/quic_ptr_util.h"
-#include "common/platform/api/quiche_text_utils.h"
 
 namespace quic {
 
@@ -132,15 +130,6 @@ QuicCryptoClientConfig::CachedState::GetServerConfig() const {
     QUICHE_DCHECK(scfg_.get());
   }
   return scfg_.get();
-}
-
-void QuicCryptoClientConfig::CachedState::add_server_nonce(
-    const std::string& server_nonce) {
-  server_nonces_.push(server_nonce);
-}
-
-bool QuicCryptoClientConfig::CachedState::has_server_nonce() const {
-  return !server_nonces_.empty();
 }
 
 QuicCryptoClientConfig::CachedState::ServerConfigState
@@ -363,17 +352,6 @@ void QuicCryptoClientConfig::CachedState::InitializeFrom(
   ++generation_counter_;
 }
 
-std::string QuicCryptoClientConfig::CachedState::GetNextServerNonce() {
-  if (server_nonces_.empty()) {
-    QUIC_BUG
-        << "Attempting to consume a server nonce that was never designated.";
-    return "";
-  }
-  const std::string server_nonce = server_nonces_.front();
-  server_nonces_.pop();
-  return server_nonce;
-}
-
 void QuicCryptoClientConfig::SetDefaults() {
   // Key exchange methods.
   kexs = {kC255, kP256};
@@ -395,7 +373,7 @@ QuicCryptoClientConfig::CachedState* QuicCryptoClientConfig::LookupOrCreate(
   }
 
   CachedState* cached = new CachedState;
-  cached_states_.insert(std::make_pair(server_id, QuicWrapUnique(cached)));
+  cached_states_.insert(std::make_pair(server_id, absl::WrapUnique(cached)));
   bool cache_populated = PopulateFromCanonicalConfig(server_id, cached);
   QUIC_CLIENT_HISTOGRAM_BOOL(
       "QuicCryptoClientConfig.PopulatedFromCanonicalConfig", cache_populated,
@@ -495,8 +473,9 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
     CryptoHandshakeMessage* out,
     std::string* error_details) const {
   QUICHE_DCHECK(error_details != nullptr);
-  QUIC_BUG_IF(!QuicUtils::IsConnectionIdValidForVersion(
-      connection_id, preferred_version.transport_version))
+  QUIC_BUG_IF(quic_bug_12943_2,
+              !QuicUtils::IsConnectionIdValidForVersion(
+                  connection_id, preferred_version.transport_version))
       << "FillClientHello: attempted to use connection ID " << connection_id
       << " which is invalid with version " << preferred_version;
 
@@ -868,22 +847,23 @@ bool QuicCryptoClientConfig::PopulateFromCanonicalConfig(
 
   QuicServerId suffix_server_id(canonical_suffixes_[i], server_id.port(),
                                 server_id.privacy_mode_enabled());
-  if (!QuicContainsKey(canonical_server_map_, suffix_server_id)) {
+  auto it = canonical_server_map_.lower_bound(suffix_server_id);
+  if (it == canonical_server_map_.end() || it->first != suffix_server_id) {
     // This is the first host we've seen which matches the suffix, so make it
-    // canonical.
-    canonical_server_map_[suffix_server_id] = server_id;
+    // canonical.  Use |it| as position hint for faster insertion.
+    canonical_server_map_.insert(
+        it, std::make_pair(std::move(suffix_server_id), std::move(server_id)));
     return false;
   }
 
-  const QuicServerId& canonical_server_id =
-      canonical_server_map_[suffix_server_id];
+  const QuicServerId& canonical_server_id = it->second;
   CachedState* canonical_state = cached_states_[canonical_server_id].get();
   if (!canonical_state->proof_valid()) {
     return false;
   }
 
   // Update canonical version to point at the "most recent" entry.
-  canonical_server_map_[suffix_server_id] = server_id;
+  it->second = server_id;
 
   server_state->InitializeFrom(*canonical_state);
   return true;

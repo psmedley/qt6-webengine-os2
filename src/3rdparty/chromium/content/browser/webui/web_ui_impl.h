@@ -32,12 +32,14 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
   explicit WebUIImpl(WebContentsImpl* contents,
                      RenderFrameHostImpl* frame_host);
   ~WebUIImpl() override;
+  WebUIImpl(const WebUIImpl&) = delete;
+  WebUIImpl& operator=(const WebUIImpl&) = delete;
 
   // Called when a RenderFrame is created for a WebUI (reload after a renderer
   // crash) or when a WebUI is created for a RenderFrame (i.e. navigating from
   // chrome://downloads to chrome://bookmarks) or when both are new (i.e.
   // opening a new tab).
-  void RenderFrameCreated(RenderFrameHost* render_frame_host);
+  void WebUIRenderFrameCreated(RenderFrameHost* render_frame_host);
 
   // Called when a RenderFrame is reused for the same WebUI type (i.e. reload).
   void RenderFrameReused(RenderFrameHost* render_frame_host);
@@ -64,8 +66,8 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
   WebUIController* GetController() override;
   void SetController(std::unique_ptr<WebUIController> controller) override;
   float GetDeviceScaleFactor() override;
-  const base::string16& GetOverriddenTitle() override;
-  void OverrideTitle(const base::string16& title) override;
+  const std::u16string& GetOverriddenTitle() override;
+  void OverrideTitle(const std::u16string& title) override;
   int GetBindings() override;
   void SetBindings(int bindings) override;
   const std::vector<std::string>& GetRequestableSchemes() override;
@@ -114,7 +116,7 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
   void Send(const std::string& message, base::Value args) override;
 
   // Execute a string of raw JavaScript on the page.
-  void ExecuteJavascript(const base::string16& javascript);
+  void ExecuteJavascript(const std::u16string& javascript);
 
   // Called internally and by the owned WebUIMainFrameObserver.
   void DisallowJavascriptOnAllHandlers();
@@ -124,7 +126,7 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
 
   // Options that may be overridden by individual Web UI implementations. The
   // bool options default to false. See the public getters for more information.
-  base::string16 overridden_title_;  // Defaults to empty string.
+  std::u16string overridden_title_;  // Defaults to empty string.
   int bindings_;  // The bindings from BindingsPolicy that should be enabled for
                   // this page.
 
@@ -147,8 +149,6 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
 
   mojo::AssociatedRemote<mojom::WebUI> remote_;
   mojo::AssociatedReceiver<mojom::WebUIHost> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebUIImpl);
 };
 
 }  // namespace content

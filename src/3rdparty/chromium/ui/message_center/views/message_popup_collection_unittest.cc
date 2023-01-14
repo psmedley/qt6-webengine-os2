@@ -4,7 +4,7 @@
 
 #include "ui/message_center/views/message_popup_collection.h"
 
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -154,6 +154,8 @@ class MockMessagePopupView : public MessagePopupView {
     }
   }
 
+  void SimulateFocused() { OnDidChangeFocus(nullptr, children().front()); }
+
   void Activate() {
     SetCanActivate(true);
     GetWidget()->Activate();
@@ -166,7 +168,7 @@ class MockMessagePopupView : public MessagePopupView {
 
   void set_expandable(bool expandable) { expandable_ = expandable; }
 
-  void set_height_after_update(base::Optional<int> height_after_update) {
+  void set_height_after_update(absl::optional<int> height_after_update) {
     height_after_update_ = height_after_update;
   }
 
@@ -178,7 +180,7 @@ class MockMessagePopupView : public MessagePopupView {
   bool expandable_ = false;
   std::string title_;
 
-  base::Optional<int> height_after_update_;
+  absl::optional<int> height_after_update_;
 };
 
 MessagePopupView* MockMessagePopupCollection::CreatePopup(
@@ -240,9 +242,9 @@ class MessagePopupCollectionTest : public views::ViewsTestBase,
                                                    const std::string& title) {
     return std::make_unique<Notification>(
         NOTIFICATION_TYPE_BASE_FORMAT, id, base::UTF8ToUTF16(title),
-        base::UTF8ToUTF16("test message"), gfx::Image(),
-        base::string16() /* display_source */, GURL(), NotifierId(),
-        RichNotificationData(), new NotificationDelegate());
+        u"test message", gfx::Image(), std::u16string() /* display_source */,
+        GURL(), NotifierId(), RichNotificationData(),
+        new NotificationDelegate());
   }
 
   std::string AddNotification() {
@@ -431,7 +433,7 @@ TEST_F(MessagePopupCollectionTest, UpdateContents) {
   EXPECT_FALSE(GetPopup(id)->updated());
 
   auto updated_notification = CreateNotification(id);
-  updated_notification->set_message(base::ASCIIToUTF16("updated"));
+  updated_notification->set_message(u"updated");
   MessageCenter::Get()->UpdateNotification(id, std::move(updated_notification));
   EXPECT_EQ(1u, GetPopupCounts());
   EXPECT_TRUE(GetPopup(id)->updated());
@@ -448,7 +450,7 @@ TEST_F(MessagePopupCollectionTest, UpdateContentsCausesPopupClose) {
   GetPopup(id)->set_height_after_update(2048);
 
   auto updated_notification = CreateNotification(id);
-  updated_notification->set_message(base::ASCIIToUTF16("updated"));
+  updated_notification->set_message(u"updated");
   MessageCenter::Get()->UpdateNotification(id, std::move(updated_notification));
   RunPendingMessages();
   EXPECT_EQ(0u, GetPopupCounts());
@@ -769,7 +771,10 @@ TEST_F(MessagePopupCollectionTest, HoverClose) {
   EXPECT_GT(first_popup_top, GetPopup(id1)->GetBoundsInScreen().y());
 }
 
-TEST_F(MessagePopupCollectionTest, ActivatedClose) {
+// Popup timers should be paused if a notification has focus.
+// Once the focus is lost or the notification is resumed, popup timers
+// should restart.
+TEST_F(MessagePopupCollectionTest, FocusedClose) {
   std::string id0 = AddNotification();
   AnimateToEnd();
   popup_collection()->set_new_popup_height(256);
@@ -782,6 +787,10 @@ TEST_F(MessagePopupCollectionTest, ActivatedClose) {
 
   EXPECT_TRUE(IsPopupTimerStarted());
   GetPopup(id0)->Activate();
+  // Activating a popup should not pause timers.
+  EXPECT_TRUE(IsPopupTimerStarted());
+  // If the popup gets keyboard focus the timers should pause.
+  GetPopup(id0)->SimulateFocused();
   EXPECT_FALSE(IsPopupTimerStarted());
 
   const int first_popup_top = GetPopup(id0)->GetBoundsInScreen().y();

@@ -1,21 +1,7 @@
 {
-  "Android CFI": {
-    "gn_args": {
-      "dcheck_always_on": true,
-      "ffmpeg_branding": "Chrome",
-      "is_cfi": true,
-      "is_component_build": false,
-      "is_debug": false,
-      "proprietary_codecs": true,
-      "target_os": "android",
-      "use_cfi_cast": true,
-      "use_cfi_diag": true,
-      "use_goma": true,
-      "use_thin_lto": true
-    }
-  },
   "Linux ASan LSan Builder": {
     "gn_args": {
+      "blink_enable_generated_code_formatting": false,
       "dcheck_always_on": true,
       "is_asan": true,
       "is_component_build": false,
@@ -40,6 +26,7 @@
   },
   "Linux Chromium OS ASan LSan Builder": {
     "gn_args": {
+      "blink_enable_generated_code_formatting": false,
       "dcheck_always_on": true,
       "is_asan": true,
       "is_component_build": false,
@@ -52,6 +39,7 @@
   },
   "Linux ChromiumOS MSan Builder": {
     "gn_args": {
+      "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
       "is_msan": true,
@@ -62,6 +50,7 @@
   },
   "Linux MSan Builder": {
     "gn_args": {
+      "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
       "is_msan": true,
@@ -71,6 +60,7 @@
   },
   "Linux TSan Builder": {
     "gn_args": {
+      "dcheck_always_on": false,
       "enable_nacl": false,
       "is_component_build": false,
       "is_debug": false,
@@ -91,6 +81,7 @@
   },
   "WebKit Linux ASAN": {
     "gn_args": {
+      "dcheck_always_on": false,
       "ffmpeg_branding": "Chrome",
       "is_asan": true,
       "is_component_build": false,
@@ -102,6 +93,7 @@
   },
   "WebKit Linux Leak": {
     "gn_args": {
+      "dcheck_always_on": false,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
@@ -111,6 +103,7 @@
   },
   "WebKit Linux MSAN": {
     "gn_args": {
+      "dcheck_always_on": false,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
@@ -122,6 +115,7 @@
   },
   "android-asan": {
     "gn_args": {
+      "dcheck_always_on": false,
       "ffmpeg_branding": "Chrome",
       "is_asan": true,
       "is_clang": true,
@@ -136,6 +130,7 @@
   },
   "linux-ubsan-vptr": {
     "gn_args": {
+      "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
       "is_ubsan_no_recover": true,
@@ -145,6 +140,7 @@
   },
   "win-asan": {
     "gn_args": {
+      "dcheck_always_on": false,
       "enable_ipc_fuzzer": true,
       "is_asan": true,
       "is_component_build": false,

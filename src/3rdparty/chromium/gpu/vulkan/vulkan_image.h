@@ -12,10 +12,10 @@
 
 #include "base/component_export.h"
 #include "base/files/scoped_file.h"
-#include "base/optional.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "gpu/ipc/common/vulkan_ycbcr_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_pixmap.h"
@@ -68,8 +68,9 @@ class COMPONENT_EXPORT(VULKAN) VulkanImage {
       const gfx::Size& size,
       VkFormat format,
       VkImageUsageFlags usage,
-      VkImageCreateFlags flags = 0,
-      VkImageTiling image_tiling = VK_IMAGE_TILING_OPTIMAL);
+      VkImageCreateFlags flags,
+      VkImageTiling image_tiling,
+      uint32_t queue_family_index);
 
   static std::unique_ptr<VulkanImage> Create(
       VulkanDeviceQueue* device_queue,
@@ -80,7 +81,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanImage {
       VkImageTiling image_tiling,
       VkDeviceSize device_size,
       uint32_t memory_type_index,
-      base::Optional<VulkanYCbCrInfo>& ycbcr_info,
+      absl::optional<VulkanYCbCrInfo>& ycbcr_info,
       VkImageUsageFlags usage,
       VkImageCreateFlags flags);
 
@@ -123,7 +124,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanImage {
   void set_image_layout(VkImageLayout layout) { image_layout_ = layout; }
   uint32_t queue_family_index() const { return queue_family_index_; }
   void set_queue_family_index(uint32_t index) { queue_family_index_ = index; }
-  const base::Optional<VulkanYCbCrInfo>& ycbcr_info() const {
+  const absl::optional<VulkanYCbCrInfo>& ycbcr_info() const {
     return ycbcr_info_;
   }
   VkImage image() const { return image_; }
@@ -164,7 +165,8 @@ class COMPONENT_EXPORT(VULKAN) VulkanImage {
       VkFormat format,
       VkImageUsageFlags usage,
       VkImageCreateFlags flags,
-      VkImageTiling image_tiling);
+      VkImageTiling image_tiling,
+      uint32_t queue_family_index);
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   bool InitializeWithExternalMemoryAndModifiers(VulkanDeviceQueue* device_queue,
@@ -185,7 +187,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanImage {
   VkImageTiling image_tiling_ = VK_IMAGE_TILING_OPTIMAL;
   VkImageLayout image_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
   uint32_t queue_family_index_ = VK_QUEUE_FAMILY_IGNORED;
-  base::Optional<VulkanYCbCrInfo> ycbcr_info_;
+  absl::optional<VulkanYCbCrInfo> ycbcr_info_;
   VkImage image_ = VK_NULL_HANDLE;
   VkDeviceMemory device_memory_ = VK_NULL_HANDLE;
   VkExternalMemoryHandleTypeFlags handle_types_ = 0;

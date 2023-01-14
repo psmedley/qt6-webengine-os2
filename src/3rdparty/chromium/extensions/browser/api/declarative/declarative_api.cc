@@ -16,7 +16,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -142,18 +141,21 @@ RulesFunction::~RulesFunction() {}
 ExtensionFunction::ResponseAction RulesFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(CreateParams());
 
-  std::string event_name;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &event_name));
-
-  int web_view_instance_id = 0;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &web_view_instance_id));
+  const auto& list = args_->GetList();
+  EXTENSION_FUNCTION_VALIDATE(list.size() >= 2);
+  const auto& event_name_value = list[0];
+  const auto& web_view_instance_id_value = list[1];
+  EXTENSION_FUNCTION_VALIDATE(event_name_value.is_string());
+  EXTENSION_FUNCTION_VALIDATE(web_view_instance_id_value.is_int());
+  std::string event_name = event_name_value.GetString();
+  int web_view_instance_id = web_view_instance_id_value.GetInt();
 
   EXTENSION_FUNCTION_VALIDATE(extension_);
 
   // <webview> embedders use the declarativeWebRequest API via
   // <webview>.onRequest.
   if (web_view_instance_id && !extension_->permissions_data()->HasAPIPermission(
-                                  APIPermission::kWebView)) {
+                                  mojom::APIPermissionID::kWebView)) {
     return RespondNow(Error("Missing webview permission"));
   }
 
@@ -187,12 +189,12 @@ ExtensionFunction::ResponseAction RulesFunction::Run() {
   if (content::BrowserThread::CurrentlyOn(rules_registry_->owner_thread()))
     return RespondNow(RunAsyncOnCorrectThread());
 
-  scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner =
-      base::CreateSingleThreadTaskRunner({rules_registry_->owner_thread()});
-  base::PostTaskAndReplyWithResult(
-      thread_task_runner.get(), FROM_HERE,
-      base::BindOnce(&RulesFunction::RunAsyncOnCorrectThread, this),
-      base::BindOnce(&RulesFunction::SendResponse, this));
+  content::BrowserThread::GetTaskRunnerForThread(
+      rules_registry_->owner_thread())
+      ->PostTaskAndReplyWithResult(
+          FROM_HERE,
+          base::BindOnce(&RulesFunction::RunAsyncOnCorrectThread, this),
+          base::BindOnce(&RulesFunction::SendResponse, this));
   return RespondLater();
 }
 

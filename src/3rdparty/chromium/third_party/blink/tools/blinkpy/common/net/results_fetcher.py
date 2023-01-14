@@ -44,15 +44,17 @@ RESULTS_URL_BASE = '%s/data/layout_results' % TEST_RESULTS_SERVER
 RESULTS_SUMMARY_URL_BASE = 'https://storage.googleapis.com/chromium-layout-test-archives'
 
 
-class Build(collections.namedtuple('Build', ('builder_name', 'build_number'))):
+class Build(collections.namedtuple('Build', ('builder_name', 'build_number',
+                                             'build_id'))):
     """Represents a combination of builder and build number.
 
     If build number is None, this represents the latest build
     for a given builder.
     """
 
-    def __new__(cls, builder_name, build_number=None):
-        return super(Build, cls).__new__(cls, builder_name, build_number)
+    def __new__(cls, builder_name, build_number=None, build_id=None):
+        return super(Build, cls).__new__(cls, builder_name,
+                                         build_number, build_id)
 
 
 class TestResultsFetcher(object):
@@ -178,8 +180,9 @@ class TestResultsFetcher(object):
             # patch)'. Only make sure it starts with blink_web_tests and
             # runs with a patch. This should be changed eventually to use actual
             # structured data from the test results server.
-            if re.match(r'(blink_web_tests|wpt_tests_suite).*\(with patch\)$',
-                        entry['TestType'])
+            if re.match(
+                r'(blink_web_tests|wpt_tests_suite|high_dpi_blink_web_tests).*\(with patch\)$',
+                entry['TestType'])
         ]
         # In manual testing, I sometimes saw results where the same suite was
         # repeated twice. De-duplicate here to try to catch this.
@@ -189,7 +192,6 @@ class TestResultsFetcher(object):
                 'build %s on builder %s expected to only have one web test '
                 'step, instead has %s' % (build.build_number,
                                           build.builder_name, suites))
-
         return suites[0]
 
     @memoized

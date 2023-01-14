@@ -7,10 +7,10 @@
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/timer/timer.h"
 #include "chrome/renderer/subresource_redirect/public_resource_decider_agent.h"
-#include "chrome/renderer/subresource_redirect/redirect_result.h"
+#include "components/subresource_redirect/common/subresource_redirect_result.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace subresource_redirect {
@@ -34,7 +34,7 @@ class PublicImageHintsDeciderAgent : public PublicResourceDeciderAgent {
   // content::RenderFrameObserver:
   void DidStartNavigation(
       const GURL& url,
-      base::Optional<blink::WebNavigationType> navigation_type) override;
+      absl::optional<blink::WebNavigationType> navigation_type) override;
   void ReadyToCommitNavigation(
       blink::WebDocumentLoader* document_loader) override;
   void OnDestruct() override;
@@ -45,12 +45,13 @@ class PublicImageHintsDeciderAgent : public PublicResourceDeciderAgent {
   void SetLoggedInState(bool is_logged_in) override;
 
   // PublicResourceDeciderAgent:
-  base::Optional<RedirectResult> ShouldRedirectSubresource(
+  absl::optional<SubresourceRedirectResult> ShouldRedirectSubresource(
       const GURL& url,
       ShouldRedirectDecisionCallback callback) override;
-  void RecordMetricsOnLoadFinished(const GURL& url,
-                                   int64_t content_length,
-                                   RedirectResult redirect_result) override;
+  void RecordMetricsOnLoadFinished(
+      const GURL& url,
+      int64_t content_length,
+      SubresourceRedirectResult redirect_result) override;
   void NotifyCompressedResourceFetchFailed(
       base::TimeDelta retry_after) override;
 
@@ -66,7 +67,7 @@ class PublicImageHintsDeciderAgent : public PublicResourceDeciderAgent {
 
   // Records the breakdown of bytes to UKM metrics.
   void RecordMetrics(int64_t content_length,
-                     RedirectResult redirect_result) const;
+                     SubresourceRedirectResult redirect_result) const;
 
   // Record the breakdown of bytes for unavailable image hints, whether the
   // hints fetch timed out, the image was not in the delayed hints, or the
@@ -74,9 +75,9 @@ class PublicImageHintsDeciderAgent : public PublicResourceDeciderAgent {
   void RecordImageHintsUnavailableMetrics();
 
   // The raw spec of image urls that are determined public, received from image
-  // hints. Will be base::nullopt after the navigation starts and until the
+  // hints. Will be absl::nullopt after the navigation starts and until the
   // hints have been received.
-  base::Optional<base::flat_set<std::string>> public_image_urls_;
+  absl::optional<base::flat_set<std::string>> public_image_urls_;
 
   // To trigger the timeout for the hints to be received from the time
   // navigation starts.

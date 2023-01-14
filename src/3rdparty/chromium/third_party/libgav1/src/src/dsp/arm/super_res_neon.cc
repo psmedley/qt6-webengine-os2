@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/dsp/arm/common_neon.h"
 #include "src/dsp/super_res.h"
 #include "src/utils/cpu.h"
 
@@ -20,6 +19,7 @@
 
 #include <arm_neon.h>
 
+#include "src/dsp/arm/common_neon.h"
 #include "src/dsp/constants.h"
 #include "src/dsp/dsp.h"
 #include "src/utils/common.h"
@@ -81,11 +81,13 @@ inline uint8x8_t SuperRes(const uint8x8_t src[kSuperResFilterTaps],
   return vqrshrn_n_u16(res, kFilterBits);
 }
 
-void SuperRes_NEON(const void* const coefficients, void* const source,
+void SuperRes_NEON(const void* LIBGAV1_RESTRICT const coefficients,
+                   void* LIBGAV1_RESTRICT const source,
                    const ptrdiff_t source_stride, const int height,
                    const int downscaled_width, const int upscaled_width,
                    const int initial_subpixel_x, const int step,
-                   void* const dest, const ptrdiff_t dest_stride) {
+                   void* LIBGAV1_RESTRICT const dest,
+                   const ptrdiff_t dest_stride) {
   auto* src = static_cast<uint8_t*>(source) - DivideBy2(kSuperResFilterTaps);
   auto* dst = static_cast<uint8_t*>(dest);
   int y = height;
@@ -234,11 +236,13 @@ inline uint16x8_t SuperRes(const uint16x8_t src[kSuperResFilterTaps],
 }
 
 template <int bitdepth>
-void SuperRes_NEON(const void* const coefficients, void* const source,
+void SuperRes_NEON(const void* LIBGAV1_RESTRICT const coefficients,
+                   void* LIBGAV1_RESTRICT const source,
                    const ptrdiff_t source_stride, const int height,
                    const int downscaled_width, const int upscaled_width,
                    const int initial_subpixel_x, const int step,
-                   void* const dest, const ptrdiff_t dest_stride) {
+                   void* LIBGAV1_RESTRICT const dest,
+                   const ptrdiff_t dest_stride) {
   auto* src = static_cast<uint16_t*>(source) - DivideBy2(kSuperResFilterTaps);
   auto* dst = static_cast<uint16_t*>(dest);
   int y = height;

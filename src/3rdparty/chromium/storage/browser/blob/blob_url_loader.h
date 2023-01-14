@@ -17,6 +17,7 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "storage/browser/blob/mojo_blob_reader.h"
 
@@ -64,7 +65,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobURLLoader
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_request_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_request_headers,
-      const base::Optional<GURL>& new_url) override;
+      const absl::optional<GURL>& new_url) override;
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {}
   void PauseReadingBodyFromNet() override {}
@@ -73,12 +74,12 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobURLLoader
   // MojoBlobReader::Delegate implementation:
   RequestSideData DidCalculateSize(uint64_t total_size,
                                    uint64_t content_size) override;
-  void DidReadSideData(base::Optional<mojo_base::BigBuffer> data) override;
+  void DidReadSideData(absl::optional<mojo_base::BigBuffer> data) override;
   void OnComplete(net::Error error_code, uint64_t total_written_bytes) override;
 
   void HeadersCompleted(net::HttpStatusCode status_code,
                         uint64_t content_size,
-                        base::Optional<mojo_base::BigBuffer> metadata);
+                        absl::optional<mojo_base::BigBuffer> metadata);
 
   mojo::Receiver<network::mojom::URLLoader> receiver_;
   mojo::Remote<network::mojom::URLLoaderClient> client_;

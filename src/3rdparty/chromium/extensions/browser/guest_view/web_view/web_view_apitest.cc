@@ -75,13 +75,14 @@ static std::unique_ptr<net::test_server::HttpResponse> UserAgentResponseHandler(
     const GURL& redirect_target,
     const net::test_server::HttpRequest& request) {
   if (!base::StartsWith(path, request.relative_url,
-                        base::CompareCase::SENSITIVE))
-    return std::unique_ptr<net::test_server::HttpResponse>();
+                        base::CompareCase::SENSITIVE)) {
+    return nullptr;
+  }
 
   auto it = request.headers.find("User-Agent");
   EXPECT_TRUE(it != request.headers.end());
   if (!base::StartsWith("foobar", it->second, base::CompareCase::SENSITIVE))
-    return std::unique_ptr<net::test_server::HttpResponse>();
+    return nullptr;
 
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
@@ -121,8 +122,9 @@ std::unique_ptr<net::test_server::HttpResponse> RedirectResponseHandler(
     const GURL& redirect_target,
     const net::test_server::HttpRequest& request) {
   if (!base::StartsWith(path, request.relative_url,
-                        base::CompareCase::SENSITIVE))
-    return std::unique_ptr<net::test_server::HttpResponse>();
+                        base::CompareCase::SENSITIVE)) {
+    return nullptr;
+  }
 
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
@@ -141,7 +143,7 @@ std::unique_ptr<net::test_server::HttpResponse> EmptyResponseHandler(
         new net::test_server::RawHttpResponse("", ""));
   }
 
-  return std::unique_ptr<net::test_server::HttpResponse>();
+  return nullptr;
 }
 
 }  // namespace
@@ -289,8 +291,10 @@ void WebViewAPITest::SendMessageToGuestAndWait(
     const std::string& message,
     const std::string& wait_message) {
   std::unique_ptr<ExtensionTestMessageListener> listener;
-  if (!wait_message.empty())
-    listener.reset(new ExtensionTestMessageListener(wait_message, false));
+  if (!wait_message.empty()) {
+    listener =
+        std::make_unique<ExtensionTestMessageListener>(wait_message, false);
+  }
 
   EXPECT_TRUE(
       content::ExecuteScript(
@@ -467,8 +471,8 @@ IN_PROC_BROWSER_TEST_F(WebViewAPITest, TestContextMenu) {
   // Create a ContextMenuInterceptor to intercept the ShowContextMenu event
   // before RenderFrameHost receives.
   auto context_menu_interceptor =
-      std::make_unique<content::ContextMenuInterceptor>();
-  context_menu_interceptor->Init(guest_web_contents->GetMainFrame());
+      std::make_unique<content::ContextMenuInterceptor>(
+          guest_web_contents->GetMainFrame());
 
   // Trigger the context menu. AppShell doesn't show a context menu; this is
   // just a sanity check that nothing breaks.

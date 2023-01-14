@@ -4,8 +4,9 @@
 
 #include "net/quic/quic_transport_client.h"
 
+#include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/stl_util.h"
 #include "base/strings/abseil_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
@@ -16,6 +17,7 @@
 #include "net/third_party/quiche/src/quic/core/quic_connection.h"
 #include "net/third_party/quiche/src/quic/core/quic_utils.h"
 #include "net/url_request/url_request_context.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 
@@ -35,7 +37,7 @@ std::set<std::string> HostsFromOrigins(std::set<HostPortPair> origins) {
 std::unique_ptr<quic::ProofVerifier> CreateProofVerifier(
     const NetworkIsolationKey& isolation_key,
     URLRequestContext* context,
-    const QuicTransportClient::Parameters& parameters) {
+    const WebTransportParameters& parameters) {
   if (parameters.server_certificate_fingerprints.empty()) {
     return std::make_unique<ProofVerifierChromium>(
         context->cert_verifier(), context->ct_policy_enforcer(),
@@ -59,18 +61,13 @@ std::unique_ptr<quic::ProofVerifier> CreateProofVerifier(
 }
 }  // namespace
 
-QuicTransportClient::Parameters::Parameters() = default;
-QuicTransportClient::Parameters::~Parameters() = default;
-QuicTransportClient::Parameters::Parameters(const Parameters&) = default;
-QuicTransportClient::Parameters::Parameters(Parameters&&) = default;
-
 QuicTransportClient::QuicTransportClient(
     const GURL& url,
     const url::Origin& origin,
-    Visitor* visitor,
+    WebTransportClientVisitor* visitor,
     const NetworkIsolationKey& isolation_key,
     URLRequestContext* context,
-    const Parameters& parameters)
+    const WebTransportParameters& parameters)
     : url_(url),
       origin_(origin),
       isolation_key_(isolation_key),
@@ -94,8 +91,6 @@ QuicTransportClient::QuicTransportClient(
 
 QuicTransportClient::~QuicTransportClient() = default;
 
-QuicTransportClient::Visitor::~Visitor() = default;
-
 void QuicTransportClient::Connect() {
   if (state_ != NEW || next_connect_state_ != CONNECT_STATE_NONE) {
     NOTREACHED();
@@ -107,7 +102,15 @@ void QuicTransportClient::Connect() {
   DoLoop(OK);
 }
 
-quic::QuicTransportClientSession* QuicTransportClient::session() {
+const WebTransportError& QuicTransportClient::error() const {
+  return error_;
+}
+
+quic::WebTransportSession* QuicTransportClient::session() {
+  return quic_session();
+}
+
+quic::QuicTransportClientSession* QuicTransportClient::quic_session() {
   if (session_ == nullptr || !session_->IsSessionReady())
     return nullptr;
   return session_.get();
@@ -211,7 +214,7 @@ int QuicTransportClient::DoResolveHost() {
   next_connect_state_ = CONNECT_STATE_RESOLVE_HOST_COMPLETE;
   HostResolver::ResolveHostParameters parameters;
   resolve_host_request_ = context_->host_resolver()->CreateRequest(
-      HostPortPair::FromURL(url_), isolation_key_, net_log_, base::nullopt);
+      url::SchemeHostPort(url_), isolation_key_, net_log_, absl::nullopt);
   return resolve_host_request_->Start(
       base::BindOnce(&QuicTransportClient::DoLoop, base::Unretained(this)));
 }
@@ -311,8 +314,8 @@ int QuicTransportClient::DoConfirmConnection() {
   return OK;
 }
 
-void QuicTransportClient::TransitionToState(State next_state) {
-  const State last_state = state_;
+void QuicTransportClient::TransitionToState(WebTransportState next_state) {
+  const WebTransportState last_state = state_;
   state_ = next_state;
   switch (next_state) {
     case CONNECTING:
@@ -484,8 +487,8 @@ void QuicTransportClient::OnConnectionClosed(
 void QuicTransportClient::DatagramObserverProxy::OnDatagramProcessed(
     absl::optional<quic::MessageStatus> status) {
   client_->visitor_->OnDatagramProcessed(
-      status.has_value() ? base::Optional<quic::MessageStatus>(*status)
-                         : base::Optional<quic::MessageStatus>());
+      status.has_value() ? absl::optional<quic::MessageStatus>(*status)
+                         : absl::optional<quic::MessageStatus>());
 }
 
 }  // namespace net

@@ -15,6 +15,7 @@
 #include <tuple>
 
 #include "include/core/SkSerialProcs.h"
+#include "include/core/SkSpan.h"
 #include "include/core/SkTypeface.h"
 #include "include/private/SkChecksum.h"
 #include "include/private/SkTHash.h"
@@ -23,7 +24,6 @@
 #include "src/core/SkEnumerate.h"
 #include "src/core/SkGlyphRun.h"
 #include "src/core/SkScalerCache.h"
-#include "src/core/SkSpan.h"
 #include "src/core/SkStrikeCache.h"
 #include "src/core/SkStrikeForGPU.h"
 #include "src/core/SkTLazy.h"
@@ -33,7 +33,7 @@
 #if SK_SUPPORT_GPU
 #include "include/gpu/GrContextOptions.h"
 #include "src/gpu/GrDrawOpAtlas.h"
-#include "src/gpu/text/GrSDFTOptions.h"
+#include "src/gpu/text/GrSDFTControl.h"
 #endif
 
 static SkDescriptor* auto_descriptor_from_desc(const SkDescriptor* source_desc,
@@ -654,6 +654,10 @@ sk_sp<SkData> SkStrikeServerImpl::serializeTypeface(SkTypeface* tf) {
 }
 
 void SkStrikeServerImpl::writeStrikeData(std::vector<uint8_t>* memory) {
+    #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+        SkString msg;
+        msg.appendf("\nBegin send strike differences\n");
+    #endif
     size_t strikesToSend = 0;
     fRemoteStrikesToSend.foreach ([&](RemoteStrike* strike) {
         if (strike->hasPendingGlyphs()) {
@@ -686,6 +690,9 @@ void SkStrikeServerImpl::writeStrikeData(std::vector<uint8_t>* memory) {
                 auto it = fDescToRemoteStrike.find(&strike->getDescriptor());
                 SkASSERT(it != fDescToRemoteStrike.end());
                 SkASSERT(it->second.get() == strike);
+                #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+                    msg.append(strike->getDescriptor().dumpRec());
+                #endif
             }
 
 #else
@@ -694,10 +701,17 @@ void SkStrikeServerImpl::writeStrikeData(std::vector<uint8_t>* memory) {
                     strike->writePendingGlyphs(&serializer);
                     strike->resetScalerContext();
                 }
+                #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+                    msg.append(strike->getDescriptor().dumpRec());
+                #endif
             }
 #endif
     );
     fRemoteStrikesToSend.reset();
+    #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+        msg.appendf("End send strike differences");
+        SkDebugf("%s\n", msg.c_str());
+    #endif
 }
 
 RemoteStrike* SkStrikeServerImpl::getOrCreateCache(
@@ -795,13 +809,13 @@ RemoteStrike* SkStrikeServerImpl::getOrCreateCache(
     return remoteStrikePtr;
 }
 
-// -- TrackLayerDevice -----------------------------------------------------------------------------
-class SkTextBlobCacheDiffCanvas::TrackLayerDevice final : public SkNoPixelsDevice {
+// -- GlyphTrackingDevice --------------------------------------------------------------------------
+class GlyphTrackingDevice final : public SkNoPixelsDevice {
 public:
-    TrackLayerDevice(
-            const SkIRect& bounds, const SkSurfaceProps& props, SkStrikeServerImpl* server,
+    GlyphTrackingDevice(
+            const SkISize& dimensions, const SkSurfaceProps& props, SkStrikeServerImpl* server,
             sk_sp<SkColorSpace> colorSpace, bool DFTSupport)
-            : SkNoPixelsDevice(bounds, props, std::move(colorSpace))
+            : SkNoPixelsDevice(SkIRect::MakeSize(dimensions), props, std::move(colorSpace))
             , fStrikeServerImpl(server)
             , fDFTSupport(DFTSupport)
             , fPainter{props, kUnknown_SkColorType, imageInfo().colorSpace(), fStrikeServerImpl} {
@@ -810,28 +824,29 @@ public:
 
     SkBaseDevice* onCreateDevice(const CreateInfo& cinfo, const SkPaint*) override {
         const SkSurfaceProps surfaceProps(this->surfaceProps().flags(), cinfo.fPixelGeometry);
-        return new TrackLayerDevice(this->getGlobalBounds(), surfaceProps, fStrikeServerImpl,
-                                    cinfo.fInfo.refColorSpace(), fDFTSupport);
+        return new GlyphTrackingDevice(cinfo.fInfo.dimensions(), surfaceProps, fStrikeServerImpl,
+                                       cinfo.fInfo.refColorSpace(), fDFTSupport);
     }
 
 protected:
-    void drawGlyphRunList(const SkGlyphRunList& glyphRunList) override {
+    void onDrawGlyphRunList(const SkGlyphRunList& glyphRunList, const SkPaint& paint) override {
         #if SK_SUPPORT_GPU
         GrContextOptions ctxOptions;
-        GrSDFTOptions options =
-                {ctxOptions.fMinDistanceFieldFontSize, ctxOptions.fGlyphsAsPathsFontSize};
+        GrSDFTControl control =
+                GrSDFTControl{fDFTSupport,
+                              this->surfaceProps().isUseDeviceIndependentFonts(),
+                              ctxOptions.fMinDistanceFieldFontSize,
+                              ctxOptions.fGlyphsAsPathsFontSize};
 
-        const SkPoint drawOrigin = glyphRunList.origin();
-        const SkPaint& drawPaint = glyphRunList.paint();
+        SkMatrix drawMatrix = this->localToDevice();
+        drawMatrix.preTranslate(glyphRunList.origin().x(), glyphRunList.origin().y());
         for (auto& glyphRun : glyphRunList) {
             fPainter.processGlyphRun(glyphRun,
-                                     this->localToDevice(),
-                                     drawOrigin,
-                                     drawPaint,
-                                     this->surfaceProps(),
-                                     fDFTSupport,
-                                     options,
-                                     nullptr);
+                                     drawMatrix,
+                                     paint,
+                                     control,
+                                     nullptr,
+                                     "Cache Diff");
         }
         #endif  // SK_SUPPORT_GPU
     }
@@ -842,45 +857,22 @@ private:
     SkGlyphRunListPainter fPainter;
 };
 
-// -- SkTextBlobCacheDiffCanvas -------------------------------------------------------------------
-SkTextBlobCacheDiffCanvas::SkTextBlobCacheDiffCanvas(int width, int height,
-                                                     const SkSurfaceProps& props,
-                                                     SkStrikeServer* strikeServer,
-                                                     bool DFTSupport)
-        : SkTextBlobCacheDiffCanvas{width, height, props, strikeServer, nullptr, DFTSupport} { }
-
-SkTextBlobCacheDiffCanvas::SkTextBlobCacheDiffCanvas(int width, int height,
-                                                     const SkSurfaceProps& props,
-                                                     SkStrikeServer* strikeServer,
-                                                     sk_sp<SkColorSpace> colorSpace,
-                                                     bool DFTSupport)
-        : SkNoDrawCanvas{sk_make_sp<TrackLayerDevice>(SkIRect::MakeWH(width, height),
-                                                      props,
-                                                      strikeServer->impl(),
-                                                      std::move(colorSpace),
-                                                      DFTSupport)} { }
-
-SkTextBlobCacheDiffCanvas::~SkTextBlobCacheDiffCanvas() = default;
-
-SkCanvas::SaveLayerStrategy SkTextBlobCacheDiffCanvas::getSaveLayerStrategy(
-        const SaveLayerRec& rec) {
-    return kFullLayer_SaveLayerStrategy;
-}
-
-bool SkTextBlobCacheDiffCanvas::onDoSaveBehind(const SkRect*) {
-    return false;
-}
-
-void SkTextBlobCacheDiffCanvas::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
-                                               const SkPaint& paint) {
-    SkCanvas::onDrawTextBlob(blob, x, y, paint);
-}
-
 // -- SkStrikeServer -------------------------------------------------------------------------------
 SkStrikeServer::SkStrikeServer(DiscardableHandleManager* dhm)
         : fImpl(new SkStrikeServerImpl{dhm}) { }
 
 SkStrikeServer::~SkStrikeServer() = default;
+
+std::unique_ptr<SkCanvas> SkStrikeServer::makeAnalysisCanvas(int width, int height,
+                                                             const SkSurfaceProps& props,
+                                                             sk_sp<SkColorSpace> colorSpace,
+                                                             bool DFTSupport) {
+    sk_sp<SkBaseDevice> trackingDevice(new GlyphTrackingDevice(SkISize::Make(width, height),
+                                                               props, this->impl(),
+                                                               std::move(colorSpace),
+                                                               DFTSupport));
+    return std::make_unique<SkCanvas>(std::move(trackingDevice));
+}
 
 sk_sp<SkData> SkStrikeServer::serializeTypeface(SkTypeface* tf) {
     return fImpl->serializeTypeface(tf);
@@ -994,6 +986,11 @@ bool SkStrikeClientImpl::readStrikeData(const volatile void* memory, size_t memo
         addTypeface(wire);
     }
 
+    #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+        SkString msg;
+        msg.appendf("\nBegin receive strike differences\n");
+    #endif
+
     if (!deserializer.read<uint64_t>(&strikeCount)) READ_FAILURE
 
     for (size_t i = 0; i < strikeCount; ++i) {
@@ -1002,6 +999,9 @@ bool SkStrikeClientImpl::readStrikeData(const volatile void* memory, size_t memo
 
         SkAutoDescriptor sourceAd;
         if (!deserializer.readDescriptor(&sourceAd)) READ_FAILURE
+        #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+            msg.appendf("  Received descriptor:\n%s", sourceAd.getDesc()->dumpRec().c_str());
+        #endif
 
         bool fontMetricsInitialized;
         if (!deserializer.read(&fontMetricsInitialized)) READ_FAILURE
@@ -1023,6 +1023,9 @@ bool SkStrikeClientImpl::readStrikeData(const volatile void* memory, size_t memo
         SkAutoDescriptor ad;
         auto* client_desc = auto_descriptor_from_desc(sourceAd.getDesc(), tf->uniqueID(), &ad);
 
+        #if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+            msg.appendf("  Mapped descriptor:\n%s", client_desc->dumpRec().c_str());
+        #endif
         auto strike = fStrikeCache->findStrike(*client_desc);
         // Metrics are only sent the first time. If the metrics are not initialized, there must
         // be an existing strike.
@@ -1077,6 +1080,11 @@ bool SkStrikeClientImpl::readStrikeData(const volatile void* memory, size_t memo
         }
     }
 
+#if defined(SK_TRACE_GLYPH_RUN_PROCESS)
+    msg.appendf("End receive strike differences");
+    SkDebugf("%s\n", msg.c_str());
+#endif
+
     return true;
 }
 
@@ -1113,4 +1121,3 @@ bool SkStrikeClient::readStrikeData(const volatile void* memory, size_t memorySi
 sk_sp<SkTypeface> SkStrikeClient::deserializeTypeface(const void* buf, size_t len) {
     return fImpl->deserializeTypeface(buf, len);
 }
-

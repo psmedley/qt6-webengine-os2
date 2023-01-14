@@ -33,16 +33,19 @@ namespace dawn_native { namespace d3d12 {
     MaybeError ValidateD3D12TextureCanBeWrapped(ID3D12Resource* d3d12Resource,
                                                 const TextureDescriptor* descriptor);
     MaybeError ValidateTextureDescriptorCanBeWrapped(const TextureDescriptor* descriptor);
+    MaybeError ValidateD3D12VideoTextureCanBeShared(Device* device, DXGI_FORMAT textureFormat);
 
     class Texture final : public TextureBase {
       public:
         static ResultOrError<Ref<Texture>> Create(Device* device,
                                                   const TextureDescriptor* descriptor);
-        static ResultOrError<Ref<Texture>> Create(Device* device,
-                                                  const ExternalImageDescriptor* descriptor,
-                                                  HANDLE sharedHandle,
-                                                  ExternalMutexSerial acquireMutexKey,
-                                                  bool isSwapChainTexture);
+        static ResultOrError<Ref<Texture>> CreateExternalImage(Device* device,
+                                                               const TextureDescriptor* descriptor,
+                                                               ComPtr<ID3D12Resource> d3d12Texture,
+                                                               ExternalMutexSerial acquireMutexKey,
+                                                               ExternalMutexSerial releaseMutexKey,
+                                                               bool isSwapChainTexture,
+                                                               bool isInitialized);
         static ResultOrError<Ref<Texture>> Create(Device* device,
                                                   const TextureDescriptor* descriptor,
                                                   ComPtr<ID3D12Resource> d3d12Texture);
@@ -52,8 +55,8 @@ namespace dawn_native { namespace d3d12 {
         DXGI_FORMAT GetD3D12CopyableSubresourceFormat(Aspect aspect) const;
 
         D3D12_RENDER_TARGET_VIEW_DESC GetRTVDescriptor(uint32_t mipLevel,
-                                                       uint32_t baseArrayLayer,
-                                                       uint32_t layerCount) const;
+                                                       uint32_t baseSlice,
+                                                       uint32_t sliceCount) const;
         D3D12_DEPTH_STENCIL_VIEW_DESC GetDSVDescriptor(uint32_t mipLevel,
                                                        uint32_t baseArrayLayer,
                                                        uint32_t layerCount) const;
@@ -62,7 +65,7 @@ namespace dawn_native { namespace d3d12 {
 
         void TrackUsageAndGetResourceBarrierForPass(CommandRecordingContext* commandContext,
                                                     std::vector<D3D12_RESOURCE_BARRIER>* barrier,
-                                                    const PassTextureUsage& textureUsages);
+                                                    const TextureSubresourceUsage& textureUsages);
         void TransitionUsageAndGetResourceBarrier(CommandRecordingContext* commandContext,
                                                   std::vector<D3D12_RESOURCE_BARRIER>* barrier,
                                                   wgpu::TextureUsage usage,
@@ -85,8 +88,9 @@ namespace dawn_native { namespace d3d12 {
 
         MaybeError InitializeAsInternalTexture();
         MaybeError InitializeAsExternalTexture(const TextureDescriptor* descriptor,
-                                               HANDLE sharedHandle,
+                                               ComPtr<ID3D12Resource> d3d12Texture,
                                                ExternalMutexSerial acquireMutexKey,
+                                               ExternalMutexSerial releaseMutexKey,
                                                bool isSwapChainTexture);
         MaybeError InitializeAsSwapChainTexture(ComPtr<ID3D12Resource> d3d12Texture);
 
@@ -119,14 +123,17 @@ namespace dawn_native { namespace d3d12 {
 
         ResourceHeapAllocation mResourceAllocation;
         bool mSwapChainTexture = false;
+        D3D12_RESOURCE_FLAGS mD3D12ResourceFlags;
 
         ExternalMutexSerial mAcquireMutexKey = ExternalMutexSerial(0);
+        ExternalMutexSerial mReleaseMutexKey = ExternalMutexSerial(0);
         ComPtr<IDXGIKeyedMutex> mDxgiKeyedMutex;
     };
 
     class TextureView final : public TextureViewBase {
       public:
-        TextureView(TextureBase* texture, const TextureViewDescriptor* descriptor);
+        static Ref<TextureView> Create(TextureBase* texture,
+                                       const TextureViewDescriptor* descriptor);
 
         DXGI_FORMAT GetD3D12Format() const;
 
@@ -136,6 +143,8 @@ namespace dawn_native { namespace d3d12 {
         D3D12_UNORDERED_ACCESS_VIEW_DESC GetUAVDescriptor() const;
 
       private:
+        TextureView(TextureBase* texture, const TextureViewDescriptor* descriptor);
+
         D3D12_SHADER_RESOURCE_VIEW_DESC mSrvDesc;
     };
 }}  // namespace dawn_native::d3d12

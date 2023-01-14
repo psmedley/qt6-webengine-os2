@@ -6,15 +6,18 @@
 
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/pattern.h"
+#include "base/strings/stringprintf.h"
 #include "cc/base/switches.h"
 #include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/browser_context.h"
@@ -35,7 +38,6 @@
 #include "content/test/mock_badge_service.h"
 #include "content/test/mock_clipboard_host.h"
 #include "content/test/mock_platform_notification_service.h"
-#include "content/test/mock_raw_clipboard_host.h"
 #include "content/web_test/browser/fake_bluetooth_chooser.h"
 #include "content/web_test/browser/fake_bluetooth_chooser_factory.h"
 #include "content/web_test/browser/fake_bluetooth_delegate.h"
@@ -45,6 +47,7 @@
 #include "content/web_test/browser/web_test_browser_context.h"
 #include "content/web_test/browser/web_test_browser_main_parts.h"
 #include "content/web_test/browser/web_test_control_host.h"
+#include "content/web_test/browser/web_test_cookie_manager.h"
 #include "content/web_test/browser/web_test_permission_manager.h"
 #include "content/web_test/browser/web_test_storage_access_manager.h"
 #include "content/web_test/browser/web_test_tts_platform.h"
@@ -60,6 +63,7 @@
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/net_buildflags.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/service_manager/public/cpp/manifest.h"
 #include "services/service_manager/public/cpp/manifest_builder.h"
@@ -113,6 +117,11 @@ class BoundsMatchVideoSizeOverlayWindow : public OverlayWindow {
   void SetSkipAdButtonVisibility(bool is_visible) override {}
   void SetNextTrackButtonVisibility(bool is_visible) override {}
   void SetPreviousTrackButtonVisibility(bool is_visible) override {}
+  void SetMicrophoneMuted(bool muted) override {}
+  void SetCameraState(bool turned_on) override {}
+  void SetToggleMicrophoneButtonVisibility(bool is_visible) override {}
+  void SetToggleCameraButtonVisibility(bool is_visible) override {}
+  void SetHangUpButtonVisibility(bool is_visible) override {}
   void SetSurfaceId(const viz::SurfaceId& surface_id) override {}
   cc::Layer* GetLayerForTesting() override { return nullptr; }
 
@@ -239,8 +248,6 @@ void WebTestContentBrowserClient::SetPopupBlockingEnabled(bool block_popups) {
 void WebTestContentBrowserClient::ResetMockClipboardHosts() {
   if (mock_clipboard_host_)
     mock_clipboard_host_->Reset();
-  if (mock_raw_clipboard_host_)
-    mock_raw_clipboard_host_->Reset();
 }
 
 void WebTestContentBrowserClient::SetScreenOrientationChanged(
@@ -425,8 +432,8 @@ PlatformNotificationService*
 WebTestContentBrowserClient::GetPlatformNotificationService(
     content::BrowserContext* browser_context) {
   if (!mock_platform_notification_service_) {
-    mock_platform_notification_service_.reset(
-        new MockPlatformNotificationService(browser_context));
+    mock_platform_notification_service_ =
+        std::make_unique<MockPlatformNotificationService>(browser_context);
   }
 
   return mock_platform_notification_service_.get();
@@ -471,11 +478,11 @@ void WebTestContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
   map->Add<mojom::MojoWebTestHelper>(base::BindRepeating(&BindWebTestHelper));
   map->Add<blink::mojom::ClipboardHost>(base::BindRepeating(
       &WebTestContentBrowserClient::BindClipboardHost, base::Unretained(this)));
-  map->Add<blink::mojom::RawClipboardHost>(
-      base::BindRepeating(&WebTestContentBrowserClient::BindRawClipboardHost,
-                          base::Unretained(this)));
   map->Add<blink::mojom::BadgeService>(base::BindRepeating(
       &WebTestContentBrowserClient::BindBadgeService, base::Unretained(this)));
+  map->Add<blink::test::mojom::CookieManagerAutomation>(base::BindRepeating(
+      &WebTestContentBrowserClient::BindCookieManagerAutomation,
+      base::Unretained(this)));
 }
 
 bool WebTestContentBrowserClient::CanAcceptUntrustedExchangesIfNeeded() {
@@ -508,24 +515,24 @@ void WebTestContentBrowserClient::BindClipboardHost(
   mock_clipboard_host_->Bind(std::move(receiver));
 }
 
-void WebTestContentBrowserClient::BindRawClipboardHost(
-    RenderFrameHost* render_frame_host,
-    mojo::PendingReceiver<blink::mojom::RawClipboardHost> receiver) {
-  if (!mock_clipboard_host_)
-    mock_clipboard_host_ = std::make_unique<MockClipboardHost>();
-  if (!mock_raw_clipboard_host_) {
-    mock_raw_clipboard_host_ =
-        std::make_unique<MockRawClipboardHost>(mock_clipboard_host_.get());
-  }
-  mock_raw_clipboard_host_->Bind(std::move(receiver));
-}
-
 void WebTestContentBrowserClient::BindBadgeService(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<blink::mojom::BadgeService> receiver) {
   if (!mock_badge_service_)
     mock_badge_service_ = std::make_unique<MockBadgeService>();
   mock_badge_service_->Bind(std::move(receiver));
+}
+
+void WebTestContentBrowserClient::BindCookieManagerAutomation(
+    RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<blink::test::mojom::CookieManagerAutomation>
+        receiver) {
+  cookie_managers_.Add(std::make_unique<WebTestCookieManager>(
+                           GetWebTestBrowserContext()
+                               ->GetDefaultStoragePartition()
+                               ->GetCookieManagerForBrowserProcess(),
+                           render_frame_host->GetLastCommittedURL()),
+                       std::move(receiver));
 }
 
 std::unique_ptr<LoginDelegate> WebTestContentBrowserClient::CreateLoginDelegate(
@@ -548,7 +555,6 @@ void WebTestContentBrowserClient::ConfigureNetworkContextParamsForShell(
   ShellContentBrowserClient::ConfigureNetworkContextParamsForShell(
       context, context_params, cert_verifier_creation_params);
 
-#if BUILDFLAG(ENABLE_REPORTING)
   // Configure the Reporting service in a manner expected by certain Web
   // Platform Tests (network-error-logging and reporting-api).
   //
@@ -557,7 +563,6 @@ void WebTestContentBrowserClient::ConfigureNetworkContextParamsForShell(
   context_params->reporting_delivery_interval =
       kReportingDeliveryIntervalTimeForWebTests;
   context_params->skip_reporting_send_permission_check = true;
-#endif
 }
 
 void WebTestContentBrowserClient::CreateFakeBluetoothChooserFactory(

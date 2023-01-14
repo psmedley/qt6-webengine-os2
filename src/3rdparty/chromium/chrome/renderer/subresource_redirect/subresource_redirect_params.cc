@@ -19,14 +19,6 @@ const int64_t kHintsReceiveDefaultTimeoutSeconds = 5;
 
 }  // namespace
 
-url::Origin GetSubresourceRedirectOrigin() {
-  auto lite_page_subresource_origin = base::GetFieldTrialParamValueByFeature(
-      blink::features::kSubresourceRedirect, "lite_page_subresource_origin");
-  if (lite_page_subresource_origin.empty())
-    return url::Origin::Create(GURL("https://litepages.googlezip.net/"));
-  return url::Origin::Create(GURL(lite_page_subresource_origin));
-}
-
 base::TimeDelta GetCompressionRedirectTimeout() {
   return base::TimeDelta::FromMilliseconds(
       base::GetFieldTrialParamByFeatureAsInt(
@@ -41,10 +33,16 @@ int64_t GetHintsReceiveTimeout() {
 }
 
 base::TimeDelta GetRobotsRulesReceiveTimeout() {
+  if (base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect)) {
+    return base::TimeDelta::FromMilliseconds(
+        base::GetFieldTrialParamByFeatureAsInt(
+            blink::features::kSubresourceRedirect,
+            "robots_rules_receive_timeout_ms", 2000));
+  }
   return base::TimeDelta::FromMilliseconds(
       base::GetFieldTrialParamByFeatureAsInt(
-          blink::features::kSubresourceRedirect, "robots_rules_receive_timeout",
-          10));
+          blink::features::kSubresourceRedirectSrcVideo,
+          "robots_rules_receive_timeout_ms", 2000));
 }
 
 size_t GetFirstKSubresourceLimit() {
@@ -53,10 +51,22 @@ size_t GetFirstKSubresourceLimit() {
 }
 
 base::TimeDelta GetRobotsRulesReceiveFirstKSubresourceTimeout() {
+  if (base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect)) {
+    return base::TimeDelta::FromMilliseconds(
+        base::GetFieldTrialParamByFeatureAsInt(
+            blink::features::kSubresourceRedirect,
+            "robots_rules_receive_first_k_timeout_ms", 2000));
+  }
   return base::TimeDelta::FromMilliseconds(
       base::GetFieldTrialParamByFeatureAsInt(
-          blink::features::kSubresourceRedirect,
-          "robots_rules_receive_first_k_timeout_ms", 10));
+          blink::features::kSubresourceRedirectSrcVideo,
+          "robots_rules_receive_first_k_timeout_ms", 2000));
+}
+
+size_t GetFirstKDisableSubresourceRedirectLimit() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      blink::features::kSubresourceRedirect,
+      "first_k_disable_subresource_redirect_limit", 0);
 }
 
 int MaxRobotsRulesParsersCacheSize() {

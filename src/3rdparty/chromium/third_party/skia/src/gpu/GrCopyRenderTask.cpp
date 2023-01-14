@@ -10,6 +10,7 @@
 #include "src/gpu/GrGpu.h"
 #include "src/gpu/GrOpFlushState.h"
 #include "src/gpu/GrResourceAllocator.h"
+#include "src/gpu/geometry/GrRect.h"
 
 sk_sp<GrRenderTask> GrCopyRenderTask::Make(GrDrawingManager* drawingMgr,
                                            sk_sp<GrSurfaceProxy> src,
@@ -29,13 +30,12 @@ sk_sp<GrRenderTask> GrCopyRenderTask::Make(GrDrawingManager* drawingMgr,
         return nullptr;
     }
 
-    sk_sp<GrCopyRenderTask> task(new GrCopyRenderTask(drawingMgr,
-                                                      std::move(src),
-                                                      srcRect,
-                                                      std::move(dst),
-                                                      dstPoint,
-                                                      origin));
-    return std::move(task);
+    return sk_sp<GrRenderTask>(new GrCopyRenderTask(drawingMgr,
+                                                    std::move(src),
+                                                    srcRect,
+                                                    std::move(dst),
+                                                    dstPoint,
+                                                    origin));
 }
 
 GrCopyRenderTask::GrCopyRenderTask(GrDrawingManager* drawingMgr,
@@ -49,6 +49,10 @@ GrCopyRenderTask::GrCopyRenderTask(GrDrawingManager* drawingMgr,
 }
 
 void GrCopyRenderTask::gatherProxyIntervals(GrResourceAllocator* alloc) const {
+    if (!fSrc) {
+        alloc->incOps();
+        return;
+    }
     // This renderTask doesn't have "normal" ops. In this case we still need to add an interval (so
     // fEndOfOpsTaskOpIndices will remain in sync), so we create a fake op# to capture the fact that
     // we read fSrcView and copy to target view.
@@ -59,8 +63,10 @@ void GrCopyRenderTask::gatherProxyIntervals(GrResourceAllocator* alloc) const {
     alloc->incOps();
 }
 
-GrRenderTask::ExpectedOutcome GrCopyRenderTask::onMakeClosed(const GrCaps&,
+GrRenderTask::ExpectedOutcome GrCopyRenderTask::onMakeClosed(GrRecordingContext*,
                                                              SkIRect* targetUpdateBounds) {
+    // We don't expect to be marked skippable before being closed.
+    SkASSERT(fSrc);
     *targetUpdateBounds = GrNativeRect::MakeIRectRelativeTo(
             fOrigin,
             this->target(0)->height(),
@@ -69,6 +75,10 @@ GrRenderTask::ExpectedOutcome GrCopyRenderTask::onMakeClosed(const GrCaps&,
 }
 
 bool GrCopyRenderTask::onExecute(GrOpFlushState* flushState) {
+    if (!fSrc) {
+        // Did nothing, just like we're supposed to.
+        return true;
+    }
     GrSurfaceProxy* dstProxy = this->target(0);
     if (!fSrc->isInstantiated() || !dstProxy->isInstantiated()) {
         return false;

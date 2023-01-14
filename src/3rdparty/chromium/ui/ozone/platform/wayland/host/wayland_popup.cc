@@ -6,30 +6,55 @@
 
 #include <aura-shell-client-protocol.h>
 
+#include "base/auto_reset.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/display/display.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/transform.h"
+#include "ui/ozone/platform/wayland/common/wayland_object.h"
 #include "ui/ozone/platform/wayland/common/wayland_util.h"
 #include "ui/ozone/platform/wayland/host/shell_object_factory.h"
 #include "ui/ozone/platform/wayland/host/shell_popup_wrapper.h"
 #include "ui/ozone/platform/wayland/host/wayland_buffer_manager_host.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
+#include "ui/ozone/platform/wayland/host/wayland_output.h"
+#include "ui/ozone/platform/wayland/host/wayland_output_manager.h"
 #include "ui/ozone/platform/wayland/host/wayland_zaura_shell.h"
 
 namespace ui {
 
 WaylandPopup::WaylandPopup(PlatformWindowDelegate* delegate,
-                           WaylandConnection* connection)
-    : WaylandWindow(delegate, connection) {}
+                           WaylandConnection* connection,
+                           WaylandWindow* parent)
+    : WaylandWindow(delegate, connection) {
+  set_parent_window(parent);
+}
 
 WaylandPopup::~WaylandPopup() = default;
 
 bool WaylandPopup::CreateShellPopup() {
   DCHECK(parent_window() && !shell_popup_);
 
-  auto subsurface_bounds_dip =
+  // Set pending initial bounds and notify the delegate.
+  if (!pending_initial_bounds_px_.IsEmpty()) {
+    SetBounds(pending_initial_bounds_px_);
+    pending_initial_bounds_px_ = gfx::Rect();
+  } else if (window_scale() != parent_window()->window_scale()) {
+    // If scale changed while this was hidden (when WaylandPopup hides, parent
+    // window's child is reset), update buffer scale accordingly.
+    UpdateWindowScale(true);
+  }
+
+  const auto bounds_dip =
       wl::TranslateWindowBoundsToParentDIP(this, parent_window());
 
+  ShellPopupParams params;
+  params.bounds = bounds_dip;
+  params.menu_type =
+      delegate()->GetMenuType().value_or(MenuType::kRootContextMenu);
+
   ShellObjectFactory factory;
-  shell_popup_ = factory.CreateShellPopupWrapper(connection(), this,
-                                                 subsurface_bounds_dip);
+  shell_popup_ = factory.CreateShellPopupWrapper(connection(), this, params);
   if (!shell_popup_) {
     LOG(ERROR) << "Failed to create Wayland shell popup";
     return false;
@@ -56,12 +81,17 @@ void WaylandPopup::Show(bool inactive) {
   if (shell_popup_)
     return;
 
+  // Map parent window as WaylandPopup cannot become a visible child of a
+  // window that is not mapped.
+  DCHECK(parent_window());
+  if (!parent_window()->IsVisible())
+    parent_window()->Show(false);
+
   if (!CreateShellPopup()) {
     Close();
     return;
   }
 
-  UpdateBufferScale(false);
   connection()->ScheduleFlush();
   WaylandWindow::Show(inactive);
 }
@@ -72,6 +102,7 @@ void WaylandPopup::Hide() {
 
   if (child_window())
     child_window()->Hide();
+  WaylandWindow::Hide();
 
   if (shell_popup_) {
     parent_window()->set_child_window(nullptr);
@@ -87,11 +118,41 @@ bool WaylandPopup::IsVisible() const {
   return !!shell_popup_;
 }
 
+void WaylandPopup::SetBounds(const gfx::Rect& bounds) {
+  auto old_bounds = GetBounds();
+  WaylandWindow::SetBounds(bounds);
+
+  // The shell popup can be null if bounds are being fixed during
+  // the initialization. See WaylandPopup::CreateShellPopup.
+  if (shell_popup_ && old_bounds != bounds && !wayland_sets_bounds_) {
+    const auto bounds_dip =
+        wl::TranslateWindowBoundsToParentDIP(this, parent_window());
+
+    // If Wayland moved the popup (for example, a dnd arrow icon), schedule
+    // redraw as Aura doesn't do that for moved surfaces. If redraw has not been
+    // scheduled and a new buffer is not attached, some compositors may not
+    // apply a new state. And committing the surface without attaching a buffer
+    // won't make Wayland compositor apply these new bounds.
+    schedule_redraw_ = old_bounds.origin() != GetBounds().origin();
+
+    // If ShellPopup doesn't support repositioning, the popup will be recreated
+    // with new geometry applied. Availability of methods to move/resize popup
+    // surfaces purely depends on a protocol. See implementations of ShellPopup
+    // for more details.
+    if (!shell_popup_->SetBounds(bounds_dip)) {
+      // Always force redraw for recreated objects.
+      schedule_redraw_ = true;
+      // This will also close all the children windows...
+      Hide();
+      // ... and will result in showing them again starting with their parents.
+      GetTopMostChildWindow()->Show(false);
+    }
+  }
+}
+
 void WaylandPopup::HandlePopupConfigure(const gfx::Rect& bounds_dip) {
   DCHECK(shell_popup());
   DCHECK(parent_window());
-
-  root_surface()->SetBufferScale(parent_window()->buffer_scale(), true);
 
   gfx::Rect new_bounds_dip = bounds_dip;
 
@@ -107,13 +168,13 @@ void WaylandPopup::HandlePopupConfigure(const gfx::Rect& bounds_dip) {
   // is above the top level parent window, the origin of the top level window
   // has to be shifted by that value on y-axis so that the origin of the menu
   // becomes x,0, and events can be handled normally.
-  if (!wl::IsMenuType(parent_window()->type())) {
+  if (!parent_window()->AsWaylandPopup()) {
     gfx::Rect parent_bounds = parent_window()->GetBounds();
     // The menu window is flipped along y-axis and have x,-y origin. Shift the
     // parent top level window instead.
     if (new_bounds_dip.y() < 0) {
       // Move parent bounds along y-axis.
-      parent_bounds.set_y(-(new_bounds_dip.y() * buffer_scale()));
+      parent_bounds.set_y(-(new_bounds_dip.y() * window_scale()));
       new_bounds_dip.set_y(0);
     } else {
       // If the menu window is located at correct origin from the browser point
@@ -128,16 +189,22 @@ void WaylandPopup::HandlePopupConfigure(const gfx::Rect& bounds_dip) {
     // a display.
     new_bounds_dip = gfx::ScaleToRoundedRect(
         wl::TranslateBoundsToTopLevelCoordinates(
-            gfx::ScaleToRoundedRect(new_bounds_dip, buffer_scale()),
+            gfx::ScaleToRoundedRect(new_bounds_dip, window_scale()),
             parent_window()->GetBounds()),
-        1.0 / buffer_scale());
+        1.0 / window_scale());
     DCHECK(new_bounds_dip.y() >= 0);
   }
 
+  base::AutoReset<bool> auto_reset(&wayland_sets_bounds_, true);
   SetBoundsDip(new_bounds_dip);
 }
 
 void WaylandPopup::HandleSurfaceConfigure(uint32_t serial) {
+  if (schedule_redraw_) {
+    delegate()->OnDamageRect(gfx::Rect{{0, 0}, GetBounds().size()});
+    schedule_redraw_ = false;
+  }
+
   shell_popup()->AckConfigure(serial);
 }
 
@@ -149,12 +216,62 @@ void WaylandPopup::OnCloseRequest() {
 }
 
 bool WaylandPopup::OnInitialize(PlatformWindowInitProperties properties) {
-  DCHECK(wl::IsMenuType(type()));
   DCHECK(parent_window());
-  root_surface()->SetBufferScale(parent_window()->buffer_scale(), false);
+  SetWindowScale(parent_window()->window_scale());
   set_ui_scale(parent_window()->ui_scale());
   shadow_type_ = properties.shadow_type;
+
+  // Fix initial bounds. The client initially doesn't know the display where the
+  // WaylandPopup will be located and uses a primary display to convert DIP
+  // bounds to pixels. However, Ozone/Wayland does know where it is going to
+  // locate WaylandPopup as it is going to use parent's entered outputs. Thus,
+  // if the primary display's scale (or forced scale factor) is different from
+  // parents' output scale (and this' scale), fix bounds accordingly. Otherwise,
+  // popup is located using wrong bounds in DIP.
+  absl::optional<float> used_scale;
+  if (display::Display::HasForceDeviceScaleFactor()) {
+    used_scale = display::Display::GetForcedDeviceScaleFactor();
+  } else if (auto* primary_output =
+                 connection()->wayland_output_manager()->GetPrimaryOutput()) {
+    used_scale = primary_output->scale_factor();
+  }
+
+  if (!used_scale.has_value())
+    return true;
+
+  const auto client_initial_scale = used_scale.value();
+
+  gfx::RectF float_rect = gfx::RectF(GetBounds());
+  gfx::Transform transform;
+  float scale = client_initial_scale;
+  // The bounds are initially given in the scale of the primary display (or
+  // forced scale), so we have to upscale or downscale the rect to the scale
+  // of the target display, if that scale is different.
+  if (client_initial_scale < window_scale()) {
+    scale = static_cast<float>(window_scale()) /
+            static_cast<float>(client_initial_scale);
+    transform.Scale(scale, scale);
+    transform.TransformRect(&float_rect);
+  } else if (client_initial_scale > window_scale()) {
+    scale = static_cast<float>(client_initial_scale) /
+            static_cast<float>(window_scale());
+    transform.Scale(scale, scale);
+    transform.TransformRectReverse(&float_rect);
+  }
+
+    // delegate()->OnBoundsChanged cannot be called at this point. Thus, set
+    // pending internal bounds and call SetBounds later when CreateShellPopup is
+    // called.
+    pending_initial_bounds_px_ = gfx::ToEnclosingRect(float_rect);
   return true;
+}
+
+WaylandPopup* WaylandPopup::AsWaylandPopup() {
+  return this;
+}
+
+bool WaylandPopup::IsSurfaceConfigured() {
+  return shell_popup() ? shell_popup()->IsConfigured() : false;
 }
 
 }  // namespace ui

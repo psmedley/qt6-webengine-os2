@@ -36,7 +36,7 @@ pp::Var VarFromValue(const base::Value& value) {
     }
     case base::Value::Type::DICTIONARY: {
       pp::VarDictionary var_dict;
-      for (const auto& value_pair : value.DictItems()) {
+      for (auto value_pair : value.DictItems()) {
         var_dict.Set(value_pair.first, VarFromValue(value_pair.second));
       }
       return var_dict;
@@ -50,10 +50,6 @@ pp::Var VarFromValue(const base::Value& value) {
       }
       return var_array;
     }
-    // TODO(crbug.com/859477): Remove after root cause is found.
-    case base::Value::Type::DEAD:
-      CHECK(false);
-      return pp::Var();
   }
 }
 

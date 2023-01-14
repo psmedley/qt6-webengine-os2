@@ -23,6 +23,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_flood.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 
@@ -59,7 +60,7 @@ bool FEFlood::SetFloodOpacity(float flood_opacity) {
 
 sk_sp<PaintFilter> FEFlood::CreateImageFilter() {
   Color color = FloodColor().CombineWithAlpha(FloodOpacity());
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   return sk_make_sp<ColorFilterPaintFilter>(
       SkColorFilters::Blend(color.Rgb(), SkBlendMode::kSrc), nullptr,
       base::OptionalOrNullptr(crop_rect));

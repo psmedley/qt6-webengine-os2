@@ -10,6 +10,7 @@
 
 #include "base/containers/flat_map.h"
 #include "printing/backend/print_backend.h"
+#include "printing/mojom/print.mojom.h"
 
 namespace printing {
 
@@ -20,15 +21,18 @@ class TestPrintBackend : public PrintBackend {
   TestPrintBackend();
 
   // PrintBackend overrides
-  bool EnumeratePrinters(PrinterList* printer_list) override;
-  std::string GetDefaultPrinterName() override;
-  bool GetPrinterBasicInfo(const std::string& printer_name,
-                           PrinterBasicInfo* printer_info) override;
-  bool GetPrinterSemanticCapsAndDefaults(
+  mojom::ResultCode EnumeratePrinters(PrinterList* printer_list) override;
+  mojom::ResultCode GetDefaultPrinterName(
+      std::string& default_printer) override;
+  mojom::ResultCode GetPrinterBasicInfo(
+      const std::string& printer_name,
+      PrinterBasicInfo* printer_info) override;
+  mojom::ResultCode GetPrinterSemanticCapsAndDefaults(
       const std::string& printer_name,
       PrinterSemanticCapsAndDefaults* printer_info) override;
-  bool GetPrinterCapsAndDefaults(const std::string& printer_name,
-                                 PrinterCapsAndDefaults* printer_info) override;
+  mojom::ResultCode GetPrinterCapsAndDefaults(
+      const std::string& printer_name,
+      PrinterCapsAndDefaults* printer_info) override;
   std::string GetPrinterDriverInfo(const std::string& printer_name) override;
   bool IsValidPrinter(const std::string& printer_name) override;
 
@@ -50,17 +54,31 @@ class TestPrintBackend : public PrintBackend {
                        std::unique_ptr<PrinterSemanticCapsAndDefaults> caps,
                        std::unique_ptr<PrinterBasicInfo> info);
 
+  // Adds a printer which will cause a Mojom data validation error.
+  void AddInvalidDataPrinter(const std::string& printer_name);
+
+  // Adds a printer which will fail with an access-denied permission error for
+  // calls specific to a particular `printer_name`.
+  void AddAccessDeniedPrinter(const std::string& printer_name);
+
  protected:
   ~TestPrintBackend() override;
 
  private:
+  void AddPrinter(const std::string& printer_name,
+                  std::unique_ptr<PrinterSemanticCapsAndDefaults> caps,
+                  std::unique_ptr<PrinterBasicInfo> info,
+                  bool blocked_by_permissions);
+
   struct PrinterData {
     PrinterData(std::unique_ptr<PrinterSemanticCapsAndDefaults> caps,
-                std::unique_ptr<PrinterBasicInfo> info);
+                std::unique_ptr<PrinterBasicInfo> info,
+                bool blocked_by_permissions);
     ~PrinterData();
 
     std::unique_ptr<PrinterSemanticCapsAndDefaults> caps;
     std::unique_ptr<PrinterBasicInfo> info;
+    bool blocked_by_permissions = false;
   };
 
   std::string default_printer_name_;

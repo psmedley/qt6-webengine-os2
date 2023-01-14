@@ -26,8 +26,8 @@
 #include "components/sync/model/sync_change.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory.h"
+#include "components/sync/protocol/entity_specifics.pb.h"
 #include "components/sync/protocol/preference_specifics.pb.h"
-#include "components/sync/protocol/sync.pb.h"
 #include "components/sync_preferences/pref_model_associator_client.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 
@@ -136,12 +136,12 @@ void PrefModelAssociator::InitPrefAndAssociate(
       if (new_value->is_none()) {
         LOG(WARNING) << "Sync has null value for pref " << pref_name.c_str();
         pref_service_->ClearPref(pref_name);
-      } else if (!user_pref_value->Equals(new_value.get())) {
+      } else if (*user_pref_value != *new_value) {
         SetPrefWithTypeCheck(pref_name, *new_value);
       }
 
       // If the merge resulted in an updated value, inform the syncer.
-      if (!sync_value->Equals(new_value.get())) {
+      if (*sync_value != *new_value) {
         syncer::SyncData sync_data;
         if (!CreatePrefSyncData(pref_name, *new_value, &sync_data)) {
           LOG(ERROR) << "Failed to update preference.";
@@ -184,7 +184,7 @@ void PrefModelAssociator::WaitUntilReadyToSync(base::OnceClosure done) {
   std::move(done).Run();
 }
 
-base::Optional<syncer::ModelError>
+absl::optional<syncer::ModelError>
 PrefModelAssociator::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
@@ -242,7 +242,7 @@ PrefModelAssociator::MergeDataAndStartSyncing(
   }
 
   // Push updates to sync.
-  base::Optional<syncer::ModelError> error =
+  absl::optional<syncer::ModelError> error =
       sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
   if (!error.has_value()) {
     models_associated_ = true;
@@ -280,7 +280,7 @@ std::unique_ptr<base::Value> PrefModelAssociator::MergePreference(
   }
 
   // If this is not a specially handled preference, server wins.
-  return base::WrapUnique(server_value.DeepCopy());
+  return base::Value::ToUniquePtrValue(server_value.Clone());
 }
 
 bool PrefModelAssociator::CreatePrefSyncData(
@@ -343,7 +343,7 @@ base::Value PrefModelAssociator::MergeDictionaryValues(
   DCHECK(to_value.is_dict());
   base::Value result = to_value.Clone();
 
-  for (const auto& it : from_value.DictItems()) {
+  for (auto it : from_value.DictItems()) {
     const base::Value* from_key_value = &it.second;
     base::Value* to_key_value = result.FindKey(it.first);
     if (to_key_value) {
@@ -383,7 +383,7 @@ syncer::SyncDataList PrefModelAssociator::GetAllSyncDataForTesting(
   return current_data;
 }
 
-base::Optional<syncer::ModelError> PrefModelAssociator::ProcessSyncChanges(
+absl::optional<syncer::ModelError> PrefModelAssociator::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   if (!models_associated_) {
@@ -410,7 +410,7 @@ base::Optional<syncer::ModelError> PrefModelAssociator::ProcessSyncChanges(
       continue;
     }
 
-    base::Optional<base::Value> new_value(
+    absl::optional<base::Value> new_value(
         ReadPreferenceSpecifics(pref_specifics));
     if (!new_value) {
       // Skip values we can't deserialize.
@@ -438,11 +438,11 @@ base::Optional<syncer::ModelError> PrefModelAssociator::ProcessSyncChanges(
       synced_preferences_.insert(pref_specifics.name());
     }
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 // static
-base::Optional<base::Value> PrefModelAssociator::ReadPreferenceSpecifics(
+absl::optional<base::Value> PrefModelAssociator::ReadPreferenceSpecifics(
     const sync_pb::PreferenceSpecifics& preference) {
   base::JSONReader::ValueWithError parsed_json =
       base::JSONReader::ReadAndReturnValueWithError(preference.value());
@@ -450,7 +450,7 @@ base::Optional<base::Value> PrefModelAssociator::ReadPreferenceSpecifics(
     std::string err =
         "Failed to deserialize preference value: " + parsed_json.error_message;
     LOG(ERROR) << err;
-    return base::nullopt;
+    return absl::nullopt;
   }
   return std::move(parsed_json.value);
 }
@@ -479,7 +479,7 @@ bool PrefModelAssociator::IsPrefSyncedForTesting(
 }
 
 void PrefModelAssociator::RegisterPref(const std::string& name) {
-  DCHECK(registered_preferences_.count(name) == 0);
+  DCHECK(!base::Contains(registered_preferences_, name));
   registered_preferences_.insert(name);
 
   // Make sure data in the local store matches the registered type (where "type"
@@ -492,8 +492,8 @@ void PrefModelAssociator::RegisterPref(const std::string& name) {
 
 void PrefModelAssociator::RegisterPrefWithLegacyModelType(
     const std::string& name) {
-  DCHECK(legacy_model_type_preferences_.count(name) == 0);
-  DCHECK(registered_preferences_.count(name) == 0);
+  DCHECK(!base::Contains(legacy_model_type_preferences_, name));
+  DCHECK(!base::Contains(registered_preferences_, name));
   legacy_model_type_preferences_.insert(name);
 }
 

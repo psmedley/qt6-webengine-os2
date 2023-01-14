@@ -89,10 +89,9 @@ class BasicShapeCenterCoordinate {
                              ? length
                              : length.SubtractFromOneHundredPercent()) {}
 
-  BasicShapeCenterCoordinate(const BasicShapeCenterCoordinate& other)
-      : direction_(other.GetDirection()),
-        length_(other.length()),
-        computed_length_(other.computed_length_) {}
+  BasicShapeCenterCoordinate(const BasicShapeCenterCoordinate&) = default;
+  BasicShapeCenterCoordinate& operator=(const BasicShapeCenterCoordinate&) =
+      default;
 
   bool operator==(const BasicShapeCenterCoordinate& other) const {
     return direction_ == other.direction_ && length_ == other.length_ &&
@@ -117,8 +116,8 @@ class BasicShapeRadius {
   BasicShapeRadius() : type_(kClosestSide) {}
   explicit BasicShapeRadius(const Length& v) : value_(v), type_(kValue) {}
   explicit BasicShapeRadius(RadiusType t) : type_(t) {}
-  BasicShapeRadius(const BasicShapeRadius& other)
-      : value_(other.Value()), type_(other.GetType()) {}
+  BasicShapeRadius(const BasicShapeRadius&) = default;
+  BasicShapeRadius& operator=(const BasicShapeRadius&) = default;
   bool operator==(const BasicShapeRadius& other) const {
     return type_ == other.type_ && value_ == other.value_;
   }
@@ -300,4 +299,4 @@ struct DowncastTraits<BasicShapeInset> {
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_BASIC_SHAPES_H_

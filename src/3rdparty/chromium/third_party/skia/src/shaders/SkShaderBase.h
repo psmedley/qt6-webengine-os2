@@ -8,7 +8,6 @@
 #ifndef SkShaderBase_DEFINED
 #define SkShaderBase_DEFINED
 
-#include "include/core/SkFilterQuality.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkSamplingOptions.h"
@@ -46,8 +45,10 @@ class SkStageUpdater {
 public:
     virtual ~SkStageUpdater() {}
 
-    virtual bool SK_WARN_UNUSED_RESULT update(const SkMatrix& ctm, const SkMatrix* localM) = 0;
+    virtual bool SK_WARN_UNUSED_RESULT update(const SkMatrix& ctm) = 0;
 };
+
+class SkUpdatableShader;
 
 class SkShaderBase : public SkShader {
 public:
@@ -90,7 +91,6 @@ public:
             , fLocalMatrix(localM)
             , fDstColorType(dstColorType)
             , fDstColorSpace(dstColorSpace) {
-                fPaintSampling = SkSamplingOptions(paint.getFilterQuality());
                 fPaintAlpha = paint.getAlpha();
                 fPaintDither = paint.isDither();
             }
@@ -99,9 +99,8 @@ public:
         const SkMatrix* fLocalMatrix;      // optional local matrix
         SkColorType     fDstColorType;     // the color type of the dest surface
         SkColorSpace*   fDstColorSpace;    // the color space of the dest surface (if any)
-        SkSamplingOptions fPaintSampling;  // only used for legacy-built shaders (inherit sampling)
-        SkAlpha           fPaintAlpha;
-        bool              fPaintDither;
+        SkAlpha         fPaintAlpha;
+        bool            fPaintDither;
 
         bool isLegacyCompatible(SkColorSpace* shadersColorSpace) const;
     };
@@ -198,7 +197,7 @@ public:
 
     virtual SkRuntimeEffect* asRuntimeEffect() const { return nullptr; }
 
-    static Type GetFlattenableType() { return kSkShaderBase_Type; }
+    static Type GetFlattenableType() { return kSkShader_Type; }
     Type getFlattenableType() const override { return GetFlattenableType(); }
 
     static sk_sp<SkShaderBase> Deserialize(const void* data, size_t size,
@@ -214,14 +213,16 @@ public:
      */
     virtual sk_sp<SkShader> makeAsALocalMatrixShader(SkMatrix* localMatrix) const;
 
+    SkUpdatableShader* updatableShader(SkArenaAlloc* alloc) const;
+    virtual SkUpdatableShader* onUpdatableShader(SkArenaAlloc* alloc) const;
+
     SkStageUpdater* appendUpdatableStages(const SkStageRec& rec) const {
         return this->onAppendUpdatableStages(rec);
     }
 
     SK_WARN_UNUSED_RESULT
     skvm::Color program(skvm::Builder*, skvm::Coord device, skvm::Coord local, skvm::Color paint,
-                        const SkMatrixProvider&, const SkMatrix* localM,
-                        SkFilterQuality quality, const SkColorInfo& dst,
+                        const SkMatrixProvider&, const SkMatrix* localM, const SkColorInfo& dst,
                         skvm::Uniforms* uniforms, SkArenaAlloc* alloc) const;
 
 protected:
@@ -258,10 +259,19 @@ private:
     virtual skvm::Color onProgram(skvm::Builder*,
                                   skvm::Coord device, skvm::Coord local, skvm::Color paint,
                                   const SkMatrixProvider&, const SkMatrix* localM,
-                                  SkFilterQuality quality, const SkColorInfo& dst,
-                                  skvm::Uniforms* uniforms, SkArenaAlloc* alloc) const = 0;
+                                  const SkColorInfo& dst, skvm::Uniforms*, SkArenaAlloc*) const = 0;
 
     using INHERITED = SkShader;
+};
+
+class SkUpdatableShader : public SkShaderBase {
+public:
+    virtual bool update(const SkMatrix& ctm) const = 0;
+
+private:
+    // For serialization.  This will never be called.
+    Factory getFactory() const override { return nullptr; }
+    const char* getTypeName() const override { return nullptr; }
 };
 
 inline SkShaderBase* as_SB(SkShader* shader) {

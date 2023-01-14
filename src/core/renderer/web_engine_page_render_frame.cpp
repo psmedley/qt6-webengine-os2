@@ -84,14 +84,14 @@ void WebEnginePageRenderFrame::FetchDocumentInnerText(uint64_t requestId,
     blink::WebString text;
     if (m_ready) {
         text = blink::WebFrameContentDumper::DumpFrameTreeAsText(
-                frame, std::numeric_limits<std::size_t>::max());
+                frame, std::numeric_limits<int32_t>::max());
     }
     std::move(callback).Run(requestId, text.Utf8());
 }
 
 void WebEnginePageRenderFrame::SetBackgroundColor(uint32_t color)
 {
-    render_frame()->GetWebFrame()->View()->SetBaseBackgroundColorOverride(color);
+    render_frame()->GetWebFrame()->View()->SetBaseBackgroundColorOverrideForInspector(color);
 }
 
 void WebEnginePageRenderFrame::OnDestruct()

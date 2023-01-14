@@ -52,7 +52,7 @@ gfx::Rect OverlayProcessorMac::GetAndResetOverlayDamage() {
 void OverlayProcessorMac::ProcessForOverlays(
     DisplayResourceProvider* resource_provider,
     AggregatedRenderPassList* render_passes,
-    const SkMatrix44& output_color_matrix,
+    const skia::Matrix44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap& render_pass_filters,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
@@ -97,15 +97,23 @@ void OverlayProcessorMac::ProcessForOverlays(
     // RenderPass overlays still point into that list. So instead, to avoid
     // drawing the root RenderPass, we set |damage_rect| to be empty.
     *damage_rect = gfx::Rect();
+  } else {
+    CALayerOverlayList underlays;
+    ca_layer_overlay_processor_->PutForcedOverlayContentIntoUnderlays(
+        resource_provider, render_pass.get(),
+        gfx::RectF(render_pass->output_rect), &render_pass->quad_list,
+        render_pass_filters, render_pass_backdrop_filters, &underlays);
+    // Put underlays at the beginning of the list of CALayers
+    underlays.reserve(underlays.size() + candidates->size());
+    for (auto&& candidate : *candidates) {
+      underlays.push_back(std::move(candidate));
+    }
+    candidates->swap(underlays);
   }
-
-  // TODO(https://crbug.com/1152849): If there is any HDR or protected content,
-  // use an underlay strategy to move those to |candidates| and replace them
-  // with transparent quads in |render_pass->quad_list|.
 }
 
 void OverlayProcessorMac::AdjustOutputSurfaceOverlay(
-    base::Optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
+    absl::optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
   if (!output_surface_plane->has_value())
     return;
 

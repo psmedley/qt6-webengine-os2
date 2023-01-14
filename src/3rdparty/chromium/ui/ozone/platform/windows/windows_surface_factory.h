@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "ui/ozone/public/gl_ozone.h"
 #include "ui/ozone/public/surface_factory_ozone.h"
@@ -22,8 +21,8 @@ class WindowsSurfaceFactory : public SurfaceFactoryOzone {
   ~WindowsSurfaceFactory() override;
 
   // SurfaceFactoryOzone:
-  std::vector<gl::GLImplementation> GetAllowedGLImplementations() override;
-  GLOzone* GetGLOzone(gl::GLImplementation implementation) override;
+  std::vector<gl::GLImplementationParts> GetAllowedGLImplementations() override;
+  GLOzone* GetGLOzone(const gl::GLImplementationParts& implementation) override;
 
  private:
   std::unique_ptr<GLOzone> egl_implementation_;

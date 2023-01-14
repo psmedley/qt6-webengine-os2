@@ -4,10 +4,12 @@
 
 #include "services/network/public/cpp/content_security_policy/csp_source_list.h"
 
+#include "base/containers/cxx20_erase.h"
 #include "base/containers/flat_set.h"
 #include "base/ranges/algorithm.h"
 #include "services/network/public/cpp/content_security_policy/content_security_policy.h"
 #include "services/network/public/cpp/content_security_policy/csp_source.h"
+#include "services/network/public/mojom/content_security_policy.mojom-shared.h"
 
 namespace network {
 
@@ -185,15 +187,18 @@ bool UrlSourceListSubsumes(
 
 }  // namespace
 
-bool CheckCSPSourceList(const mojom::CSPSourceList& source_list,
+bool CheckCSPSourceList(mojom::CSPDirectiveName directive_name,
+                        const mojom::CSPSourceList& source_list,
                         const GURL& url,
                         const mojom::CSPSource& self_source,
                         bool has_followed_redirect,
                         bool is_response_check) {
   // If the source list allows all redirects, the decision can't be made until
   // the response is received.
-  if (source_list.allow_response_redirects && !is_response_check)
+  if (directive_name == mojom::CSPDirectiveName::NavigateTo &&
+      source_list.allow_response_redirects && !is_response_check) {
     return true;
+  }
 
   // Wildcards match network schemes ('http', 'https', 'ftp', 'ws', 'wss'), and
   // the scheme of the protected resource:
@@ -229,7 +234,6 @@ bool CSPSourceListSubsumes(
   auto it = source_list_b.begin();
   bool allow_inline_b = (*it)->allow_inline;
   bool allow_eval_b = (*it)->allow_eval;
-  bool allow_wasm_eval_b = (*it)->allow_wasm_eval;
   bool allow_dynamic_b = (*it)->allow_dynamic;
   bool allow_unsafe_hashes_b = (*it)->allow_unsafe_hashes;
   bool is_hash_or_nonce_present_b =
@@ -246,7 +250,6 @@ bool CSPSourceListSubsumes(
     // 'strict-dynamic' is specified.
     allow_inline_b = allow_inline_b && (*it)->allow_inline;
     allow_eval_b = allow_eval_b && (*it)->allow_eval;
-    allow_wasm_eval_b = allow_wasm_eval_b && (*it)->allow_wasm_eval;
     allow_dynamic_b = allow_dynamic_b && (*it)->allow_dynamic;
     allow_unsafe_hashes_b = allow_unsafe_hashes_b && (*it)->allow_unsafe_hashes;
     is_hash_or_nonce_present_b =
@@ -278,8 +281,6 @@ bool CSPSourceListSubsumes(
 
   if (IsScriptDirective(directive) || IsStyleDirective(directive)) {
     if (!source_list_a.allow_eval && allow_eval_b)
-      return false;
-    if (!source_list_a.allow_wasm_eval && allow_wasm_eval_b)
       return false;
     if (!source_list_a.allow_unsafe_hashes && allow_unsafe_hashes_b)
       return false;

@@ -41,8 +41,9 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Has an active accelerated backdrop filter animation or transition"},
     {CompositingReason::kXrOverlay, "xrOverlay",
      "Is DOM overlay for WebXR immersive-ar mode"},
-    {CompositingReason::kScrollDependentPosition, "scrollDependentPosition",
-     "Is fixed or sticky position"},
+    {CompositingReason::kFixedPosition, "fixedPosition", "Is fixed position"},
+    {CompositingReason::kStickyPosition, "stickyPosition",
+     "Is sticky position"},
     {CompositingReason::kOverflowScrolling, "overflowScrolling",
      "Is a scrollable overflow element"},
     {CompositingReason::kOverflowScrollingParent, "overflowScrollingParent",
@@ -133,6 +134,9 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
     {CompositingReason::kBackfaceInvisibility3DAncestor,
      "BackfaceInvisibility3DAncestor",
      "Ancestor in same 3D rendering context has a hidden backface"},
+    {CompositingReason::kDocumentTransitionSharedElement,
+     "DocumentTransitionSharedElement",
+     "This element is shared during document transition"},
 };
 
 }  // anonymous namespace

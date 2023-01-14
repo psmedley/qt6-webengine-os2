@@ -16,22 +16,22 @@
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fpdfdoc/cpdf_interactiveform.h"
 #include "third_party/base/check.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
 constexpr char kHighlightModes[] = {'N', 'I', 'O', 'P', 'T'};
 
 // Order of |kHighlightModes| must match order of HighlightingMode enum.
-static_assert(kHighlightModes[CPDF_FormControl::None] == 'N',
+static_assert(kHighlightModes[CPDF_FormControl::kNone] == 'N',
               "HighlightingMode mismatch");
-static_assert(kHighlightModes[CPDF_FormControl::Invert] == 'I',
+static_assert(kHighlightModes[CPDF_FormControl::kInvert] == 'I',
               "HighlightingMode mismatch");
-static_assert(kHighlightModes[CPDF_FormControl::Outline] == 'O',
+static_assert(kHighlightModes[CPDF_FormControl::kOutline] == 'O',
               "HighlightingMode mismatch");
-static_assert(kHighlightModes[CPDF_FormControl::Push] == 'P',
+static_assert(kHighlightModes[CPDF_FormControl::kPush] == 'P',
               "HighlightingMode mismatch");
-static_assert(kHighlightModes[CPDF_FormControl::Toggle] == 'T',
+static_assert(kHighlightModes[CPDF_FormControl::kToggle] == 'T',
               "HighlightingMode mismatch");
 
 }  // namespace
@@ -40,7 +40,9 @@ CPDF_FormControl::CPDF_FormControl(CPDF_FormField* pField,
                                    CPDF_Dictionary* pWidgetDict)
     : m_pField(pField),
       m_pWidgetDict(pWidgetDict),
-      m_pForm(m_pField->GetForm()) {}
+      m_pForm(m_pField->GetForm()) {
+  DCHECK(m_pWidgetDict);
+}
 
 CPDF_FormControl::~CPDF_FormControl() = default;
 
@@ -125,20 +127,16 @@ void CPDF_FormControl::CheckControl(bool bChecked) {
 
 CPDF_FormControl::HighlightingMode CPDF_FormControl::GetHighlightingMode()
     const {
-  if (!m_pWidgetDict)
-    return Invert;
-
   ByteString csH = m_pWidgetDict->GetStringFor("H", "I");
   for (size_t i = 0; i < pdfium::size(kHighlightModes); ++i) {
     if (csH == kHighlightModes[i])
       return static_cast<HighlightingMode>(i);
   }
-  return Invert;
+  return kInvert;
 }
 
 CPDF_ApSettings CPDF_FormControl::GetMK() const {
-  return CPDF_ApSettings(m_pWidgetDict ? m_pWidgetDict->GetDictFor("MK")
-                                       : nullptr);
+  return CPDF_ApSettings(m_pWidgetDict->GetDictFor("MK"));
 }
 
 bool CPDF_FormControl::HasMKEntry(const ByteString& csEntry) const {
@@ -149,18 +147,18 @@ int CPDF_FormControl::GetRotation() const {
   return GetMK().GetRotation();
 }
 
-FX_ARGB CPDF_FormControl::GetColor(int& iColorType, const ByteString& csEntry) {
-  return GetMK().GetColor(iColorType, csEntry);
+CFX_Color::TypeAndARGB CPDF_FormControl::GetColorARGB(
+    const ByteString& csEntry) {
+  return GetMK().GetColorARGB(csEntry);
 }
 
-float CPDF_FormControl::GetOriginalColor(int index, const ByteString& csEntry) {
-  return GetMK().GetOriginalColor(index, csEntry);
+float CPDF_FormControl::GetOriginalColorComponent(int index,
+                                                  const ByteString& csEntry) {
+  return GetMK().GetOriginalColorComponent(index, csEntry);
 }
 
-void CPDF_FormControl::GetOriginalColor(int& iColorType,
-                                        float fc[4],
-                                        const ByteString& csEntry) {
-  GetMK().GetOriginalColor(iColorType, fc, csEntry);
+CFX_Color CPDF_FormControl::GetOriginalColor(const ByteString& csEntry) {
+  return GetMK().GetOriginalColor(csEntry);
 }
 
 WideString CPDF_FormControl::GetCaption(const ByteString& csEntry) const {
@@ -180,9 +178,6 @@ int CPDF_FormControl::GetTextPosition() const {
 }
 
 CPDF_DefaultAppearance CPDF_FormControl::GetDefaultAppearance() const {
-  if (!m_pWidgetDict)
-    return CPDF_DefaultAppearance();
-
   if (m_pWidgetDict->KeyExist("DA"))
     return CPDF_DefaultAppearance(m_pWidgetDict->GetStringFor("DA"));
 
@@ -195,7 +190,7 @@ CPDF_DefaultAppearance CPDF_FormControl::GetDefaultAppearance() const {
 Optional<WideString> CPDF_FormControl::GetDefaultControlFontName() const {
   RetainPtr<CPDF_Font> pFont = GetDefaultControlFont();
   if (!pFont)
-    return {};
+    return pdfium::nullopt;
 
   return WideString::FromDefANSI(pFont->GetBaseFontName().AsStringView());
 }
@@ -204,14 +199,14 @@ RetainPtr<CPDF_Font> CPDF_FormControl::GetDefaultControlFont() const {
   float fFontSize;
   CPDF_DefaultAppearance cDA = GetDefaultAppearance();
   Optional<ByteString> csFontNameTag = cDA.GetFont(&fFontSize);
-  if (!csFontNameTag || csFontNameTag->IsEmpty())
+  if (!csFontNameTag.has_value() || csFontNameTag->IsEmpty())
     return nullptr;
 
   CPDF_Object* pObj = CPDF_FormField::GetFieldAttr(m_pWidgetDict.Get(), "DR");
   if (CPDF_Dictionary* pDict = ToDictionary(pObj)) {
     CPDF_Dictionary* pFonts = pDict->GetDictFor("Font");
     if (ValidateFontResourceDict(pFonts)) {
-      CPDF_Dictionary* pElement = pFonts->GetDictFor(*csFontNameTag);
+      CPDF_Dictionary* pElement = pFonts->GetDictFor(csFontNameTag.value());
       if (pElement) {
         auto* pData = CPDF_DocPageData::FromDocument(m_pForm->GetDocument());
         RetainPtr<CPDF_Font> pFont = pData->GetFont(pElement);
@@ -220,7 +215,7 @@ RetainPtr<CPDF_Font> CPDF_FormControl::GetDefaultControlFont() const {
       }
     }
   }
-  RetainPtr<CPDF_Font> pFormFont = m_pForm->GetFormFont(*csFontNameTag);
+  RetainPtr<CPDF_Font> pFormFont = m_pForm->GetFormFont(csFontNameTag.value());
   if (pFormFont)
     return pFormFont;
 
@@ -234,7 +229,7 @@ RetainPtr<CPDF_Font> CPDF_FormControl::GetDefaultControlFont() const {
   if (!ValidateFontResourceDict(pFonts))
     return nullptr;
 
-  CPDF_Dictionary* pElement = pFonts->GetDictFor(*csFontNameTag);
+  CPDF_Dictionary* pElement = pFonts->GetDictFor(csFontNameTag.value());
   if (!pElement)
     return nullptr;
 
@@ -243,8 +238,6 @@ RetainPtr<CPDF_Font> CPDF_FormControl::GetDefaultControlFont() const {
 }
 
 int CPDF_FormControl::GetControlAlignment() const {
-  if (!m_pWidgetDict)
-    return 0;
   if (m_pWidgetDict->KeyExist("Q"))
     return m_pWidgetDict->GetIntegerFor("Q", 0);
 

@@ -12,6 +12,7 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "media/cdm/cdm_allocator.h"
 #include "media/cdm/cdm_auxiliary_helper.h"
 #include "media/cdm/cdm_helpers.h"
@@ -21,6 +22,7 @@ namespace media {
 
 class MockCdmAuxiliaryHelper : public CdmAuxiliaryHelper {
  public:
+  // `allocator` is optional; can be null if no need to create buffers/frames.
   explicit MockCdmAuxiliaryHelper(std::unique_ptr<CdmAllocator> allocator);
   ~MockCdmAuxiliaryHelper() override;
 
@@ -49,6 +51,13 @@ class MockCdmAuxiliaryHelper : public CdmAuxiliaryHelper {
 
   MOCK_METHOD1(GetStorageIdCalled, std::vector<uint8_t>(uint32_t version));
   void GetStorageId(uint32_t version, StorageIdCB callback) override;
+
+#if defined(OS_WIN)
+  MOCK_METHOD(void,
+              GetCdmPreferenceData,
+              (GetCdmPreferenceDataCB callback),
+              (override));
+#endif  // defined(OS_WIN)
 
  private:
   std::unique_ptr<CdmAllocator> allocator_;

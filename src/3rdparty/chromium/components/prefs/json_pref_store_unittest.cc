@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
@@ -19,15 +20,16 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/gtest_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "components/prefs/persistent_pref_store_unittest.h"
 #include "components/prefs/pref_filter.h"
@@ -240,55 +242,51 @@ void RunBasicJsonPrefStoreTest(JsonPrefStore* pref_store,
 
   const Value* actual;
   EXPECT_TRUE(pref_store->GetValue(kHomePage, &actual));
-  std::string string_value;
-  EXPECT_TRUE(actual->GetAsString(&string_value));
-  EXPECT_EQ(cnn, string_value);
+  EXPECT_TRUE(actual->is_string());
+  EXPECT_EQ(cnn, actual->GetString());
 
   const char kSomeDirectory[] = "some_directory";
 
   EXPECT_TRUE(pref_store->GetValue(kSomeDirectory, &actual));
-  std::string path;
-  EXPECT_TRUE(actual->GetAsString(&path));
-  EXPECT_EQ("/usr/local/", path);
+  EXPECT_TRUE(actual->is_string());
+  EXPECT_EQ("/usr/local/", actual->GetString());
   base::FilePath some_path(FILE_PATH_LITERAL("/usr/sbin/"));
 
   pref_store->SetValue(kSomeDirectory,
                        std::make_unique<Value>(some_path.AsUTF8Unsafe()),
                        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   EXPECT_TRUE(pref_store->GetValue(kSomeDirectory, &actual));
-  EXPECT_TRUE(actual->GetAsString(&path));
-  EXPECT_EQ(some_path.AsUTF8Unsafe(), path);
+  EXPECT_TRUE(actual->is_string());
+  EXPECT_EQ(some_path.AsUTF8Unsafe(), actual->GetString());
 
   // Test reading some other data types from sub-dictionaries.
   EXPECT_TRUE(pref_store->GetValue(kNewWindowsInTabs, &actual));
-  bool boolean = false;
-  EXPECT_TRUE(actual->GetAsBoolean(&boolean));
-  EXPECT_TRUE(boolean);
+  EXPECT_TRUE(actual->is_bool());
+  EXPECT_TRUE(actual->GetBool());
 
   pref_store->SetValue(kNewWindowsInTabs, std::make_unique<Value>(false),
                        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   EXPECT_TRUE(pref_store->GetValue(kNewWindowsInTabs, &actual));
-  EXPECT_TRUE(actual->GetAsBoolean(&boolean));
-  EXPECT_FALSE(boolean);
+  EXPECT_TRUE(actual->is_bool());
+  EXPECT_FALSE(actual->GetBool());
 
   EXPECT_TRUE(pref_store->GetValue(kMaxTabs, &actual));
-  int integer = 0;
-  EXPECT_TRUE(actual->GetAsInteger(&integer));
-  EXPECT_EQ(20, integer);
+  ASSERT_TRUE(actual->is_int());
+  EXPECT_EQ(20, actual->GetInt());
   pref_store->SetValue(kMaxTabs, std::make_unique<Value>(10),
                        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   EXPECT_TRUE(pref_store->GetValue(kMaxTabs, &actual));
-  EXPECT_TRUE(actual->GetAsInteger(&integer));
-  EXPECT_EQ(10, integer);
+  ASSERT_TRUE(actual->is_int());
+  EXPECT_EQ(10, actual->GetInt());
 
   pref_store->SetValue(
       kLongIntPref,
       std::make_unique<Value>(base::NumberToString(214748364842LL)),
       WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   EXPECT_TRUE(pref_store->GetValue(kLongIntPref, &actual));
-  EXPECT_TRUE(actual->GetAsString(&string_value));
+  EXPECT_TRUE(actual->is_string());
   int64_t value;
-  base::StringToInt64(string_value, &value);
+  base::StringToInt64(actual->GetString(), &value);
   EXPECT_EQ(214748364842LL, value);
 
   // Serialize and compare to expected output.
@@ -573,6 +571,65 @@ INSTANTIATE_TEST_SUITE_P(
     WithSynchronousCallback,
     JsonPrefStoreTest,
     ::testing::Values(CommitPendingWriteMode::WITH_SYNCHRONOUS_CALLBACK));
+
+class JsonPrefStoreWriteSynchronouslyTest : public testing::Test {
+ public:
+  JsonPrefStoreWriteSynchronouslyTest() = default;
+  ~JsonPrefStoreWriteSynchronouslyTest() override = default;
+
+ protected:
+  void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
+
+  base::test::TaskEnvironment task_environment_;
+  base::ScopedTempDir temp_dir_;
+};
+
+TEST_F(JsonPrefStoreWriteSynchronouslyTest,
+       WriteFailsWhenBlockingIsDisallowed) {
+  const char kEmptyPrefContents[] = "{}";
+
+  base::FilePath pref_file = temp_dir_.GetPath().AppendASCII("write.json");
+  ASSERT_LT(0, base::WriteFile(pref_file, kEmptyPrefContents,
+                               base::size(kEmptyPrefContents) - 1));
+
+  auto pref_store = base::MakeRefCounted<JsonPrefStore>(pref_file);
+  ASSERT_EQ(PersistentPrefStore::PREF_READ_ERROR_NONE, pref_store->ReadPrefs());
+
+  const std::string test_pref = "test";
+  pref_store->SetValue(test_pref, std::make_unique<Value>(3),
+                       WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  {
+    base::ScopedDisallowBlocking scoped_disallow_blocking;
+    EXPECT_DCHECK_DEATH(pref_store->CommitPendingWriteSynchronously());
+  }
+}
+
+TEST_F(JsonPrefStoreWriteSynchronouslyTest, CommitPendingWriteSynchronously) {
+  const char kInputPrefContents[] =
+      "{\n"
+      "  \"homepage\": \"http://www.cnn.com\"\n"
+      "}";
+
+  const std::string kExpectedPrefContents =
+      "{\"homepage\":\"http://www.cnn.com\",\"test\":3}";
+
+  base::FilePath pref_file = temp_dir_.GetPath().AppendASCII("write.json");
+  ASSERT_LT(0, base::WriteFile(pref_file, kInputPrefContents,
+                               base::size(kInputPrefContents) - 1));
+
+  auto pref_store = base::MakeRefCounted<JsonPrefStore>(pref_file);
+  ASSERT_EQ(PersistentPrefStore::PREF_READ_ERROR_NONE, pref_store->ReadPrefs());
+
+  const std::string test_pref = "test";
+  pref_store->SetValue(test_pref, std::make_unique<Value>(3),
+                       WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  pref_store->CommitPendingWriteSynchronously();
+
+  std::string pref_file_contents;
+  ASSERT_TRUE(base::ReadFileToString(pref_file, &pref_file_contents));
+  EXPECT_EQ(kExpectedPrefContents, pref_file_contents);
+  ASSERT_TRUE(base::DeleteFile(pref_file));
+}
 
 class JsonPrefStoreLossyWriteTest : public JsonPrefStoreTest {
  public:

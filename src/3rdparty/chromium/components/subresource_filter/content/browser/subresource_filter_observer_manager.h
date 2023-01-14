@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer.h"
-#include "components/subresource_filter/content/common/ad_evidence.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/load_policy.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -27,6 +26,12 @@ class ActivationState;
 
 // Manages retaining the list of SubresourceFilterObservers and notifying them
 // of various filtering events. Scoped to the lifetime of a WebContents.
+// !!!WARNING!!!: This observer will receive notifications from all pages
+// within a WebContents. This includes non-primary pages like those that are
+// prerendering which is probably not what clients expect. Clients should
+// make sure they're manually scoping observations to the relevant page.
+// TODO(bokan): We should probably refactor this class to manage the
+// observations of a single Page/FrameTree. #MPArch
 class SubresourceFilterObserverManager
     : public content::WebContentsUserData<SubresourceFilterObserverManager> {
  public:
@@ -58,11 +63,11 @@ class SubresourceFilterObserverManager
       LoadPolicy load_policy);
 
   // Called in DidCreateNewDocument or ReadyToCommitNavigation to notify
-  // observers that an ad frame has been detected with the associated
-  // RenderFrameHost. The evidence that caused the frame to be tagged is passed
-  // as `ad_evidence`.
-  void NotifyAdSubframeDetected(content::RenderFrameHost* render_frame_host,
-                                const FrameAdEvidence& ad_evidence);
+  // observers that an frame with the associated RenderFrameHost has either been
+  // detected as an ad or is no longer considered one. The frame's new status is
+  // passed as `is_ad_subframe`.
+  void NotifyIsAdSubframeChanged(content::RenderFrameHost* render_frame_host,
+                                 bool is_ad_subframe);
 
  private:
   friend class content::WebContentsUserData<SubresourceFilterObserverManager>;

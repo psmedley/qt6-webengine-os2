@@ -46,11 +46,13 @@
 
 namespace vk {
 
+class Device;
 class PipelineLayout;
 class ImageView;
 class Sampler;
 class RenderPass;
 struct SampledImageDescriptor;
+struct SamplerState;
 
 namespace dbg {
 class Context;
@@ -194,13 +196,41 @@ public:
 
 		uint32_t const *wordPointer(uint32_t n) const
 		{
-			ASSERT(n < wordCount());
 			return &iter[n];
 		}
 
 		const char *string(uint32_t n) const
 		{
 			return reinterpret_cast<const char *>(wordPointer(n));
+		}
+
+		// Returns the number of whole-words that a string literal starting at
+		// word n consumes. If the end of the intruction is reached before the
+		// null-terminator is found, then the function DABORT()s and 0 is
+		// returned.
+		uint32_t stringSizeInWords(uint32_t n) const
+		{
+			uint32_t c = wordCount();
+			for(uint32_t i = n; n < c; i++)
+			{
+				auto *u32 = wordPointer(i);
+				auto *u8 = reinterpret_cast<const uint8_t *>(u32);
+				// SPIR-V spec 2.2.1. Instructions:
+				// A string is interpreted as a nul-terminated stream of
+				// characters. The character set is Unicode in the UTF-8
+				// encoding scheme. The UTF-8 octets (8-bit bytes) are packed
+				// four per word, following the little-endian convention (i.e.,
+				// the first octet is in the lowest-order 8 bits of the word).
+				// The final word contains the string’s nul-termination
+				// character (0), and all contents past the end of the string in
+				// the final word are padded with 0.
+				if(u8[3] == 0)
+				{
+					return 1 + i - n;
+				}
+			}
+			DABORT("SPIR-V string literal was not null-terminated");
+			return 0;
 		}
 
 		bool hasResultAndType() const
@@ -550,6 +580,9 @@ public:
 		bool DepthGreater : 1;
 		bool DepthLess : 1;
 		bool DepthUnchanged : 1;
+
+		// TODO(b/177839655): These are not SPIR-V execution modes.
+		// Move to an Analysis structure.
 		bool ContainsKill : 1;
 		bool ContainsControlBarriers : 1;
 		bool NeedsCentroid : 1;
@@ -1291,13 +1324,13 @@ private:
 	// Returns the pair <significand, exponent>
 	std::pair<SIMD::Float, SIMD::Int> Frexp(RValue<SIMD::Float> val) const;
 
-	static ImageSampler *getImageSampler(uint32_t instruction, vk::SampledImageDescriptor const *imageDescriptor, const vk::Sampler *sampler);
+	static ImageSampler *getImageSampler(const vk::Device *device, uint32_t instruction, uint32_t samplerId, uint32_t imageViewId);
 	static std::shared_ptr<rr::Routine> emitSamplerRoutine(ImageInstruction instruction, const Sampler &samplerState);
 
 	// TODO(b/129523279): Eliminate conversion and use vk::Sampler members directly.
-	static sw::FilterType convertFilterMode(const vk::Sampler *sampler, VkImageViewType imageViewType, ImageInstruction instruction);
-	static sw::MipmapType convertMipmapMode(const vk::Sampler *sampler);
-	static sw::AddressingMode convertAddressingMode(int coordinateIndex, const vk::Sampler *sampler, VkImageViewType imageViewType);
+	static sw::FilterType convertFilterMode(const vk::SamplerState *samplerState, VkImageViewType imageViewType, SamplerMethod samplerMethod);
+	static sw::MipmapType convertMipmapMode(const vk::SamplerState *samplerState);
+	static sw::AddressingMode convertAddressingMode(int coordinateIndex, const vk::SamplerState *samplerState, VkImageViewType imageViewType);
 
 	// Returns 0 when invalid.
 	static VkShaderStageFlagBits executionModelToStage(spv::ExecutionModel model);
@@ -1366,7 +1399,7 @@ public:
 	struct SamplerCache
 	{
 		Pointer<Byte> imageDescriptor = nullptr;
-		Pointer<Byte> sampler;
+		Int samplerId;
 		Pointer<Byte> function;
 	};
 

@@ -34,7 +34,11 @@ namespace dawn_native {
 
     static constexpr wgpu::BufferUsage kReadOnlyBufferUsages =
         wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::Index |
-        wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Uniform | kReadOnlyStorageBuffer;
+        wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Uniform | kReadOnlyStorageBuffer |
+        wgpu::BufferUsage::Indirect;
+
+    static constexpr wgpu::BufferUsage kMappableBufferUsages =
+        wgpu::BufferUsage::MapRead | wgpu::BufferUsage::MapWrite;
 
     class BufferBase : public ObjectBase {
         enum class BufferState {
@@ -50,6 +54,7 @@ namespace dawn_native {
         static BufferBase* MakeError(DeviceBase* device, const BufferDescriptor* descriptor);
 
         uint64_t GetSize() const;
+        uint64_t GetAllocatedSize() const;
         wgpu::BufferUsage GetUsage() const;
 
         MaybeError MapAtCreation();
@@ -61,16 +66,19 @@ namespace dawn_native {
         bool IsDataInitialized() const;
         void SetIsDataInitialized();
 
-        // Dawn API
-        void MapAsync(wgpu::MapMode mode,
-                      size_t offset,
-                      size_t size,
-                      WGPUBufferMapCallback callback,
-                      void* userdata);
-        void* GetMappedRange(size_t offset, size_t size);
-        const void* GetConstMappedRange(size_t offset, size_t size);
+        void* GetMappedRange(size_t offset, size_t size, bool writable = true);
         void Unmap();
-        void Destroy();
+
+        // Dawn API
+        void APIMapAsync(wgpu::MapMode mode,
+                         size_t offset,
+                         size_t size,
+                         WGPUBufferMapCallback callback,
+                         void* userdata);
+        void* APIGetMappedRange(size_t offset, size_t size);
+        const void* APIGetConstMappedRange(size_t offset, size_t size);
+        void APIUnmap();
+        void APIDestroy();
 
       protected:
         BufferBase(DeviceBase* device,
@@ -82,6 +90,8 @@ namespace dawn_native {
 
         MaybeError MapAtCreationInternal();
 
+        uint64_t mAllocatedSize = 0;
+
       private:
         virtual MaybeError MapAtCreationImpl() = 0;
         virtual MaybeError MapAsyncImpl(wgpu::MapMode mode, size_t offset, size_t size) = 0;
@@ -91,7 +101,6 @@ namespace dawn_native {
 
         virtual bool IsCPUWritableAtCreation() const = 0;
         MaybeError CopyFromStagingBuffer();
-        void* GetMappedRangeInternal(bool writable, size_t offset, size_t size);
         void CallMapCallback(MapRequestID mapID, WGPUBufferMapAsyncStatus status);
 
         MaybeError ValidateMap(wgpu::BufferUsage requiredUsage,

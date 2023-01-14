@@ -7,17 +7,18 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -1253,16 +1254,16 @@ class SimpleGetRunner {
   void SetupParserAndSendRequest() {
     reads_.push_back(MockRead(SYNCHRONOUS, 0, sequence_number_++));  // EOF
 
-    data_.reset(new SequencedSocketData(reads_, writes_));
+    data_ = std::make_unique<SequencedSocketData>(reads_, writes_);
     stream_socket_ = CreateConnectedSocket(data_.get());
 
     request_info_.method = "GET";
     request_info_.url = url_;
     request_info_.load_flags = LOAD_NORMAL;
 
-    parser_.reset(new HttpStreamParser(stream_socket_.get(),
-                                       false /* is_reused */, &request_info_,
-                                       read_buffer(), NetLogWithSource()));
+    parser_ = std::make_unique<HttpStreamParser>(
+        stream_socket_.get(), false /* is_reused */, &request_info_,
+        read_buffer(), NetLogWithSource());
 
     TestCompletionCallback callback;
     ASSERT_EQ(OK, parser_->SendRequest("GET / HTTP/1.1\r\n", request_headers_,
@@ -1360,7 +1361,7 @@ TEST(HttpStreamParser, Http09PortTests) {
               get_runner.response_info()->headers->GetStatusLine());
 
     EXPECT_EQ(0, get_runner.parser()->received_bytes());
-    int read_lengths[] = {kResponse.size(), 0};
+    int read_lengths[] = {static_cast<int>(kResponse.size()), 0};
     get_runner.ReadBody(kResponse.size(), read_lengths);
     EXPECT_EQ(kResponse.size(),
               static_cast<size_t>(get_runner.parser()->received_bytes()));
@@ -1385,7 +1386,7 @@ TEST(HttpStreamParser, Http09PortTests) {
               get_runner.response_info()->headers->GetStatusLine());
 
     EXPECT_EQ(0, get_runner.parser()->received_bytes());
-    int read_lengths[] = {kShoutcastResponse.size(), 0};
+    int read_lengths[] = {static_cast<int>(kShoutcastResponse.size()), 0};
     get_runner.ReadBody(kShoutcastResponse.size(), read_lengths);
     EXPECT_EQ(kShoutcastResponse.size(),
               static_cast<size_t>(get_runner.parser()->received_bytes()));

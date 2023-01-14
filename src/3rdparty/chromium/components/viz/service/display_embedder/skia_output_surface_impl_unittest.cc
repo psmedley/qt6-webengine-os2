@@ -6,9 +6,9 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/pixel_test_utils.h"
@@ -119,7 +119,8 @@ void SkiaOutputSurfaceImplTest::CopyRequestCallbackOnGpuThread(
     const gfx::Rect& output_rect,
     const gfx::ColorSpace& color_space,
     std::unique_ptr<CopyOutputResult> result) {
-  SkBitmap result_bitmap(result->AsSkBitmap());
+  auto scoped_bitmap = result->ScopedAccessSkBitmap();
+  auto result_bitmap = scoped_bitmap.bitmap();
   EXPECT_EQ(result_bitmap.width(), output_rect.width());
   EXPECT_EQ(result_bitmap.height(), output_rect.height());
 
@@ -150,7 +151,8 @@ TEST_F(SkiaOutputSurfaceImplTest, EndPaint) {
   // Copy the output
   const gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&SkiaOutputSurfaceImplTest::CopyRequestCallbackOnGpuThread,
                      base::Unretained(this), output_rect, color_space));
   request->set_result_task_runner(
@@ -162,7 +164,7 @@ TEST_F(SkiaOutputSurfaceImplTest, EndPaint) {
   geometry.readback_offset = gfx::Vector2d(0, 0);
 
   output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
-                              std::move(request));
+                              std::move(request), gpu::Mailbox());
   output_surface_->SwapBuffersSkipped(kSurfaceRect);
   output_surface_->Flush();
   BlockMainThread();
@@ -210,7 +212,8 @@ TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapSupportedColorSpace) {
   base::RunLoop run_loop;
   std::unique_ptr<CopyOutputResult> result;
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(
           [](std::unique_ptr<CopyOutputResult>* result_out,
              base::OnceClosure quit_closure,
@@ -229,7 +232,7 @@ TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapSupportedColorSpace) {
 
   PaintRootRenderPass(kSurfaceRect, base::DoNothing::Once());
   output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
-                              std::move(request));
+                              std::move(request), gpu::Mailbox());
   output_surface_->SwapBuffersSkipped(kSurfaceRect);
   output_surface_->Flush();
   run_loop.Run();
@@ -249,7 +252,8 @@ TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapUnsupportedColorSpace) {
   base::RunLoop run_loop;
   std::unique_ptr<CopyOutputResult> result;
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(
           [](std::unique_ptr<CopyOutputResult>* result_out,
              base::OnceClosure quit_closure,
@@ -268,7 +272,7 @@ TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapUnsupportedColorSpace) {
 
   PaintRootRenderPass(kSurfaceRect, base::DoNothing::Once());
   output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
-                              std::move(request));
+                              std::move(request), gpu::Mailbox());
   output_surface_->SwapBuffersSkipped(kSurfaceRect);
   output_surface_->Flush();
   run_loop.Run();

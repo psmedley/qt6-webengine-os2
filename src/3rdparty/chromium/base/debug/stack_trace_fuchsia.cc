@@ -21,10 +21,10 @@
 #include <type_traits>
 
 #include "base/atomic_sequence_num.h"
+#include "base/cxx17_backports.h"
 #include "base/debug/elf_reader.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 
 namespace base {
 namespace debug {
@@ -196,7 +196,7 @@ void SymbolMap::Populate() {
 
     // Get the human-readable library name from the ELF header, falling back on
     // using names from the link map for binaries that aren't shared libraries.
-    Optional<StringPiece> elf_library_name =
+    absl::optional<StringPiece> elf_library_name =
         ReadElfLibraryName(next_entry.addr);
     if (elf_library_name) {
       strlcpy(next_entry.name, elf_library_name->data(),

@@ -49,7 +49,6 @@
 #include "third_party/blink/renderer/platform/fonts/skia/sktypeface_factory.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkStream.h"
@@ -70,13 +69,14 @@ AtomicString FontCache::GetFamilyNameForCharacter(
     SkFontMgr* fm,
     UChar32 c,
     const FontDescription& font_description,
+    const char* family_name,
     FontFallbackPriority fallback_priority) {
   DCHECK(fm);
 
   Bcp47Vector locales =
       GetBcp47LocaleForRequest(font_description, fallback_priority);
   sk_sp<SkTypeface> typeface(fm->matchFamilyStyleCharacter(
-      nullptr, SkFontStyle(), locales.data(), locales.size(), c));
+      family_name, SkFontStyle(), locales.data(), locales.size(), c));
   if (!typeface)
     return g_empty_atom;
 
@@ -208,7 +208,7 @@ sk_sp<SkTypeface> FontCache::CreateTypeface(
   }
 #endif
 
-  AtomicString family = creation_params.Family();
+  const AtomicString& family = creation_params.Family();
   DCHECK_NE(family, font_family_names::kSystemUi);
   // If we're creating a fallback font (e.g. "-webkit-monospace"), convert the
   // name into the fallback name (like "monospace") that fontconfig understands.
@@ -218,6 +218,16 @@ sk_sp<SkTypeface> FontCache::CreateTypeface(
     // convert the name to utf8
     name = family.Utf8();
   }
+
+#if defined(OS_ANDROID)
+  // If this is a locale-specific family, try looking up locale-specific
+  // typeface first.
+  if (const char* locale_family = GetLocaleSpecificFamilyName(family)) {
+    if (sk_sp<SkTypeface> typeface =
+            CreateLocaleSpecificTypeface(font_description, locale_family))
+      return typeface;
+  }
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
   // TODO(vmpstr): Deal with paint typeface here.
@@ -257,8 +267,21 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
 
   sk_sp<SkTypeface> typeface;
 #if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_CHROMEOS)
-  if (alternate_name == AlternateFontName::kLocalUniqueFace &&
-      RuntimeEnabledFeatures::FontSrcLocalMatchingEnabled()) {
+  bool noto_color_emoji_from_gmscore = false;
+#if defined(OS_ANDROID)
+  // Use the unique local matching pathway for fetching Noto Color Emoji Compat
+  // from GMS core if this family is requested, see font_cache_android.cc. Noto
+  // Color Emoji Compat is an up-to-date emoji font shipped with GMSCore which
+  // provides better emoji coverage and emoji sequence support than the firmware
+  // Noto Color Emoji font.
+  noto_color_emoji_from_gmscore =
+      (creation_params.CreationType() ==
+           FontFaceCreationType::kCreateFontByFamily &&
+       creation_params.Family() == kNotoColorEmojiCompat);
+#endif
+  if (RuntimeEnabledFeatures::FontSrcLocalMatchingEnabled() &&
+      (alternate_name == AlternateFontName::kLocalUniqueFace ||
+       noto_color_emoji_from_gmscore)) {
     typeface = CreateTypefaceFromUniqueName(creation_params);
   } else {
     typeface = CreateTypeface(font_description, creation_params, name);

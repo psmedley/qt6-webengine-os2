@@ -15,15 +15,14 @@
 #include "src/gpu/GrGeometryProcessor.h"
 #include "src/gpu/GrMemoryPool.h"
 #include "src/gpu/GrProgramInfo.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/SkGr.h"
 #include "src/gpu/glsl/GrGLSLColorSpaceXformHelper.h"
 #include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/glsl/GrGLSLGeometryProcessor.h"
 #include "src/gpu/glsl/GrGLSLVarying.h"
 #include "src/gpu/glsl/GrGLSLVertexGeoBuilder.h"
 #include "src/gpu/ops/GrMeshDrawOp.h"
 #include "src/gpu/ops/GrSimpleMeshDrawOpHelper.h"
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 
 namespace {
 
@@ -45,11 +44,19 @@ public:
 
     const char* name() const override { return "VertexColorXformGP"; }
 
-    GrGLSLPrimitiveProcessor* createGLSLInstance(const GrShaderCaps&) const override {
-        class GLSLGP : public GrGLSLGeometryProcessor {
+    std::unique_ptr<ProgramImpl> makeProgramImpl(const GrShaderCaps&) const override {
+        class Impl : public ProgramImpl {
         public:
+            void setData(const GrGLSLProgramDataManager& pdman,
+                         const GrShaderCaps&,
+                         const GrGeometryProcessor& geomProc) override {
+                const GP& gp = geomProc.cast<GP>();
+                fColorSpaceHelper.setData(pdman, gp.fColorSpaceXform.get());
+            }
+
+        private:
             void onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) override {
-                const GP& gp = args.fGP.cast<GP>();
+                const GP& gp = args.fGeomProc.cast<GP>();
                 GrGLSLVertexBuilder* vertBuilder = args.fVertBuilder;
                 GrGLSLFPFragmentBuilder* fragBuilder = args.fFragBuilder;
                 GrGLSLVaryingHandler* varyingHandler = args.fVaryingHandler;
@@ -72,26 +79,22 @@ public:
                 }
 
                 vertBuilder->codeAppendf("%s = color;", varying.vsOut());
-                fragBuilder->codeAppendf("%s = %s;", args.fOutputColor, varying.fsIn());
+                fragBuilder->codeAppendf("half4 %s = %s;", args.fOutputColor, varying.fsIn());
 
                 // Position
-                this->writeOutputPosition(args.fVertBuilder, gpArgs, gp.fInPosition.name());
+                WriteOutputPosition(args.fVertBuilder, gpArgs, gp.fInPosition.name());
 
                 // Coverage
-                fragBuilder->codeAppendf("%s = half4(1);", args.fOutputCoverage);
-            }
-            void setData(const GrGLSLProgramDataManager& pdman,
-                         const GrPrimitiveProcessor& primProc) override {
-                const GP& gp = primProc.cast<GP>();
-                fColorSpaceHelper.setData(pdman, gp.fColorSpaceXform.get());
+                fragBuilder->codeAppendf("const half4 %s = half4(1);", args.fOutputCoverage);
             }
 
             GrGLSLColorSpaceXformHelper fColorSpaceHelper;
         };
-        return new GLSLGP();
+
+        return std::make_unique<Impl>();
     }
 
-    void getGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder* b) const override {
+    void addToKey(const GrShaderCaps&, GrProcessorKeyBuilder* b) const override {
         b->add32(fMode);
         b->add32(GrColorSpaceXform::XformKey(fColorSpaceXform.get()));
     }
@@ -159,8 +162,7 @@ public:
         return FixedFunctionFlags::kNone;
     }
 
-    GrProcessorSet::Analysis finalize(const GrCaps&, const GrAppliedClip*,
-                                      bool hasMixedSampledCoverage, GrClampType) override {
+    GrProcessorSet::Analysis finalize(const GrCaps&, const GrAppliedClip*, GrClampType) override {
         return GrProcessorSet::EmptySetAnalysis();
     }
 
@@ -172,8 +174,9 @@ private:
     void onCreateProgramInfo(const GrCaps* caps,
                              SkArenaAlloc* arena,
                              const GrSurfaceProxyView& writeView,
+                             bool usesMSAASurface,
                              GrAppliedClip&& appliedClip,
-                             const GrXferProcessor::DstProxyView& dstProxyView,
+                             const GrDstProxyView& dstProxyView,
                              GrXferBarrierFlags renderPassXferBarriers,
                              GrLoadOp colorLoadOp) override {
         GrGeometryProcessor* gp = GP::Make(arena, fMode, fColorSpaceXform);
@@ -191,12 +194,12 @@ private:
                                                                    GrPipeline::InputFlags::kNone);
     }
 
-    void onPrepareDraws(Target* target) override {
+    void onPrepareDraws(GrMeshDrawTarget* target) override {
         if (!fProgramInfo) {
             this->createProgramInfo(target);
         }
 
-        size_t vertexStride = fProgramInfo->primProc().vertexStride();
+        size_t vertexStride = fProgramInfo->geomProc().vertexStride();
         const int kVertexCount = 1024;
         sk_sp<const GrBuffer> vertexBuffer;
         int firstVertex = 0;
@@ -264,7 +267,7 @@ private:
         }
 
         flushState->bindPipelineAndScissorClip(*fProgramInfo, chainBounds);
-        flushState->bindTextures(fProgramInfo->primProc(), nullptr, fProgramInfo->pipeline());
+        flushState->bindTextures(fProgramInfo->geomProc(), nullptr, fProgramInfo->pipeline());
         flushState->drawMesh(*fMesh);
     }
 
@@ -308,9 +311,10 @@ public:
         const int kDrawsPerLoop = 32;
 
         for (int i = 0; i < loops; ++i) {
-            auto rtc = GrSurfaceDrawContext::Make(
-                    context, GrColorType::kRGBA_8888, p3, SkBackingFit::kApprox, {100, 100});
-            SkASSERT(rtc);
+            auto sdc = skgpu::v1::SurfaceDrawContext::Make(context, GrColorType::kRGBA_8888, p3,
+                                                           SkBackingFit::kApprox, {100, 100},
+                                                           SkSurfaceProps());
+            SkASSERT(sdc);
 
             for (int j = 0; j < kDrawsPerLoop; ++j) {
                 SkColor c = r.nextU();
@@ -330,7 +334,7 @@ public:
                         op = GrOp::Make<Op>(rContext, c4f, fMode);
                     }
                 }
-                rtc->addDrawOp(std::move(op));
+                sdc->addDrawOp(std::move(op));
             }
 
             context->flushAndSubmit();

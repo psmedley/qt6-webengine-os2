@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/test/bind.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
@@ -17,6 +19,8 @@
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 
 namespace content {
 
@@ -27,7 +31,7 @@ class ServiceWorkerContextCoreTest : public testing::Test,
       : task_environment_(BrowserTaskEnvironment::IO_MAINLOOP) {}
 
   void SetUp() override {
-    helper_.reset(new EmbeddedWorkerTestHelper(base::FilePath()));
+    helper_ = std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath());
   }
 
   void TearDown() override {
@@ -55,16 +59,17 @@ class ServiceWorkerContextCoreTest : public testing::Test,
     loop.Run();
   }
 
-  // Registers |script| and waits for the service worker to become activated.
+  // Registers `script` and waits for the service worker to become activated.
   void RegisterServiceWorker(
       const GURL& script,
+      const blink::StorageKey& key,
       blink::mojom::ServiceWorkerRegistrationOptions options,
       scoped_refptr<ServiceWorkerRegistration>* result) {
     base::RunLoop loop;
     blink::ServiceWorkerStatusCode status;
     int64_t registration_id;
     context()->RegisterServiceWorker(
-        script, options, blink::mojom::FetchClientSettingsObject::New(),
+        script, key, options, blink::mojom::FetchClientSettingsObject::New(),
         base::BindLambdaForTesting(
             [&](blink::ServiceWorkerStatusCode result_status,
                 const std::string& /* status_message */,
@@ -72,7 +77,8 @@ class ServiceWorkerContextCoreTest : public testing::Test,
               status = result_status;
               registration_id = result_registration_id;
               loop.Quit();
-            }));
+            }),
+        /*requesting_frame_id=*/GlobalRenderFrameHostId());
     loop.Run();
     EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status);
     scoped_refptr<ServiceWorkerRegistration> registration =
@@ -84,11 +90,13 @@ class ServiceWorkerContextCoreTest : public testing::Test,
   }
 
   // Wrapper for ServiceWorkerRegistry::FindRegistrationForScope.
-  blink::ServiceWorkerStatusCode FindRegistrationForScope(const GURL& scope) {
+  blink::ServiceWorkerStatusCode FindRegistrationForScope(
+      const GURL& scope,
+      const blink::StorageKey& key) {
     base::RunLoop loop;
     blink::ServiceWorkerStatusCode status;
     context()->registry()->FindRegistrationForScope(
-        scope,
+        scope, key,
         base::BindLambdaForTesting(
             [&](blink::ServiceWorkerStatusCode result_status,
                 scoped_refptr<ServiceWorkerRegistration> result_registration) {
@@ -100,11 +108,12 @@ class ServiceWorkerContextCoreTest : public testing::Test,
   }
 
   // Wrapper for ServiceWorkerContextCore::UnregisterServiceWorker.
-  blink::ServiceWorkerStatusCode Unregister(const GURL& scope) {
+  blink::ServiceWorkerStatusCode Unregister(const GURL& scope,
+                                            const blink::StorageKey& key) {
     base::RunLoop loop;
     blink::ServiceWorkerStatusCode status;
     context()->UnregisterServiceWorker(
-        scope, /*is_immediate=*/false,
+        scope, key, /*is_immediate=*/false,
         base::BindLambdaForTesting(
             [&](blink::ServiceWorkerStatusCode result_status) {
               status = result_status;
@@ -114,16 +123,17 @@ class ServiceWorkerContextCoreTest : public testing::Test,
     return status;
   }
 
-  // Wrapper for ServiceWorkerContextCore::DeleteForOrigin.
-  blink::ServiceWorkerStatusCode DeleteForOrigin(const url::Origin& origin) {
+  // Wrapper for ServiceWorkerContextCore::DeleteForStorageKey.
+  blink::ServiceWorkerStatusCode DeleteForStorageKey(
+      const blink::StorageKey& key) {
     blink::ServiceWorkerStatusCode status;
     base::RunLoop loop;
-    context()->DeleteForOrigin(
-        origin, base::BindLambdaForTesting(
-                    [&](blink::ServiceWorkerStatusCode result_status) {
-                      status = result_status;
-                      loop.Quit();
-                    }));
+    context()->DeleteForStorageKey(
+        key, base::BindLambdaForTesting(
+                 [&](blink::ServiceWorkerStatusCode result_status) {
+                   status = result_status;
+                   loop.Quit();
+                 }));
     loop.Run();
     return status;
   }
@@ -141,6 +151,7 @@ class ServiceWorkerContextCoreTest : public testing::Test,
   // ServiceWorkerContextCoreObserver overrides:
   void OnVersionStateChanged(int64_t version_id,
                              const GURL& scope,
+                             const blink::StorageKey& key,
                              ServiceWorkerVersion::Status status) override {
     if (status == ServiceWorkerVersion::ACTIVATED &&
         scope == scope_for_wait_for_activated_ &&
@@ -188,52 +199,55 @@ TEST_F(ServiceWorkerContextCoreTest, FailureInfo) {
   EXPECT_FALSE(base::Contains(context()->failure_counts_, kVersionId));
 }
 
-TEST_F(ServiceWorkerContextCoreTest, DeleteForOrigin) {
+TEST_F(ServiceWorkerContextCoreTest, DeleteForStorageKey) {
   const GURL script("https://www.example.com/a/sw.js");
   const GURL scope("https://www.example.com/a");
   const url::Origin origin = url::Origin::Create(scope);
+  const blink::StorageKey key(origin);
 
   // Register a service worker.
   blink::mojom::ServiceWorkerRegistrationOptions options;
   options.scope = scope;
   scoped_refptr<ServiceWorkerRegistration> registration;
-  RegisterServiceWorker(scope, options, &registration);
+  RegisterServiceWorker(scope, key, options, &registration);
 
-  // Delete for origin.
-  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForOrigin(origin));
+  // Delete for key.
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForStorageKey(key));
 
   // The registration should be deleted.
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorNotFound,
-            FindRegistrationForScope(scope));
+            FindRegistrationForScope(scope, key));
 }
 
-TEST_F(ServiceWorkerContextCoreTest, DeleteForOriginAbortsQueuedJobs) {
+TEST_F(ServiceWorkerContextCoreTest, DeleteForStorageKeyAbortsQueuedJobs) {
   const GURL script("https://www.example.com/a/sw.js");
   const GURL scope("https://www.example.com/a");
   const url::Origin origin = url::Origin::Create(scope);
+  const blink::StorageKey key(origin);
 
   // Register a service worker.
   blink::mojom::ServiceWorkerRegistrationOptions options;
   options.scope = scope;
   scoped_refptr<ServiceWorkerRegistration> registration;
-  RegisterServiceWorker(scope, options, &registration);
+  RegisterServiceWorker(scope, key, options, &registration);
 
   // Queue a register job.
   base::RunLoop register_job_loop;
   blink::ServiceWorkerStatusCode register_job_status;
   context()->RegisterServiceWorker(
-      script, options, blink::mojom::FetchClientSettingsObject::New(),
+      script, key, options, blink::mojom::FetchClientSettingsObject::New(),
       base::BindLambdaForTesting(
           [&](blink::ServiceWorkerStatusCode result_status,
               const std::string& /* status_message */,
               int64_t result_registration_id) {
             register_job_status = result_status;
             register_job_loop.Quit();
-          }));
+          }),
+      /*requesting_frame_id=*/GlobalRenderFrameHostId());
 
-  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForOrigin(origin));
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForStorageKey(key));
 
-  // DeleteForOrigin must abort pending jobs.
+  // DeleteForStorageKey must abort pending jobs.
   register_job_loop.Run();
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorAbort, register_job_status);
 }
@@ -243,12 +257,13 @@ TEST_F(ServiceWorkerContextCoreTest,
   const GURL script("https://www.example.com/a/sw.js");
   const GURL scope("https://www.example.com/a");
   const url::Origin origin = url::Origin::Create(scope);
+  const blink::StorageKey key(origin);
 
   // Register a service worker.
   blink::mojom::ServiceWorkerRegistrationOptions options;
   options.scope = scope;
   scoped_refptr<ServiceWorkerRegistration> registration;
-  RegisterServiceWorker(scope, options, &registration);
+  RegisterServiceWorker(scope, key, options, &registration);
 
   // Add a controlled client.
   ServiceWorkerContainerHost* container_host = CreateControllee();
@@ -258,7 +273,7 @@ TEST_F(ServiceWorkerContextCoreTest,
                                             /*notify_controllerchange=*/false);
 
   // Unregister, which will wait to clear until the controlled client unloads.
-  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, Unregister(scope));
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, Unregister(scope, key));
 
   // Queue an Update job.
   context()->UpdateServiceWorker(registration.get(),
@@ -268,44 +283,46 @@ TEST_F(ServiceWorkerContextCoreTest,
   base::RunLoop register_job_loop;
   blink::ServiceWorkerStatusCode register_job_status;
   context()->RegisterServiceWorker(
-      script, options, blink::mojom::FetchClientSettingsObject::New(),
+      script, key, options, blink::mojom::FetchClientSettingsObject::New(),
       base::BindLambdaForTesting(
           [&](blink::ServiceWorkerStatusCode result_status,
               const std::string& /* status_message */,
               int64_t result_registration_id) {
             register_job_status = result_status;
             register_job_loop.Quit();
-          }));
+          }),
+      /*requesting_frame_id=*/GlobalRenderFrameHostId());
 
-  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForOrigin(origin));
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, DeleteForStorageKey(key));
 
-  // DeleteForOrigin must abort pending jobs.
+  // DeleteForStorageKey must abort pending jobs.
   register_job_loop.Run();
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorAbort, register_job_status);
 }
 
-// Tests that DeleteForOrigin() doesn't get stuck forever even upon an error
+// Tests that DeleteForStorageKey() doesn't get stuck forever even upon an error
 // when trying to unregister.
-TEST_F(ServiceWorkerContextCoreTest, DeleteForOrigin_UnregisterFail) {
+TEST_F(ServiceWorkerContextCoreTest, DeleteForStorageKey_UnregisterFail) {
   const GURL script("https://www.example.com/a/sw.js");
   const GURL scope("https://www.example.com/a");
   const url::Origin origin = url::Origin::Create(scope);
+  const blink::StorageKey key(origin);
 
   // Register a service worker.
   blink::mojom::ServiceWorkerRegistrationOptions options;
   options.scope = scope;
   scoped_refptr<ServiceWorkerRegistration> registration;
-  RegisterServiceWorker(scope, options, &registration);
+  RegisterServiceWorker(scope, key, options, &registration);
 
-  // Start DeleteForOrigin().
+  // Start DeleteForStorageKey().
   base::RunLoop loop;
   blink::ServiceWorkerStatusCode status;
-  context()->DeleteForOrigin(
-      origin, base::BindLambdaForTesting(
-                  [&](blink::ServiceWorkerStatusCode result_status) {
-                    status = result_status;
-                    loop.Quit();
-                  }));
+  context()->DeleteForStorageKey(
+      key, base::BindLambdaForTesting(
+               [&](blink::ServiceWorkerStatusCode result_status) {
+                 status = result_status;
+                 loop.Quit();
+               }));
   // Disable storage before it finishes. This causes the Unregister job to
   // complete with an error.
   context()->registry()->DisableStorageForTesting(base::DoNothing());

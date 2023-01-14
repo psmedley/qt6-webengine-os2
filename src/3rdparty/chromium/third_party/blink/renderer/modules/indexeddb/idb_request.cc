@@ -34,9 +34,10 @@
 
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
-#include "third_party/blink/renderer/bindings/modules/v8/idb_object_store_or_idb_index_or_idb_cursor.h"
 #include "third_party/blink/renderer/bindings/modules/v8/to_v8_for_modules.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_idbcursor_idbindex_idbobjectstore.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_idbindex_idbobjectstore.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -98,28 +99,31 @@ IDBRequest* IDBRequest::Create(ScriptState* script_state,
                                IDBIndex* source,
                                IDBTransaction* transaction,
                                IDBRequest::AsyncTraceState metrics) {
-  return IDBRequest::Create(script_state, Source::FromIDBIndex(source),
-                            transaction, std::move(metrics));
+  return Create(script_state,
+                source ? MakeGarbageCollected<Source>(source) : nullptr,
+                transaction, std::move(metrics));
 }
 
 IDBRequest* IDBRequest::Create(ScriptState* script_state,
                                IDBObjectStore* source,
                                IDBTransaction* transaction,
                                IDBRequest::AsyncTraceState metrics) {
-  return IDBRequest::Create(script_state, Source::FromIDBObjectStore(source),
-                            transaction, std::move(metrics));
+  return Create(script_state,
+                source ? MakeGarbageCollected<Source>(source) : nullptr,
+                transaction, std::move(metrics));
 }
 
 IDBRequest* IDBRequest::Create(ScriptState* script_state,
                                IDBCursor* source,
                                IDBTransaction* transaction,
                                IDBRequest::AsyncTraceState metrics) {
-  return IDBRequest::Create(script_state, Source::FromIDBCursor(source),
-                            transaction, std::move(metrics));
+  return Create(script_state,
+                source ? MakeGarbageCollected<Source>(source) : nullptr,
+                transaction, std::move(metrics));
 }
 
 IDBRequest* IDBRequest::Create(ScriptState* script_state,
-                               const Source& source,
+                               const Source* source,
                                IDBTransaction* transaction,
                                IDBRequest::AsyncTraceState metrics) {
   IDBRequest* request = MakeGarbageCollected<IDBRequest>(
@@ -132,7 +136,7 @@ IDBRequest* IDBRequest::Create(ScriptState* script_state,
 }
 
 IDBRequest::IDBRequest(ScriptState* script_state,
-                       const Source& source,
+                       const Source* source,
                        IDBTransaction* transaction,
                        AsyncTraceState metrics)
     : ExecutionContextLifecycleObserver(ExecutionContext::From(script_state)),
@@ -142,7 +146,8 @@ IDBRequest::IDBRequest(ScriptState* script_state,
       source_(source),
       event_queue_(
           MakeGarbageCollected<EventQueue>(ExecutionContext::From(script_state),
-                                           TaskType::kDatabaseAccess)) {}
+                                           TaskType::kDatabaseAccess)) {
+}
 
 IDBRequest::~IDBRequest() {
   if (!GetExecutionContext())
@@ -194,12 +199,10 @@ DOMException* IDBRequest::error(ExceptionState& exception_state) const {
   return error_;
 }
 
-void IDBRequest::source(ScriptState* script_state,
-                        IDBObjectStoreOrIDBIndexOrIDBCursor& source) const {
-  if (!GetExecutionContext()) {
-    source = Source();
-  }
-  source = source_;
+const IDBRequest::Source* IDBRequest::source(ScriptState* script_state) const {
+  if (!GetExecutionContext())
+    return nullptr;
+  return source_;
 }
 
 const String& IDBRequest::readyState() const {
@@ -450,15 +453,22 @@ void IDBRequest::EnqueueResponse(std::unique_ptr<WebIDBCursor> backend,
 
   DCHECK(!pending_cursor_);
   IDBCursor* cursor = nullptr;
-  IDBObjectStoreOrIDBIndex source;
+  IDBCursor::Source* source = nullptr;
 
-  if (source_.IsIDBObjectStore()) {
-    source =
-        IDBCursor::Source::FromIDBObjectStore(source_.GetAsIDBObjectStore());
-  } else if (source_.IsIDBIndex()) {
-    source = IDBCursor::Source::FromIDBIndex(source_.GetAsIDBIndex());
+  DCHECK(source_);
+  switch (source_->GetContentType()) {
+    case Source::ContentType::kIDBCursor:
+      break;
+    case Source::ContentType::kIDBIndex:
+      source =
+          MakeGarbageCollected<IDBCursor::Source>(source_->GetAsIDBIndex());
+      break;
+    case Source::ContentType::kIDBObjectStore:
+      source = MakeGarbageCollected<IDBCursor::Source>(
+          source_->GetAsIDBObjectStore());
+      break;
   }
-  DCHECK(!source.IsNull());
+  DCHECK(source);
 
   switch (cursor_type_) {
     case indexed_db::kCursorKeyOnly:
@@ -512,12 +522,17 @@ void IDBRequest::EnqueueResponse(Vector<std::unique_ptr<IDBValue>> values) {
 }
 
 #if DCHECK_IS_ON()
-static IDBObjectStore* EffectiveObjectStore(const IDBRequest::Source& source) {
-  if (source.IsIDBObjectStore())
-    return source.GetAsIDBObjectStore();
-  if (source.IsIDBIndex())
-    return source.GetAsIDBIndex()->objectStore();
-
+static IDBObjectStore* EffectiveObjectStore(const IDBRequest::Source* source) {
+  DCHECK(source);
+  switch (source->GetContentType()) {
+    case IDBRequest::Source::ContentType::kIDBCursor:
+      NOTREACHED();
+      return nullptr;
+    case IDBRequest::Source::ContentType::kIDBIndex:
+      return source->GetAsIDBIndex()->objectStore();
+    case IDBRequest::Source::ContentType::kIDBObjectStore:
+      return source->GetAsIDBObjectStore();
+  }
   NOTREACHED();
   return nullptr;
 }
@@ -609,8 +624,8 @@ void IDBRequest::ContextDestroyed() {
       transaction_->UnregisterRequest(this);
   }
 
-  if (source_.IsIDBCursor())
-    source_.GetAsIDBCursor()->ContextWillBeDestroyed();
+  if (source_ && source_->IsIDBCursor())
+    source_->GetAsIDBCursor()->ContextWillBeDestroyed();
   if (result_)
     result_->ContextWillBeDestroyed();
   if (pending_cursor_)

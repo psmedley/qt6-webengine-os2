@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <set>
+#include <string>
 #include <utility>
 
 #include "base/base_paths_win.h"
@@ -24,7 +25,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -891,8 +891,8 @@ void WiFiServiceImpl::WaitForNetworkConnect(const std::string& network_guid,
       if (created_profile->GetString(kProfileXmlKey, &tkip_profile_xml) &&
           created_profile->GetBoolean(kProfileSharedKey, &shared)) {
         // Remove TKIP profile xml, so it will not be tried again.
-        created_profile->Remove(kProfileXmlKey, nullptr);
-        created_profile->Remove(kProfileSharedKey, nullptr);
+        created_profile->RemoveKey(kProfileXmlKey);
+        created_profile->RemoveKey(kProfileSharedKey);
         DWORD error_code = SetProfile(shared, tkip_profile_xml, true);
         if (error_code == ERROR_SUCCESS) {
           // Try to connect with new profile.

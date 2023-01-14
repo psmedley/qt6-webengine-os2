@@ -105,8 +105,8 @@ void HttpServer::SendRaw(int connection_id,
     connection->write_watcher().Watch(
         connection->send_handle(),
         MOJO_HANDLE_SIGNAL_WRITABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
-        base::BindRepeating(&HttpServer::OnWritable, base::Unretained(this),
-                            connection->id()));
+        base::BindRepeating(&HttpServer::OnWritable,
+                            weak_ptr_factory_.GetWeakPtr(), connection->id()));
   }
 }
 
@@ -180,14 +180,14 @@ bool HttpServer::SetSendBufferSize(int connection_id, int32_t size) {
 }
 
 void HttpServer::DoAcceptLoop() {
-  server_socket_->Accept(
-      mojo::NullRemote(), /* observer */
-      base::BindOnce(&HttpServer::OnAcceptCompleted, base::Unretained(this)));
+  server_socket_->Accept(mojo::NullRemote(), /* observer */
+                         base::BindOnce(&HttpServer::OnAcceptCompleted,
+                                        weak_ptr_factory_.GetWeakPtr()));
 }
 
 void HttpServer::OnAcceptCompleted(
     int rv,
-    const base::Optional<net::IPEndPoint>& remote_addr,
+    const absl::optional<net::IPEndPoint>& remote_addr,
     mojo::PendingRemote<mojom::TCPConnectedSocket> connected_socket,
     mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
     mojo::ScopedDataPipeProducerHandle send_pipe_handle) {
@@ -210,8 +210,8 @@ void HttpServer::OnAcceptCompleted(
         connection->receive_handle(),
         MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
         MOJO_TRIGGER_CONDITION_SIGNALS_SATISFIED,
-        base::BindRepeating(&HttpServer::OnReadable, base::Unretained(this),
-                            connection->id()));
+        base::BindRepeating(&HttpServer::OnReadable,
+                            weak_ptr_factory_.GetWeakPtr(), connection->id()));
   }
 
   DoAcceptLoop();
@@ -299,7 +299,8 @@ void HttpServer::HandleReadResult(HttpConnection* connection, MojoResult rv) {
     // Sets peer address.
     request.peer = connection->GetPeerAddress();
 
-    if (request.HasHeaderValue("connection", "upgrade")) {
+    if (request.HasHeaderValue("connection", "upgrade") &&
+        request.HasHeaderValue("upgrade", "websocket")) {
       connection->SetWebSocket(std::make_unique<WebSocket>(this, connection));
       connection->read_buf().erase(0, pos);
       delegate_->OnWebSocketRequest(connection->id(), request);

@@ -20,11 +20,18 @@ include_rules = [
     "!third_party/blink/renderer/core/frame/web_local_frame_impl.h",
     "!third_party/blink/renderer/core/frame/web_remote_frame_impl.h",
     "+third_party/blink/renderer/modules",
+    "+ui/accessibility/ax_mode.h",
+    "+ui/display/screen_info.h",
+    "+ui/display/screen_infos.h",
+    "+ui/display/mojom",
     "+ui/gfx/geometry",
     "-web",
 ]
 
 specific_include_rules = {
+    "cookie_store.cc": [
+        "+services/network/public/cpp/is_potentially_trustworthy.h",
+    ],
     "media_capabilities_fuzzer.cc": [
         "+testing/libfuzzer/proto/lpm_interface.h",
         "+third_party/protobuf/src/google/protobuf/repeated_field.h",
@@ -33,7 +40,7 @@ specific_include_rules = {
         "+base/run_loop.h",
         "+testing/libfuzzer/proto/lpm_interface.h",
     ],
-    "video_encoder_fuzzer.cc": [
+    ".*_encoder_fuzzer.cc": [
         "+base/at_exit.h",
         "+base/run_loop.h",
         "+testing/libfuzzer/proto/lpm_interface.h",
@@ -44,4 +51,8 @@ specific_include_rules = {
     "web_ax_object.cc": [
         "+ui/accessibility/ax_action_data.h",
     ],
+
+    "tcp_writable_stream_wrapper.h": [
+        "+base/allocator/partition_allocator/partition_root.h",
+    ]
 }

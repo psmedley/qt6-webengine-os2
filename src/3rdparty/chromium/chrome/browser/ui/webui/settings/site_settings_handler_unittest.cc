@@ -14,6 +14,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
@@ -24,7 +25,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/permissions/permission_decision_auto_blocker_factory.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -32,7 +32,8 @@
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
-#include "chrome/browser/web_applications/test/test_app_registrar.h"
+#include "chrome/browser/web_applications/test/test_web_app_registry_controller.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
@@ -46,11 +47,12 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
-#include "components/permissions/chooser_context_base.h"
+#include "components/permissions/object_permission_context_base.h"
 #include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_uma_util.h"
-#include "components/permissions/test/chooser_context_base_mock_permission_observer.h"
+#include "components/permissions/test/object_permission_context_base_mock_permission_observer.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/navigation_controller.h"
@@ -64,12 +66,13 @@
 #include "ppapi/buildflags/buildflags.h"
 #include "services/device/public/cpp/test/fake_usb_device_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/webui/webui_allowlist.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chrome/browser/ash/login/users/mock_user_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #endif
 
@@ -104,10 +107,6 @@ const struct PatternContentTypeTestCase {
     {{"http://google.com", "location"}, {false, "Origin must be secure"}},
     {{"http://127.0.0.1", "location"}, {true, ""}},  // Localhost is secure.
     {{"http://[::1]", "location"}, {true, ""}}};
-
-std::string GenerateFakeAppId(const GURL& url) {
-  return web_app::GenerateAppIdFromURL(url);
-}
 
 }  // namespace
 
@@ -157,20 +156,26 @@ class SiteSettingsHandlerTest : public testing::Test {
             ContentSettingsType::COOKIES)) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
-        std::make_unique<chromeos::MockUserManager>());
+        std::make_unique<ash::MockUserManager>());
 #endif
 
     // Fully initialize |profile_| in the constructor since some children
     // classes need it right away for SetUp().
-    DCHECK(profile_dir_.CreateUniqueTempDir());
     TestingProfile::Builder profile_builder;
-    profile_builder.SetPath(profile_dir_.GetPath());
+    profile_builder.AddTestingFactory(
+        HistoryServiceFactory::GetInstance(),
+        HistoryServiceFactory::GetDefaultFactory());
     profile_ = profile_builder.Build();
   }
 
   void SetUp() override {
+    test_registry_controller_ =
+        std::make_unique<web_app::TestWebAppRegistryController>();
+    test_registry_controller_->SetUp(profile());
+    controller().Init();
+
     handler_ =
-        std::make_unique<SiteSettingsHandler>(profile_.get(), app_registrar_);
+        std::make_unique<SiteSettingsHandler>(profile_.get(), app_registrar());
     handler()->set_web_ui(web_ui());
     handler()->AllowJavascript();
     // AllowJavascript() adds a callback to create leveldb_env::ChromiumEnv
@@ -182,16 +187,33 @@ class SiteSettingsHandlerTest : public testing::Test {
 
   void TearDown() override {
     if (profile_) {
-      auto* partition =
-          content::BrowserContext::GetDefaultStoragePartition(profile_.get());
+      auto* partition = profile_->GetDefaultStoragePartition();
       if (partition)
         partition->WaitForDeletionTasksForTesting();
     }
   }
 
+  std::unique_ptr<web_app::WebApp> CreateWebApp() {
+    const GURL app_url = GURL("http://abc.example.com/path");
+    const web_app::AppId app_id =
+        web_app::GenerateAppId(/*manifest_id=*/absl::nullopt, app_url);
+
+    auto web_app = std::make_unique<web_app::WebApp>(app_id);
+    web_app->AddSource(web_app::Source::kSync);
+    web_app->SetDisplayMode(web_app::DisplayMode::kStandalone);
+    web_app->SetUserDisplayMode(web_app::DisplayMode::kStandalone);
+    web_app->SetName("Name");
+    web_app->SetStartUrl(app_url);
+
+    return web_app;
+  }
+
+  web_app::TestWebAppRegistryController& controller() {
+    return *test_registry_controller_;
+  }
+  web_app::WebAppRegistrar& app_registrar() { return controller().registrar(); }
   TestingProfile* profile() { return profile_.get(); }
   TestingProfile* incognito_profile() { return incognito_profile_; }
-  web_app::TestAppRegistrar& app_registrar() { return app_registrar_; }
   content::TestWebUI* web_ui() { return &web_ui_; }
   SiteSettingsHandler* handler() { return handler_.get(); }
 
@@ -199,9 +221,8 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
 
-    std::string event_name;
-    ASSERT_TRUE(data.arg1()->GetAsString(&event_name));
-    EXPECT_EQ("onBlockAutoplayStatusChanged", event_name);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ("onBlockAutoplayStatusChanged", data.arg1()->GetString());
 
     const base::DictionaryValue* event_data = nullptr;
     ASSERT_TRUE(data.arg2()->GetAsDictionary(&event_data));
@@ -233,13 +254,11 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ(kCallbackId, callback_id);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
 
-    bool success = false;
-    ASSERT_TRUE(data.arg2()->GetAsBoolean(&success));
-    ASSERT_TRUE(success);
+    ASSERT_TRUE(data.arg2()->is_bool());
+    ASSERT_TRUE(data.arg2()->GetBool());
 
     const base::DictionaryValue* default_value = nullptr;
     ASSERT_TRUE(data.arg3()->GetAsDictionary(&default_value));
@@ -264,12 +283,10 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ(kCallbackId, callback_id);
-    bool success = false;
-    ASSERT_TRUE(data.arg2()->GetAsBoolean(&success));
-    ASSERT_TRUE(success);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->is_bool());
+    ASSERT_TRUE(data.arg2()->GetBool());
 
     const base::ListValue* exceptions;
     ASSERT_TRUE(data.arg3()->GetAsList(&exceptions));
@@ -299,13 +316,11 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ(kCallbackId, callback_id);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
 
-    bool success = false;
-    ASSERT_TRUE(data.arg2()->GetAsBoolean(&success));
-    ASSERT_TRUE(success);
+    ASSERT_TRUE(data.arg2()->is_bool());
+    ASSERT_TRUE(data.arg2()->GetBool());
 
     const base::ListValue* exceptions;
     ASSERT_TRUE(data.arg3()->GetAsList(&exceptions));
@@ -320,13 +335,11 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ(kCallbackId, callback_id);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
 
-    bool success = false;
-    ASSERT_TRUE(data.arg2()->GetAsBoolean(&success));
-    ASSERT_TRUE(success);
+    ASSERT_TRUE(data.arg2()->is_bool());
+    ASSERT_TRUE(data.arg2()->GetBool());
 
     const base::DictionaryValue* result = nullptr;
     ASSERT_TRUE(data.arg3()->GetAsDictionary(&result));
@@ -347,13 +360,11 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ("onIncognitoStatusChanged", callback_id);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ("onIncognitoStatusChanged", data.arg1()->GetString());
 
-    bool incognito;
-    ASSERT_TRUE(data.arg2()->GetAsBoolean(&incognito));
-    EXPECT_EQ(expected_incognito, incognito);
+    ASSERT_TRUE(data.arg2()->is_bool());
+    EXPECT_EQ(expected_incognito, data.arg2()->GetBool());
   }
 
   void ValidateZoom(const std::string& expected_host,
@@ -364,9 +375,8 @@ class SiteSettingsHandlerTest : public testing::Test {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
 
-    std::string callback_id;
-    ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-    EXPECT_EQ("onZoomLevelsChanged", callback_id);
+    ASSERT_TRUE(data.arg1()->is_string());
+    EXPECT_EQ("onZoomLevelsChanged", data.arg1()->GetString());
 
     const base::ListValue* exceptions;
     ASSERT_TRUE(data.arg2()->GetAsList(&exceptions));
@@ -437,11 +447,15 @@ class SiteSettingsHandlerTest : public testing::Test {
     auto mock_cookies_tree_model = std::make_unique<CookiesTreeModel>(
         std::move(container), profile()->GetExtensionSpecialStoragePolicy());
 
-    mock_browsing_data_local_storage_helper->AddLocalStorageForOrigin(
-        url::Origin::Create(GURL("https://www.example.com/")), 2);
+    mock_browsing_data_local_storage_helper->AddLocalStorageForStorageKey(
+        blink::StorageKey::CreateFromStringForTesting(
+            "https://www.example.com/"),
+        2);
 
-    mock_browsing_data_local_storage_helper->AddLocalStorageForOrigin(
-        url::Origin::Create(GURL("https://www.google.com/")), 50000000000);
+    mock_browsing_data_local_storage_helper->AddLocalStorageForStorageKey(
+        blink::StorageKey::CreateFromStringForTesting(
+            "https://www.google.com/"),
+        50000000000);
     mock_browsing_data_local_storage_helper->Notify();
 
     mock_browsing_data_cookie_helper->AddCookieSamples(
@@ -466,8 +480,6 @@ class SiteSettingsHandlerTest : public testing::Test {
     handler()->ClearAllSitesMapForTesting();
     handler()->OnStorageFetched();
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
-    std::string callback_id;
-    data.arg1()->GetAsString(&callback_id);
     const base::ListValue* storage_and_cookie_list;
     data.arg2()->GetAsList(&storage_and_cookie_list);
     return storage_and_cookie_list;
@@ -485,14 +497,11 @@ class SiteSettingsHandlerTest : public testing::Test {
   const size_t kNumberContentSettingListeners = 2;
 
  private:
-  // A profile directory that outlives |task_environment_| is needed because
-  // TestingProfile::CreateHistoryService uses the directory to host a
-  // database. See https://crbug.com/546640 for more details.
-  base::ScopedTempDir profile_dir_;
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   TestingProfile* incognito_profile_;
-  web_app::TestAppRegistrar app_registrar_;
+  std::unique_ptr<web_app::TestWebAppRegistryController>
+      test_registry_controller_;
   content::TestWebUI web_ui_;
   std::unique_ptr<SiteSettingsHandler> handler_;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -502,38 +511,38 @@ class SiteSettingsHandlerTest : public testing::Test {
 
 TEST_F(SiteSettingsHandlerTest, GetAndSetDefault) {
   // Test the JS -> C++ -> JS callback path for getting and setting defaults.
-  base::ListValue get_args;
-  get_args.AppendString(kCallbackId);
-  get_args.AppendString(kNotifications);
-  handler()->HandleGetDefaultValueForContentType(&get_args);
+  base::Value get_args(base::Value::Type::LIST);
+  get_args.Append(kCallbackId);
+  get_args.Append(kNotifications);
+  handler()->HandleGetDefaultValueForContentType(
+      &base::Value::AsListValue(get_args));
   ValidateDefault(CONTENT_SETTING_ASK,
                   site_settings::SiteSettingSource::kDefault, 1U);
 
   // Set the default to 'Blocked'.
-  base::ListValue set_args;
-  set_args.AppendString(kNotifications);
-  set_args.AppendString(
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(kNotifications);
+  set_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-  handler()->HandleSetDefaultValueForContentType(&set_args);
+  handler()->HandleSetDefaultValueForContentType(
+      &base::Value::AsListValue(set_args));
 
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
   // Verify that the default has been set to 'Blocked'.
-  handler()->HandleGetDefaultValueForContentType(&get_args);
+  handler()->HandleGetDefaultValueForContentType(
+      &base::Value::AsListValue(get_args));
   ValidateDefault(CONTENT_SETTING_BLOCK,
                   site_settings::SiteSettingSource::kDefault, 3U);
 }
 
 // Flaky on CrOS and Linux. https://crbug.com/930481
 TEST_F(SiteSettingsHandlerTest, GetAllSites) {
-  base::ListValue get_all_sites_args;
-  get_all_sites_args.AppendString(kCallbackId);
-  base::Value category_list(base::Value::Type::LIST);
-  category_list.Append(kNotifications);
-  get_all_sites_args.Append(std::move(category_list));
+  base::Value get_all_sites_args(base::Value::Type::LIST);
+  get_all_sites_args.Append(kCallbackId);
 
   // Test all sites is empty when there are no preferences.
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
   EXPECT_EQ(1U, web_ui()->call_data().size());
 
   {
@@ -555,7 +564,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
       url1, url1, ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_BLOCK);
   map->SetContentSettingDefaultScope(
       url2, url2, ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_ALLOW);
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
 
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
@@ -583,7 +592,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
   const GURL url3("https://example2.net");
   map->SetContentSettingDefaultScope(
       url3, url3, ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_BLOCK);
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
 
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
@@ -623,7 +632,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
       CONTENT_SETTING_BLOCK,
       auto_blocker->GetEmbargoResult(url4, ContentSettingsType::NOTIFICATIONS)
           .content_setting);
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
 
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
@@ -637,7 +646,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
 
   // Check |url4| disappears from the list when its embargo expires.
   clock.Advance(base::TimeDelta::FromDays(8));
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
 
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
@@ -667,7 +676,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
       auto_blocker->GetEmbargoResult(url3, ContentSettingsType::NOTIFICATIONS)
           .content_setting);
 
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
@@ -696,7 +705,7 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
       auto_blocker->GetEmbargoResult(url5, ContentSettingsType::NOTIFICATIONS)
           .content_setting);
 
-  handler()->HandleGetAllSites(&get_all_sites_args);
+  handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
@@ -727,11 +736,8 @@ TEST_F(SiteSettingsHandlerTest, GetRecentSitePermissions) {
   std::string kPreference =
       SiteSettingSourceToString(site_settings::SiteSettingSource::kPreference);
 
-  base::ListValue get_recent_permissions_args;
-  get_recent_permissions_args.AppendString(kCallbackId);
-  base::Value category_list(base::Value::Type::LIST);
-  category_list.Append(kNotifications);
-  get_recent_permissions_args.Append(std::move(category_list));
+  base::Value get_recent_permissions_args(base::Value::Type::LIST);
+  get_recent_permissions_args.Append(kCallbackId);
   get_recent_permissions_args.Append(3);
 
   // Configure prefs and auto blocker with a controllable clock.
@@ -746,7 +752,8 @@ TEST_F(SiteSettingsHandlerTest, GetRecentSitePermissions) {
   clock.Advance(base::TimeDelta::FromHours(1));
 
   // Test recent permissions is empty when there are no preferences.
-  handler()->HandleGetRecentSitePermissions(&get_recent_permissions_args);
+  handler()->HandleGetRecentSitePermissions(
+      &base::Value::AsListValue(get_recent_permissions_args));
   EXPECT_EQ(1U, web_ui()->call_data().size());
 
   {
@@ -768,15 +775,11 @@ TEST_F(SiteSettingsHandlerTest, GetRecentSitePermissions) {
         url1, ContentSettingsType::NOTIFICATIONS, false);
 
   clock.Advance(base::TimeDelta::FromHours(2));
-  map->SetContentSettingDefaultScope(url2, url2, ContentSettingsType::IMAGES,
-                                     CONTENT_SETTING_ALLOW);
   clock.Advance(base::TimeDelta::FromHours(1));
   CreateIncognitoProfile();
   HostContentSettingsMap* incognito_map =
       HostContentSettingsMapFactory::GetForProfile(incognito_profile());
   incognito_map->SetClockForTesting(&clock);
-  incognito_map->SetContentSettingDefaultScope(
-      url1, url1, ContentSettingsType::IMAGES, CONTENT_SETTING_ALLOW);
 
   clock.Advance(base::TimeDelta::FromHours(1));
   permissions::PermissionDecisionAutoBlocker* incognito_auto_blocker =
@@ -786,7 +789,8 @@ TEST_F(SiteSettingsHandlerTest, GetRecentSitePermissions) {
     incognito_auto_blocker->RecordDismissAndEmbargo(
         url1, ContentSettingsType::NOTIFICATIONS, false);
 
-  handler()->HandleGetRecentSitePermissions(&get_recent_permissions_args);
+  handler()->HandleGetRecentSitePermissions(
+      &base::Value::AsListValue(get_recent_permissions_args));
   {
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     EXPECT_EQ("cr.webUIResponse", data.function_name());
@@ -832,9 +836,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
 
-  std::string callback_id;
-  ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-  EXPECT_EQ("onStorageListFetched", callback_id);
+  ASSERT_TRUE(data.arg1()->is_string());
+  EXPECT_EQ("onStorageListFetched", data.arg1()->GetString());
 
   const base::ListValue* storage_and_cookie_list;
   ASSERT_TRUE(data.arg2()->GetAsList(&storage_and_cookie_list));
@@ -911,9 +914,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
 }
 
 TEST_F(SiteSettingsHandlerTest, InstalledApps) {
-  web_app::TestAppRegistrar& registrar = app_registrar();
-  const GURL url("http://abc.example.com/");
-  registrar.AddExternalApp(GenerateFakeAppId(url), {url});
+  auto web_app = CreateWebApp();
+  controller().RegisterApp(std::move(web_app));
 
   SetUpCookiesTreeModel();
 
@@ -958,20 +960,22 @@ TEST_F(SiteSettingsHandlerTest, IncognitoExceptions) {
   CreateIncognitoProfile();
 
   {
-    base::ListValue set_args;
-    set_args.AppendString(kOriginToBlock);  // Primary pattern.
-    set_args.AppendString(std::string());   // Secondary pattern.
-    set_args.AppendString(kNotifications);
-    set_args.AppendString(
+    base::Value set_args(base::Value::Type::LIST);
+    set_args.Append(kOriginToBlock);  // Primary pattern.
+    set_args.Append(std::string());   // Secondary pattern.
+    set_args.Append(kNotifications);
+    set_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-    set_args.AppendBoolean(true);  // Incognito.
+    set_args.Append(true);  // Incognito.
 
-    handler()->HandleSetCategoryPermissionForPattern(&set_args);
+    handler()->HandleSetCategoryPermissionForPattern(
+        &base::Value::AsListValue(set_args));
 
-    base::ListValue get_exception_list_args;
-    get_exception_list_args.AppendString(kCallbackId);
-    get_exception_list_args.AppendString(kNotifications);
-    handler()->HandleGetExceptionList(&get_exception_list_args);
+    base::Value get_exception_list_args(base::Value::Type::LIST);
+    get_exception_list_args.Append(kCallbackId);
+    get_exception_list_args.Append(kNotifications);
+    handler()->HandleGetExceptionList(
+        &base::Value::AsListValue(get_exception_list_args));
 
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     const base::ListValue* exceptions;
@@ -986,20 +990,22 @@ TEST_F(SiteSettingsHandlerTest, IncognitoExceptions) {
   }
 
   {
-    base::ListValue set_args;
-    set_args.AppendString(kOriginToBlock);  // Primary pattern.
-    set_args.AppendString(std::string());   // Secondary pattern.
-    set_args.AppendString(kNotifications);
-    set_args.AppendString(
+    base::Value set_args(base::Value::Type::LIST);
+    set_args.Append(kOriginToBlock);  // Primary pattern.
+    set_args.Append(std::string());   // Secondary pattern.
+    set_args.Append(kNotifications);
+    set_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-    set_args.AppendBoolean(false);  // Incognito.
+    set_args.Append(false);  // Incognito.
 
-    handler()->HandleSetCategoryPermissionForPattern(&set_args);
+    handler()->HandleSetCategoryPermissionForPattern(
+        &base::Value::AsListValue(set_args));
 
-    base::ListValue get_exception_list_args;
-    get_exception_list_args.AppendString(kCallbackId);
-    get_exception_list_args.AppendString(kNotifications);
-    handler()->HandleGetExceptionList(&get_exception_list_args);
+    base::Value get_exception_list_args(base::Value::Type::LIST);
+    get_exception_list_args.Append(kCallbackId);
+    get_exception_list_args.Append(kNotifications);
+    handler()->HandleGetExceptionList(
+        &base::Value::AsListValue(get_exception_list_args));
 
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     const base::ListValue* exceptions;
@@ -1026,15 +1032,16 @@ TEST_F(SiteSettingsHandlerTest, ResetCategoryPermissionForEmbargoedOrigins) {
 
   // Add and test 1 blocked origin
   {
-    base::ListValue set_args;
-    set_args.AppendString(kOriginToBlock);  // Primary pattern.
-    set_args.AppendString(std::string());   // Secondary pattern.
-    set_args.AppendString(kNotifications);
-    set_args.AppendString(
+    base::Value set_args(base::Value::Type::LIST);
+    set_args.Append(kOriginToBlock);  // Primary pattern.
+    set_args.Append(std::string());   // Secondary pattern.
+    set_args.Append(kNotifications);
+    set_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-    set_args.AppendBoolean(false);  // Incognito.
+    set_args.Append(false);  // Incognito.
 
-    handler()->HandleSetCategoryPermissionForPattern(&set_args);
+    handler()->HandleSetCategoryPermissionForPattern(
+        &base::Value::AsListValue(set_args));
     ASSERT_EQ(1U, web_ui()->call_data().size());
   }
 
@@ -1068,12 +1075,13 @@ TEST_F(SiteSettingsHandlerTest, ResetCategoryPermissionForEmbargoedOrigins) {
 
   {
     // Reset blocked origin.
-    base::ListValue reset_args;
-    reset_args.AppendString(kOriginToBlock);
-    reset_args.AppendString(std::string());
-    reset_args.AppendString(kNotifications);
-    reset_args.AppendBoolean(false);  // Incognito.
-    handler()->HandleResetCategoryPermissionForPattern(&reset_args);
+    base::Value reset_args(base::Value::Type::LIST);
+    reset_args.Append(kOriginToBlock);
+    reset_args.Append(std::string());
+    reset_args.Append(kNotifications);
+    reset_args.Append(false);  // Incognito.
+    handler()->HandleResetCategoryPermissionForPattern(
+        &base::Value::AsListValue(reset_args));
 
     // Check there is 1 blocked origin.
     base::ListValue exceptions;
@@ -1086,12 +1094,13 @@ TEST_F(SiteSettingsHandlerTest, ResetCategoryPermissionForEmbargoedOrigins) {
 
   {
     // Reset embargoed origin.
-    base::ListValue reset_args;
-    reset_args.AppendString(kOriginToEmbargo);
-    reset_args.AppendString(std::string());
-    reset_args.AppendString(kNotifications);
-    reset_args.AppendBoolean(false);  // Incognito.
-    handler()->HandleResetCategoryPermissionForPattern(&reset_args);
+    base::Value reset_args(base::Value::Type::LIST);
+    reset_args.Append(kOriginToEmbargo);
+    reset_args.Append(std::string());
+    reset_args.Append(kNotifications);
+    reset_args.Append(false);  // Incognito.
+    handler()->HandleResetCategoryPermissionForPattern(
+        &base::Value::AsListValue(reset_args));
 
     // Check that there are no blocked or embargoed origins.
     base::ListValue exceptions;
@@ -1103,21 +1112,51 @@ TEST_F(SiteSettingsHandlerTest, ResetCategoryPermissionForEmbargoedOrigins) {
   }
 }
 
+TEST_F(SiteSettingsHandlerTest, ResetCategoryPermissionForInvalidOrigins) {
+  constexpr char kInvalidOrigin[] = "example.com";
+  auto url = GURL(kInvalidOrigin);
+  EXPECT_FALSE(url.is_valid());
+  EXPECT_TRUE(url.is_empty());
+
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(kInvalidOrigin);  // Primary pattern.
+  set_args.Append(std::string());   // Secondary pattern.
+  set_args.Append(kNotifications);
+  set_args.Append(
+      content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
+  set_args.Append(false);  // Incognito.
+
+  handler()->HandleSetCategoryPermissionForPattern(
+      &base::Value::AsListValue(set_args));
+  ASSERT_EQ(1U, web_ui()->call_data().size());
+
+  // Reset blocked origin.
+  base::Value reset_args(base::Value::Type::LIST);
+  reset_args.Append(kInvalidOrigin);
+  reset_args.Append(std::string());
+  reset_args.Append(kNotifications);
+  reset_args.Append(false);  // Incognito.
+  // Check that this method is not crashing for an invalid origin.
+  handler()->HandleResetCategoryPermissionForPattern(
+      &base::Value::AsListValue(reset_args));
+}
+
 TEST_F(SiteSettingsHandlerTest, Origins) {
   const std::string google("https://www.google.com:443");
   const std::string uma_base("WebsiteSettings.Menu.PermissionChanged");
   {
     // Test the JS -> C++ -> JS callback path for configuring origins, by
     // setting Google.com to blocked.
-    base::ListValue set_args;
-    set_args.AppendString(google);  // Primary pattern.
-    set_args.AppendString(std::string());  // Secondary pattern.
-    set_args.AppendString(kNotifications);
-    set_args.AppendString(
+    base::Value set_args(base::Value::Type::LIST);
+    set_args.Append(google);         // Primary pattern.
+    set_args.Append(std::string());  // Secondary pattern.
+    set_args.Append(kNotifications);
+    set_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-    set_args.AppendBoolean(false);  // Incognito.
+    set_args.Append(false);  // Incognito.
     base::HistogramTester histograms;
-    handler()->HandleSetCategoryPermissionForPattern(&set_args);
+    handler()->HandleSetCategoryPermissionForPattern(
+        &base::Value::AsListValue(set_args));
     EXPECT_EQ(1U, web_ui()->call_data().size());
     histograms.ExpectTotalCount(uma_base, 1);
     histograms.ExpectTotalCount(uma_base + ".Allowed", 0);
@@ -1126,22 +1165,24 @@ TEST_F(SiteSettingsHandlerTest, Origins) {
     histograms.ExpectTotalCount(uma_base + ".SessionOnly", 0);
   }
 
-  base::ListValue get_exception_list_args;
-  get_exception_list_args.AppendString(kCallbackId);
-  get_exception_list_args.AppendString(kNotifications);
-  handler()->HandleGetExceptionList(&get_exception_list_args);
+  base::Value get_exception_list_args(base::Value::Type::LIST);
+  get_exception_list_args.Append(kCallbackId);
+  get_exception_list_args.Append(kNotifications);
+  handler()->HandleGetExceptionList(
+      &base::Value::AsListValue(get_exception_list_args));
   ValidateOrigin(google, "", google, CONTENT_SETTING_BLOCK,
                  site_settings::SiteSettingSource::kPreference, 2U);
 
   {
     // Reset things back to how they were.
-    base::ListValue reset_args;
-    reset_args.AppendString(google);
-    reset_args.AppendString(std::string());
-    reset_args.AppendString(kNotifications);
-    reset_args.AppendBoolean(false);  // Incognito.
+    base::Value reset_args(base::Value::Type::LIST);
+    reset_args.Append(google);
+    reset_args.Append(std::string());
+    reset_args.Append(kNotifications);
+    reset_args.Append(false);  // Incognito.
     base::HistogramTester histograms;
-    handler()->HandleResetCategoryPermissionForPattern(&reset_args);
+    handler()->HandleResetCategoryPermissionForPattern(
+        &base::Value::AsListValue(reset_args));
     EXPECT_EQ(3U, web_ui()->call_data().size());
     histograms.ExpectTotalCount(uma_base, 1);
     histograms.ExpectTotalCount(uma_base + ".Allowed", 0);
@@ -1150,14 +1191,14 @@ TEST_F(SiteSettingsHandlerTest, Origins) {
   }
 
   // Verify the reset was successful.
-  handler()->HandleGetExceptionList(&get_exception_list_args);
+  handler()->HandleGetExceptionList(
+      &base::Value::AsListValue(get_exception_list_args));
   ValidateNoOrigin(4U);
 }
 
 TEST_F(SiteSettingsHandlerTest, NotificationPermissionRevokeUkm) {
   const std::string google("https://www.google.com");
   ukm::TestAutoSetUkmRecorder ukm_recorder;
-  ASSERT_TRUE(profile()->CreateHistoryService());
   auto* history_service = HistoryServiceFactory::GetForProfile(
       profile(), ServiceAccessType::EXPLICIT_ACCESS);
   history_service->AddPage(GURL(google), base::Time::Now(),
@@ -1167,27 +1208,27 @@ TEST_F(SiteSettingsHandlerTest, NotificationPermissionRevokeUkm) {
       origin_queried_waiter.QuitClosure());
 
   {
-    base::ListValue set_notification_origin_args;
-    set_notification_origin_args.AppendString(google);
-    set_notification_origin_args.AppendString("");
-    set_notification_origin_args.AppendString(kNotifications);
-    set_notification_origin_args.AppendString(
+    base::Value set_notification_origin_args(base::Value::Type::LIST);
+    set_notification_origin_args.Append(google);
+    set_notification_origin_args.Append("");
+    set_notification_origin_args.Append(kNotifications);
+    set_notification_origin_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_ALLOW));
-    set_notification_origin_args.AppendBoolean(false /* incognito */);
+    set_notification_origin_args.Append(false /* incognito */);
     handler()->HandleSetCategoryPermissionForPattern(
-        &set_notification_origin_args);
+        &base::Value::AsListValue(set_notification_origin_args));
   }
 
   {
-    base::ListValue set_notification_origin_args;
-    set_notification_origin_args.AppendString(google);
-    set_notification_origin_args.AppendString("");
-    set_notification_origin_args.AppendString(kNotifications);
-    set_notification_origin_args.AppendString(
+    base::Value set_notification_origin_args(base::Value::Type::LIST);
+    set_notification_origin_args.Append(google);
+    set_notification_origin_args.Append("");
+    set_notification_origin_args.Append(kNotifications);
+    set_notification_origin_args.Append(
         content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-    set_notification_origin_args.AppendBoolean(false /* incognito */);
+    set_notification_origin_args.Append(false /* incognito */);
     handler()->HandleSetCategoryPermissionForPattern(
-        &set_notification_origin_args);
+        &base::Value::AsListValue(set_notification_origin_args));
   }
 
   origin_queried_waiter.Run();
@@ -1200,8 +1241,10 @@ TEST_F(SiteSettingsHandlerTest, NotificationPermissionRevokeUkm) {
   EXPECT_EQ(
       *ukm_recorder.GetEntryMetric(entry, "Source"),
       static_cast<int64_t>(permissions::PermissionSourceUI::SITE_SETTINGS));
+  size_t num_values = 0;
   EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "PermissionType"),
-            static_cast<int64_t>(ContentSettingsType::NOTIFICATIONS));
+            ContentSettingTypeToHistogramValue(
+                ContentSettingsType::NOTIFICATIONS, &num_values));
   EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "Action"),
             static_cast<int64_t>(permissions::PermissionAction::REVOKED));
 }
@@ -1213,8 +1256,6 @@ TEST_F(SiteSettingsHandlerTest, NotificationPermissionRevokeUkm) {
 #define MAYBE_DefaultSettingSource DefaultSettingSource
 #endif
 TEST_F(SiteSettingsHandlerTest, MAYBE_DefaultSettingSource) {
-  ASSERT_TRUE(profile()->CreateHistoryService());
-
   // Use a non-default port to verify the display name does not strip this
   // off.
   const std::string google("https://www.google.com:183");
@@ -1223,59 +1264,65 @@ TEST_F(SiteSettingsHandlerTest, MAYBE_DefaultSettingSource) {
   ContentSettingSourceSetter source_setter(profile(),
                                            ContentSettingsType::NOTIFICATIONS);
 
-  base::ListValue get_origin_permissions_args;
-  get_origin_permissions_args.AppendString(kCallbackId);
-  get_origin_permissions_args.AppendString(google);
-  auto category_list = std::make_unique<base::ListValue>();
-  category_list->AppendString(kNotifications);
+  base::Value get_origin_permissions_args(base::Value::Type::LIST);
+  get_origin_permissions_args.Append(kCallbackId);
+  get_origin_permissions_args.Append(google);
+  base::Value category_list(base::Value::Type::LIST);
+  category_list.Append(kNotifications);
   get_origin_permissions_args.Append(std::move(category_list));
 
   // Test Chrome built-in defaults are marked as default.
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(google, google, expected_display_name, CONTENT_SETTING_ASK,
                  site_settings::SiteSettingSource::kDefault, 1U);
 
-  base::ListValue default_value_args;
-  default_value_args.AppendString(kNotifications);
-  default_value_args.AppendString(
+  base::Value default_value_args(base::Value::Type::LIST);
+  default_value_args.Append(kNotifications);
+  default_value_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-  handler()->HandleSetDefaultValueForContentType(&default_value_args);
+  handler()->HandleSetDefaultValueForContentType(
+      &base::Value::AsListValue(default_value_args));
   // A user-set global default should also show up as default.
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(google, google, expected_display_name, CONTENT_SETTING_BLOCK,
                  site_settings::SiteSettingSource::kDefault, 3U);
 
-  base::ListValue set_notification_pattern_args;
-  set_notification_pattern_args.AppendString("[*.]google.com");
-  set_notification_pattern_args.AppendString("");
-  set_notification_pattern_args.AppendString(kNotifications);
-  set_notification_pattern_args.AppendString(
+  base::Value set_notification_pattern_args(base::Value::Type::LIST);
+  set_notification_pattern_args.Append("[*.]google.com");
+  set_notification_pattern_args.Append("");
+  set_notification_pattern_args.Append(kNotifications);
+  set_notification_pattern_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_ALLOW));
-  set_notification_pattern_args.AppendBoolean(false);
+  set_notification_pattern_args.Append(false);
   handler()->HandleSetCategoryPermissionForPattern(
-      &set_notification_pattern_args);
+      &base::Value::AsListValue(set_notification_pattern_args));
   // A user-set pattern should not show up as default.
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(google, google, expected_display_name, CONTENT_SETTING_ALLOW,
                  site_settings::SiteSettingSource::kPreference, 5U);
 
-  base::ListValue set_notification_origin_args;
-  set_notification_origin_args.AppendString(google);
-  set_notification_origin_args.AppendString("");
-  set_notification_origin_args.AppendString(kNotifications);
-  set_notification_origin_args.AppendString(
+  base::Value set_notification_origin_args(base::Value::Type::LIST);
+  set_notification_origin_args.Append(google);
+  set_notification_origin_args.Append("");
+  set_notification_origin_args.Append(kNotifications);
+  set_notification_origin_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-  set_notification_origin_args.AppendBoolean(false);
+  set_notification_origin_args.Append(false);
   handler()->HandleSetCategoryPermissionForPattern(
-      &set_notification_origin_args);
+      &base::Value::AsListValue(set_notification_origin_args));
   // A user-set per-origin permission should not show up as default.
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(google, google, expected_display_name, CONTENT_SETTING_BLOCK,
                  site_settings::SiteSettingSource::kPreference, 7U);
 
   // Enterprise-policy set defaults should not show up as default.
   source_setter.SetPolicyDefault(CONTENT_SETTING_ALLOW);
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(google, google, expected_display_name, CONTENT_SETTING_ALLOW,
                  site_settings::SiteSettingSource::kPolicy, 8U);
 }
@@ -1284,46 +1331,40 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetOriginPermissions) {
   const std::string origin_with_port("https://www.example.com:443");
   // The display name won't show the port if it's default for that scheme.
   const std::string origin("www.example.com");
-  base::ListValue get_args;
-  get_args.AppendString(kCallbackId);
-  get_args.AppendString(origin_with_port);
+  base::Value get_args(base::Value::Type::LIST);
+  get_args.Append(kCallbackId);
+  get_args.Append(origin_with_port);
   {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
+    base::Value category_list(base::Value::Type::LIST);
+    category_list.Append(kNotifications);
     get_args.Append(std::move(category_list));
   }
-  handler()->HandleGetOriginPermissions(&get_args);
+  handler()->HandleGetOriginPermissions(&base::Value::AsListValue(get_args));
   ValidateOrigin(origin_with_port, origin_with_port, origin,
                  CONTENT_SETTING_ASK,
                  site_settings::SiteSettingSource::kDefault, 1U);
 
   // Block notifications.
-  base::ListValue set_args;
-  set_args.AppendString(origin_with_port);
-  {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
-    set_args.Append(std::move(category_list));
-  }
-  set_args.AppendString(
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(origin_with_port);
+  set_args.Append(kNotifications);
+  set_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-  handler()->HandleSetOriginPermissions(&set_args);
+  handler()->HandleSetOriginPermissions(&base::Value::AsListValue(set_args));
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
   // Reset things back to how they were.
-  base::ListValue reset_args;
-  reset_args.AppendString(origin_with_port);
-  auto category_list = std::make_unique<base::ListValue>();
-  category_list->AppendString(kNotifications);
-  reset_args.Append(std::move(category_list));
-  reset_args.AppendString(
+  base::Value reset_args(base::Value::Type::LIST);
+  reset_args.Append(origin_with_port);
+  reset_args.Append(std::move(kNotifications));
+  reset_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_DEFAULT));
 
-  handler()->HandleSetOriginPermissions(&reset_args);
+  handler()->HandleSetOriginPermissions(&base::Value::AsListValue(reset_args));
   EXPECT_EQ(3U, web_ui()->call_data().size());
 
   // Verify the reset was successful.
-  handler()->HandleGetOriginPermissions(&get_args);
+  handler()->HandleGetOriginPermissions(&base::Value::AsListValue(get_args));
   ValidateOrigin(origin_with_port, origin_with_port, origin,
                  CONTENT_SETTING_ASK,
                  site_settings::SiteSettingSource::kDefault, 4U);
@@ -1332,15 +1373,15 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetOriginPermissions) {
 TEST_F(SiteSettingsHandlerTest, GetAndSetForInvalidURLs) {
   const std::string origin("arbitrary string");
   EXPECT_FALSE(GURL(origin).is_valid());
-  base::ListValue get_args;
-  get_args.AppendString(kCallbackId);
-  get_args.AppendString(origin);
+  base::Value get_args(base::Value::Type::LIST);
+  get_args.Append(kCallbackId);
+  get_args.Append(origin);
   {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
+    base::Value category_list(base::Value::Type::LIST);
+    category_list.Append(kNotifications);
     get_args.Append(std::move(category_list));
   }
-  handler()->HandleGetOriginPermissions(&get_args);
+  handler()->HandleGetOriginPermissions(&base::Value::AsListValue(get_args));
   // Verify that it'll return CONTENT_SETTING_BLOCK as |origin| is not a secure
   // context, a requirement for notifications. Note that the display string
   // will be blank since it's an invalid URL.
@@ -1348,19 +1389,19 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetForInvalidURLs) {
                  site_settings::SiteSettingSource::kInsecureOrigin, 1U);
 
   // Make sure setting a permission on an invalid origin doesn't crash.
-  base::ListValue set_args;
-  set_args.AppendString(origin);
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(origin);
   {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
+    base::Value category_list(base::Value::Type::LIST);
+    category_list.Append(kNotifications);
     set_args.Append(std::move(category_list));
   }
-  set_args.AppendString(
+  set_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_ALLOW));
-  handler()->HandleSetOriginPermissions(&set_args);
+  handler()->HandleSetOriginPermissions(&base::Value::AsListValue(set_args));
 
   // Also make sure the content setting for |origin| wasn't actually changed.
-  handler()->HandleGetOriginPermissions(&get_args);
+  handler()->HandleGetOriginPermissions(&base::Value::AsListValue(get_args));
   ValidateOrigin(origin, origin, "", CONTENT_SETTING_BLOCK,
                  site_settings::SiteSettingSource::kInsecureOrigin, 2U);
 }
@@ -1370,7 +1411,8 @@ TEST_F(SiteSettingsHandlerTest, ExceptionHelpers) {
       ContentSettingsPattern::FromString("[*.]google.com");
   std::unique_ptr<base::DictionaryValue> exception =
       site_settings::GetExceptionForPage(
-          pattern, ContentSettingsPattern::Wildcard(), pattern.ToString(),
+          ContentSettingsType::NOTIFICATIONS, /*profile=*/nullptr, pattern,
+          ContentSettingsPattern::Wildcard(), pattern.ToString(),
           CONTENT_SETTING_BLOCK,
           site_settings::SiteSettingSourceToString(
               site_settings::SiteSettingSource::kPreference),
@@ -1385,16 +1427,17 @@ TEST_F(SiteSettingsHandlerTest, ExceptionHelpers) {
   CHECK(exception->GetString(site_settings::kSetting, &type));
   CHECK(exception->GetBoolean(site_settings::kIncognito, &incognito));
 
-  base::ListValue args;
-  args.AppendString(primary_pattern);
-  args.AppendString(secondary_pattern);
-  args.AppendString(kNotifications);  // Chosen arbitrarily.
-  args.AppendString(type);
-  args.AppendBoolean(incognito);
+  base::Value args(base::Value::Type::LIST);
+  args.Append(primary_pattern);
+  args.Append(secondary_pattern);
+  args.Append(kNotifications);  // Chosen arbitrarily.
+  args.Append(type);
+  args.Append(incognito);
 
   // We don't need to check the results. This is just to make sure it doesn't
   // crash on the input.
-  handler()->HandleSetCategoryPermissionForPattern(&args);
+  handler()->HandleSetCategoryPermissionForPattern(
+      &base::Value::AsListValue(args));
 
   scoped_refptr<const extensions::Extension> extension;
   extension = extensions::ExtensionBuilder()
@@ -1420,7 +1463,8 @@ TEST_F(SiteSettingsHandlerTest, ExceptionHelpers) {
   CHECK(dictionary->GetBoolean(site_settings::kIncognito, &incognito));
 
   // Again, don't need to check the results.
-  handler()->HandleSetCategoryPermissionForPattern(&args);
+  handler()->HandleSetCategoryPermissionForPattern(
+      &base::Value::AsListValue(args));
 }
 
 TEST_F(SiteSettingsHandlerTest, ExtensionDisplayName) {
@@ -1438,15 +1482,16 @@ TEST_F(SiteSettingsHandlerTest, ExtensionDisplayName) {
           .Build();
   extension_registry->AddEnabled(extension);
 
-  base::ListValue get_origin_permissions_args;
-  get_origin_permissions_args.AppendString(kCallbackId);
-  get_origin_permissions_args.AppendString(test_extension_url);
+  base::Value get_origin_permissions_args(base::Value::Type::LIST);
+  get_origin_permissions_args.Append(kCallbackId);
+  get_origin_permissions_args.Append(test_extension_url);
   {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
+    base::Value category_list(base::Value::Type::LIST);
+    category_list.Append(kNotifications);
     get_origin_permissions_args.Append(std::move(category_list));
   }
-  handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+  handler()->HandleGetOriginPermissions(
+      &base::Value::AsListValue(get_origin_permissions_args));
   ValidateOrigin(test_extension_url, test_extension_url, kExtensionName,
                  CONTENT_SETTING_ASK,
                  site_settings::SiteSettingSource::kDefault, 1U);
@@ -1455,11 +1500,11 @@ TEST_F(SiteSettingsHandlerTest, ExtensionDisplayName) {
 TEST_F(SiteSettingsHandlerTest, PatternsAndContentType) {
   unsigned counter = 1;
   for (const auto& test_case : kPatternsAndContentTypeTestCases) {
-    base::ListValue args;
-    args.AppendString(kCallbackId);
-    args.AppendString(test_case.arguments.pattern);
-    args.AppendString(test_case.arguments.content_type);
-    handler()->HandleIsPatternValidForType(&args);
+    base::Value args(base::Value::Type::LIST);
+    args.Append(kCallbackId);
+    args.Append(test_case.arguments.pattern);
+    args.Append(test_case.arguments.content_type);
+    handler()->HandleIsPatternValidForType(&base::Value::AsListValue(args));
     ValidatePattern(test_case.expected.validity, counter,
                     test_case.expected.reason);
     ++counter;
@@ -1467,8 +1512,8 @@ TEST_F(SiteSettingsHandlerTest, PatternsAndContentType) {
 }
 
 TEST_F(SiteSettingsHandlerTest, Incognito) {
-  base::ListValue args;
-  handler()->HandleUpdateIncognitoStatus(&args);
+  base::Value args(base::Value::Type::LIST);
+  handler()->HandleUpdateIncognitoStatus(&base::Value::AsListValue(args));
   ValidateIncognitoExists(false, 1U);
 
   CreateIncognitoProfile();
@@ -1487,12 +1532,12 @@ TEST_F(SiteSettingsHandlerTest, ZoomLevels) {
   host_zoom_map->SetZoomLevelForHost(host, zoom_level);
   ValidateZoom(host, "122%", 1U);
 
-  base::ListValue args;
-  handler()->HandleFetchZoomLevels(&args);
+  base::Value args(base::Value::Type::LIST);
+  handler()->HandleFetchZoomLevels(&base::Value::AsListValue(args));
   ValidateZoom(host, "122%", 2U);
 
-  args.AppendString("http://www.google.com");
-  handler()->HandleRemoveZoomLevel(&args);
+  args.Append("http://www.google.com");
+  handler()->HandleRemoveZoomLevel(&base::Value::AsListValue(args));
   ValidateZoom("", "", 3U);
 
   double default_level = host_zoom_map->GetDefaultZoomLevel();
@@ -1511,7 +1556,13 @@ class SiteSettingsHandlerInfobarTest : public BrowserWithTestWindowTest {
       const SiteSettingsHandlerInfobarTest&) = delete;
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
-    handler_ = std::make_unique<SiteSettingsHandler>(profile(), app_registrar_);
+
+    test_registry_controller_ =
+        std::make_unique<web_app::TestWebAppRegistryController>();
+    test_registry_controller_->SetUp(profile());
+
+    handler_ =
+        std::make_unique<SiteSettingsHandler>(profile(), app_registrar());
     handler()->set_web_ui(web_ui());
     handler()->AllowJavascript();
     web_ui()->ClearTrackedCalls();
@@ -1525,6 +1576,9 @@ class SiteSettingsHandlerInfobarTest : public BrowserWithTestWindowTest {
             extensions::ExtensionSystem::Get(profile()));
     extension_system->CreateExtensionService(
         base::CommandLine::ForCurrentProcess(), base::FilePath(), false);
+
+    // Wait for the sync bridge to be ready synchronously.
+    controller().Init();
   }
 
   void TearDown() override {
@@ -1539,14 +1593,14 @@ class SiteSettingsHandlerInfobarTest : public BrowserWithTestWindowTest {
     BrowserWithTestWindowTest::TearDown();
   }
 
-  InfoBarService* GetInfobarServiceForTab(Browser* browser,
-                                          int tab_index,
-                                          GURL* tab_url) {
+  infobars::ContentInfoBarManager* GetInfoBarManagerForTab(Browser* browser,
+                                                           int tab_index,
+                                                           GURL* tab_url) {
     content::WebContents* web_contents =
         browser->tab_strip_model()->GetWebContentsAt(tab_index);
     if (tab_url)
       *tab_url = web_contents->GetLastCommittedURL();
-    return InfoBarService::FromWebContents(web_contents);
+    return infobars::ContentInfoBarManager::FromWebContents(web_contents);
   }
 
   content::TestWebUI* web_ui() { return &web_ui_; }
@@ -1555,10 +1609,17 @@ class SiteSettingsHandlerInfobarTest : public BrowserWithTestWindowTest {
 
   Browser* browser2() { return browser2_.get(); }
 
+  web_app::TestWebAppRegistryController& controller() {
+    return *test_registry_controller_;
+  }
+
+  web_app::WebAppRegistrar& app_registrar() { return controller().registrar(); }
+
   const std::string kNotifications;
 
  private:
-  web_app::TestAppRegistrar app_registrar_;
+  std::unique_ptr<web_app::TestWebAppRegistryController>
+      test_registry_controller_;
   content::TestWebUI web_ui_;
   std::unique_ptr<SiteSettingsHandler> handler_;
   std::unique_ptr<BrowserWindow> window2_;
@@ -1605,7 +1666,7 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   AddTab(browser(), foo);
   for (int i = 0; i < browser()->tab_strip_model()->count(); ++i) {
     EXPECT_EQ(0u,
-              GetInfobarServiceForTab(browser(), i, nullptr)->infobar_count());
+              GetInfoBarManagerForTab(browser(), i, nullptr)->infobar_count());
   }
 
   AddTab(browser2(), about);
@@ -1614,20 +1675,16 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   AddTab(browser2(), insecure);
   for (int i = 0; i < browser2()->tab_strip_model()->count(); ++i) {
     EXPECT_EQ(0u,
-              GetInfobarServiceForTab(browser2(), i, nullptr)->infobar_count());
+              GetInfoBarManagerForTab(browser2(), i, nullptr)->infobar_count());
   }
 
   // Block notifications.
-  base::ListValue set_args;
-  set_args.AppendString(origin_anchor_string);
-  {
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
-    set_args.Append(std::move(category_list));
-  }
-  set_args.AppendString(
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(origin_anchor_string);
+  set_args.Append(kNotifications);
+  set_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_BLOCK));
-  handler()->HandleSetOriginPermissions(&set_args);
+  handler()->HandleSetOriginPermissions(&base::Value::AsListValue(set_args));
 
   // Make sure all tabs belonging to the same origin as |origin_anchor| have an
   // infobar shown.
@@ -1635,11 +1692,11 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   for (int i = 0; i < browser()->tab_strip_model()->count(); ++i) {
     if (i == /*origin_anchor=*/1 || i == /*origin=*/3) {
       EXPECT_EQ(
-          1u, GetInfobarServiceForTab(browser(), i, &tab_url)->infobar_count());
+          1u, GetInfoBarManagerForTab(browser(), i, &tab_url)->infobar_count());
       EXPECT_TRUE(url::IsSameOriginWith(origin, tab_url));
     } else {
       EXPECT_EQ(
-          0u, GetInfobarServiceForTab(browser(), i, &tab_url)->infobar_count());
+          0u, GetInfoBarManagerForTab(browser(), i, &tab_url)->infobar_count());
       EXPECT_FALSE(url::IsSameOriginWith(origin, tab_url));
     }
   }
@@ -1647,12 +1704,12 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
     if (i == /*origin_query=*/1) {
       EXPECT_EQ(
           1u,
-          GetInfobarServiceForTab(browser2(), i, &tab_url)->infobar_count());
+          GetInfoBarManagerForTab(browser2(), i, &tab_url)->infobar_count());
       EXPECT_TRUE(url::IsSameOriginWith(origin, tab_url));
     } else {
       EXPECT_EQ(
           0u,
-          GetInfobarServiceForTab(browser2(), i, &tab_url)->infobar_count());
+          GetInfoBarManagerForTab(browser2(), i, &tab_url)->infobar_count());
       EXPECT_FALSE(url::IsSameOriginWith(origin, tab_url));
     }
   }
@@ -1676,14 +1733,14 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   NavigateAndCommit(origin_query_controller, example_without_www);
 
   // Reset all permissions.
-  base::ListValue reset_args;
-  reset_args.AppendString(origin_anchor_string);
-  auto category_list = std::make_unique<base::ListValue>();
-  category_list->AppendString(kNotifications);
+  base::Value reset_args(base::Value::Type::LIST);
+  reset_args.Append(origin_anchor_string);
+  base::Value category_list(base::Value::Type::LIST);
+  category_list.Append(kNotifications);
   reset_args.Append(std::move(category_list));
-  reset_args.AppendString(
+  reset_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_DEFAULT));
-  handler()->HandleSetOriginPermissions(&reset_args);
+  handler()->HandleSetOriginPermissions(&base::Value::AsListValue(reset_args));
 
   // Check the same tabs (plus the tab navigated to |origin_path|) still have
   // infobars showing.
@@ -1691,11 +1748,11 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
     if (i == /*origin_path=*/0 || i == /*origin_anchor=*/1 ||
         i == /*origin=*/3) {
       EXPECT_EQ(
-          1u, GetInfobarServiceForTab(browser(), i, &tab_url)->infobar_count());
+          1u, GetInfoBarManagerForTab(browser(), i, &tab_url)->infobar_count());
       EXPECT_TRUE(url::IsSameOriginWith(origin, tab_url));
     } else {
       EXPECT_EQ(
-          0u, GetInfobarServiceForTab(browser(), i, &tab_url)->infobar_count());
+          0u, GetInfoBarManagerForTab(browser(), i, &tab_url)->infobar_count());
       EXPECT_FALSE(url::IsSameOriginWith(origin, tab_url));
     }
   }
@@ -1703,13 +1760,13 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   // navigated to |example_without_www|) should disappear.
   for (int i = 0; i < browser2()->tab_strip_model()->count(); ++i) {
     EXPECT_EQ(
-        0u, GetInfobarServiceForTab(browser2(), i, &tab_url)->infobar_count());
+        0u, GetInfoBarManagerForTab(browser2(), i, &tab_url)->infobar_count());
     EXPECT_FALSE(url::IsSameOriginWith(origin, tab_url));
   }
 
   // Make sure it's the correct infobar that's being shown.
   EXPECT_EQ(infobars::InfoBarDelegate::PAGE_INFO_INFOBAR_DELEGATE,
-            GetInfobarServiceForTab(browser(), /*origin_path=*/0, &tab_url)
+            GetInfoBarManagerForTab(browser(), /*origin_path=*/0, &tab_url)
                 ->infobar_at(0)
                 ->delegate()
                 ->GetIdentifier());
@@ -1719,15 +1776,16 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
 TEST_F(SiteSettingsHandlerTest, SessionOnlyException) {
   const std::string google_with_port("https://www.google.com:443");
   const std::string uma_base("WebsiteSettings.Menu.PermissionChanged");
-  base::ListValue set_args;
-  set_args.AppendString(google_with_port);  // Primary pattern.
-  set_args.AppendString(std::string());     // Secondary pattern.
-  set_args.AppendString(kCookies);
-  set_args.AppendString(
+  base::Value set_args(base::Value::Type::LIST);
+  set_args.Append(google_with_port);  // Primary pattern.
+  set_args.Append(std::string());     // Secondary pattern.
+  set_args.Append(kCookies);
+  set_args.Append(
       content_settings::ContentSettingToString(CONTENT_SETTING_SESSION_ONLY));
-  set_args.AppendBoolean(false);  // Incognito.
+  set_args.Append(false);  // Incognito.
   base::HistogramTester histograms;
-  handler()->HandleSetCategoryPermissionForPattern(&set_args);
+  handler()->HandleSetCategoryPermissionForPattern(
+      &base::Value::AsListValue(set_args));
 
   EXPECT_EQ(kNumberContentSettingListeners, web_ui()->call_data().size());
   histograms.ExpectTotalCount(uma_base, 1);
@@ -1735,8 +1793,8 @@ TEST_F(SiteSettingsHandlerTest, SessionOnlyException) {
 }
 
 TEST_F(SiteSettingsHandlerTest, BlockAutoplay_SendOnRequest) {
-  base::ListValue args;
-  handler()->HandleFetchBlockAutoplayStatus(&args);
+  base::Value args(base::Value::Type::LIST);
+  handler()->HandleFetchBlockAutoplayStatus(&base::Value::AsListValue(args));
 
   // Check that we are checked and enabled.
   ValidateBlockAutoplay(true, true);
@@ -1773,10 +1831,10 @@ TEST_F(SiteSettingsHandlerTest, BlockAutoplay_PrefUpdate) {
 TEST_F(SiteSettingsHandlerTest, BlockAutoplay_Update) {
   EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(prefs::kBlockAutoplayEnabled));
 
-  base::ListValue data;
-  data.AppendBoolean(false);
+  base::Value data(base::Value::Type::LIST);
+  data.Append(false);
 
-  handler()->HandleSetBlockAutoplayEnabled(&data);
+  handler()->HandleSetBlockAutoplayEnabled(&base::Value::AsListValue(data));
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(prefs::kBlockAutoplayEnabled));
 }
 
@@ -1814,13 +1872,10 @@ TEST_F(SiteSettingsHandlerTest, ExcludeWebUISchemesInLists) {
 
   // GetAllSites() only returns website exceptions.
   {
-    base::ListValue get_all_sites_args;
-    get_all_sites_args.AppendString(kCallbackId);
-    base::Value category_list(base::Value::Type::LIST);
-    category_list.Append(kNotifications);
-    get_all_sites_args.Append(std::move(category_list));
+    base::Value get_all_sites_args(base::Value::Type::LIST);
+    get_all_sites_args.Append(kCallbackId);
 
-    handler()->HandleGetAllSites(&get_all_sites_args);
+    handler()->HandleGetAllSites(&base::Value::AsListValue(get_all_sites_args));
 
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     base::Value::ConstListView site_groups = data.arg3()->GetList();
@@ -1837,11 +1892,12 @@ TEST_F(SiteSettingsHandlerTest, ExcludeWebUISchemesInLists) {
 
   // GetExceptionList() only returns website exceptions.
   {
-    base::ListValue get_exception_list_args;
-    get_exception_list_args.AppendString(kCallbackId);
-    get_exception_list_args.AppendString(kNotifications);
+    base::Value get_exception_list_args(base::Value::Type::LIST);
+    get_exception_list_args.Append(kCallbackId);
+    get_exception_list_args.Append(kNotifications);
 
-    handler()->HandleGetExceptionList(&get_exception_list_args);
+    handler()->HandleGetExceptionList(
+        &base::Value::AsListValue(get_exception_list_args));
 
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     base::Value::ConstListView exception_list = data.arg3()->GetList();
@@ -1852,14 +1908,12 @@ TEST_F(SiteSettingsHandlerTest, ExcludeWebUISchemesInLists) {
 
   // GetRecentSitePermissions() only returns website exceptions.
   {
-    base::ListValue get_recent_permissions_args;
-    get_recent_permissions_args.AppendString(kCallbackId);
-    base::Value category_list(base::Value::Type::LIST);
-    category_list.Append(kNotifications);
-    get_recent_permissions_args.Append(std::move(category_list));
+    base::Value get_recent_permissions_args(base::Value::Type::LIST);
+    get_recent_permissions_args.Append(kCallbackId);
     get_recent_permissions_args.Append(3);
 
-    handler()->HandleGetRecentSitePermissions(&get_recent_permissions_args);
+    handler()->HandleGetRecentSitePermissions(
+        &base::Value::AsListValue(get_recent_permissions_args));
 
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     base::Value::ConstListView recent_permission_list = data.arg3()->GetList();
@@ -1888,14 +1942,15 @@ TEST_F(SiteSettingsHandlerTest, IncludeWebUISchemesInGetOriginPermissions) {
     allowlist->RegisterAutoGrantedPermission(origin, content_settings_type);
 
   for (const url::Origin& origin : kWebUIOrigins) {
-    base::ListValue get_origin_permissions_args;
-    get_origin_permissions_args.AppendString(kCallbackId);
-    get_origin_permissions_args.AppendString(origin.GetURL().spec());
-    auto category_list = std::make_unique<base::ListValue>();
-    category_list->AppendString(kNotifications);
+    base::Value get_origin_permissions_args(base::Value::Type::LIST);
+    get_origin_permissions_args.Append(kCallbackId);
+    get_origin_permissions_args.Append(origin.GetURL().spec());
+    base::Value category_list(base::Value::Type::LIST);
+    category_list.Append(kNotifications);
     get_origin_permissions_args.Append(std::move(category_list));
 
-    handler()->HandleGetOriginPermissions(&get_origin_permissions_args);
+    handler()->HandleGetOriginPermissions(
+        &base::Value::AsListValue(get_origin_permissions_args));
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
     const base::Value::ConstListView exception_list = data.arg3()->GetList();
     EXPECT_EQ(1UL, exception_list.size());
@@ -1925,25 +1980,15 @@ constexpr char kUsbPolicySetting[] = R"(
       }
     ])";
 
-// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
-// function.
-GURL AndroidUrl() {
-  return GURL("https://android.com");
-}
-GURL ChromiumUrl() {
-  return GURL("https://chromium.org");
-}
-GURL GoogleUrl() {
-  return GURL("https://google.com");
-}
-GURL WebUIUrl() {
-  return GURL("chrome://test");
-}
-
 }  // namespace
 
 class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
  protected:
+  const GURL kAndroidUrl{"https://android.com"};
+  const GURL kChromiumUrl{"https://chromium.org"};
+  const GURL kGoogleUrl{"https://google.com"};
+  const GURL kWebUIUrl{"chrome://test"};
+
   void SetUp() override {
     // Set up UsbChooserContext first, since the granting of device permissions
     // causes the WebUI listener callbacks for
@@ -1956,7 +2001,7 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
 
   void TearDown() override {
     auto* chooser_context = UsbChooserContextFactory::GetForProfile(profile());
-    chooser_context->permissions::ChooserContextBase::RemoveObserver(
+    chooser_context->permissions::ObjectPermissionContextBase::RemoveObserver(
         &observer_);
   }
 
@@ -1983,25 +2028,23 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
         base::DoNothing::Once<std::vector<device::mojom::UsbDeviceInfoPtr>>());
     base::RunLoop().RunUntilIdle();
 
-    const auto kAndroidOrigin = url::Origin::Create(AndroidUrl());
-    const auto kChromiumOrigin = url::Origin::Create(ChromiumUrl());
-    const auto kGoogleOrigin = url::Origin::Create(GoogleUrl());
-    const auto kWebUIOrigin = url::Origin::Create(WebUIUrl());
+    const auto kAndroidOrigin = url::Origin::Create(kAndroidUrl);
+    const auto kChromiumOrigin = url::Origin::Create(kChromiumUrl);
+    const auto kGoogleOrigin = url::Origin::Create(kGoogleUrl);
+    const auto kWebUIOrigin = url::Origin::Create(kWebUIUrl);
 
     // Add the user granted permissions for testing.
     // These two persistent device permissions should be lumped together with
     // the policy permissions, since they apply to the same device and URL.
-    chooser_context->GrantDevicePermission(kChromiumOrigin, kChromiumOrigin,
+    chooser_context->GrantDevicePermission(kChromiumOrigin,
                                            *persistent_device_info_);
-    chooser_context->GrantDevicePermission(kChromiumOrigin, kGoogleOrigin,
+    chooser_context->GrantDevicePermission(kGoogleOrigin,
                                            *persistent_device_info_);
-    chooser_context->GrantDevicePermission(kAndroidOrigin, kChromiumOrigin,
+    chooser_context->GrantDevicePermission(kWebUIOrigin,
                                            *persistent_device_info_);
-    chooser_context->GrantDevicePermission(kWebUIOrigin, kWebUIOrigin,
-                                           *persistent_device_info_);
-    chooser_context->GrantDevicePermission(kAndroidOrigin, kAndroidOrigin,
+    chooser_context->GrantDevicePermission(kAndroidOrigin,
                                            *ephemeral_device_info_);
-    chooser_context->GrantDevicePermission(kAndroidOrigin, kAndroidOrigin,
+    chooser_context->GrantDevicePermission(kAndroidOrigin,
                                            *user_granted_device_info_);
 
     // Add the policy granted permissions for testing.
@@ -2011,7 +2054,8 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
                                *policy_value);
 
     // Add the observer for permission changes.
-    chooser_context->permissions::ChooserContextBase::AddObserver(&observer_);
+    chooser_context->permissions::ObjectPermissionContextBase::AddObserver(
+        &observer_);
   }
 
   void SetUpOffTheRecordUsbChooserContext() {
@@ -2029,19 +2073,19 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
         base::DoNothing::Once<std::vector<device::mojom::UsbDeviceInfoPtr>>());
     base::RunLoop().RunUntilIdle();
 
-    const auto kAndroidOrigin = url::Origin::Create(AndroidUrl());
-    const auto kChromiumOrigin = url::Origin::Create(ChromiumUrl());
-    chooser_context->GrantDevicePermission(kChromiumOrigin, kAndroidOrigin,
+    const auto kChromiumOrigin = url::Origin::Create(kChromiumUrl);
+    chooser_context->GrantDevicePermission(kChromiumOrigin,
                                            *off_the_record_device_);
 
     // Add the observer for permission changes.
-    chooser_context->permissions::ChooserContextBase::AddObserver(&observer_);
+    chooser_context->permissions::ObjectPermissionContextBase::AddObserver(
+        &observer_);
   }
 
   void DestroyIncognitoProfile() override {
     auto* chooser_context =
         UsbChooserContextFactory::GetForProfile(incognito_profile());
-    chooser_context->permissions::ChooserContextBase::RemoveObserver(
+    chooser_context->permissions::ObjectPermissionContextBase::RemoveObserver(
         &observer_);
 
     SiteSettingsHandlerTest::DestroyIncognitoProfile();
@@ -2051,11 +2095,11 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
   // and return the exception list received by the WebUI.
   void ValidateChooserExceptionList(const std::string& chooser_type,
                                     size_t expected_total_calls) {
-    base::ListValue args;
-    args.AppendString(kCallbackId);
-    args.AppendString(chooser_type);
+    base::Value args(base::Value::Type::LIST);
+    args.Append(kCallbackId);
+    args.Append(chooser_type);
 
-    handler()->HandleGetChooserExceptionList(&args);
+    handler()->HandleGetChooserExceptionList(&base::Value::AsListValue(args));
 
     EXPECT_EQ(web_ui()->call_data().size(), expected_total_calls);
 
@@ -2083,26 +2127,18 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
 
   // Iterate through the exception's sites array and return true if a site
   // exception matches |requesting_origin| and |embedding_origin|.
-  bool ChooserExceptionContainsSiteException(
-      const base::Value& exception,
-      const std::string& requesting_origin,
-      const std::string& embedding_origin) {
+  bool ChooserExceptionContainsSiteException(const base::Value& exception,
+                                             const std::string& origin) {
     const base::Value* sites = exception.FindListKey(site_settings::kSites);
     if (!sites)
       return false;
 
     for (const auto& site : sites->GetList()) {
-      const std::string* origin = site.FindStringKey(site_settings::kOrigin);
-      if (!origin)
+      const std::string* exception_origin =
+          site.FindStringKey(site_settings::kOrigin);
+      if (!exception_origin)
         continue;
-      if (*origin != requesting_origin)
-        continue;
-
-      const std::string* exception_embedding_origin =
-          site.FindStringKey(site_settings::kEmbeddingOrigin);
-      if (!exception_embedding_origin)
-        continue;
-      if (*exception_embedding_origin == embedding_origin)
+      if (*exception_origin == origin)
         return true;
     }
     return false;
@@ -2110,12 +2146,10 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
 
   // Iterate through the |exception_list| array and return true if there is a
   // chooser exception with |display_name| that contains a site exception for
-  // |requesting_origin| and |embedding_origin|.
-  bool ChooserExceptionContainsSiteException(
-      const base::Value& exceptions,
-      const std::string& display_name,
-      const std::string& requesting_origin,
-      const std::string& embedding_origin) {
+  // |origin|.
+  bool ChooserExceptionContainsSiteException(const base::Value& exceptions,
+                                             const std::string& display_name,
+                                             const std::string& origin) {
     if (!exceptions.is_list())
       return false;
 
@@ -2126,8 +2160,7 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
         continue;
 
       if (*exception_display_name == display_name) {
-        return ChooserExceptionContainsSiteException(
-            exception, requesting_origin, embedding_origin);
+        return ChooserExceptionContainsSiteException(exception, origin);
       }
     }
     return false;
@@ -2146,27 +2179,25 @@ class SiteSettingsHandlerChooserExceptionTest : public SiteSettingsHandlerTest {
 
 TEST_F(SiteSettingsHandlerChooserExceptionTest,
        HandleGetChooserExceptionListForUsb) {
-  const std::string kUsbChooserGroupName =
+  const std::string kUsbChooserGroupName(
       site_settings::ContentSettingsTypeToGroupName(
-          ContentSettingsType::USB_CHOOSER_DATA)
-          .as_string();
+          ContentSettingsType::USB_CHOOSER_DATA));
 
   const base::Value& exceptions = GetChooserExceptionListFromWebUiCallData(
       kUsbChooserGroupName, /*expected_total_calls=*/1u);
   EXPECT_EQ(exceptions.GetList().size(), 5u);
 
   // Don't include WebUI schemes.
-  const std::string kWebUIOriginStr = WebUIUrl().GetOrigin().spec();
-  EXPECT_FALSE(ChooserExceptionContainsSiteException(
-      exceptions, "Gizmo", kWebUIOriginStr, kWebUIOriginStr));
+  const std::string kWebUIOriginStr = kWebUIUrl.GetOrigin().spec();
+  EXPECT_FALSE(ChooserExceptionContainsSiteException(exceptions, "Gizmo",
+                                                     kWebUIOriginStr));
 }
 
 TEST_F(SiteSettingsHandlerChooserExceptionTest,
        HandleGetChooserExceptionListForUsbOffTheRecord) {
-  const std::string kUsbChooserGroupName =
+  const std::string kUsbChooserGroupName(
       site_settings::ContentSettingsTypeToGroupName(
-          ContentSettingsType::USB_CHOOSER_DATA)
-          .as_string();
+          ContentSettingsType::USB_CHOOSER_DATA));
   SetUpOffTheRecordUsbChooserContext();
   web_ui()->ClearTrackedCalls();
 
@@ -2200,14 +2231,15 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
 
 TEST_F(SiteSettingsHandlerChooserExceptionTest,
        HandleResetChooserExceptionForSiteForUsb) {
-  const std::string kUsbChooserGroupName =
+  const std::string kUsbChooserGroupName(
       site_settings::ContentSettingsTypeToGroupName(
-          ContentSettingsType::USB_CHOOSER_DATA)
-          .as_string();
-  const auto kAndroidOrigin = url::Origin::Create(AndroidUrl());
-  const auto kChromiumOrigin = url::Origin::Create(ChromiumUrl());
-  const std::string kAndroidOriginStr = AndroidUrl().GetOrigin().spec();
-  const std::string kChromiumOriginStr = ChromiumUrl().GetOrigin().spec();
+          ContentSettingsType::USB_CHOOSER_DATA));
+  const auto kAndroidOrigin = url::Origin::Create(kAndroidUrl);
+  const auto kChromiumOrigin = url::Origin::Create(kChromiumUrl);
+  const auto kGoogleOrigin = url::Origin::Create(kGoogleUrl);
+  const std::string kAndroidOriginStr = kAndroidUrl.GetOrigin().spec();
+  const std::string kChromiumOriginStr = kChromiumUrl.GetOrigin().spec();
+  const std::string kGoogleOriginStr = kGoogleUrl.GetOrigin().spec();
 
   {
     const base::Value& exceptions = GetChooserExceptionListFromWebUiCallData(
@@ -2218,18 +2250,21 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
   // User granted USB permissions for devices also containing policy permissions
   // should be able to be reset without removing the chooser exception object
   // from the list.
-  base::ListValue args;
-  args.AppendString(kUsbChooserGroupName);
-  args.AppendString(kAndroidOriginStr);
-  args.AppendString(kChromiumOriginStr);
-  args.Append(base::Value::ToUniquePtrValue(
-      UsbChooserContext::DeviceInfoToValue(*persistent_device_info_)));
+  base::Value args(base::Value::Type::LIST);
+  args.Append(kUsbChooserGroupName);
+  args.Append("https://unused.com");
+  args.Append(kGoogleOriginStr);
+  args.Append(UsbChooserContext::DeviceInfoToValue(*persistent_device_info_));
 
-  EXPECT_CALL(observer_, OnChooserObjectPermissionChanged(
-                             ContentSettingsType::USB_GUARD,
-                             ContentSettingsType::USB_CHOOSER_DATA));
-  EXPECT_CALL(observer_, OnPermissionRevoked(kAndroidOrigin, kChromiumOrigin));
-  handler()->HandleResetChooserExceptionForSite(&args);
+  EXPECT_CALL(observer_,
+              OnObjectPermissionChanged(absl::optional<ContentSettingsType>(
+                                            ContentSettingsType::USB_GUARD),
+                                        ContentSettingsType::USB_CHOOSER_DATA));
+  EXPECT_CALL(observer_, OnPermissionRevoked(kGoogleOrigin));
+  handler()->HandleResetChooserExceptionForSite(
+      &base::Value::AsListValue(args));
+  auto* chooser_context = UsbChooserContextFactory::GetForProfile(profile());
+  chooser_context->FlushScheduledSaveSettingsCalls();
 
   // The HandleResetChooserExceptionForSite() method should have also caused the
   // WebUIListenerCallbacks for contentSettingSitePermissionChanged and
@@ -2244,18 +2279,17 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
 
     // Ensure that the sites list does not contain the URLs of the removed
     // permission.
-    EXPECT_FALSE(ChooserExceptionContainsSiteException(
-        exceptions, "Gizmo", kAndroidOriginStr, kChromiumOriginStr));
+    EXPECT_FALSE(ChooserExceptionContainsSiteException(exceptions, "Gizmo",
+                                                       kGoogleOriginStr));
   }
 
   // User granted USB permissions that are also granted by policy should not
   // be able to be reset.
-  args.Clear();
-  args.AppendString(kUsbChooserGroupName);
-  args.AppendString(kChromiumOriginStr);
-  args.AppendString(kChromiumOriginStr);
-  args.Append(base::Value::ToUniquePtrValue(
-      UsbChooserContext::DeviceInfoToValue(*persistent_device_info_)));
+  args.ClearList();
+  args.Append(kUsbChooserGroupName);
+  args.Append("https://unused.com");
+  args.Append(kChromiumOriginStr);
+  args.Append(UsbChooserContext::DeviceInfoToValue(*persistent_device_info_));
 
   {
     const base::Value& exceptions =
@@ -2263,20 +2297,22 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
     EXPECT_EQ(exceptions.GetList().size(), 5u);
 
     // User granted exceptions that are also granted by policy are only
-    // displayed through the policy granted site exception, so ensure that a
-    // site exception entry for a requesting and embedding origin of
-    // kChromiumOriginStr does not exist.
-    EXPECT_TRUE(ChooserExceptionContainsSiteException(
-        exceptions, "Gizmo", kChromiumOriginStr, std::string()));
-    EXPECT_FALSE(ChooserExceptionContainsSiteException(
-        exceptions, "Gizmo", kChromiumOriginStr, kChromiumOriginStr));
+    // displayed through the policy granted site exception, so ensure that the
+    // policy exception is present under the "Gizmo" device.
+    EXPECT_TRUE(ChooserExceptionContainsSiteException(exceptions, "Gizmo",
+                                                      kChromiumOriginStr));
+    EXPECT_FALSE(ChooserExceptionContainsSiteException(exceptions, "Gizmo",
+                                                       kGoogleOriginStr));
   }
 
-  EXPECT_CALL(observer_, OnChooserObjectPermissionChanged(
-                             ContentSettingsType::USB_GUARD,
-                             ContentSettingsType::USB_CHOOSER_DATA));
-  EXPECT_CALL(observer_, OnPermissionRevoked(kChromiumOrigin, kChromiumOrigin));
-  handler()->HandleResetChooserExceptionForSite(&args);
+  EXPECT_CALL(observer_,
+              OnObjectPermissionChanged(absl::optional<ContentSettingsType>(
+                                            ContentSettingsType::USB_GUARD),
+                                        ContentSettingsType::USB_CHOOSER_DATA));
+  EXPECT_CALL(observer_, OnPermissionRevoked(kChromiumOrigin));
+  handler()->HandleResetChooserExceptionForSite(
+      &base::Value::AsListValue(args));
+  chooser_context->FlushScheduledSaveSettingsCalls();
 
   // The HandleResetChooserExceptionForSite() method should have also caused the
   // WebUIListenerCallbacks for contentSettingSitePermissionChanged and
@@ -2287,37 +2323,43 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
         kUsbChooserGroupName, /*expected_total_calls=*/8u);
     EXPECT_EQ(exceptions.GetList().size(), 5u);
 
-    // Ensure that the sites list still displays a site exception entry for a
-    // requesting origin of kChromiumOriginStr and a wildcard embedding origin.
+    // Ensure that the sites list still displays a site exception entry for an
+    // origin of kGoogleOriginStr.  Since now the device has had its
+    // permission revoked, the policy-provided object will not be able to deduce
+    // the name "Gizmo" from the connected device. As such we check that the
+    // policy is still active by looking for the genericly constructed name.
     EXPECT_TRUE(ChooserExceptionContainsSiteException(
-        exceptions, "Gizmo", kChromiumOriginStr, std::string()));
-    EXPECT_FALSE(ChooserExceptionContainsSiteException(
-        exceptions, "Gizmo", kChromiumOriginStr, kChromiumOriginStr));
+        exceptions, "Unknown product 0x162E from Google Inc.",
+        kChromiumOriginStr));
+    EXPECT_FALSE(ChooserExceptionContainsSiteException(exceptions, "Gizmo",
+                                                       kGoogleOriginStr));
   }
 
   // User granted USB permissions that are not covered by policy should be able
   // to be reset and the chooser exception entry should be removed from the list
   // when the exception only has one site exception granted to it..
-  args.Clear();
-  args.AppendString(kUsbChooserGroupName);
-  args.AppendString(kAndroidOriginStr);
-  args.AppendString(kAndroidOriginStr);
-  args.Append(base::Value::ToUniquePtrValue(
-      UsbChooserContext::DeviceInfoToValue(*user_granted_device_info_)));
+  args.ClearList();
+  args.Append(kUsbChooserGroupName);
+  args.Append("https://unused.com");
+  args.Append(kAndroidOriginStr);
+  args.Append(UsbChooserContext::DeviceInfoToValue(*user_granted_device_info_));
 
   {
     const base::Value& exceptions =
         GetChooserExceptionListFromWebUiCallData(kUsbChooserGroupName, 9u);
     EXPECT_EQ(exceptions.GetList().size(), 5u);
-    EXPECT_TRUE(ChooserExceptionContainsSiteException(
-        exceptions, "Widget", kAndroidOriginStr, kAndroidOriginStr));
+    EXPECT_TRUE(ChooserExceptionContainsSiteException(exceptions, "Widget",
+                                                      kAndroidOriginStr));
   }
 
-  EXPECT_CALL(observer_, OnChooserObjectPermissionChanged(
-                             ContentSettingsType::USB_GUARD,
-                             ContentSettingsType::USB_CHOOSER_DATA));
-  EXPECT_CALL(observer_, OnPermissionRevoked(kAndroidOrigin, kAndroidOrigin));
-  handler()->HandleResetChooserExceptionForSite(&args);
+  EXPECT_CALL(observer_,
+              OnObjectPermissionChanged(absl::optional<ContentSettingsType>(
+                                            ContentSettingsType::USB_GUARD),
+                                        ContentSettingsType::USB_CHOOSER_DATA));
+  EXPECT_CALL(observer_, OnPermissionRevoked(kAndroidOrigin));
+  handler()->HandleResetChooserExceptionForSite(
+      &base::Value::AsListValue(args));
+  chooser_context->FlushScheduledSaveSettingsCalls();
 
   // The HandleResetChooserExceptionForSite() method should have also caused the
   // WebUIListenerCallbacks for contentSettingSitePermissionChanged and
@@ -2327,8 +2369,8 @@ TEST_F(SiteSettingsHandlerChooserExceptionTest,
     const base::Value& exceptions = GetChooserExceptionListFromWebUiCallData(
         kUsbChooserGroupName, /*expected_total_calls=*/12u);
     EXPECT_EQ(exceptions.GetList().size(), 4u);
-    EXPECT_FALSE(ChooserExceptionContainsSiteException(
-        exceptions, "Widget", kAndroidOriginStr, kAndroidOriginStr));
+    EXPECT_FALSE(ChooserExceptionContainsSiteException(exceptions, "Widget",
+                                                       kAndroidOriginStr));
   }
 }
 
@@ -2346,9 +2388,10 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   ASSERT_TRUE(site_group->GetString("etldPlus1", &etld_plus1_string));
   ASSERT_EQ("example.com", etld_plus1_string);
 
-  base::ListValue args;
-  args.AppendString("example.com");
-  handler()->HandleClearEtldPlus1DataAndCookies(&args);
+  base::Value args(base::Value::Type::LIST);
+  args.Append("example.com");
+  handler()->HandleClearEtldPlus1DataAndCookies(
+      &base::Value::AsListValue(args));
   EXPECT_EQ(11, handler()->cookies_tree_model_->GetRoot()->GetTotalNodeCount());
 
   storage_and_cookie_list = GetOnStorageFetchedSentListValue();
@@ -2357,10 +2400,11 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   ASSERT_TRUE(site_group->GetString("etldPlus1", &etld_plus1_string));
   ASSERT_EQ("google.com", etld_plus1_string);
 
-  args.Clear();
-  args.AppendString("google.com");
+  args.ClearList();
+  args.Append("google.com");
 
-  handler()->HandleClearEtldPlus1DataAndCookies(&args);
+  handler()->HandleClearEtldPlus1DataAndCookies(
+      &base::Value::AsListValue(args));
 
   EXPECT_EQ(4, handler()->cookies_tree_model_->GetRoot()->GetTotalNodeCount());
 
@@ -2370,10 +2414,11 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   ASSERT_TRUE(site_group->GetString("etldPlus1", &etld_plus1_string));
   ASSERT_EQ("google.com.au", etld_plus1_string);
 
-  args.Clear();
-  args.AppendString("google.com.au");
+  args.ClearList();
+  args.Append("google.com.au");
 
-  handler()->HandleClearEtldPlus1DataAndCookies(&args);
+  handler()->HandleClearEtldPlus1DataAndCookies(
+      &base::Value::AsListValue(args));
 
   EXPECT_EQ(1, handler()->cookies_tree_model_->GetRoot()->GetTotalNodeCount());
 
@@ -2406,9 +2451,10 @@ TEST_F(SiteSettingsHandlerTest, CookieSettingDescription) {
   web_ui()->ClearTrackedCalls();
 
   // Validate get method works.
-  base::ListValue get_args;
-  get_args.AppendString(kCallbackId);
-  handler()->HandleGetCookieSettingDescription(&get_args);
+  base::Value get_args(base::Value::Type::LIST);
+  get_args.Append(kCallbackId);
+  handler()->HandleGetCookieSettingDescription(
+      &base::Value::AsListValue(get_args));
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
 
   EXPECT_EQ("cr.webUIResponse", data.function_name());
@@ -2477,10 +2523,10 @@ TEST_F(SiteSettingsHandlerTest, CookieSettingDescription) {
 
 TEST_F(SiteSettingsHandlerTest, HandleGetFormattedBytes) {
   const double size = 120000000000;
-  base::ListValue get_args;
-  get_args.AppendString(kCallbackId);
-  get_args.AppendDouble(size);
-  handler()->HandleGetFormattedBytes(&get_args);
+  base::Value get_args(base::Value::Type::LIST);
+  get_args.Append(kCallbackId);
+  get_args.Append(size);
+  handler()->HandleGetFormattedBytes(&base::Value::AsListValue(get_args));
 
   // Validate that this method can handle large data.
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();

@@ -17,7 +17,7 @@ std::string TestingSearchTermsData::GoogleBaseURLValue() const {
   return google_base_url_;
 }
 
-base::string16 TestingSearchTermsData::GetRlzParameterValue(
+std::u16string TestingSearchTermsData::GetRlzParameterValue(
     bool from_app_list) const {
   return base::ASCIIToUTF16(
       from_app_list ? "rlz_parameter_from_app_list" : "rlz_parameter");
@@ -27,8 +27,8 @@ std::string TestingSearchTermsData::GetSearchClient() const {
   return search_client_;
 }
 
-std::string TestingSearchTermsData::GetSuggestClient(bool from_ntp) const {
-  return from_ntp ? suggest_client_ + "_from_ntp" : suggest_client_;
+std::string TestingSearchTermsData::GetSuggestClient() const {
+  return suggest_client_;
 }
 
 std::string TestingSearchTermsData::GoogleImageSearchSource() const {

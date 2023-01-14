@@ -23,23 +23,23 @@ ShellContentClient::ShellContentClient() {}
 
 ShellContentClient::~ShellContentClient() {}
 
-base::string16 ShellContentClient::GetLocalizedString(int message_id) {
+std::u16string ShellContentClient::GetLocalizedString(int message_id) {
   if (switches::IsRunWebTestsSwitchPresent()) {
     switch (message_id) {
       case IDS_FORM_OTHER_DATE_LABEL:
-        return base::ASCIIToUTF16("<<OtherDateLabel>>");
+        return u"<<OtherDate>>";
       case IDS_FORM_OTHER_MONTH_LABEL:
-        return base::ASCIIToUTF16("<<OtherMonthLabel>>");
+        return u"<<OtherMonth>>";
       case IDS_FORM_OTHER_WEEK_LABEL:
-        return base::ASCIIToUTF16("<<OtherWeekLabel>>");
+        return u"<<OtherWeek>>";
       case IDS_FORM_CALENDAR_CLEAR:
-        return base::ASCIIToUTF16("<<CalendarClear>>");
+        return u"<<Clear>>";
       case IDS_FORM_CALENDAR_TODAY:
-        return base::ASCIIToUTF16("<<CalendarToday>>");
+        return u"<<Today>>";
       case IDS_FORM_THIS_MONTH_LABEL:
-        return base::ASCIIToUTF16("<<ThisMonthLabel>>");
+        return u"<<ThisMonth>>";
       case IDS_FORM_THIS_WEEK_LABEL:
-        return base::ASCIIToUTF16("<<ThisWeekLabel>>");
+        return u"<<ThisWeek>>";
     }
   }
   return l10n_util::GetStringUTF16(message_id);
@@ -47,7 +47,7 @@ base::string16 ShellContentClient::GetLocalizedString(int message_id) {
 
 base::StringPiece ShellContentClient::GetDataResource(
     int resource_id,
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
       resource_id, scale_factor);
 }

@@ -11,13 +11,13 @@
 #include "src/ast/scopes.h"
 #include "src/base/hashmap.h"
 #include "src/base/logging.h"
+#include "src/base/numbers/double.h"
 #include "src/base/platform/wrappers.h"
 #include "src/builtins/builtins-constructor.h"
 #include "src/builtins/builtins.h"
 #include "src/common/assert-scope.h"
 #include "src/heap/local-factory-inl.h"
 #include "src/numbers/conversions-inl.h"
-#include "src/numbers/double.h"
 #include "src/objects/contexts.h"
 #include "src/objects/elements-kind.h"
 #include "src/objects/elements.h"
@@ -56,7 +56,6 @@ static const char* NameForNativeContextIntrinsicIndex(uint32_t idx) {
 }
 
 void AstNode::Print(Isolate* isolate) {
-  AllowHandleDereference allow_deref;
   AstPrinter::PrintOut(isolate, this);
 }
 
@@ -243,7 +242,6 @@ std::unique_ptr<char[]> FunctionLiteral::GetDebugName() const {
   } else if (raw_inferred_name_ != nullptr && !raw_inferred_name_->IsEmpty()) {
     cons_string = raw_inferred_name_;
   } else if (!inferred_name_.is_null()) {
-    AllowHandleDereference allow_deref;
     return inferred_name_->ToCString();
   } else {
     char* empty_str = new char[1];
@@ -261,7 +259,7 @@ std::unique_ptr<char[]> FunctionLiteral::GetDebugName() const {
     }
   }
   std::unique_ptr<char[]> result(new char[result_vec.size() + 1]);
-  base::Memcpy(result.get(), result_vec.data(), result_vec.size());
+  memcpy(result.get(), result_vec.data(), result_vec.size());
   result[result_vec.size()] = '\0';
   return result;
 }
@@ -445,8 +443,8 @@ int ObjectLiteral::InitDepthAndFlags() {
   return depth_acc;
 }
 
-template <typename LocalIsolate>
-void ObjectLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
+template <typename IsolateT>
+void ObjectLiteral::BuildBoilerplateDescription(IsolateT* isolate) {
   if (!boilerplate_description_.is_null()) return;
 
   int index_keys = 0;
@@ -484,9 +482,9 @@ void ObjectLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
       m_literal->BuildConstants(isolate);
     }
 
-    // Add CONSTANT and COMPUTED properties to boilerplate. Use undefined
-    // value for COMPUTED properties, the real value is filled in at
-    // runtime. The enumeration order is maintained.
+    // Add CONSTANT and COMPUTED properties to boilerplate. Use the
+    // 'uninitialized' Oddball for COMPUTED properties, the real value is filled
+    // in at runtime. The enumeration order is maintained.
     Literal* key_literal = property->key()->AsLiteral();
     uint32_t element_index = 0;
     Handle<Object> key =
@@ -495,10 +493,7 @@ void ObjectLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
                   ->template NewNumberFromUint<AllocationType::kOld>(
                       element_index)
             : Handle<Object>::cast(key_literal->AsRawPropertyName()->string());
-
     Handle<Object> value = GetBoilerplateValue(property->value(), isolate);
-
-    // Add name, value pair to the fixed array.
     boilerplate_description->set_key_value(position++, *key, *value);
   }
 
@@ -599,8 +594,8 @@ int ArrayLiteral::InitDepthAndFlags() {
   return depth_acc;
 }
 
-template <typename LocalIsolate>
-void ArrayLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
+template <typename IsolateT>
+void ArrayLiteral::BuildBoilerplateDescription(IsolateT* isolate) {
   if (!boilerplate_description_.is_null()) return;
 
   int constants_length =
@@ -644,7 +639,7 @@ void ArrayLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
       }
 
       // New handle scope here, needs to be after BuildContants().
-      typename LocalIsolate::HandleScopeType scope(isolate);
+      typename IsolateT::HandleScopeType scope(isolate);
 
       Object boilerplate_value = *GetBoilerplateValue(element, isolate);
       // We shouldn't allocate after creating the boilerplate value.
@@ -663,7 +658,7 @@ void ArrayLiteral::BuildBoilerplateDescription(LocalIsolate* isolate) {
           boilerplate_descriptor_kind(),
           GetMoreGeneralElementsKind(boilerplate_descriptor_kind(),
                                      boilerplate_value.OptimalElementsKind(
-                                         GetIsolateForPtrCompr(*elements))));
+                                         GetPtrComprCageBase(*elements))));
 
       FixedArray::cast(*elements).set(array_index, boilerplate_value);
     }
@@ -699,9 +694,9 @@ bool MaterializedLiteral::IsSimple() const {
   return false;
 }
 
-template <typename LocalIsolate>
+template <typename IsolateT>
 Handle<Object> MaterializedLiteral::GetBoilerplateValue(Expression* expression,
-                                                        LocalIsolate* isolate) {
+                                                        IsolateT* isolate) {
   if (expression->IsLiteral()) {
     return expression->AsLiteral()->BuildValue(isolate);
   }
@@ -744,8 +739,8 @@ bool MaterializedLiteral::NeedsInitialAllocationSite() {
   return false;
 }
 
-template <typename LocalIsolate>
-void MaterializedLiteral::BuildConstants(LocalIsolate* isolate) {
+template <typename IsolateT>
+void MaterializedLiteral::BuildConstants(IsolateT* isolate) {
   if (IsArrayLiteral()) {
     AsArrayLiteral()->BuildBoilerplateDescription(isolate);
     return;
@@ -762,9 +757,9 @@ template EXPORT_TEMPLATE_DEFINE(
     V8_BASE_EXPORT) void MaterializedLiteral::BuildConstants(LocalIsolate*
                                                                  isolate);
 
-template <typename LocalIsolate>
+template <typename IsolateT>
 Handle<TemplateObjectDescription> GetTemplateObject::GetOrBuildDescription(
-    LocalIsolate* isolate) {
+    IsolateT* isolate) {
   Handle<FixedArray> raw_strings = isolate->factory()->NewFixedArray(
       this->raw_strings()->length(), AllocationType::kOld);
   bool raw_and_cooked_match = true;
@@ -891,6 +886,22 @@ bool CompareOperation::IsLiteralCompareNull(Expression** expr) {
          MatchLiteralCompareNull(right_, op(), left_, expr);
 }
 
+void CallBase::ComputeSpreadPosition() {
+  int arguments_length = arguments_.length();
+  int first_spread_index = 0;
+  for (; first_spread_index < arguments_length; first_spread_index++) {
+    if (arguments_.at(first_spread_index)->IsSpread()) break;
+  }
+  SpreadPosition position;
+  if (first_spread_index == arguments_length - 1) {
+    position = kHasFinalSpread;
+  } else {
+    DCHECK_LT(first_spread_index, arguments_length - 1);
+    position = kHasNonFinalSpread;
+  }
+  bit_field_ |= SpreadPositionField::encode(position);
+}
+
 Call::CallType Call::GetCallType() const {
   VariableProxy* proxy = expression()->AsVariableProxy();
   if (proxy != nullptr) {
@@ -964,8 +975,8 @@ bool Literal::AsArrayIndex(uint32_t* value) const {
   return ToUint32(value) && *value != kMaxUInt32;
 }
 
-template <typename LocalIsolate>
-Handle<Object> Literal::BuildValue(LocalIsolate* isolate) const {
+template <typename IsolateT>
+Handle<Object> Literal::BuildValue(IsolateT* isolate) const {
   switch (type()) {
     case kSmi:
       return handle(Smi::FromInt(smi_), isolate);
@@ -1026,14 +1037,25 @@ bool Literal::ToBooleanIsTrue() const {
 }
 
 uint32_t Literal::Hash() {
+  uint32_t index;
+  if (AsArrayIndex(&index)) {
+    // Treat array indices as numbers, so that array indices are de-duped
+    // correctly even if one of them is a string and the other is a number.
+    return ComputeLongHash(index);
+  }
   return IsString() ? AsRawString()->Hash()
-                    : ComputeLongHash(double_to_uint64(AsNumber()));
+                    : ComputeLongHash(base::double_to_uint64(AsNumber()));
 }
 
 // static
 bool Literal::Match(void* a, void* b) {
   Literal* x = static_cast<Literal*>(a);
   Literal* y = static_cast<Literal*>(b);
+  uint32_t index_x;
+  uint32_t index_y;
+  if (x->AsArrayIndex(&index_x)) {
+    return y->AsArrayIndex(&index_y) && index_x == index_y;
+  }
   return (x->IsString() && y->IsString() &&
           x->AsRawString() == y->AsRawString()) ||
          (x->IsNumber() && y->IsNumber() && x->AsNumber() == y->AsNumber());

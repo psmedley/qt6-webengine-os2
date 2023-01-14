@@ -16,6 +16,10 @@ Action::Action(ActionDelegate* delegate, const ActionProto& proto)
 
 Action::~Action() {}
 
+bool Action::ShouldInterruptOnPause() const {
+  return false;
+}
+
 void Action::ProcessAction(ProcessActionCallback callback) {
   action_stopwatch_.StartActiveTime();
   processed_action_proto_ = std::make_unique<ProcessedActionProto>();
@@ -80,12 +84,6 @@ std::ostream& operator<<(std::ostream& out,
   return out;
 #else
   switch (action_case) {
-    case ActionProto::ActionInfoCase::kClick:
-      out << "Click";
-      break;
-    case ActionProto::ActionInfoCase::kSetFormValue:
-      out << "KeyboardInput";
-      break;
     case ActionProto::ActionInfoCase::kSelectOption:
       out << "SelectOption";
       break;
@@ -214,6 +212,51 @@ std::ostream& operator<<(std::ostream& out,
       break;
     case ActionProto::ActionInfoCase::kDispatchJsEvent:
       out << "DispatchJsEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSendKeyEvent:
+      out << "SendKeyEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSelectOptionElement:
+      out << "SelectOptionElement";
+      break;
+    case ActionProto::ActionInfoCase::kCheckElementTag:
+      out << "CheckElementTag";
+      break;
+    case ActionProto::ActionInfoCase::kCheckOptionElement:
+      out << "CheckOptionElement";
+      break;
+    case ActionProto::ActionInfoCase::kSetPersistentUi:
+      out << "SetPersistentUi";
+      break;
+    case ActionProto::ActionInfoCase::kClearPersistentUi:
+      out << "ClearPersistentUi";
+      break;
+    case ActionProto::ActionInfoCase::kScrollIntoViewIfNeeded:
+      out << "ScrollIntoViewIfNeeded";
+      break;
+    case ActionProto::ActionInfoCase::kScrollWindow:
+      out << "ScrollWindow";
+      break;
+    case ActionProto::ActionInfoCase::kScrollContainer:
+      out << "ScrollContainer";
+      break;
+    case ActionProto::ActionInfoCase::kSetTouchableArea:
+      out << "SetTouchableArea";
+      break;
+    case ActionProto::ActionInfoCase::kDeletePassword:
+      out << "DeletePassword";
+      break;
+    case ActionProto::ActionInfoCase::kEditPassword:
+      out << "EditPassword";
+      break;
+    case ActionProto::ActionInfoCase::kBlurField:
+      out << "BlurField";
+      break;
+    case ActionProto::ActionInfoCase::kResetPendingCredentials:
+      out << "ResetPendingCredentials";
+      break;
+    case ActionProto::ActionInfoCase::kSaveSubmittedPassword:
+      out << "SaveSubmittedPassword";
       break;
     case ActionProto::ActionInfoCase::ACTION_INFO_NOT_SET:
       out << "ACTION_INFO_NOT_SET";

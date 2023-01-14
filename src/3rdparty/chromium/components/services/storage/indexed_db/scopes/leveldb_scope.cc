@@ -10,8 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/debug/stack_trace.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scopes_coding.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/leveldatabase/src/include/leveldb/comparator.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
@@ -105,16 +105,14 @@ class LevelDBScope::UndoLogWriter : public leveldb::WriteBatch::Handler {
   leveldb::Status error_ = leveldb::Status::OK();
 };
 
-LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan() noexcept = default;
+LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan() = default;
 LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan(
-    const leveldb::Comparator* comparator) noexcept
+    const leveldb::Comparator* comparator)
     : comparator_(comparator) {}
-LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan(const LevelDBScope::EmptyRangeLessThan& other) noexcept = default;
+LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan(
+    const LevelDBScope::EmptyRangeLessThan& other) = default;
 LevelDBScope::EmptyRangeLessThan& LevelDBScope::EmptyRangeLessThan::operator=(
-    const LevelDBScope::EmptyRangeLessThan& other) noexcept = default;
-LevelDBScope::EmptyRangeLessThan::EmptyRangeLessThan(LevelDBScope::EmptyRangeLessThan&& other) noexcept = default;
-LevelDBScope::EmptyRangeLessThan& LevelDBScope::EmptyRangeLessThan::operator=(
-    LevelDBScope::EmptyRangeLessThan&& other) noexcept = default;
+    const LevelDBScope::EmptyRangeLessThan& other) = default;
 
 // The ranges are expected to be disjoint.
 bool LevelDBScope::EmptyRangeLessThan::operator()(const EmptyRange& lhs,

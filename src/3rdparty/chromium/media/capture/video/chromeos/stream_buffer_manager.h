@@ -17,12 +17,12 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/queue.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_device_delegate.h"
 #include "media/capture/video/chromeos/mojom/camera3.mojom.h"
 #include "media/capture/video_capture_types.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace gfx {
 
@@ -32,6 +32,7 @@ class GpuMemoryBuffer;
 
 namespace gpu {
 
+class GpuMemoryBufferImpl;
 class GpuMemoryBufferSupport;
 
 }  // namespace gpu
@@ -68,7 +69,7 @@ class CAPTURE_EXPORT StreamBufferManager final {
   //
   // TODO(crbug.com/990682): Remove the |rotation| arg when we disable the
   // camera frame rotation for good.
-  base::Optional<Buffer> AcquireBufferForClientById(StreamType stream_type,
+  absl::optional<Buffer> AcquireBufferForClientById(StreamType stream_type,
                                                     uint64_t buffer_ipc_id,
                                                     VideoCaptureFormat* format);
 
@@ -93,9 +94,9 @@ class CAPTURE_EXPORT StreamBufferManager final {
   // Requests buffer for specific stream type. If the |buffer_id| is provided,
   // it will use |buffer_id| as buffer id rather than using id from free
   // buffers.
-  base::Optional<BufferInfo> RequestBufferForCaptureRequest(
+  absl::optional<BufferInfo> RequestBufferForCaptureRequest(
       StreamType stream_type,
-      base::Optional<uint64_t> buffer_ipc_id);
+      absl::optional<uint64_t> buffer_ipc_id);
 
   // Releases buffer by marking it as free buffer.
   void ReleaseBufferFromCaptureResult(StreamType stream_type,
@@ -107,13 +108,18 @@ class CAPTURE_EXPORT StreamBufferManager final {
 
   bool IsRecordingSupported();
 
+  std::unique_ptr<gpu::GpuMemoryBufferImpl> CreateGpuMemoryBuffer(
+      gfx::GpuMemoryBufferHandle handle,
+      const VideoCaptureFormat& format,
+      gfx::BufferUsage buffer_usage);
+
  private:
   friend class RequestManagerTest;
 
   // BufferPair holding up to two types of handles of a stream buffer.
   struct BufferPair {
     BufferPair(std::unique_ptr<gfx::GpuMemoryBuffer> gmb,
-               base::Optional<Buffer> vcd_buffer);
+               absl::optional<Buffer> vcd_buffer);
     BufferPair(BufferPair&& other);
     ~BufferPair();
     // The GpuMemoryBuffer interface of the stream buffer.
@@ -124,7 +130,7 @@ class CAPTURE_EXPORT StreamBufferManager final {
     std::unique_ptr<gfx::GpuMemoryBuffer> gmb;
     // The VCD buffer reserved from the VCD buffer pool.  This is only set when
     // the VCD runs GpuMemoryBuffer-based VideoCapture buffer.
-    base::Optional<Buffer> vcd_buffer;
+    absl::optional<Buffer> vcd_buffer;
   };
 
   struct StreamContext {

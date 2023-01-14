@@ -7,20 +7,17 @@
 
 #include <stdint.h>
 
+#include "base/allocator/buildflags.h"
+#include "base/allocator/partition_allocator/partition_alloc-inl.h"
+#include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/allocator/partition_allocator/partition_alloc_constants.h"
+#include "base/allocator/partition_allocator/partition_ref_count.h"
 #include "base/compiler_specific.h"
 #include "base/dcheck_is_on.h"
+#include "base/debug/alias.h"
 #include "base/immediate_crash.h"
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
-
-// Enable free list hardening.
-//
-// Disabled on ARM64 Macs, as this crashes very early (crbug.com/1172236).
-// TODO(lizeb): Enable in as many configurations as possible.
-#if !(defined(OS_MAC) && defined(ARCH_CPU_ARM64))
-#define PA_HAS_FREELIST_HARDENING
-#endif
 
 namespace base {
 namespace internal {
@@ -28,7 +25,22 @@ namespace internal {
 namespace {
 
 #if defined(PA_HAS_FREELIST_HARDENING) || DCHECK_IS_ON()
-[[noreturn]] NOINLINE void FreelistCorruptionDetected() {
+[[noreturn]] NOINLINE void FreelistCorruptionDetected(size_t extra) {
+  // Make it visible in minidumps.
+  //
+  // To make the size stick out, surround it with two easily recognizable
+  // patterns: 0xffffffff..
+  // Locally, one can use "x/3g <%rsp address>" in GDB to see the value on
+  // x86_64.
+  size_t before = ~0;
+  base::debug::Alias(&before);
+
+  size_t tmp_extra = extra;
+  base::debug::Alias(&tmp_extra);
+
+  size_t after = ~0;
+  base::debug::Alias(&after);
+
   IMMEDIATE_CRASH();
 }
 #endif  // defined(PA_HAS_FREELIST_HARDENING) || DCHECK_IS_ON()
@@ -38,8 +50,24 @@ namespace {
 struct EncodedPartitionFreelistEntry;
 
 #if defined(PA_HAS_FREELIST_HARDENING)
-static_assert((1 << kMinBucketedOrder) >= 2 * sizeof(void*),
+static_assert(kSmallestBucket >= 2 * sizeof(void*),
               "Need enough space for two pointers in freelist entries");
+#endif
+
+#if BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
+constexpr size_t kMinimalBucketSizeWithRefCount =
+    (1 + sizeof(PartitionRefCount) + kSmallestBucket - 1) &
+    ~(kSmallestBucket - 1);
+#if defined(PA_HAS_FREELIST_HARDENING)
+static_assert(
+    kMinimalBucketSizeWithRefCount >=
+        sizeof(PartitionRefCount) + 2 * sizeof(void*),
+    "Need enough space for two pointer and one refcount in freelist entries");
+#else
+static_assert(
+    kMinimalBucketSizeWithRefCount >= sizeof(PartitionRefCount) + sizeof(void*),
+    "Need enough space for one pointer and one refcount in freelist entries");
+#endif
 #endif
 
 // Freelist entries are encoded for security reasons. See
@@ -71,22 +99,29 @@ class PartitionFreelistEntry {
     return reinterpret_cast<EncodedPartitionFreelistEntry*>(Transform(ptr));
   }
 
-  ALWAYS_INLINE PartitionFreelistEntry* GetNext() const;
-  NOINLINE void CheckFreeList() const {
+  // Puts |extra| on the stack before crashing in case of memory
+  // corruption. Meant to be used to report the failed allocation size.
+  ALWAYS_INLINE PartitionFreelistEntry* GetNext(size_t extra) const;
+  NOINLINE void CheckFreeList(size_t extra) const {
 #if defined(PA_HAS_FREELIST_HARDENING)
-    for (auto* entry = this; entry; entry = entry->GetNext()) {
+    for (auto* entry = this; entry; entry = entry->GetNext(extra)) {
       // |GetNext()| checks freelist integrity.
     }
 #endif
   }
 
   ALWAYS_INLINE void SetNext(PartitionFreelistEntry* ptr) {
+    // SetNext() is either called on the freelist head, when provisioning new
+    // slots, or when GetNext() has been called before, no need to pass the
+    // size.
 #if DCHECK_IS_ON()
     // Regular freelists always point to an entry within the same super page.
+    //
+    // This is most likely a PartitionAlloc bug if this triggers.
     if (UNLIKELY(ptr &&
                  (reinterpret_cast<uintptr_t>(this) & kSuperPageBaseMask) !=
                      (reinterpret_cast<uintptr_t>(ptr) & kSuperPageBaseMask))) {
-      FreelistCorruptionDetected();
+      FreelistCorruptionDetected(0);
     }
 #endif  // DCHECK_IS_ON()
     SetNextInternal(ptr);
@@ -156,15 +191,27 @@ static_assert(sizeof(PartitionFreelistEntry) ==
                   sizeof(EncodedPartitionFreelistEntry),
               "Should not have padding");
 
-ALWAYS_INLINE PartitionFreelistEntry* PartitionFreelistEntry::GetNext() const {
+ALWAYS_INLINE PartitionFreelistEntry* PartitionFreelistEntry::GetNext(
+    size_t extra) const {
 #if defined(PA_HAS_FREELIST_HARDENING)
   // GetNext() can be called on decommitted memory, which is full of
   // zeroes. This is not a corruption issue, so only check integrity when we
   // have a non-nullptr |next_| pointer.
   if (UNLIKELY(next_ && ~reinterpret_cast<uintptr_t>(next_) != inverted_next_))
-    FreelistCorruptionDetected();
+    FreelistCorruptionDetected(extra);
 #endif  // defined(PA_HAS_FREELIST_HARDENING)
-  return EncodedPartitionFreelistEntry::Decode(next_);
+  auto* ret = EncodedPartitionFreelistEntry::Decode(next_);
+  // In real-world profiles, the load of |next_| above is responsible for a
+  // large fraction of the allocation cost. However, we cannot anticipate it
+  // enough since it is accessed right after we know its address.
+  //
+  // In the case of repeated allocations, we can prefetch the access that will
+  // be done at the *next* allocation, which will touch *ret, prefetch it. There
+  // is no harm in prefetching nullptr, but on some architectures, it causes a
+  // needless dTLB miss.
+  if (ret)
+    PA_PREFETCH(ret);
+  return ret;
 }
 
 }  // namespace internal

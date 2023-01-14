@@ -9,12 +9,15 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "base/test/scoped_feature_list.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/ax_inspect_factory.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/test/accessibility_notification_waiter.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/dump_accessibility_test_helper.h"
 #include "third_party/blink/public/common/features.h"
+#include "ui/accessibility/platform/inspect/ax_inspect_scenario.h"
 
 namespace content {
 
@@ -41,7 +44,10 @@ class DumpAccessibilityTestBase
   // loads the HTML, loads the accessibility tree, calls Dump(), then
   // compares the output to the expected result and has the test succeed
   // or fail based on the diff.
-  void RunTest(const base::FilePath file_path, const char* file_dir);
+  void RunTest(const base::FilePath file_path,
+               const char* file_dir,
+               const base::FilePath::StringType& expectations_qualifier =
+                   FILE_PATH_LITERAL(""));
 
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override;
@@ -56,8 +62,7 @@ class DumpAccessibilityTestBase
   // including the load complete accessibility event. The subclass should
   // dump whatever that specific test wants to dump, returning the result
   // as a sequence of strings.
-  virtual std::vector<std::string> Dump(
-      std::vector<std::string>& run_until) = 0;
+  virtual std::vector<std::string> Dump() = 0;
 
   // Add the default filters that are applied to all tests.
   virtual std::vector<ui::AXPropertyFilter> DefaultFilters() const = 0;
@@ -78,44 +83,84 @@ class DumpAccessibilityTestBase
   // and return it as a string.
   std::string DumpUnfilteredAccessibilityTreeAsString();
 
-  void RunTestForPlatform(const base::FilePath file_path, const char* file_dir);
+  void RunTestForPlatform(const base::FilePath file_path,
+                          const char* file_dir,
+                          const base::FilePath::StringType&
+                              expectations_qualifier = FILE_PATH_LITERAL(""));
 
   // Retrieve the accessibility node that matches the accessibility name. There
   // is an optional search_root parameter that defaults to the document root if
   // not provided.
-  BrowserAccessibility* FindNode(const std::string& name,
-                                 BrowserAccessibility* search_root = nullptr);
+  BrowserAccessibility* FindNode(
+      const std::string& name,
+      BrowserAccessibility* search_root = nullptr) const;
 
   // Retrieve the browser accessibility manager object for the current web
   // contents.
-  BrowserAccessibilityManager* GetManager();
+  BrowserAccessibilityManager* GetManager() const;
 
   std::unique_ptr<ui::AXTreeFormatter> CreateFormatter() const;
 
+  // Returns a list of captured events fired after the invoked action.
+  using InvokeAction = base::OnceCallback<base::Value()>;
+  std::pair<base::Value, std::vector<std::string>> CaptureEvents(
+      InvokeAction invoke_action);
+
   // Test scenario loaded from the test file.
-  DumpAccessibilityTestHelper::Scenario scenario_;
+  ui::AXInspectScenario scenario_;
 
   // Whether we should enable accessibility after navigating to the page,
   // otherwise we enable it first.
   bool enable_accessibility_after_navigating_;
 
-  // Whether we should enable extra mac nodes when running a test.
-  bool disable_extra_mac_nodes_for_testing_ = false;
-
   base::test::ScopedFeatureList scoped_feature_list_;
+
+  bool HasHtmlAttribute(BrowserAccessibility& node,
+                        const char* attr,
+                        const std::string& value) const;
+
+  BrowserAccessibility* FindNodeByHTMLAttribute(const char* attr,
+                                                const std::string& value) const;
 
  protected:
   DumpAccessibilityTestHelper test_helper_;
 
+  WebContentsImpl* GetWebContents() const;
+
+  // Wait until all accessibility events and dirty objects have been processed.
+  void WaitForEndOfTest() const;
+
+  // Perform any requested default actions and wait until a notification is
+  // received that each action is performed.
+  void PerformAndWaitForDefaultActions();
+
+  // Support the @WAIT-FOR directive (node, tree tests only).
+  void WaitForExpectedText();
+
+  // Wait for default action, expected text and then end of test signal.
+  void WaitForFinalTreeContents();
+
  private:
   BrowserAccessibility* FindNodeInSubtree(BrowserAccessibility& node,
-                                          const std::string& name);
+                                          const std::string& name) const;
+
+  BrowserAccessibility* FindNodeByHTMLAttributeInSubtree(
+      BrowserAccessibility& node,
+      const char* attr,
+      const std::string& value) const;
 
   std::vector<std::string> CollectAllFrameUrls(
-      WebContentsImpl* web_contents,
       const std::vector<std::string>& skip_urls);
 
-  void WaitForAXTreeLoaded(WebContentsImpl* web_contents);
+  // Wait until all initial content is completely loaded, included within
+  // subframes, objects and portals.
+  void WaitForAllFramesLoaded();
+
+  void OnEventRecorded(const std::string& event) const {
+    LOG(INFO) << "++ Platform event: " << event;
+  }
+
+  bool has_performed_default_actions_ = false;
 };
 
 }  // namespace content

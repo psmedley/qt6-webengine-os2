@@ -38,7 +38,7 @@ such as how to lay out UI elements and how to customize them.
 ## Run the example
 
 The example code is in the file
-[`ui/views/examples/colored_dialog_example.cc`](https://source.chromium.org/chromium/chromium/src/+/master:ui/views/examples/colored_dialog_example.cc)
+[`ui/views/examples/colored_dialog_example.cc`](https://source.chromium.org/chromium/chromium/src/+/main:ui/views/examples/colored_dialog_example.cc)
 and its corresponding header file. You can run it on Windows or Linux via
 the `views_examples` application. Change the path accordingly based on your
 platform and building environment:
@@ -68,7 +68,7 @@ is necessary.
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
   set_margins(views::LayoutProvider::Get()->GetDialogInsetsForContentType(
-      views::CONTROL, views::CONTROL));
+      views::DialogContentType::kControl, views::DialogContentType::kControl));
 
   textfield_ = AddChildView(std::make_unique<views::Textfield>());
   textfield_->SetPlaceholderText(
@@ -94,7 +94,7 @@ theme changes, including when a `View` is first shown.
 ``` cpp
 class ThemeTrackingCheckbox : public views::Checkbox {
  public:
-  explicit ThemeTrackingCheckbox(const base::string16& label)
+  explicit ThemeTrackingCheckbox(const std::u16string& label)
       : Checkbox(label, this) {}
   ThemeTrackingCheckbox(const ThemeTrackingCheckbox&) = delete;
   ThemeTrackingCheckbox& operator=(const ThemeTrackingCheckbox&) = delete;
@@ -154,7 +154,7 @@ change.
 class TextVectorImageButton : public views::MdTextButton {
 public:
  TextVectorImageButton(PressedCallback callback,
-                       const base::string16& text,
+                       const std::u16string& text,
                        const gfx::VectorIcon& icon)
      : MdTextButton(std::move(callback), text), icon_(icon) {}
  TextVectorImageButton(const TextVectorImageButton&) = delete;

@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_multi_column_set.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_flow_thread.h"
 #include "third_party/blink/renderer/core/layout/multi_column_fragmentainer_group.h"
@@ -46,8 +47,9 @@ LayoutMultiColumnSet* LayoutMultiColumnSet::CreateAnonymous(
   Document& document = flow_thread.GetDocument();
   LayoutMultiColumnSet* layout_object = new LayoutMultiColumnSet(&flow_thread);
   layout_object->SetDocumentForAnonymous(&document);
-  layout_object->SetStyle(ComputedStyle::CreateAnonymousStyleWithDisplay(
-      parent_style, EDisplay::kBlock));
+  layout_object->SetStyle(
+      document.GetStyleResolver().CreateAnonymousStyleWithDisplay(
+          parent_style, EDisplay::kBlock));
   return layout_object;
 }
 
@@ -515,7 +517,7 @@ LayoutUnit LayoutMultiColumnSet::ColumnGap() const {
   NOT_DESTROYED();
   LayoutBlockFlow* parent_block = MultiColumnBlockFlow();
 
-  if (const base::Optional<Length>& column_gap =
+  if (const absl::optional<Length>& column_gap =
           parent_block->StyleRef().ColumnGap())
     return ValueForLength(*column_gap, AvailableLogicalWidth());
 
@@ -549,7 +551,7 @@ LayoutRect LayoutMultiColumnSet::FragmentsBoundingBox(
 
 void LayoutMultiColumnSet::ComputeVisualOverflow(bool recompute_floats) {
   NOT_DESTROYED();
-  LayoutRect previous_visual_overflow_rect = VisualOverflowRect();
+  LayoutRect previous_visual_overflow_rect = VisualOverflowRectAllowingUnset();
   ClearVisualOverflow();
   AddVisualOverflowFromChildren();
   AddVisualEffectOverflow();

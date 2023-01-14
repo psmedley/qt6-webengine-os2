@@ -14,11 +14,8 @@ js_type_check("closure_compile_module") {
     ":coordinate2d",
     ":destination",
     ":destination_match",
-    ":destination_policies",
     ":destination_store",
     ":document_info",
-    ":invitation",
-    ":invitation_store",
     ":local_parsers",
     ":margins",
     ":measurement_system",
@@ -31,15 +28,12 @@ js_type_check("closure_compile_module") {
     ":user_manager",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     deps += [ ":print_server_store" ]
   }
 }
 
 js_library("cdd") {
-}
-
-js_library("destination_policies") {
 }
 
 js_library("destination_store") {
@@ -60,16 +54,7 @@ js_library("destination_store") {
   ]
 }
 
-js_library("invitation_store") {
-  deps = [
-    ":invitation",
-    "..:cloud_print_interface",
-    "//ui/webui/resources/js:event_tracker.m",
-    "//ui/webui/resources/js/cr:event_target.m",
-  ]
-}
-
-if (is_chromeos_ash) {
+if (is_chromeos) {
   js_library("print_server_store") {
     deps = [
       ":destination_store",
@@ -83,7 +68,6 @@ js_library("local_parsers") {
   deps = [
     ":destination",
     ":destination_match",
-    ":destination_policies",
     "..:native_layer",
     "//ui/webui/resources/js:cr.m",
   ]
@@ -99,13 +83,8 @@ js_library("destination_match") {
 js_library("cloud_parsers") {
   deps = [
     ":destination",
-    ":invitation",
     "//ui/webui/resources/js:assert.m",
   ]
-}
-
-js_library("invitation") {
-  deps = [ ":destination" ]
 }
 
 js_library("destination") {
@@ -115,11 +94,8 @@ js_library("destination") {
     "//ui/webui/resources/js:load_time_data.m",
   ]
 
-  if (is_chromeos_ash) {
-    deps += [
-      ":destination_policies",
-      "..:native_layer_cros",
-    ]
+  if (is_chromeos) {
+    deps += [ "..:native_layer_cros" ]
   }
 }
 
@@ -184,7 +160,6 @@ js_library("user_manager") {
   deps = [
     ":destination",
     ":destination_store",
-    ":invitation_store",
     "..:cloud_print_interface",
     "//ui/webui/resources/js:assert.m",
     "//ui/webui/resources/js:event_tracker.m",

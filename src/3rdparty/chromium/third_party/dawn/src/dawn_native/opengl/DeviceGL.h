@@ -31,6 +31,8 @@
 #    include "common/windows_with_undefs.h"
 #endif
 
+typedef void* EGLImage;
+
 namespace dawn_native { namespace opengl {
 
     class Device : public DeviceBase {
@@ -49,9 +51,14 @@ namespace dawn_native { namespace opengl {
 
         void SubmitFenceSync();
 
-        // Dawn API
-        CommandBufferBase* CreateCommandBuffer(CommandEncoder* encoder,
-                                               const CommandBufferDescriptor* descriptor) override;
+        MaybeError ValidateEGLImageCanBeWrapped(const TextureDescriptor* descriptor,
+                                                ::EGLImage image);
+        TextureBase* CreateTextureWrappingEGLImage(const ExternalImageDescriptor* descriptor,
+                                                   ::EGLImage image);
+
+        ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
+            CommandEncoder* encoder,
+            const CommandBufferDescriptor* descriptor) override;
 
         MaybeError TickImpl() override;
 
@@ -77,38 +84,39 @@ namespace dawn_native { namespace opengl {
                const DeviceDescriptor* descriptor,
                const OpenGLFunctions& functions);
 
-        ResultOrError<BindGroupBase*> CreateBindGroupImpl(
+        ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
             const BindGroupDescriptor* descriptor) override;
-        ResultOrError<BindGroupLayoutBase*> CreateBindGroupLayoutImpl(
+        ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
             const BindGroupLayoutDescriptor* descriptor) override;
         ResultOrError<Ref<BufferBase>> CreateBufferImpl(
             const BufferDescriptor* descriptor) override;
-        ResultOrError<ComputePipelineBase*> CreateComputePipelineImpl(
+        ResultOrError<Ref<ComputePipelineBase>> CreateComputePipelineImpl(
             const ComputePipelineDescriptor* descriptor) override;
-        ResultOrError<PipelineLayoutBase*> CreatePipelineLayoutImpl(
+        ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
             const PipelineLayoutDescriptor* descriptor) override;
-        ResultOrError<QuerySetBase*> CreateQuerySetImpl(
+        ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
             const QuerySetDescriptor* descriptor) override;
-        ResultOrError<RenderPipelineBase*> CreateRenderPipelineImpl(
+        ResultOrError<Ref<RenderPipelineBase>> CreateRenderPipelineImpl(
             const RenderPipelineDescriptor* descriptor) override;
-        ResultOrError<SamplerBase*> CreateSamplerImpl(const SamplerDescriptor* descriptor) override;
-        ResultOrError<ShaderModuleBase*> CreateShaderModuleImpl(
+        ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(
+            const SamplerDescriptor* descriptor) override;
+        ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
             const ShaderModuleDescriptor* descriptor,
             ShaderModuleParseResult* parseResult) override;
-        ResultOrError<SwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
             const SwapChainDescriptor* descriptor) override;
-        ResultOrError<NewSwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
             Surface* surface,
             NewSwapChainBase* previousSwapChain,
             const SwapChainDescriptor* descriptor) override;
         ResultOrError<Ref<TextureBase>> CreateTextureImpl(
             const TextureDescriptor* descriptor) override;
-        ResultOrError<TextureViewBase*> CreateTextureViewImpl(
+        ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
             TextureBase* texture,
             const TextureViewDescriptor* descriptor) override;
 
         void InitTogglesFromDriver();
-        ExecutionSerial CheckAndUpdateCompletedSerials() override;
+        ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
         void ShutDownImpl() override;
         MaybeError WaitForIdleForDestruction() override;
 

@@ -18,8 +18,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "content/web_test/common/web_test.mojom.h"
 #include "content/web_test/common/web_test_bluetooth_fake_adapter_setter.mojom.h"
 #include "content/web_test/common/web_test_constants.h"
@@ -28,6 +26,7 @@
 #include "content/web_test/renderer/gamepad_controller.h"
 #include "content/web_test/renderer/layout_dump.h"
 #include "content/web_test/renderer/web_test_content_settings_client.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -99,12 +98,8 @@ class TestRunner {
   void TestFinishedFromSecondaryRenderer();
 
   // Performs a reset at the end of a test, in order to prepare for the next
-  // test. This includes a navigation to about:blank, which we hear about
-  // through DidCommitNavigationInMainFrame().
-  void ResetRendererAfterWebTest(base::OnceClosure done_callback);
-  // Listener for navigations in order to hear about the navigation to
-  // about:blank done for ResetRendererAfterWebTest().
-  void DidCommitNavigationInMainFrame(WebFrameTestProxy* main_frame);
+  // test.
+  void ResetRendererAfterWebTest();
 
   // Track the set of all main frames in the process, which is also the set of
   // windows rooted in this process.
@@ -211,7 +206,6 @@ class TestRunner {
   bool PolicyDelegateEnabled() const;
   bool PolicyDelegateIsPermissive() const;
   bool PolicyDelegateShouldNotifyDone() const;
-  void SetToolTipText(const blink::WebString&);
   void SetDragImage(const SkBitmap& drag_image);
   bool ShouldDumpNavigationPolicy() const;
 
@@ -296,7 +290,7 @@ class TestRunner {
     bool is_frozen() const { return GetStateValue(kKeyFrozen); }
 
     bool GetStateValue(const char* key) const {
-      base::Optional<bool> value = states_.current_values().FindBoolPath(key);
+      absl::optional<bool> value = states_.current_values().FindBoolPath(key);
       DCHECK(value.has_value());
       return value.value();
     }
@@ -588,12 +582,6 @@ class TestRunner {
   // An effective connection type settable by web tests.
   blink::WebEffectiveConnectionType effective_connection_type_ =
       blink::WebEffectiveConnectionType::kTypeUnknown;
-
-  // Set to ack callback when the browser asks the renderer to reset at the end
-  // of a test. Part of reset involves performing a navigation to about:blank
-  // and this tracks that the navigation is in progress, and is called to inform
-  // the browser that the reset is complete.
-  base::OnceClosure waiting_for_reset_navigation_to_about_blank_;
 
   mojom::WebTestRunTestConfiguration test_config_;
 

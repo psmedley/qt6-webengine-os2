@@ -32,6 +32,7 @@
 #include "chrome/browser/extensions/error_console/error_console_factory.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_verifier.h"
@@ -44,6 +45,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -101,8 +103,10 @@
 #include "storage/browser/file_system/file_system_operation.h"
 #include "storage/browser/file_system/file_system_operation_runner.h"
 #include "storage/browser/file_system/isolated_context.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 #include "url/origin.h"
 
 namespace extensions {
@@ -236,7 +240,7 @@ developer::LoadError CreateLoadError(
   return response;
 }
 
-base::Optional<URLPattern> ParseRuntimePermissionsPattern(
+absl::optional<URLPattern> ParseRuntimePermissionsPattern(
     const std::string& pattern_str) {
   constexpr int kValidRuntimePermissionSchemes = URLPattern::SCHEME_HTTP |
                                                  URLPattern::SCHEME_HTTPS |
@@ -244,13 +248,13 @@ base::Optional<URLPattern> ParseRuntimePermissionsPattern(
 
   URLPattern pattern(kValidRuntimePermissionSchemes);
   if (pattern.Parse(pattern_str) != URLPattern::ParseResult::kSuccess)
-    return base::nullopt;
+    return absl::nullopt;
 
   // We don't allow adding paths for permissions, because they aren't meaningful
   // in terms of origin access. The frontend should validate this, but there's
   // a chance something can slip through, so we should fail gracefully.
   if (pattern.path() != "/*")
-    return base::nullopt;
+    return absl::nullopt;
 
   return pattern;
 }
@@ -330,6 +334,7 @@ void BrowserContextKeyedAPIFactory<
   DependsOn(ExtensionManagementFactory::GetInstance());
   DependsOn(CommandService::GetFactoryInstance());
   DependsOn(EventRouterFactory::GetInstance());
+  DependsOn(ExtensionSystemFactory::GetInstance());
 }
 
 // static
@@ -345,15 +350,17 @@ DeveloperPrivateAPI::DeveloperPrivateAPI(content::BrowserContext* context)
 
 DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
     : profile_(profile), event_router_(EventRouter::Get(profile_)) {
-  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
-  error_console_observer_.Add(ErrorConsole::Get(profile));
-  process_manager_observer_.Add(ProcessManager::Get(profile));
-  app_window_registry_observer_.Add(AppWindowRegistry::Get(profile));
-  warning_service_observer_.Add(WarningService::Get(profile));
-  extension_prefs_observer_.Add(ExtensionPrefs::Get(profile));
-  extension_management_observer_.Add(
+  extension_registry_observation_.Observe(ExtensionRegistry::Get(profile_));
+  error_console_observation_.Observe(ErrorConsole::Get(profile));
+  process_manager_observation_.Observe(ProcessManager::Get(profile));
+  app_window_registry_observation_.Observe(AppWindowRegistry::Get(profile));
+  warning_service_observation_.Observe(WarningService::Get(profile));
+  extension_prefs_observation_.Observe(ExtensionPrefs::Get(profile));
+  extension_management_observation_.Observe(
       ExtensionManagementFactory::GetForBrowserContext(profile));
-  command_service_observer_.Add(CommandService::Get(profile));
+  command_service_observation_.Observe(CommandService::Get(profile));
+  extension_allowlist_observer_.Observe(
+      ExtensionSystem::Get(profile)->extension_service()->allowlist());
   pref_change_registrar_.Init(profile->GetPrefs());
   // The unretained is safe, since the PrefChangeRegistrar unregisters the
   // callback on destruction.
@@ -493,9 +500,16 @@ void DeveloperPrivateEventRouter::OnExtensionRuntimePermissionsChanged(
                             extension_id);
 }
 
+void DeveloperPrivateEventRouter::OnExtensionAllowlistWarningStateChanged(
+    const std::string& extension_id,
+    bool show_warning) {
+  BroadcastItemStateChanged(developer::EVENT_TYPE_PREFS_CHANGED, extension_id);
+}
+
 void DeveloperPrivateEventRouter::OnExtensionManagementSettingsChanged() {
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(DeveloperPrivateAPI::CreateProfileInfo(profile_)->ToValue());
+  std::vector<base::Value> args;
+  args.push_back(base::Value::FromUniquePtrValue(
+      DeveloperPrivateAPI::CreateProfileInfo(profile_)->ToValue()));
 
   std::unique_ptr<Event> event(
       new Event(events::DEVELOPER_PRIVATE_ON_PROFILE_STATE_CHANGED,
@@ -522,8 +536,9 @@ void DeveloperPrivateEventRouter::Observe(
 }
 
 void DeveloperPrivateEventRouter::OnProfilePrefChanged() {
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(DeveloperPrivateAPI::CreateProfileInfo(profile_)->ToValue());
+  std::vector<base::Value> args;
+  args.push_back(base::Value::FromUniquePtrValue(
+      DeveloperPrivateAPI::CreateProfileInfo(profile_)->ToValue()));
   std::unique_ptr<Event> event(
       new Event(events::DEVELOPER_PRIVATE_ON_PROFILE_STATE_CHANGED,
                 developer::OnProfileStateChanged::kEventName, std::move(args)));
@@ -572,12 +587,12 @@ void DeveloperPrivateEventRouter::BroadcastItemStateChangedHelper(
   event_data.event_type = event_type;
   event_data.item_id = extension_id;
   if (!infos.empty()) {
-    event_data.extension_info.reset(
-        new developer::ExtensionInfo(std::move(infos[0])));
+    event_data.extension_info =
+        std::make_unique<developer::ExtensionInfo>(std::move(infos[0]));
   }
 
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(event_data.ToValue());
+  std::vector<base::Value> args;
+  args.push_back(base::Value::FromUniquePtrValue(event_data.ToValue()));
   std::unique_ptr<Event> event(
       new Event(events::DEVELOPER_PRIVATE_ON_ITEM_STATE_CHANGED,
                 developer::OnItemStateChanged::kEventName, std::move(args)));
@@ -662,8 +677,8 @@ void DeveloperPrivateAPI::Shutdown() {}
 void DeveloperPrivateAPI::OnListenerAdded(
     const EventListenerInfo& details) {
   if (!developer_private_event_router_) {
-    developer_private_event_router_.reset(
-        new DeveloperPrivateEventRouter(profile_));
+    developer_private_event_router_ =
+        std::make_unique<DeveloperPrivateEventRouter>(profile_);
   }
 
   developer_private_event_router_->AddExtensionId(details.extension_id);
@@ -740,7 +755,7 @@ DeveloperPrivateGetExtensionsInfoFunction::Run() {
       include_terminated = *params->options->include_terminated;
   }
 
-  info_generator_.reset(new ExtensionInfoGenerator(browser_context()));
+  info_generator_ = std::make_unique<ExtensionInfoGenerator>(browser_context());
   info_generator_->CreateExtensionsInfo(
       include_disabled, include_terminated,
       base::BindOnce(
@@ -769,7 +784,7 @@ DeveloperPrivateGetExtensionInfoFunction::Run() {
       developer::GetExtensionInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  info_generator_.reset(new ExtensionInfoGenerator(browser_context()));
+  info_generator_ = std::make_unique<ExtensionInfoGenerator>(browser_context());
   info_generator_->CreateExtensionInfo(
       params->id,
       base::BindOnce(
@@ -813,7 +828,7 @@ DeveloperPrivateGetExtensionSizeFunction::Run() {
 }
 
 void DeveloperPrivateGetExtensionSizeFunction::OnSizeCalculated(
-    const base::string16& size) {
+    const std::u16string& size) {
   Respond(OneArgument(base::Value(size)));
 }
 
@@ -825,7 +840,7 @@ ExtensionFunction::ResponseAction DeveloperPrivateGetItemsInfoFunction::Run() {
       developer::GetItemsInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  info_generator_.reset(new ExtensionInfoGenerator(browser_context()));
+  info_generator_ = std::make_unique<ExtensionInfoGenerator>(browser_context());
   info_generator_->CreateExtensionsInfo(
       params->include_disabled, params->include_terminated,
       base::BindOnce(&DeveloperPrivateGetItemsInfoFunction::OnInfosGenerated,
@@ -986,8 +1001,8 @@ ExtensionFunction::ResponseAction DeveloperPrivateReloadFunction::Run() {
   // Balanced in ClearObservers(), which is called from the first observer
   // method to be called with the appropriate extension (or shutdown).
   AddRef();
-  error_reporter_observer_.Add(LoadErrorReporter::GetInstance());
-  registry_observer_.Add(ExtensionRegistry::Get(browser_context()));
+  error_reporter_observation_.Observe(LoadErrorReporter::GetInstance());
+  registry_observation_.Observe(ExtensionRegistry::Get(browser_context()));
 
   return RespondLater();
 }
@@ -1042,8 +1057,8 @@ void DeveloperPrivateReloadFunction::OnGotManifestError(
 }
 
 void DeveloperPrivateReloadFunction::ClearObservers() {
-  registry_observer_.RemoveAll();
-  error_reporter_observer_.RemoveAll();
+  registry_observation_.Reset();
+  error_reporter_observation_.Reset();
 
   Release();  // Balanced in Run().
 }
@@ -1281,7 +1296,7 @@ void DeveloperPrivateNotifyDragInstallInProgressFunction::SetDropPathForTesting(
 
 bool DeveloperPrivateChooseEntryFunction::ShowPicker(
     ui::SelectFileDialog::Type picker_type,
-    const base::string16& select_title,
+    const std::u16string& select_title,
     const ui::SelectFileDialog::FileTypeInfo& info,
     int file_type_index) {
   content::WebContents* web_contents = GetSenderWebContents();
@@ -1393,14 +1408,14 @@ ExtensionFunction::ResponseAction DeveloperPrivateLoadDirectoryFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &directory_url_str));
 
-  context_ = content::BrowserContext::GetStoragePartition(
-                 browser_context(), render_frame_host()->GetSiteInstance())
+  context_ = browser_context()
+                 ->GetStoragePartition(render_frame_host()->GetSiteInstance())
                  ->GetFileSystemContext();
 
   // Directory url is non empty only for syncfilesystem.
   if (!directory_url_str.empty()) {
     storage::FileSystemURL directory_url =
-        context_->CrackURL(GURL(directory_url_str));
+        context_->CrackURLInFirstPartyContext(GURL(directory_url_str));
     if (!directory_url.is_valid() ||
         directory_url.type() != storage::kFileSystemTypeSyncable) {
       return RespondNow(Error("DirectoryEntry of unsupported filesystem."));
@@ -1427,8 +1442,8 @@ ExtensionFunction::ResponseAction DeveloperPrivateLoadDirectoryFunction::Run() {
           ->CreateVirtualRootPath(filesystem_id)
           .Append(base::FilePath::FromUTF8Unsafe(filesystem_path));
   storage::FileSystemURL directory_url = context_->CreateCrackedFileSystemURL(
-      url::Origin::Create(
-          extensions::Extension::GetBaseURLFromExtensionId(extension_id())),
+      blink::StorageKey(url::Origin::Create(
+          extensions::Extension::GetBaseURLFromExtensionId(extension_id()))),
       storage::kFileSystemTypeIsolated, virtual_path);
 
   if (directory_url.is_valid() &&
@@ -1501,7 +1516,8 @@ void DeveloperPrivateLoadDirectoryFunction::ReadDirectoryByFileSystemAPI(
     const base::FilePath& project_path,
     const base::FilePath& destination_path) {
   GURL project_url = GURL(project_base_url_ + destination_path.AsUTF8Unsafe());
-  storage::FileSystemURL url = context_->CrackURL(project_url);
+  storage::FileSystemURL url =
+      context_->CrackURLInFirstPartyContext(project_url);
 
   context_->operation_runner()->ReadDirectory(
       url, base::BindRepeating(&DeveloperPrivateLoadDirectoryFunction::
@@ -1538,7 +1554,8 @@ void DeveloperPrivateLoadDirectoryFunction::ReadDirectoryByFileSystemAPICb(
 
     GURL project_url = GURL(project_base_url_ +
         destination_path.Append(file_list[i].name).AsUTF8Unsafe());
-    storage::FileSystemURL url = context_->CrackURL(project_url);
+    storage::FileSystemURL url =
+        context_->CrackURLInFirstPartyContext(project_url);
 
     base::FilePath target_path = project_path;
     target_path = target_path.Append(file_list[i].name);
@@ -1623,7 +1640,7 @@ ExtensionFunction::ResponseAction DeveloperPrivateChoosePathFunction::Run() {
 
   if (params->select_type == developer::SELECT_TYPE_FILE)
     type = ui::SelectFileDialog::SELECT_OPEN_FILE;
-  base::string16 select_title;
+  std::u16string select_title;
 
   int file_type_index = 0;
   if (params->file_type == developer::FILE_TYPE_LOAD) {
@@ -1735,15 +1752,13 @@ void DeveloperPrivateRequestFileSourceFunction::Finish(
 
   std::unique_ptr<FileHighlighter> highlighter;
   if (properties.path_suffix == kManifestFile) {
-    highlighter.reset(new ManifestHighlighter(
-        file_contents,
-        *properties.manifest_key,
-        properties.manifest_specific ?
-            *properties.manifest_specific : std::string()));
+    highlighter = std::make_unique<ManifestHighlighter>(
+        file_contents, *properties.manifest_key,
+        properties.manifest_specific ? *properties.manifest_specific
+                                     : std::string());
   } else {
-    highlighter.reset(new SourceHighlighter(
-        file_contents,
-        properties.line_number ? *properties.line_number : 0));
+    highlighter = std::make_unique<SourceHighlighter>(
+        file_contents, properties.line_number ? *properties.line_number : 0);
   }
 
   response.before_highlight = highlighter->GetBeforeFeature();
@@ -1765,7 +1780,7 @@ DeveloperPrivateOpenDevToolsFunction::Run() {
 
   Profile* profile = Profile::FromBrowserContext(browser_context());
   if (properties.incognito && *properties.incognito)
-    profile = profile->GetPrimaryOTRProfile();
+    profile = profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
 
   const Extension* extension =
       properties.extension_id
@@ -1775,10 +1790,10 @@ DeveloperPrivateOpenDevToolsFunction::Run() {
   const bool is_service_worker =
       properties.is_service_worker && *properties.is_service_worker;
   if (is_service_worker) {
-    if (!BackgroundInfo::IsServiceWorkerBased(extension))
-      return RespondNow(Error(kInvalidLazyBackgroundPageParameter));
     if (!extension)
       return RespondNow(Error(kNoSuchExtensionError));
+    if (!BackgroundInfo::IsServiceWorkerBased(extension))
+      return RespondNow(Error(kInvalidLazyBackgroundPageParameter));
     if (properties.render_process_id == -1) {
       // Start the service worker and open the inspect window.
       devtools_util::InspectInactiveServiceWorkerBackground(extension, profile);
@@ -2008,7 +2023,7 @@ DeveloperPrivateAddHostPermissionFunction::Run() {
       developer::AddHostPermission::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  base::Optional<URLPattern> pattern =
+  absl::optional<URLPattern> pattern =
       ParseRuntimePermissionsPattern(params->host);
   if (!pattern)
     return RespondNow(Error(kInvalidHost));
@@ -2051,7 +2066,7 @@ DeveloperPrivateRemoveHostPermissionFunction::Run() {
       developer::RemoveHostPermission::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  base::Optional<URLPattern> pattern =
+  absl::optional<URLPattern> pattern =
       ParseRuntimePermissionsPattern(params->host);
   if (!pattern)
     return RespondNow(Error(kInvalidHost));

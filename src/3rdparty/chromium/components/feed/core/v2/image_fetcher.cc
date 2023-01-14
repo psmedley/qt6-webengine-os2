@@ -8,8 +8,10 @@
 #include "components/feed/core/v2/public/types.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace feed {
 
@@ -67,7 +69,7 @@ ImageFetchId ImageFetcher::Fetch(const GURL& url, ImageCallback callback) {
 
 void ImageFetcher::OnFetchComplete(ImageFetchId id,
                                    std::unique_ptr<std::string> response_data) {
-  base::Optional<PendingRequest> request = RemovePending(id);
+  absl::optional<PendingRequest> request = RemovePending(id);
   if (!request)
     return;
 
@@ -87,7 +89,7 @@ void ImageFetcher::OnFetchComplete(ImageFetchId id,
 }
 
 void ImageFetcher::Cancel(ImageFetchId id) {
-  base::Optional<PendingRequest> request = RemovePending(id);
+  absl::optional<PendingRequest> request = RemovePending(id);
   if (!request)
     return;
 
@@ -97,13 +99,13 @@ void ImageFetcher::Cancel(ImageFetchId id) {
       .Run({/*response_bytes=*/std::string(), net::Error::ERR_ABORTED});
 }
 
-base::Optional<ImageFetcher::PendingRequest> ImageFetcher::RemovePending(
+absl::optional<ImageFetcher::PendingRequest> ImageFetcher::RemovePending(
     ImageFetchId id) {
   auto iterator = pending_requests_.find(id);
   if (iterator == pending_requests_.end())
-    return base::nullopt;
+    return absl::nullopt;
 
-  auto request = base::make_optional(std::move(iterator->second));
+  auto request = absl::make_optional(std::move(iterator->second));
   pending_requests_.erase(iterator);
   return request;
 }

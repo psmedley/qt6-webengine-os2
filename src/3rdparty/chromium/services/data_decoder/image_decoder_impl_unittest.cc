@@ -6,14 +6,15 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
 #include "base/test/task_environment.h"
 #include "gin/array_buffer.h"
 #include "gin/public/isolate_holder.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "services/data_decoder/image_decoder_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -60,7 +61,7 @@ class Request {
 
   void DecodeImage(const std::vector<unsigned char>& image, bool shrink) {
     decoder_->DecodeImage(
-        image, mojom::ImageCodec::DEFAULT, shrink, kTestMaxImageSize,
+        image, mojom::ImageCodec::kDefault, shrink, kTestMaxImageSize,
         gfx::Size(),  // Take the smallest frame (there's only one frame).
         base::BindOnce(&Request::OnRequestDone, base::Unretained(this)));
   }

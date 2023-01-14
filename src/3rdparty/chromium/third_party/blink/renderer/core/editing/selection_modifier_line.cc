@@ -53,10 +53,12 @@ class AbstractLineBox {
 
   static AbstractLineBox CreateFor(const PositionInFlatTreeWithAffinity&);
 
+  explicit operator bool() const { return IsNotNull(); }
+  bool IsNotNull() const { return !IsNull(); }
   bool IsNull() const { return type_ == Type::kNull; }
 
   bool CanBeCaretContainer() const {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     // We want to skip zero height boxes.
     // This could happen in case it is a TrailingFloatsRootInlineBox.
     if (IsOldLayout()) {
@@ -79,39 +81,41 @@ class AbstractLineBox {
   }
 
   AbstractLineBox PreviousLine() const {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     if (IsOldLayout()) {
       const RootInlineBox* previous_root = GetRootInlineBox().PrevRootBox();
       return previous_root ? AbstractLineBox(*previous_root)
                            : AbstractLineBox();
     }
     NGInlineCursor previous_line = cursor_;
-    previous_line.MoveToPreviousLine();
+    do {
+      previous_line.MoveToPreviousIncludingFragmentainer();
+    } while (previous_line && !previous_line.Current().IsLineBox());
     return previous_line ? AbstractLineBox(previous_line) : AbstractLineBox();
   }
 
   AbstractLineBox NextLine() const {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     if (IsOldLayout()) {
       const RootInlineBox* next_root = GetRootInlineBox().NextRootBox();
       return next_root ? AbstractLineBox(*next_root) : AbstractLineBox();
     }
     NGInlineCursor next_line = cursor_;
-    next_line.MoveToNextLine();
+    do {
+      next_line.MoveToNextIncludingFragmentainer();
+    } while (next_line && !next_line.Current().IsLineBox());
     return next_line ? AbstractLineBox(next_line) : AbstractLineBox();
   }
 
   PhysicalOffset AbsoluteLineDirectionPointToLocalPointInBlock(
       LayoutUnit line_direction_point) {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     const LayoutBlockFlow& containing_block = GetBlock();
     // TODO(yosin): Is kIgnoreTransforms correct here?
     PhysicalOffset absolute_block_point = containing_block.LocalToAbsolutePoint(
         PhysicalOffset(), kIgnoreTransforms);
-    if (containing_block.IsScrollContainer()) {
-      absolute_block_point -=
-          PhysicalOffset(containing_block.ScrolledContentOffset());
-    }
+    if (containing_block.IsScrollContainer())
+      absolute_block_point -= containing_block.ScrolledContentOffset();
 
     if (containing_block.IsHorizontalWritingMode()) {
       return PhysicalOffset(line_direction_point - absolute_block_point.left,
@@ -152,7 +156,7 @@ class AbstractLineBox {
   }
 
   const LayoutBlockFlow& GetBlock() const {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     if (IsOldLayout()) {
       return *To<LayoutBlockFlow>(
           LineLayoutAPIShim::LayoutObjectFrom(GetRootInlineBox().Block()));
@@ -161,7 +165,7 @@ class AbstractLineBox {
   }
 
   LayoutUnit PhysicalBlockOffset() const {
-    DCHECK(!IsNull());
+    DCHECK(IsNotNull());
     if (IsOldLayout()) {
       return GetBlock().FlipForWritingMode(
           GetRootInlineBox().BlockDirectionPointInLine());
@@ -440,19 +444,19 @@ PositionInFlatTreeWithAffinity SelectionModifier::PreviousLinePosition(
     return PositionInFlatTreeWithAffinity();
 
   AbstractLineBox line = AbstractLineBox::CreateFor(position);
-  if (!line.IsNull()) {
+  if (line) {
     line = line.PreviousLine();
-    if (line.IsNull() || !line.CanBeCaretContainer())
+    if (!line || !line.CanBeCaretContainer())
       line = AbstractLineBox();
   }
 
-  if (line.IsNull()) {
+  if (!line) {
     PositionInFlatTree candidate =
         PreviousRootInlineBoxCandidatePosition(node, position);
     if (candidate.IsNotNull()) {
       line = AbstractLineBox::CreateFor(
           CreateVisiblePosition(candidate).ToPositionWithAffinity());
-      if (line.IsNull()) {
+      if (!line) {
         // TODO(editing-dev): Investigate if this is correct for null
         // |CreateVisiblePosition(candidate)|.
         return PositionInFlatTreeWithAffinity(candidate);
@@ -460,7 +464,7 @@ PositionInFlatTreeWithAffinity SelectionModifier::PreviousLinePosition(
     }
   }
 
-  if (!line.IsNull()) {
+  if (line) {
     // FIXME: Can be wrong for multi-column layout and with transforms.
     PhysicalOffset point_in_line =
         line.AbsoluteLineDirectionPointToLocalPointInBlock(
@@ -508,13 +512,13 @@ PositionInFlatTreeWithAffinity SelectionModifier::NextLinePosition(
     return PositionInFlatTreeWithAffinity();
 
   AbstractLineBox line = AbstractLineBox::CreateFor(position);
-  if (!line.IsNull()) {
+  if (line) {
     line = line.NextLine();
-    if (line.IsNull() || !line.CanBeCaretContainer())
+    if (!line || !line.CanBeCaretContainer())
       line = AbstractLineBox();
   }
 
-  if (line.IsNull()) {
+  if (!line) {
     // FIXME: We need do the same in previousLinePosition.
     Node* child = FlatTreeTraversal::ChildAt(*node, p.ComputeEditingOffset());
     Node* search_start_node =
@@ -524,7 +528,7 @@ PositionInFlatTreeWithAffinity SelectionModifier::NextLinePosition(
     if (candidate.IsNotNull()) {
       line = AbstractLineBox::CreateFor(
           CreateVisiblePosition(candidate).ToPositionWithAffinity());
-      if (line.IsNull()) {
+      if (!line) {
         // TODO(editing-dev): Investigate if this is correct for null
         // |CreateVisiblePosition(candidate)|.
         return PositionInFlatTreeWithAffinity(candidate);
@@ -532,7 +536,7 @@ PositionInFlatTreeWithAffinity SelectionModifier::NextLinePosition(
     }
   }
 
-  if (!line.IsNull()) {
+  if (line) {
     // FIXME: Can be wrong for multi-column layout and with transforms.
     PhysicalOffset point_in_line =
         line.AbsoluteLineDirectionPointToLocalPointInBlock(

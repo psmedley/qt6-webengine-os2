@@ -90,11 +90,11 @@ class AutomationPosition final : public gin::Wrappable<AutomationPosition> {
   void MoveToNextAnchorPosition(gin::Arguments* arguments);
   void MoveToPreviousAnchorPosition(gin::Arguments* arguments);
   int MaxTextOffset(gin::Arguments* arguments);
-  bool IsInLineBreak(gin::Arguments* arguments);
+  bool IsPointingToLineBreak(gin::Arguments* arguments);
   bool IsInTextObject(gin::Arguments* arguments);
   bool IsInWhiteSpace(gin::Arguments* arguments);
   bool IsValid(gin::Arguments* arguments);
-  base::string16 GetText(gin::Arguments* arguments);
+  std::u16string GetText(gin::Arguments* arguments);
 
   ui::AXNodePosition::AXPositionInstance position_;
 

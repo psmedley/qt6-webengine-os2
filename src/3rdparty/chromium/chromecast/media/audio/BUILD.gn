@@ -47,6 +47,19 @@ cast_source_set("processing") {
   cflags = [ "-ffast-math" ]
 }
 
+cast_source_set("playback_rate_shifter") {
+  sources = [
+    "playback_rate_shifter.cc",
+    "playback_rate_shifter.h",
+  ]
+
+  deps = [
+    ":processing",
+    "//base",
+    "//media",
+  ]
+}
+
 cast_source_set("interleaved_channel_mixer") {
   sources = [
     "interleaved_channel_mixer.cc",
@@ -77,6 +90,16 @@ cast_source_set("cma_audio_output") {
   ]
 }
 
+cast_source_set("resampler") {
+  sources = [ "cast_audio_resampler_impl.cc" ]
+
+  deps = [
+    "//base",
+    "//chromecast/media/api",
+    "//media",
+  ]
+}
+
 cast_source_set("audio") {
   sources = [
     "cast_audio_input_stream.cc",
@@ -89,7 +112,8 @@ cast_source_set("audio") {
     "cast_audio_mixer.h",
     "cast_audio_output_stream.cc",
     "cast_audio_output_stream.h",
-    "cast_audio_resampler_impl.cc",
+    "cast_audio_output_utils.cc",
+    "cast_audio_output_utils.h",
     "cma_audio_output_stream.cc",
     "cma_audio_output_stream.h",
   ]
@@ -100,6 +124,7 @@ cast_source_set("audio") {
     "//base",
     "//chromecast/base",
     "//chromecast/common/mojom",
+    "//chromecast/external_mojo/external_service_support:external_service",
     "//chromecast/media/api",
     "//chromecast/media/audio/capture_service:common",
     "//chromecast/media/audio/capture_service:receiver",
@@ -199,11 +224,17 @@ cast_source_set("rate_adjuster") {
 cast_source_set("test_support") {
   testonly = true
 
-  sources = [ "mock_audio_input_callback.h" ]
+  sources = [
+    "mock_audio_input_callback.h",
+    "mock_cast_audio_manager_helper_delegate.h",
+  ]
 
   public_deps = [ "//testing/gmock" ]
 
-  deps = [ "//media" ]
+  deps = [
+    ":audio",
+    "//media",
+  ]
 }
 
 cast_source_set("unittests") {
@@ -212,11 +243,13 @@ cast_source_set("unittests") {
     "audio_clock_simulator_unittest.cc",
     "audio_fader_unittest.cc",
     "interleaved_channel_mixer_unittest.cc",
+    "playback_rate_shifter_unittest.cc",
     "rate_adjuster_unittest.cc",
   ]
 
   deps = [
     ":interleaved_channel_mixer",
+    ":playback_rate_shifter",
     ":processing",
     ":rate_adjuster",
     "//base",

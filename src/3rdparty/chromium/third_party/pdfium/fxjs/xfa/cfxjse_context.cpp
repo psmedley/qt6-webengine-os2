@@ -16,6 +16,7 @@
 #include "fxjs/xfa/cfxjse_value.h"
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
 #include "third_party/base/ptr_util.h"
 #include "xfa/fxfa/parser/cxfa_thisproxy.h"
 
@@ -55,9 +56,12 @@ const char szConsoleScript[] =
     "  this.log(...args);\n"
     "};";
 
-// Only address matters, values are for humans debuging here.
-const char kFXJSEHostObjectTag[] = "FXJSE Host Object";
-const char kFXJSEProxyObjectTag[] = "FXJSE Proxy Object";
+// Only address matters, values are for humans debuging here.  Keep these
+// wchar_t to prevent the compiler from doing something clever, like
+// aligning them on a byte boundary to save space, which would make them
+// incompatible for use as V8 aligned pointers.
+const wchar_t kFXJSEHostObjectTag[] = L"FXJSE Host Object";
+const wchar_t kFXJSEProxyObjectTag[] = L"FXJSE Proxy Object";
 
 v8::Local<v8::Object> CreateReturnValue(v8::Isolate* pIsolate,
                                         v8::TryCatch* trycatch) {
@@ -110,26 +114,26 @@ v8::Local<v8::Object> CreateReturnValue(v8::Isolate* pIsolate,
 
 void FXJSE_UpdateProxyBinding(v8::Local<v8::Object> hObject) {
   DCHECK(!hObject.IsEmpty());
-  DCHECK(hObject->InternalFieldCount() == 2);
+  DCHECK_EQ(hObject->InternalFieldCount(), 2);
   hObject->SetAlignedPointerInInternalField(
-      0, const_cast<char*>(kFXJSEProxyObjectTag));
+      0, const_cast<wchar_t*>(kFXJSEProxyObjectTag));
   hObject->SetAlignedPointerInInternalField(1, nullptr);
 }
 
 }  // namespace
 
 void FXJSE_UpdateObjectBinding(v8::Local<v8::Object> hObject,
-                               CFXJSE_HostObject* lpNewBinding) {
+                               CFXJSE_HostObject* pNewBinding) {
   DCHECK(!hObject.IsEmpty());
-  DCHECK(hObject->InternalFieldCount() == 2);
+  DCHECK_EQ(hObject->InternalFieldCount(), 2);
   hObject->SetAlignedPointerInInternalField(
-      0, const_cast<char*>(kFXJSEHostObjectTag));
-  hObject->SetAlignedPointerInInternalField(1, lpNewBinding);
+      0, const_cast<wchar_t*>(kFXJSEHostObjectTag));
+  hObject->SetAlignedPointerInInternalField(1, pNewBinding);
 }
 
 void FXJSE_ClearObjectBinding(v8::Local<v8::Object> hObject) {
   DCHECK(!hObject.IsEmpty());
-  DCHECK(hObject->InternalFieldCount() == 2);
+  DCHECK_EQ(hObject->InternalFieldCount(), 2);
   hObject->SetAlignedPointerInInternalField(0, nullptr);
   hObject->SetAlignedPointerInInternalField(1, nullptr);
 }
@@ -232,7 +236,7 @@ void CFXJSE_Context::EnableCompatibleMode() {
 }
 
 bool CFXJSE_Context::ExecuteScript(const char* szScript,
-                                   CFXJSE_Value* lpRetValue,
+                                   CFXJSE_Value* pRetValue,
                                    v8::Local<v8::Object> hNewThis) {
   CFXJSE_ScopeUtil_IsolateHandleContext scope(this);
   v8::Local<v8::Context> hContext = GetIsolate()->GetCurrentContext();
@@ -246,14 +250,15 @@ bool CFXJSE_Context::ExecuteScript(const char* szScript,
       v8::Local<v8::Value> hValue;
       if (hScript->Run(hContext).ToLocal(&hValue)) {
         DCHECK(!trycatch.HasCaught());
-        if (lpRetValue)
-          lpRetValue->ForceSetValue(GetIsolate(), hValue);
+        if (pRetValue)
+          pRetValue->ForceSetValue(GetIsolate(), hValue);
         return true;
       }
     }
-    if (lpRetValue)
-      lpRetValue->ForceSetValue(GetIsolate(),
-                                CreateReturnValue(GetIsolate(), &trycatch));
+    if (pRetValue) {
+      pRetValue->ForceSetValue(GetIsolate(),
+                               CreateReturnValue(GetIsolate(), &trycatch));
+    }
     return false;
   }
 
@@ -270,8 +275,8 @@ bool CFXJSE_Context::ExecuteScript(const char* szScript,
     if (hWrapperFn->Call(hContext, hNewThis.As<v8::Object>(), 1, rgArgs)
             .ToLocal(&hValue)) {
       DCHECK(!trycatch.HasCaught());
-      if (lpRetValue)
-        lpRetValue->ForceSetValue(GetIsolate(), hValue);
+      if (pRetValue)
+        pRetValue->ForceSetValue(GetIsolate(), hValue);
       return true;
     }
   }
@@ -290,9 +295,9 @@ bool CFXJSE_Context::ExecuteScript(const char* szScript,
   }
 #endif  // NDEBUG
 
-  if (lpRetValue) {
-    lpRetValue->ForceSetValue(GetIsolate(),
-                              CreateReturnValue(GetIsolate(), &trycatch));
+  if (pRetValue) {
+    pRetValue->ForceSetValue(GetIsolate(),
+                             CreateReturnValue(GetIsolate(), &trycatch));
   }
   return false;
 }

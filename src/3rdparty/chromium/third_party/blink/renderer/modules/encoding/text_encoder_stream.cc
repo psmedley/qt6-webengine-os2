@@ -10,8 +10,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/optional.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_string_resource.h"
@@ -46,8 +46,8 @@ class TextEncoderStream::Transformer final : public TransformStreamTransformer {
     if (input.IsEmpty())
       return ScriptPromise::CastUndefined(script_state_);
 
-    const base::Optional<UChar> high_surrogate = pending_high_surrogate_;
-    pending_high_surrogate_ = base::nullopt;
+    const absl::optional<UChar> high_surrogate = pending_high_surrogate_;
+    pending_high_surrogate_ = absl::nullopt;
     std::string prefix;
     std::string result;
     if (input.Is8Bit()) {
@@ -101,10 +101,7 @@ class TextEncoderStream::Transformer final : public TransformStreamTransformer {
   }
 
  private:
-  static std::string ReplacementCharacterInUtf8() {
-    constexpr char kRawBytes[] = {(char)0xEF, (char)0xBF, (char)0xBD};
-    return std::string(kRawBytes, sizeof(kRawBytes));
-  }
+  static std::string ReplacementCharacterInUtf8() { return "\ufffd"; }
 
   static DOMUint8Array* CreateDOMUint8ArrayFromTwoStdStringsConcatenated(
       const std::string& string1,
@@ -122,7 +119,7 @@ class TextEncoderStream::Transformer final : public TransformStreamTransformer {
   // Returns true if either |*prefix| or |*result| have been set to a non-empty
   // value.
   bool Encode16BitString(const String& input,
-                         base::Optional<UChar> high_surrogate,
+                         absl::optional<UChar> high_surrogate,
                          std::string* prefix,
                          std::string* result) {
     const UChar* begin = input.Characters16();
@@ -162,7 +159,7 @@ class TextEncoderStream::Transformer final : public TransformStreamTransformer {
   // There is no danger of ScriptState leaking across worlds because a
   // TextEncoderStream can only be accessed from the world that created it.
   Member<ScriptState> script_state_;
-  base::Optional<UChar> pending_high_surrogate_;
+  absl::optional<UChar> pending_high_surrogate_;
 
   DISALLOW_COPY_AND_ASSIGN(Transformer);
 };

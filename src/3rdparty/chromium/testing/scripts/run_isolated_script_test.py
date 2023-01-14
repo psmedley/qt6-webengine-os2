@@ -48,20 +48,24 @@ import xvfb
 
 # Some harnesses understand the --isolated-script-test arguments
 # directly and prefer that they be passed through.
-KNOWN_ISOLATED_SCRIPT_TEST_RUNNERS = {'run_web_tests.py'}
+KNOWN_ISOLATED_SCRIPT_TEST_RUNNERS = {'run_web_tests.py', 'run_webgpu_cts.py'}
 
 
 # Known typ test runners this script wraps. They need a different argument name
 # when selecting which tests to run.
 # TODO(dpranke): Detect if the wrapped test suite uses typ better.
 KNOWN_TYP_TEST_RUNNERS = {
-    'run_blinkpy_tests.py',
     'metrics_python_tests.py',
-    'run_mac_signing_tests.py',
-    'run_polymer_tools_tests.py',
     'monochrome_python_tests.py',
+    'run_blinkpy_tests.py',
+    'run_mac_signing_tests.py',
+    'run_mini_installer_tests.py',
 }
 
+KNOWN_TYP_VPYTHON3_TEST_RUNNERS = {
+    'monochrome_python_tests.py',
+    'run_polymer_tools_tests.py',
+}
 
 class IsolatedScriptTestAdapter(common.BaseIsolatedScriptArgsAdapter):
   def __init__(self):
@@ -117,6 +121,11 @@ class TypUnittestAdapter(common.BaseIsolatedScriptArgsAdapter):
   def clean_up_after_test_run(self):
     if self._temp_filter_file:
       os.unlink(self._temp_filter_file.name)
+
+  def select_python_executable(self):
+    if any(r in self.rest_args[0] for r in KNOWN_TYP_VPYTHON3_TEST_RUNNERS):
+      return 'vpython3.bat' if sys.platform == 'win32' else 'vpython3'
+    return super(TypUnittestAdapter, self).select_python_executable()
 
   def run_test(self):
     return super(TypUnittestAdapter, self).run_test()

@@ -10,6 +10,7 @@
 #include "components/feed/core/proto/v2/wire/feed_request.pb.h"
 #include "components/feed/core/proto/v2/wire/request.pb.h"
 #include "components/feed/core/v2/config.h"
+#include "components/feed/core/v2/public/feed_api.h"
 #include "components/feed/core/v2/test/proto_printer.h"
 #include "components/feed/core/v2/types.h"
 #include "components/feed/feed_feature_list.h"
@@ -30,7 +31,7 @@ TEST(ProtoUtilTest, CreateClientInfo) {
   request_metadata.language_tag = "en-US";
 
   feedwire::ClientInfo result = CreateClientInfo(request_metadata);
-  EXPECT_EQ(feedwire::ClientInfo::CLANK, result.app_type());
+  EXPECT_EQ(feedwire::ClientInfo::CHROME_ANDROID, result.app_type());
   EXPECT_EQ(feedwire::Version::RELEASE, result.app_version().build_type());
   EXPECT_EQ(1, result.app_version().major());
   EXPECT_EQ(2, result.app_version().minor());
@@ -47,9 +48,17 @@ TEST(ProtoUtilTest, CreateClientInfo) {
   EXPECT_EQ("en-US", result.locale());
 }
 
+TEST(ProtoUtilTest, ClientInfoStartSurface) {
+  RequestMetadata request_metadata;
+  request_metadata.chrome_info.start_surface = true;
+  feedwire::ClientInfo result = CreateClientInfo(request_metadata);
+  EXPECT_TRUE(result.chrome_client_info().start_surface());
+}
+
 TEST(ProtoUtilTest, DefaultCapabilities) {
   feedwire::FeedRequest request =
-      CreateFeedQueryRefreshRequest(feedwire::FeedQuery::MANUAL_REFRESH,
+      CreateFeedQueryRefreshRequest(kForYouStream,
+                                    feedwire::FeedQuery::MANUAL_REFRESH,
                                     /*request_metadata=*/{},
                                     /*consistency_token=*/std::string())
           .feed_request();
@@ -64,35 +73,25 @@ TEST(ProtoUtilTest, DefaultCapabilities) {
           feedwire::Capability::DOWNLOAD_LINK,
           feedwire::Capability::INFINITE_FEED,
           feedwire::Capability::DISMISS_COMMAND,
+          feedwire::Capability::MATERIAL_NEXT_BASELINE,
           feedwire::Capability::UI_THEME_V2,
           feedwire::Capability::UNDO_FOR_DISMISS_COMMAND,
-          feedwire::Capability::PREFETCH_METADATA));
+          feedwire::Capability::PREFETCH_METADATA, feedwire::Capability::SHARE,
+          feedwire::Capability::CONTENT_LIFETIME));
 }
 
 TEST(ProtoUtilTest, HeartsEnabled) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures({kInterestFeedV2Hearts}, {});
   feedwire::FeedRequest request =
-      CreateFeedQueryRefreshRequest(feedwire::FeedQuery::MANUAL_REFRESH,
+      CreateFeedQueryRefreshRequest(kForYouStream,
+                                    feedwire::FeedQuery::MANUAL_REFRESH,
                                     /*request_metadata=*/{},
                                     /*consistency_token=*/std::string())
           .feed_request();
 
   ASSERT_THAT(request.client_capability(),
               testing::Contains(feedwire::Capability::HEART));
-}
-
-TEST(ProtoUtilTest, ShareEnabled) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures({kFeedShare}, {});
-  feedwire::FeedRequest request =
-      CreateFeedQueryRefreshRequest(feedwire::FeedQuery::MANUAL_REFRESH,
-                                    /*request_metadata=*/{},
-                                    /*consistency_token=*/std::string())
-          .feed_request();
-
-  ASSERT_THAT(request.client_capability(),
-              testing::Contains(feedwire::Capability::SHARE));
 }
 
 TEST(ProtoUtilTest, DisableCapabilitiesWithFinch) {
@@ -105,7 +104,8 @@ TEST(ProtoUtilTest, DisableCapabilitiesWithFinch) {
   OverrideConfigWithFinchForTesting();
 
   feedwire::FeedRequest request =
-      CreateFeedQueryRefreshRequest(feedwire::FeedQuery::MANUAL_REFRESH,
+      CreateFeedQueryRefreshRequest(kForYouStream,
+                                    feedwire::FeedQuery::MANUAL_REFRESH,
                                     /*request_metadata=*/{},
                                     /*consistency_token=*/std::string())
           .feed_request();
@@ -118,17 +118,19 @@ TEST(ProtoUtilTest, DisableCapabilitiesWithFinch) {
           feedwire::Capability::LONG_PRESS_CARD_MENU,
           feedwire::Capability::OPEN_IN_TAB, feedwire::Capability::CARD_MENU,
           feedwire::Capability::DOWNLOAD_LINK,
-          feedwire::Capability::DISMISS_COMMAND,
+          feedwire::Capability::DISMISS_COMMAND, feedwire::Capability::SHARE,
+          feedwire::Capability::MATERIAL_NEXT_BASELINE,
           feedwire::Capability::UI_THEME_V2,
           feedwire::Capability::UNDO_FOR_DISMISS_COMMAND,
-          feedwire::Capability::PREFETCH_METADATA));
+          feedwire::Capability::PREFETCH_METADATA,
+          feedwire::Capability::CONTENT_LIFETIME));
 }
 
 TEST(ProtoUtilTest, NoticeCardAcknowledged) {
   RequestMetadata request_metadata;
   request_metadata.notice_card_acknowledged = true;
   feedwire::Request request = CreateFeedQueryRefreshRequest(
-      feedwire::FeedQuery::MANUAL_REFRESH, request_metadata,
+      kForYouStream, feedwire::FeedQuery::MANUAL_REFRESH, request_metadata,
       /*consistency_token=*/std::string());
 
   EXPECT_TRUE(request.feed_request()
@@ -141,13 +143,29 @@ TEST(ProtoUtilTest, NoticeCardNotAcknowledged) {
   RequestMetadata request_metadata;
   request_metadata.notice_card_acknowledged = false;
   feedwire::Request request = CreateFeedQueryRefreshRequest(
-      feedwire::FeedQuery::MANUAL_REFRESH, request_metadata,
+      kForYouStream, feedwire::FeedQuery::MANUAL_REFRESH, request_metadata,
       /*consistency_token=*/std::string());
 
   EXPECT_FALSE(request.feed_request()
                    .feed_query()
                    .chrome_fulfillment_info()
                    .notice_card_acknowledged());
+}
+
+TEST(ProtoUtilTest, AutoplayEnabled) {
+  RequestMetadata request_metadata;
+  request_metadata.autoplay_enabled = true;
+
+  feedwire::FeedRequest request =
+      CreateFeedQueryRefreshRequest(
+          kForYouStream, feedwire::FeedQuery::MANUAL_REFRESH, request_metadata,
+          /*consistency_token=*/std::string())
+          .feed_request();
+
+  ASSERT_THAT(request.client_capability(),
+              testing::Contains(feedwire::Capability::INLINE_VIDEO_AUTOPLAY));
+  ASSERT_THAT(request.client_capability(),
+              testing::Contains(feedwire::Capability::OPEN_VIDEO_COMMAND));
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 #include "media/capture/video/chromeos/mojom/camera_common.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -48,8 +49,8 @@ class VendorTagOpsDelegate {
   void OnGotTagCount(int32_t tag_count);
   void OnGotAllTags(size_t tag_count, const std::vector<uint32_t>& tags);
   void OnGotSectionName(uint32_t tag,
-                        const base::Optional<std::string>& section_name);
-  void OnGotTagName(uint32_t tag, const base::Optional<std::string>& tag_name);
+                        const absl::optional<std::string>& section_name);
+  void OnGotTagName(uint32_t tag, const absl::optional<std::string>& tag_name);
   void OnGotTagType(uint32_t tag, int32_t type);
 
   scoped_refptr<base::SequencedTaskRunner> ipc_task_runner_;

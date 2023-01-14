@@ -17,8 +17,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
+#include "base/stl_util.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -59,9 +60,11 @@
 #include "storage/browser/file_system/local_file_stream_writer.h"
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/file_system/file_system_mount_option.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key_range.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
@@ -131,8 +134,8 @@ base::FilePath GetBlobFileNameForKey(const base::FilePath& path_base,
   return path;
 }
 
-std::string ComputeOriginIdentifier(const url::Origin& origin) {
-  return storage::GetIdentifierFromOrigin(origin) + "@1";
+std::string ComputeOriginIdentifier(const blink::StorageKey& storage_key) {
+  return storage::GetIdentifierFromOrigin(storage_key.origin()) + "@1";
 }
 
 // TODO(ericu): Error recovery. If we persistently can't read the
@@ -317,9 +320,9 @@ bool DecodeV3ExternalObjects(const base::StringPiece& data,
   while (!slice.empty()) {
     bool is_file;
     int64_t blob_number;
-    base::string16 type;
+    std::u16string type;
     int64_t size;
-    base::string16 file_name;
+    std::u16string file_name;
 
     if (!DecodeBool(&slice, &is_file))
       return false;
@@ -362,9 +365,9 @@ bool DecodeExternalObjects(const std::string& data,
       case IndexedDBExternalObject::ObjectType::kBlob:
       case IndexedDBExternalObject::ObjectType::kFile: {
         int64_t blob_number;
-        base::string16 type;
+        std::u16string type;
         int64_t size;
-        base::string16 file_name;
+        std::u16string file_name;
 
         if (!DecodeVarInt(&slice, &blob_number) ||
             !DatabaseMetaDataKey::IsValidBlobNumber(blob_number)) {
@@ -405,7 +408,7 @@ bool DecodeExternalObjects(const std::string& data,
 
 bool IsPathTooLong(storage::FilesystemProxy* filesystem,
                    const base::FilePath& leveldb_dir) {
-  base::Optional<int> limit =
+  absl::optional<int> limit =
       filesystem->GetMaximumPathComponentLength(leveldb_dir.DirName());
   if (!limit.has_value()) {
     DLOG(WARNING) << "GetMaximumPathComponentLength returned -1";
@@ -623,7 +626,7 @@ bool IndexCursorOptions(
 IndexedDBBackingStore::IndexedDBBackingStore(
     Mode backing_store_mode,
     TransactionalLevelDBFactory* transactional_leveldb_factory,
-    const url::Origin& origin,
+    const blink::StorageKey& storage_key,
     const base::FilePath& blob_path,
     std::unique_ptr<TransactionalLevelDBDatabase> db,
     storage::mojom::BlobStorageContext* blob_storage_context,
@@ -634,13 +637,13 @@ IndexedDBBackingStore::IndexedDBBackingStore(
     scoped_refptr<base::SequencedTaskRunner> idb_task_runner)
     : backing_store_mode_(backing_store_mode),
       transactional_leveldb_factory_(transactional_leveldb_factory),
-      origin_(origin),
+      storage_key_(storage_key),
       blob_path_(backing_store_mode == Mode::kInMemory ? base::FilePath()
                                                        : blob_path),
       blob_storage_context_(blob_storage_context),
       file_system_access_context_(file_system_access_context),
       filesystem_proxy_(std::move(filesystem_proxy)),
-      origin_identifier_(ComputeOriginIdentifier(origin)),
+      origin_identifier_(ComputeOriginIdentifier(storage_key)),
       idb_task_runner_(std::move(idb_task_runner)),
       db_(std::move(db)),
       blob_files_cleaned_(std::move(blob_files_cleaned)) {
@@ -706,7 +709,7 @@ leveldb::Status IndexedDBBackingStore::Initialize(bool clean_active_journal) {
     INTERNAL_READ_ERROR(SET_UP_METADATA);
     return s;
   }
-  indexed_db::ReportSchemaVersion(db_schema_version, origin_);
+  indexed_db::ReportSchemaVersion(db_schema_version, storage_key_);
   if (!found) {
     // Initialize new backing store.
     db_schema_version = indexed_db::kLatestKnownSchemaVersion;
@@ -788,7 +791,7 @@ leveldb::Status IndexedDBBackingStore::Initialize(bool clean_active_journal) {
   if (!s.ok()) {
     indexed_db::ReportOpenStatus(
         indexed_db::INDEXED_DB_BACKING_STORE_OPEN_FAILED_METADATA_SETUP,
-        origin_);
+        storage_key_);
     INTERNAL_WRITE_ERROR(SET_UP_METADATA);
     return s;
   }
@@ -799,7 +802,7 @@ leveldb::Status IndexedDBBackingStore::Initialize(bool clean_active_journal) {
       indexed_db::ReportOpenStatus(
           indexed_db::
               INDEXED_DB_BACKING_STORE_OPEN_FAILED_CLEANUP_JOURNAL_ERROR,
-          origin_);
+          storage_key_);
     }
   }
 #if DCHECK_IS_ON()
@@ -814,7 +817,7 @@ Status IndexedDBBackingStore::AnyDatabaseContainsBlobs(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   Status status = leveldb::Status::OK();
-  std::vector<base::string16> names;
+  std::vector<std::u16string> names;
   IndexedDBMetadataCoding metadata_coding;
   status = metadata_coding.ReadDatabaseNames(db, origin_identifier_, &names);
   if (!status.ok())
@@ -870,7 +873,7 @@ Status IndexedDBBackingStore::UpgradeBlobEntriesToV4(
   DCHECK(filesystem_proxy_);
 
   Status status = leveldb::Status::OK();
-  std::vector<base::string16> names;
+  std::vector<std::u16string> names;
   IndexedDBMetadataCoding metadata_coding;
   status = metadata_coding.ReadDatabaseNames(db, origin_identifier_, &names);
   if (!status.ok())
@@ -921,7 +924,7 @@ Status IndexedDBBackingStore::UpgradeBlobEntriesToV4(
           base::FilePath path =
               GetBlobFileName(metadata.id, object.blob_number());
 
-          base::Optional<base::File::Info> info =
+          absl::optional<base::File::Info> info =
               filesystem_proxy_->GetFileInfo(path);
           if (!info.has_value()) {
             return leveldb::Status::Corruption(
@@ -957,7 +960,7 @@ Status IndexedDBBackingStore::ValidateBlobFiles(
   DCHECK(filesystem_proxy_);
 
   Status status = leveldb::Status::OK();
-  std::vector<base::string16> names;
+  std::vector<std::u16string> names;
   IndexedDBMetadataCoding metadata_coding;
   status = metadata_coding.ReadDatabaseNames(db, origin_identifier_, &names);
   if (!status.ok())
@@ -996,7 +999,7 @@ Status IndexedDBBackingStore::ValidateBlobFiles(
                  leveldb_env::MakeSlice(iterator->Key()), max_key) < 0;
            status = iterator->Next()) {
         std::vector<IndexedDBExternalObject> temp_external_objects;
-        DecodeExternalObjects(iterator->Value().as_string(),
+        DecodeExternalObjects(std::string(iterator->Value()),
                               &temp_external_objects);
         for (auto& object : temp_external_objects) {
           if (object.object_type() !=
@@ -1009,7 +1012,7 @@ Status IndexedDBBackingStore::ValidateBlobFiles(
 
           base::FilePath path =
               GetBlobFileName(metadata.id, object.blob_number());
-          base::Optional<base::File::Info> info =
+          absl::optional<base::File::Info> info =
               filesystem_proxy_->GetFileInfo(path);
           if (!info.has_value()) {
             return leveldb::Status::Corruption(
@@ -1097,7 +1100,7 @@ leveldb::Status IndexedDBBackingStore::GetCompleteMetadata(
 
   IndexedDBMetadataCoding metadata_coding;
   leveldb::Status status = leveldb::Status::OK();
-  std::vector<base::string16> names;
+  std::vector<std::u16string> names;
   status =
       metadata_coding.ReadDatabaseNames(db_.get(), origin_identifier_, &names);
   if (!status.ok())
@@ -1123,11 +1126,11 @@ leveldb::Status IndexedDBBackingStore::GetCompleteMetadata(
 // static
 bool IndexedDBBackingStore::RecordCorruptionInfo(
     const base::FilePath& path_base,
-    const url::Origin& origin,
+    const blink::StorageKey& storage_key,
     const std::string& message) {
   auto filesystem = storage::CreateFilesystemProxy();
   const base::FilePath info_path =
-      path_base.Append(indexed_db::ComputeCorruptionFileName(origin));
+      path_base.Append(indexed_db::ComputeCorruptionFileName(storage_key));
   if (IsPathTooLong(filesystem.get(), info_path))
     return false;
 
@@ -1140,7 +1143,7 @@ bool IndexedDBBackingStore::RecordCorruptionInfo(
 }
 
 Status IndexedDBBackingStore::DeleteDatabase(
-    const base::string16& name,
+    const std::u16string& name,
     TransactionalLevelDBTransaction* transaction) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 #if DCHECK_IS_ON()
@@ -1158,8 +1161,8 @@ Status IndexedDBBackingStore::DeleteDatabase(
   if (!success)
     return Status::OK();
 
-  // |ORIGIN_NAME| is the first key (0) in the database prefix, so this deletes
-  // the whole database.
+  // `ORIGIN_NAME` is the first key (0) in the database prefix, so this
+  // deletes the whole database.
   const std::string start_key =
       DatabaseMetaDataKey::Encode(id, DatabaseMetaDataKey::ORIGIN_NAME);
   const std::string stop_key =
@@ -1261,7 +1264,7 @@ Status IndexedDBBackingStore::GetRecord(
     return InternalInconsistencyStatus();
   }
 
-  record->bits = slice.as_string();
+  record->bits = std::string(slice);
   return transaction->GetExternalObjectsForRecord(database_id, leveldb_key,
                                                   record);
 }
@@ -2010,7 +2013,7 @@ Status IndexedDBBackingStore::FindKeyInIndex(
       INTERNAL_READ_ERROR(FIND_KEY_IN_INDEX);
       return InternalInconsistencyStatus();
     }
-    *found_encoded_primary_key = slice.as_string();
+    *found_encoded_primary_key = std::string(slice);
 
     bool exists = false;
     s = indexed_db::VersionExists(leveldb_transaction, database_id,
@@ -2354,13 +2357,13 @@ IndexedDBBackingStore::Cursor::ContinuePrevious(const IndexedDBKey* key,
       // If we've found a new key, remember it and keep going.
       if (!duplicate_key.IsValid()) {
         duplicate_key = *current_key_;
-        earliest_duplicate = iterator_->Key().as_string();
+        earliest_duplicate = std::string(iterator_->Key());
         continue;
       }
 
       // If we're still seeing duplicates, keep going.
       if (duplicate_key.Equals(*current_key_)) {
-        earliest_duplicate = iterator_->Key().as_string();
+        earliest_duplicate = std::string(iterator_->Key());
         continue;
       }
     }
@@ -2597,11 +2600,11 @@ bool ObjectStoreCursorImpl::LoadCurrentRow(Status* s) {
   record_identifier_.Reset(encoded_key, version);
 
   *s = transaction_->GetExternalObjectsForRecord(
-      database_id_, iterator_->Key().as_string(), &current_value_);
+      database_id_, std::string(iterator_->Key()), &current_value_);
   if (!s->ok())
     return false;
 
-  current_value_.bits = value_slice.as_string();
+  current_value_.bits = std::string(value_slice);
   return true;
 }
 
@@ -2883,7 +2886,7 @@ bool IndexCursorImpl::LoadCurrentRow(Status* s) {
     return false;
   }
 
-  current_value_.bits = slice.as_string();
+  current_value_.bits = std::string(slice);
   *s = transaction_->GetExternalObjectsForRecord(
       database_id_, primary_leveldb_key_, &current_value_);
   return s->ok();
@@ -3137,10 +3140,10 @@ Status IndexedDBBackingStore::MigrateToV3(LevelDBWriteBatch* write_batch) {
     INTERNAL_CONSISTENCY_ERROR(SET_UP_METADATA);
     return InternalInconsistencyStatus();
   }
-  indexed_db::ReportV2Schema(has_blobs, origin_);
+  indexed_db::ReportV2Schema(has_blobs, storage_key_);
   if (has_blobs) {
     INTERNAL_CONSISTENCY_ERROR(UPGRADING_SCHEMA_CORRUPTED_BLOBS);
-    if (origin_.host() != "docs.google.com")
+    if (storage_key_.origin().host() != "docs.google.com")
       return InternalInconsistencyStatus();
   } else {
     ignore_result(PutInt(write_batch, schema_version_key, db_schema_version));
@@ -3186,7 +3189,7 @@ Status IndexedDBBackingStore::MigrateToV5(LevelDBWriteBatch* write_batch) {
   const std::string schema_version_key = SchemaVersionKey::Encode();
   Status s;
 
-  if (origin_.host() != "docs.google.com") {
+  if (storage_key_.origin().host() != "docs.google.com") {
     s = ValidateBlobFiles(db_.get());
     if (!s.ok()) {
       INTERNAL_CONSISTENCY_ERROR(SET_UP_METADATA);
@@ -3539,10 +3542,10 @@ leveldb::Status IndexedDBBackingStore::Transaction::WriteNewBlobs(
   auto write_result_callback = base::BindRepeating(
       [](base::WeakPtr<Transaction> transaction,
          storage::mojom::WriteBlobToFileResult result) {
-        DCHECK_CALLED_ON_VALID_SEQUENCE(transaction->sequence_checker_);
-
         if (!transaction)
           return;
+        DCHECK_CALLED_ON_VALID_SEQUENCE(transaction->sequence_checker_);
+
         // This can be null if Rollback() is called.
         if (!transaction->write_state_)
           return;
@@ -3591,11 +3594,11 @@ leveldb::Status IndexedDBBackingStore::Transaction::WriteNewBlobs(
           // Android doesn't seem to consistently be able to set file
           // modification times. The timestamp is not checked during reading
           // on Android either. https://crbug.com/1045488
-          base::Optional<base::Time> last_modified;
+          absl::optional<base::Time> last_modified;
 #if !defined(OS_ANDROID)
           last_modified = entry.last_modified().is_null()
-                              ? base::nullopt
-                              : base::make_optional(entry.last_modified());
+                              ? absl::nullopt
+                              : absl::make_optional(entry.last_modified());
 #endif
           blob_storage_context->WriteBlobToFile(
               std::move(pending_blob),
@@ -3669,7 +3672,7 @@ leveldb::Status IndexedDBBackingStore::Transaction::Rollback() {
   if (!transaction_)
     return leveldb::Status::OK();
   // The RollbackAndMaybeTearDown method could tear down the
-  // IndexedDBOriginState, which would destroy |this|.
+  // IndexedDBStorageKeyState, which would destroy |this|.
   scoped_refptr<TransactionalLevelDBTransaction> transaction =
       std::move(transaction_);
   return transaction->Rollback();

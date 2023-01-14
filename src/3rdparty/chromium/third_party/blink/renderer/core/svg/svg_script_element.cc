@@ -20,8 +20,8 @@
 
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_htmlscriptelement_svgscriptelement.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -170,12 +170,6 @@ void SVGScriptElement::DispatchErrorEvent() {
   DispatchEvent(*Event::Create(event_type_names::kError));
 }
 
-void SVGScriptElement::SetScriptElementForBinding(
-    HTMLScriptElementOrSVGScriptElement& element) {
-  if (!IsInShadowTree())
-    element.SetSVGScriptElement(this);
-}
-
 ScriptElementBase::Type SVGScriptElement::GetScriptElementType() {
   return ScriptElementBase::Type::kSVGScriptElement;
 }
@@ -197,6 +191,16 @@ const AttrNameToTrustedType& SVGScriptElement::GetCheckedAttributeTypes()
           {svg_names::kHrefAttr.LocalName(), SpecificTrustedType::kScriptURL},
       }));
   return attribute_map;
+}
+
+V8HTMLOrSVGScriptElement* SVGScriptElement::AsV8HTMLOrSVGScriptElement() {
+  if (IsInShadowTree())
+    return nullptr;
+  return MakeGarbageCollected<V8HTMLOrSVGScriptElement>(this);
+}
+
+DOMNodeId SVGScriptElement::GetDOMNodeId() {
+  return DOMNodeIds::IdForNode(this);
 }
 
 void SVGScriptElement::Trace(Visitor* visitor) const {

@@ -19,6 +19,7 @@
 #include "components/ntp_snippets/ntp_snippets_constants.h"
 #include "components/ntp_snippets/remote/request_params.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -45,7 +46,7 @@ using testing::NotNull;
 using testing::StrEq;
 
 MATCHER_P(EqualsJSON, json, "equals JSON") {
-  base::Optional<base::Value> expected = base::JSONReader::Read(json);
+  absl::optional<base::Value> expected = base::JSONReader::Read(json);
   if (!expected) {
     *result_listener << "INTERNAL ERROR: couldn't parse expected JSON";
     return false;
@@ -115,6 +116,8 @@ class JsonRequestTest : public testing::Test {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
   scoped_refptr<base::TestMockTimeTaskRunner> mock_task_runner_;
   std::unique_ptr<base::ThreadTaskRunnerHandle> mock_runner_handle_;

@@ -10,7 +10,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/strings/string16.h"
 #include "cc/paint/paint_flags.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/focus_ring.h"
@@ -28,8 +27,9 @@ class VIEWS_EXPORT Checkbox : public LabelButton {
  public:
   METADATA_HEADER(Checkbox);
 
-  explicit Checkbox(const base::string16& label = base::string16(),
-                    PressedCallback callback = PressedCallback());
+  explicit Checkbox(const std::u16string& label = std::u16string(),
+                    PressedCallback callback = PressedCallback(),
+                    int button_context = style::CONTEXT_BUTTON);
   ~Checkbox() override;
 
   // Sets/Gets whether or not the checkbox is checked.
@@ -59,9 +59,6 @@ class VIEWS_EXPORT Checkbox : public LabelButton {
 
   // LabelButton:
   void OnThemeChanged() override;
-  std::unique_ptr<InkDrop> CreateInkDrop() override;
-  std::unique_ptr<InkDropRipple> CreateInkDropRipple() const override;
-  SkColor GetInkDropBaseColor() const override;
 
   // Returns the path to draw the focus ring around for this Checkbox.
   virtual SkPath GetFocusRingPath() const;
@@ -83,9 +80,6 @@ class VIEWS_EXPORT Checkbox : public LabelButton {
 
   // True if the checkbox is checked.
   bool checked_ = false;
-
-  // The unique id for the associated label's accessible object.
-  int32_t label_ax_id_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(Checkbox);
 };

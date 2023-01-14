@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -41,7 +42,9 @@ class XRLightProbe : public EventTargetWithInlineData {
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(reflectionchange, kReflectionchange)
 
-  base::Optional<TransformationMatrix> MojoFromObject() const;
+  absl::optional<TransformationMatrix> MojoFromObject() const;
+
+  device::mojom::blink::XRNativeOriginInformationPtr NativeOrigin() const;
 
   void ProcessLightEstimationData(
       const device::mojom::blink::XRLightEstimationData* data,
@@ -55,6 +58,8 @@ class XRLightProbe : public EventTargetWithInlineData {
   // EventTarget overrides.
   ExecutionContext* GetExecutionContext() const override;
   const AtomicString& InterfaceName() const override;
+
+  bool IsStationary() const { return true; }
 
   void Trace(Visitor* visitor) const override;
 

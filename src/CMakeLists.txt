@@ -1,4 +1,3 @@
-cmake_minimum_required(VERSION 3.19)
 ##
 #  MAIN CONFIGURE
 ##
@@ -51,6 +50,9 @@ endif()
 if(NOT QT_FEATURE_qtwebengine_build AND NOT QT_FEATURE_qtpdf_build)
     return()
 endif()
+
+# Upgrade CMake policies to the minimum supported version.
+cmake_minimum_required(VERSION ${QT_SUPPORTED_MIN_CMAKE_VERSION_FOR_BUILDING_WEBENGINE})
 
 ##
 #  MODULES
@@ -142,6 +144,9 @@ if(NOT Gn_FOUND)
     if(QT_FEATURE_qtpdf_build)
         add_dependencies(run_pdf_GnReady gn)
     endif()
+endif()
+
+if(NOT Gn_FOUND OR Gn_EXECUTABLE MATCHES "^${installDir}")
     set(INSTALL_GN 1 CACHE INTERNAL "")
 endif()
 
@@ -149,7 +154,7 @@ endif()
 #  HOST PROJECT
 ##
 
-if(CMAKE_CROSSCOMPILING AND NOT IOS)
+if(CMAKE_CROSSCOMPILING AND NOT IOS AND NOT MACOS)
 
     if(NOT Gn_FOUND)
         message(FATAL_ERROR "\nHost gn not found - cross compilation not possible")

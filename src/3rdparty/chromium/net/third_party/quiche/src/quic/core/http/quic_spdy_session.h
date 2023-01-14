@@ -6,10 +6,12 @@
 #define QUICHE_QUIC_CORE_HTTP_QUIC_SPDY_SESSION_H_
 
 #include <cstddef>
+#include <list>
 #include <memory>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "quic/core/http/http_frames.h"
@@ -28,7 +30,9 @@
 #include "quic/core/quic_time.h"
 #include "quic/core/quic_types.h"
 #include "quic/core/quic_versions.h"
+#include "quic/platform/api/quic_containers.h"
 #include "quic/platform/api/quic_export.h"
+#include "common/quiche_circular_deque.h"
 #include "spdy/core/http2_frame_decoder_adapter.h"
 
 namespace quic {
@@ -37,24 +41,9 @@ namespace test {
 class QuicSpdySessionPeer;
 }  // namespace test
 
-// QuicHpackDebugVisitor gathers data used for understanding HPACK HoL
-// dynamics.  Specifically, it is to help predict the compression
-// penalty of avoiding HoL by chagning how the dynamic table is used.
-// In chromium, the concrete instance populates an UMA
-// histogram with the data.
-class QUIC_EXPORT_PRIVATE QuicHpackDebugVisitor {
- public:
-  QuicHpackDebugVisitor();
-  QuicHpackDebugVisitor(const QuicHpackDebugVisitor&) = delete;
-  QuicHpackDebugVisitor& operator=(const QuicHpackDebugVisitor&) = delete;
+class WebTransportHttp3UnidirectionalStream;
 
-  virtual ~QuicHpackDebugVisitor();
-
-  // For each HPACK indexed representation processed, |elapsed| is
-  // the time since the corresponding entry was added to the dynamic
-  // table.
-  virtual void OnUseEntry(QuicTime::Delta elapsed) = 0;
-};
+QUIC_EXPORT_PRIVATE extern const size_t kMaxUnassociatedWebTransportStreams;
 
 class QUIC_EXPORT_PRIVATE Http3DebugVisitor {
  public:
@@ -85,12 +74,13 @@ class QUIC_EXPORT_PRIVATE Http3DebugVisitor {
   virtual void OnPeerQpackDecoderStreamCreated(QuicStreamId /*stream_id*/) = 0;
 
   // Incoming HTTP/3 frames in ALPS TLS extension.
+  virtual void OnSettingsFrameReceivedViaAlps(const SettingsFrame& /*frame*/) {}
   virtual void OnAcceptChFrameReceivedViaAlps(const AcceptChFrame& /*frame*/) {}
 
   // Incoming HTTP/3 frames on the control stream.
-  virtual void OnCancelPushFrameReceived(const CancelPushFrame& /*frame*/) {}
   virtual void OnSettingsFrameReceived(const SettingsFrame& /*frame*/) = 0;
   virtual void OnGoAwayFrameReceived(const GoAwayFrame& /*frame*/) {}
+  // TODO(b/171463363): Remove.
   virtual void OnMaxPushIdFrameReceived(const MaxPushIdFrame& /*frame*/) {}
   virtual void OnPriorityUpdateFrameReceived(
       const PriorityUpdateFrame& /*frame*/) {}
@@ -104,13 +94,6 @@ class QUIC_EXPORT_PRIVATE Http3DebugVisitor {
       QuicByteCount /*compressed_headers_length*/) {}
   virtual void OnHeadersDecoded(QuicStreamId /*stream_id*/,
                                 QuicHeaderList /*headers*/) {}
-  virtual void OnPushPromiseFrameReceived(QuicStreamId /*stream_id*/,
-                                          QuicStreamId /*push_id*/,
-                                          QuicByteCount
-                                          /*compressed_headers_length*/) {}
-  virtual void OnPushPromiseDecoded(QuicStreamId /*stream_id*/,
-                                    QuicStreamId /*push_id*/,
-                                    QuicHeaderList /*headers*/) {}
 
   // Incoming HTTP/3 frames of unknown type on any stream.
   virtual void OnUnknownFrameReceived(QuicStreamId /*stream_id*/,
@@ -120,6 +103,7 @@ class QUIC_EXPORT_PRIVATE Http3DebugVisitor {
   // Outgoing HTTP/3 frames on the control stream.
   virtual void OnSettingsFrameSent(const SettingsFrame& /*frame*/) = 0;
   virtual void OnGoAwayFrameSent(QuicStreamId /*stream_id*/) {}
+  // TODO(b/171463363): Remove.
   virtual void OnMaxPushIdFrameSent(const MaxPushIdFrame& /*frame*/) {}
   virtual void OnPriorityUpdateFrameSent(const PriorityUpdateFrame& /*frame*/) {
   }
@@ -129,11 +113,6 @@ class QUIC_EXPORT_PRIVATE Http3DebugVisitor {
                                QuicByteCount /*payload_length*/) {}
   virtual void OnHeadersFrameSent(
       QuicStreamId /*stream_id*/,
-      const spdy::SpdyHeaderBlock& /*header_block*/) {}
-  virtual void OnPushPromiseFrameSent(
-      QuicStreamId /*stream_id*/,
-      QuicStreamId
-      /*push_id*/,
       const spdy::SpdyHeaderBlock& /*header_block*/) {}
 
   // 0-RTT related events.
@@ -243,10 +222,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // before encryption gets established.
   void SendHttp3GoAway(QuicErrorCode error_code, const std::string& reason);
 
-  // Same as SendHttp3GoAway().  TODO(bnc): remove when
-  // gfe2_reloadable_flag_quic_goaway_with_max_stream_id flag is deprecated.
-  void SendHttp3Shutdown();
-
   // Write |headers| for |promised_stream_id| on |original_stream_id| in a
   // PUSH_PROMISE frame to peer.
   virtual void WritePushPromise(QuicStreamId original_stream_id,
@@ -259,24 +234,23 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
 
   const QuicHeadersStream* headers_stream() const { return headers_stream_; }
 
-  // Returns whether server push is enabled.
-  // For a Google QUIC client this always returns false.
-  // For a Google QUIC server this is set by incoming SETTINGS_ENABLE_PUSH.
-  // For an IETF QUIC client this returns true if SetMaxPushId() has ever been
-  // called.
-  // For an IETF QUIC server this returns true if EnableServerPush() has been
-  // called and the server has received at least one MAX_PUSH_ID frame from the
-  // client.
-  bool server_push_enabled() const;
-
   // Called when the control stream receives HTTP/3 SETTINGS.
   // Returns false in case of 0-RTT if received settings are incompatible with
   // cached values, true otherwise.
   virtual bool OnSettingsFrame(const SettingsFrame& frame);
 
-  // Called when a SETTINGS is parsed from an incoming SETTINGS frame.
-  // Returns false in case of 0-RTT if received SETTINGS is incompatible with
-  // cached value, true otherwise.
+  // Called when an HTTP/3 SETTINGS frame is received via ALPS.
+  // Returns an error message if an error has occurred, or nullopt otherwise.
+  // May or may not close the connection on error.
+  absl::optional<std::string> OnSettingsFrameViaAlps(
+      const SettingsFrame& frame);
+
+  // Called when a setting is parsed from a SETTINGS frame received on the
+  // control stream or from cached application state.
+  // Returns true on success.
+  // Returns false if received setting is incompatible with cached value (in
+  // case of 0-RTT) or with previously received value (in case of ALPS).
+  // Also closes the connection on error.
   bool OnSetting(uint64_t id, uint64_t value);
 
   // Return true if this session wants to release headers stream's buffer
@@ -322,6 +296,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   void OnCompressedFrameSize(size_t frame_len);
 
   // Called when a PUSH_PROMISE frame has been received.
+  // TODO(b/171463363): Remove.
   void OnPushPromise(spdy::SpdyStreamId stream_id,
                      spdy::SpdyStreamId promised_stream_id);
 
@@ -334,34 +309,16 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // those streams are not initialized yet.
   void OnCanCreateNewOutgoingStream(bool unidirectional) override;
 
-  // Sets |max_push_id_| and sends a MAX_PUSH_ID frame.
-  // This method must only be called if protocol is IETF QUIC and perspective is
-  // client.  |max_push_id| must be greater than or equal to current
-  // |max_push_id_|.
-  void SetMaxPushId(PushId max_push_id);
-
   // Sets |max_push_id_|.
   // This method must only be called if protocol is IETF QUIC and perspective is
   // server.  It must only be called if a MAX_PUSH_ID frame is received.
   // Returns whether |max_push_id| is greater than or equal to current
   // |max_push_id_|.
+  // TODO(b/171463363): Remove.
   bool OnMaxPushIdFrame(PushId max_push_id);
 
-  // Enables server push.
-  // Must only be called when using IETF QUIC, for which server push is disabled
-  // by default.  Server push defaults to enabled and cannot be disabled for
-  // Google QUIC.
-  // Must only be called for a server.  A client can effectively disable push by
-  // never calling SetMaxPushId().
-  void EnableServerPush();
-
-  // Returns true if push is enabled and a push with |push_id| can be created.
-  // For a server this means that EnableServerPush() has been called, at least
-  // one MAX_PUSH_ID frame has been received, and the largest received
-  // MAX_PUSH_ID value is greater than or equal to |push_id|.
-  // For a client this means that SetMaxPushId() has been called with
-  // |max_push_id| greater than or equal to |push_id|.
-  // Must only be called when using IETF QUIC.
+  // TODO(b/171463363): Remove.
+  // Returns false.
   bool CanCreatePushStreamWithId(PushId push_id);
 
   int32_t destruction_indicator() const { return destruction_indicator_; }
@@ -417,6 +374,85 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // extension.
   virtual void OnAcceptChFrameReceivedViaAlps(const AcceptChFrame& /*frame*/);
 
+  // Whether HTTP/3 datagrams are supported on this session, based on received
+  // SETTINGS.
+  bool h3_datagram_supported() const { return h3_datagram_supported_; }
+
+  // This must not be used except by QuicSpdyStream::SendHttp3Datagram.
+  MessageStatus SendHttp3Datagram(
+      QuicDatagramStreamId stream_id,
+      absl::optional<QuicDatagramContextId> context_id,
+      absl::string_view payload);
+  // This must not be used except by QuicSpdyStream::SetMaxDatagramTimeInQueue.
+  void SetMaxDatagramTimeInQueueForStreamId(QuicStreamId stream_id,
+                                            QuicTime::Delta max_time_in_queue);
+  // This must not be used except by
+  // QuicSpdyStream::MaybeProcessReceivedWebTransportHeaders.
+  void RegisterHttp3DatagramFlowId(QuicDatagramStreamId flow_id,
+                                   QuicStreamId stream_id);
+  // This must not be used except by QuicSpdyStream::OnClose.
+  void UnregisterHttp3DatagramFlowId(QuicDatagramStreamId flow_id);
+
+  // Override from QuicSession to support HTTP/3 datagrams.
+  void OnMessageReceived(absl::string_view message) override;
+
+  // Indicates whether the HTTP/3 session supports WebTransport.
+  bool SupportsWebTransport();
+
+  // Indicates whether both the peer and us support HTTP/3 Datagrams.
+  bool SupportsH3Datagram() { return h3_datagram_supported_; }
+
+  // Indicates whether the HTTP/3 session will indicate WebTransport support to
+  // the peer.
+  bool WillNegotiateWebTransport();
+
+  // Returns a WebTransport session by its session ID.  Returns nullptr if no
+  // session is associated with the given ID.
+  WebTransportHttp3* GetWebTransportSession(WebTransportSessionId id);
+
+  // If true, no data on bidirectional streams will be processed by the server
+  // until the SETTINGS are received.  Only works for HTTP/3.
+  bool ShouldBufferRequestsUntilSettings() {
+    return version().UsesHttp3() && perspective() == Perspective::IS_SERVER &&
+           ShouldNegotiateHttp3Datagram();
+  }
+
+  // Returns if the incoming bidirectional streams should process data.  This is
+  // usually true, but in certain cases we would want to wait until the settings
+  // are received.
+  bool ShouldProcessIncomingRequests();
+
+  void OnStreamWaitingForClientSettings(QuicStreamId id);
+
+  // Links the specified stream with a WebTransport session.  If the session is
+  // not present, it is buffered until a corresponding stream is found.
+  void AssociateIncomingWebTransportStreamWithSession(
+      WebTransportSessionId session_id,
+      QuicStreamId stream_id);
+
+  void ProcessBufferedWebTransportStreamsForSession(WebTransportHttp3* session);
+
+  bool CanOpenOutgoingUnidirectionalWebTransportStream(
+      WebTransportSessionId /*id*/) {
+    return CanOpenNextOutgoingUnidirectionalStream();
+  }
+  bool CanOpenOutgoingBidirectionalWebTransportStream(
+      WebTransportSessionId /*id*/) {
+    return CanOpenNextOutgoingBidirectionalStream();
+  }
+
+  // Creates an outgoing unidirectional WebTransport stream.  Returns nullptr if
+  // the stream cannot be created due to flow control or some other reason.
+  WebTransportHttp3UnidirectionalStream*
+  CreateOutgoingUnidirectionalWebTransportStream(WebTransportHttp3* session);
+
+  // Creates an outgoing bidirectional WebTransport stream.  Returns nullptr if
+  // the stream cannot be created due to flow control or some other reason.
+  QuicSpdyStream* CreateOutgoingBidirectionalWebTransportStream(
+      WebTransportHttp3* session);
+
+  QuicSpdyStream* GetOrCreateSpdyDataStream(const QuicStreamId stream_id);
+
  protected:
   // Override CreateIncomingStream(), CreateOutgoingBidirectionalStream() and
   // CreateOutgoingUnidirectionalStream() with QuicSpdyStream return type to
@@ -426,8 +462,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   virtual QuicSpdyStream* CreateOutgoingBidirectionalStream() = 0;
   virtual QuicSpdyStream* CreateOutgoingUnidirectionalStream() = 0;
 
-  QuicSpdyStream* GetOrCreateSpdyDataStream(const QuicStreamId stream_id);
-
   // If an incoming stream can be created, return true.
   virtual bool ShouldCreateIncomingStream(QuicStreamId id) = 0;
 
@@ -436,16 +470,20 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   virtual bool ShouldCreateOutgoingBidirectionalStream() = 0;
   virtual bool ShouldCreateOutgoingUnidirectionalStream() = 0;
 
+  // Indicates whether the underlying backend can accept and process
+  // WebTransport sessions over HTTP/3.
+  virtual bool ShouldNegotiateWebTransport();
+
   // Returns true if there are open HTTP requests.
   bool ShouldKeepConnectionAlive() const override;
 
   // Overridden to buffer incoming unidirectional streams for version 99.
   bool UsesPendingStreams() const override;
 
-  // Overridden to Process HTTP/3 stream types. H/3 streams will be created from
-  // pending streams accordingly if the stream type can be read. Returns true if
-  // unidirectional streams are created.
-  bool ProcessPendingStream(PendingStream* pending) override;
+  // Processes incoming unidirectional streams; parses the stream type, and
+  // creates a new stream of the corresponding type.  Returns the pointer to the
+  // newly created stream, or nullptr if the stream type is not yet available.
+  QuicStream* ProcessPendingStream(PendingStream* pending) override;
 
   size_t WriteHeadersOnHeadersStreamImpl(
       QuicStreamId id,
@@ -460,19 +498,9 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
       EncryptionLevel level,
       std::unique_ptr<QuicEncrypter> encrypter) override;
 
-  // Optional, enables instrumentation related to go/quic-hpack.
-  void SetHpackEncoderDebugVisitor(
-      std::unique_ptr<QuicHpackDebugVisitor> visitor);
-  void SetHpackDecoderDebugVisitor(
-      std::unique_ptr<QuicHpackDebugVisitor> visitor);
-
   // Sets the maximum size of the header compression table spdy_framer_ is
   // willing to use to encode header blocks.
   void UpdateHeaderEncoderTableSize(uint32_t value);
-
-  // Called when SETTINGS_ENABLE_PUSH is received, only supported on
-  // server side.
-  void UpdateEnableServerPush(bool value);
 
   bool IsConnected() { return connection()->connected(); }
 
@@ -488,10 +516,32 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // QuicConnectionVisitorInterface method.
   void BeforeConnectionCloseSent() override;
 
+  // Called whenever a datagram is dequeued or dropped from datagram_queue().
+  virtual void OnDatagramProcessed(absl::optional<MessageStatus> status);
+
+  // Returns true if HTTP/3 datagram extension should be supported.
+  virtual bool ShouldNegotiateHttp3Datagram();
+
  private:
   friend class test::QuicSpdySessionPeer;
 
   class SpdyFramerVisitor;
+
+  // Proxies OnDatagramProcessed() calls to the session.
+  class QUIC_EXPORT_PRIVATE DatagramObserver
+      : public QuicDatagramQueue::Observer {
+   public:
+    explicit DatagramObserver(QuicSpdySession* session) : session_(session) {}
+    void OnDatagramProcessed(absl::optional<MessageStatus> status) override;
+
+   private:
+    QuicSpdySession* session_;  // not owned
+  };
+
+  struct QUIC_EXPORT_PRIVATE BufferedWebTransportStream {
+    WebTransportSessionId session_id;
+    QuicStreamId stream_id;
+  };
 
   // The following methods are called by the SimpleVisitor.
 
@@ -514,9 +564,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // When using 0-RTT, this method is called twice: once when encryption is
   // established, and again when 1-RTT keys are available.
   void SendInitialData();
-
-  // Send a MAX_PUSH_ID frame.  Used in IETF QUIC only.
-  void SendMaxPushId();
 
   void FillSettingsFrame();
 
@@ -585,6 +632,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   //   after encryption is established, the push ID in the most recently sent
   //   MAX_PUSH_ID frame.
   // Once set, never goes back to unset.
+  // TODO(b/171463363): Remove.
   absl::optional<PushId> max_push_id_;
 
   // Not owned by the session.
@@ -599,15 +647,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // an use-after-free.
   int32_t destruction_indicator_;
 
-  // Used in Google QUIC only.  Set every time SETTINGS_ENABLE_PUSH is received.
-  // Defaults to true.
-  bool server_push_enabled_;
-
-  // Used in IETF QUIC only.  Defaults to false.
-  // Server push is enabled for a server by calling EnableServerPush().
-  // Server push is enabled for a client by calling SetMaxPushId().
-  bool ietf_server_push_enabled_;
-
   // The identifier in the most recently received GOAWAY frame.  Unset if no
   // GOAWAY frame has been received yet.
   absl::optional<uint64_t> last_received_http3_goaway_id_;
@@ -615,13 +654,34 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession
   // frame has been sent yet.
   absl::optional<uint64_t> last_sent_http3_goaway_id_;
 
-  // Only used by a client, only with IETF QUIC.  True if a MAX_PUSH_ID frame
-  // has been sent, in which case |max_push_id_| has the value sent in the most
-  // recent MAX_PUSH_ID frame.  Once true, never goes back to false.
-  bool http3_max_push_id_sent_;
+  // Whether both this endpoint and our peer support HTTP/3 datagrams.
+  bool h3_datagram_supported_ = false;
 
-  // Latched value of reloadable flag quic_goaway_with_max_stream_id.
-  const bool goaway_with_max_stream_id_;
+  // Whether the peer has indicated WebTransport support.
+  bool peer_supports_webtransport_ = false;
+
+  // This maps from draft-ietf-masque-h3-datagram-00 flow IDs to stream IDs.
+  // TODO(b/181256914) remove this when we deprecate support for that draft in
+  // favor of more recent ones.
+  absl::flat_hash_map<uint64_t, QuicStreamId>
+      h3_datagram_flow_id_to_stream_id_map_;
+
+  // Whether any settings have been received, either from the peer or from a
+  // session ticket.
+  bool any_settings_received_ = false;
+
+  // If ShouldBufferRequestsUntilSettings() is true, all streams that are
+  // blocked by that are tracked here.
+  absl::flat_hash_set<QuicStreamId> streams_waiting_for_settings_;
+
+  // WebTransport streams that do not have a session associated with them.
+  // Limited to kMaxUnassociatedWebTransportStreams; when the list is full,
+  // oldest streams are evicated first.
+  std::list<BufferedWebTransportStream> buffered_streams_;
+
+  // Latched value of flag_quic_decline_server_push_stream.
+  const bool decline_server_push_stream_ =
+      GetQuicReloadableFlag(quic_decline_server_push_stream);
 };
 
 }  // namespace quic

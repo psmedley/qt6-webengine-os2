@@ -4,7 +4,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/optional.h"
+#include "base/format_macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
@@ -29,6 +29,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
@@ -40,6 +41,7 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/content_uri_utils.h"
@@ -99,17 +101,14 @@ void CopyFileAndGetContentUri(const base::FilePath& file,
 
 std::string ExecuteAndGetString(const ToRenderFrameHost& adapter,
                                 const std::string& script) {
-  std::string result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      adapter, "domAutomationController.send(" + script + ")", &result));
-  return result;
+  return EvalJs(adapter, script).ExtractString();
 }
 
 void NavigateAndWaitForTitle(content::WebContents* web_contents,
                              const GURL& test_data_url,
                              const GURL& expected_commit_url,
                              base::StringPiece ascii_title) {
-  base::string16 expected_title = base::ASCIIToUTF16(ascii_title);
+  std::u16string expected_title = base::ASCIIToUTF16(ascii_title);
   TitleWatcher title_watcher(web_contents, expected_title);
   EXPECT_TRUE(NavigateToURL(web_contents, test_data_url, expected_commit_url));
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -347,19 +346,19 @@ class WebBundleBrowserTestBase : public ContentBrowserTest {
   }
 
   void RunTestScript(const std::string& script) {
-    EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
-                              "loadScript('" + script + "');"));
-    base::string16 ok = base::ASCIIToUTF16("OK");
+    EXPECT_TRUE(
+        ExecJs(shell()->web_contents(), "loadScript('" + script + "');"));
+    std::u16string ok = u"OK";
     TitleWatcher title_watcher(shell()->web_contents(), ok);
-    title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("FAIL"));
+    title_watcher.AlsoWaitForTitle(u"FAIL");
     EXPECT_EQ(ok, title_watcher.WaitAndGetTitle());
   }
 
   void ExecuteScriptAndWaitForTitle(const std::string& script,
                                     const std::string& title) {
-    base::string16 title16 = base::ASCIIToUTF16(title);
+    std::u16string title16 = base::ASCIIToUTF16(title);
     TitleWatcher title_watcher(shell()->web_contents(), title16);
-    EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
+    EXPECT_TRUE(ExecJs(shell()->web_contents(), script));
     EXPECT_EQ(title16, title_watcher.WaitAndGetTitle());
   }
 
@@ -411,14 +410,14 @@ class FinishNavigationObserver : public WebContentsObserver {
     navigations_remaining_ = navigations_remaining;
   }
 
-  const base::Optional<net::Error>& error_code() const { return error_code_; }
+  const absl::optional<net::Error>& error_code() const { return error_code_; }
   const std::vector<NavigationType>& navigation_types() const {
     return navigation_types_;
   }
 
  private:
   base::OnceClosure done_closure_;
-  base::Optional<net::Error> error_code_;
+  absl::optional<net::Error> error_code_;
 
   int navigations_remaining_ = 1;
   std::vector<NavigationType> navigation_types_;
@@ -617,36 +616,33 @@ void SetUpSubPageTest(net::EmbeddedTestServer* primary_server,
 
 std::string AddIframeAndWaitForMessage(const ToRenderFrameHost& adapter,
                                        const GURL& url) {
-  std::string result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(adapter,
-                                                     base::StringPrintf(
-                                                         R"(
+  return EvalJs(adapter,
+                JsReplace(
+                    R"(
   (function(){
     const iframe = document.createElement('iframe');
-    iframe.src = '%s';
+    iframe.src = $1;
     document.body.appendChild(iframe);
   })();
   )",
-                                                         url.spec().c_str()),
-                                                     &result));
-  return result;
+                    url),
+                EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+      .ExtractString();
 }
 
 std::string WindowOpenAndWaitForMessage(const ToRenderFrameHost& adapter,
                                         const GURL& url) {
-  std::string result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      adapter,
-      base::StringPrintf(R"(
+  return EvalJs(adapter,
+                JsReplace(R"(
         if (document.last_win) {
           // Close the latest window to avoid OOM-killer on Android.
           document.last_win.close();
         }
-        document.last_win = window.open('%s', '_blank');
+        document.last_win = window.open($1, '_blank');
       )",
-                         url.spec().c_str()),
-      &result));
-  return result;
+                          url),
+                EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+      .ExtractString();
 }
 
 // Runs tests for subpages  (iframe / window.open()). This function calls
@@ -729,7 +725,6 @@ void AddHtmlAndScriptForNavigationTest(
 }
 
 std::string GetLoadResultForNavigationTest(const ToRenderFrameHost& adapter) {
-  std::string result;
   std::string script = R"(
     (async () => {
       const script = document.createElement('script');
@@ -751,8 +746,8 @@ std::string GetLoadResultForNavigationTest(const ToRenderFrameHost& adapter) {
       document.body.appendChild(script);
     })()
     )";
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(adapter, script, &result));
-  return result;
+  return EvalJs(adapter, script, EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+      .ExtractString();
 }
 
 // Sets up |server| to return server generated page HTML files and JavaScript
@@ -1212,6 +1207,11 @@ void RunIframeNavigationTest(
     const GURL& web_bundle_url,
     const GURL& url_origin,
     base::RepeatingCallback<GURL(const GURL&)> get_url_for_bundle) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(web_contents,
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   NavigateAndWaitForTitle(
       web_contents, web_bundle_url,
       get_url_for_bundle.Run(url_origin.Resolve("/top-page/")), "Ready");
@@ -1400,6 +1400,11 @@ void RunIframeSameDocumentNavigationTest(
     const GURL& web_bundle_url,
     const GURL& url_origin,
     base::RepeatingCallback<GURL(const GURL&)> get_url_for_bundle) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(web_contents,
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   NavigateAndWaitForTitle(
       web_contents, web_bundle_url,
       get_url_for_bundle.Run(url_origin.Resolve("/top-page/")), "Ready");
@@ -1736,7 +1741,13 @@ IN_PROC_BROWSER_TEST_P(WebBundleTrustableFileBrowserTest,
                           &RunSameDocumentNavigationTest);
 }
 
-IN_PROC_BROWSER_TEST_P(WebBundleTrustableFileBrowserTest, IframeNavigation) {
+#if defined(OS_ANDROID)
+#define MAYBE_IframeNavigation DISABLED_IframeNavigation
+#else
+#define MAYBE_IframeNavigation IframeNavigation
+#endif
+IN_PROC_BROWSER_TEST_P(WebBundleTrustableFileBrowserTest,
+                       MAYBE_IframeNavigation) {
   RunSharedNavigationTest(&SetUpIframeNavigationTest, &RunIframeNavigationTest);
 }
 
@@ -1752,8 +1763,13 @@ IN_PROC_BROWSER_TEST_P(WebBundleTrustableFileBrowserTest,
                           &RunIframeParentInitiatedOutOfBundleNavigationTest);
 }
 
+#if defined(OS_ANDROID)
+#define MAYBE_IframeSameDocumentNavigation DISABLED_IframeSameDocumentNavigation
+#else
+#define MAYBE_IframeSameDocumentNavigation IframeSameDocumentNavigation
+#endif
 IN_PROC_BROWSER_TEST_P(WebBundleTrustableFileBrowserTest,
-                       IframeSameDocumentNavigation) {
+                       MAYBE_IframeSameDocumentNavigation) {
   RunSharedNavigationTest(&SetUpIframeNavigationTest,
                           &RunIframeSameDocumentNavigationTest);
 }
@@ -1838,7 +1854,13 @@ class WebBundleTrustableFileNotFoundBrowserTest
   DISALLOW_COPY_AND_ASSIGN(WebBundleTrustableFileNotFoundBrowserTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WebBundleTrustableFileNotFoundBrowserTest, NotFound) {
+// TODO(https://crbug.com/1227439): flaky
+#if defined(OS_LINUX)
+#define MAYBE_NotFound DISABLED_NotFound
+#else
+#define MAYBE_NotFound NotFound
+#endif
+IN_PROC_BROWSER_TEST_F(WebBundleTrustableFileNotFoundBrowserTest, MAYBE_NotFound) {
   std::string console_message = ExpectNavigationFailureAndReturnConsoleMessage(
       shell()->web_contents(), test_data_url());
 
@@ -1939,7 +1961,13 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, IframeSameDocumentNavigation) {
                           &RunIframeSameDocumentNavigationTest);
 }
 
-IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, InvalidWebBundleFile) {
+// TODO(https://crbug.com/1225178): flaky
+#if defined(OS_LINUX)
+#define MAYBE_InvalidWebBundleFile DISABLED_InvalidWebBundleFile
+#else
+#define MAYBE_InvalidWebBundleFile InvalidWebBundleFile
+#endif
+IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, MAYBE_InvalidWebBundleFile) {
   const GURL test_data_url =
       GetTestUrlForFile(GetTestDataPath("invalid_web_bundle.wbn"));
 
@@ -1950,8 +1978,15 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, InvalidWebBundleFile) {
             console_message);
 }
 
+// TODO(https://crbug.com/1225178): flaky
+#if defined(OS_LINUX)
+#define MAYBE_ResponseParseErrorInMainResource \
+  DISABLED_ResponseParseErrorInMainResource
+#else
+#define MAYBE_ResponseParseErrorInMainResource ResponseParseErrorInMainResource
+#endif
 IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest,
-                       ResponseParseErrorInMainResource) {
+                       MAYBE_ResponseParseErrorInMainResource) {
   const GURL test_data_url = GetTestUrlForFile(
       GetTestDataPath("broken_bundle_broken_first_entry.wbn"));
 
@@ -1999,9 +2034,9 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, NoLocalFileScheme) {
       test_data_url, web_bundle_utils::GetSynthesizedUrlForWebBundle(
                          test_data_url, GURL(kTestPageUrl)));
 
-  auto expected_title = base::ASCIIToUTF16("load failed");
+  auto* expected_title = u"load failed";
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("Local Script"));
+  title_watcher.AlsoWaitForTitle(u"Local Script");
 
   const GURL script_file_url =
       net::FilePathToFileURL(GetTestDataPath("local_script.js"));
@@ -2011,7 +2046,7 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, NoLocalFileScheme) {
     script.src = "%s";
     document.body.appendChild(script);)",
                                                 script_file_url.spec().c_str());
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), script));
 
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
@@ -2049,7 +2084,13 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, DataDecoderRestart) {
   EXPECT_EQ(3, mock_factory.GetParserCreationCount());
 }
 
-IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, ParseMetadataCrash) {
+// TODO(https://crbug.com/1225178): flaky
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_ANDROID)
+#define MAYBE_ParseMetadataCrash DISABLED_ParseMetadataCrash
+#else
+#define MAYBE_ParseMetadataCrash ParseMetadataCrash
+#endif
+IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, MAYBE_ParseMetadataCrash) {
   base::FilePath test_file_path = GetTestDataPath("mocked.wbn");
   MockParserFactory mock_factory({GURL(kTestPageUrl)}, test_file_path);
   mock_factory.SimulateParseMetadataCrash();
@@ -2063,7 +2104,13 @@ IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, ParseMetadataCrash) {
       console_message);
 }
 
-IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, ParseResponseCrash) {
+// TODO(https://crbug.com/1225178): flaky
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_ANDROID)
+#define MAYBE_ParseResponseCrash DISABLED_ParseResponseCrash
+#else
+#define MAYBE_ParseResponseCrash ParseResponseCrash
+#endif
+IN_PROC_BROWSER_TEST_P(WebBundleFileBrowserTest, MAYBE_ParseResponseCrash) {
   base::FilePath test_file_path = GetTestDataPath("mocked.wbn");
   MockParserFactory mock_factory({GURL(kTestPageUrl)}, test_file_path);
   mock_factory.SimulateParseResponseCrash();
@@ -2268,7 +2315,7 @@ class WebBundleNetworkBrowserTest : public WebBundleBrowserTestBase {
     base::RunLoop run_loop;
     FinishNavigationObserver finish_navigation_observer(web_contents,
                                                         run_loop.QuitClosure());
-    EXPECT_TRUE(ExecuteScript(web_contents, "history.back();"));
+    EXPECT_TRUE(ExecJs(web_contents, "history.back();"));
 
     run_loop.Run();
     ASSERT_TRUE(finish_navigation_observer.error_code());
@@ -2365,8 +2412,8 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest, Download) {
   SetContents(CreateSimpleWebBundle(primary_url));
   WebContents* web_contents = shell()->web_contents();
   std::unique_ptr<DownloadObserver> download_observer =
-      std::make_unique<DownloadObserver>(BrowserContext::GetDownloadManager(
-          web_contents->GetBrowserContext()));
+      std::make_unique<DownloadObserver>(
+          web_contents->GetBrowserContext()->GetDownloadManager());
 
   EXPECT_FALSE(NavigateToURL(web_contents, wbn_url));
   download_observer->WaitUntilDownloadCreated();
@@ -2575,7 +2622,13 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest, SameDocumentNavigation) {
                           &RunSameDocumentNavigationTest);
 }
 
-IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest, IframeNavigation) {
+// https://crbug.com/1219373 fails with BFCache field trial testing config.
+#if defined(OS_ANDROID)
+#define MAYBE_IframeNavigation DISABLED_IframeNavigation
+#else
+#define MAYBE_IframeNavigation IframeNavigation
+#endif
+IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest, MAYBE_IframeNavigation) {
   RunSharedNavigationTest(&SetUpIframeNavigationTest, &RunIframeNavigationTest);
 }
 
@@ -2591,8 +2644,14 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                           &RunIframeParentInitiatedOutOfBundleNavigationTest);
 }
 
+// https://crbug.com/1219373 fails with BFCache field trial testing config.
+#if defined(OS_ANDROID)
+#define MAYBE_IframeSameDocumentNavigation DISABLED_IframeSameDocumentNavigation
+#else
+#define MAYBE_IframeSameDocumentNavigation IframeSameDocumentNavigation
+#endif
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
-                       IframeSameDocumentNavigation) {
+                       MAYBE_IframeSameDocumentNavigation) {
   RunSharedNavigationTest(&SetUpIframeNavigationTest,
                           &RunIframeSameDocumentNavigationTest);
 }
@@ -2665,6 +2724,11 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                        HistoryNavigationError_UnexpectedContentType) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(shell()->web_contents(),
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   const std::string wbn_path = "/web_bundle/test.wbn";
   const std::string primary_url_path = "/web_bundle/test.html";
   RegisterRequestHandler(wbn_path);
@@ -2694,6 +2758,11 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                        HistoryNavigationError_MissingNosniff) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(shell()->web_contents(),
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   const std::string wbn_path = "/web_bundle/test.wbn";
   const std::string primary_url_path = "/web_bundle/test.html";
   RegisterRequestHandler(wbn_path);
@@ -2724,6 +2793,11 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                        HistoryNavigationError_UnexpectedRedirect) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(shell()->web_contents(),
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   const std::string wbn_path = "/web_bundle/test.wbn";
   const std::string primary_url_path = "/web_bundle/test.html";
   RegisterRequestHandler(wbn_path);
@@ -2753,6 +2827,10 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                        HistoryNavigationError_ReadMetadataFailure) {
+  // The test assumes the previous page gets deleted after navigation. Disable
+  // back/forward cache to ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(shell()->web_contents(),
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   const std::string wbn_path = "/web_bundle/test.wbn";
   const std::string primary_url_path = "/web_bundle/test.html";
   RegisterRequestHandler(wbn_path);
@@ -2775,6 +2853,11 @@ IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(WebBundleNetworkBrowserTest,
                        HistoryNavigationError_ExpectedUrlNotFound) {
+  // The test assumes the previous page gets deleted after navigation and doing
+  // back navigation will recreate the page. Disable back/forward cache to
+  // ensure that it doesn't get preserved in the cache.
+  DisableBackForwardCacheForTesting(shell()->web_contents(),
+                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
   const std::string wbn_path = "/web_bundle/test.wbn";
   const std::string primary_url_path = "/web_bundle/test.html";
   const std::string alt_primary_url_path = "/web_bundle/alt.html";

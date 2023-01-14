@@ -15,21 +15,24 @@
 #include "base/files/file_tracing.h"
 #include "base/files/platform_file.h"
 #include "base/time/time.h"
+#include "base/trace_event/base_tracing_forward.h"
 #include "build/build_config.h"
-
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
-#include <sys/stat.h>
-#endif
-
-namespace base {
 
 #if defined(OS_BSD) || defined(OS_APPLE) || defined(OS_NACL) || \
     defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21) || \
     defined(OS_OS2)
+struct stat;
+namespace base {
 typedef struct stat stat_wrapper_t;
+}
 #elif defined(OS_POSIX)
+struct stat64;
+namespace base {
 typedef struct stat64 stat_wrapper_t;
+}
 #endif
+
+namespace base {
 
 // Thin wrapper around an OS-level file.
 // Note that this class does not provide any support for asynchronous IO, other
@@ -179,8 +182,8 @@ class BASE_EXPORT File {
   void Initialize(const FilePath& path, uint32_t flags);
 
   // Returns |true| if the handle / fd wrapped by this object is valid.  This
-  // method doesn't interact with the file system (and is safe to be called from
-  // ThreadRestrictions::SetIOAllowed(false) threads).
+  // method doesn't interact with the file system and is thus safe to be called
+  // from threads that disallow blocking.
   bool IsValid() const;
 
   // Returns true if a new file was created (or an old one truncated to zero
@@ -317,6 +320,9 @@ class BASE_EXPORT File {
   File Duplicate() const;
 
   bool async() const { return async_; }
+
+  // Serialise this object into a trace.
+  void WriteIntoTrace(perfetto::TracedValue context) const;
 
 #if defined(OS_WIN)
   // Sets or clears the DeleteFile disposition on the file. Returns true if

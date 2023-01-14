@@ -9,22 +9,28 @@ import("//build/config/fuchsia/symbol_archive.gni")
 import("//build/config/locales.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/test.gni")
+import("//third_party/fuchsia-sdk/sdk/build/fidl_library.gni")
 import("//tools/grit/repack.gni")
 
 config("web_engine_implementation") {
   defines = [ "WEB_ENGINE_IMPLEMENTATION" ]
+  visibility = [ ":*" ]
 }
 
 mojom("mojom") {
-  sources = [
-    "cast_streaming_session.mojom",
-    "url_request_rewrite.mojom",
-  ]
+  sources = [ "url_request_rewrite.mojom" ]
   public_deps = [
     "//media/mojo/mojom",
     "//mojo/public/mojom/base",
     "//services/network/public/mojom",
   ]
+  visibility = [ ":*" ]
+}
+
+fidl_library("fidl") {
+  library_name = "chromium.internal"
+  sources = [ "fidl/dev_tools.fidl" ]
+  public_deps = [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.web" ]
   visibility = [ ":*" ]
 }
 
@@ -62,7 +68,7 @@ repack("web_engine_pak") {
   visibility = [ ":*" ]
 }
 
-foreach(locale, locales_with_fake_bidi) {
+foreach(locale, locales_with_pseudolocales) {
   repack("web_engine_locale_${locale}_pak") {
     # WebEngine requires the following locale-specific resources:
     # 1. Locale settings (e.g. default encoding, accept-languages per locale).
@@ -88,18 +94,30 @@ foreach(locale, locales_with_fake_bidi) {
 
 component("web_engine_core") {
   deps = [
+    ":fidl",
     ":mojom",
     ":switches",
     "//base",
     "//base:base_static",
     "//base/util/memory_pressure",
+    "//components/cast/message_port:message_port_fuchsia",
+    "//components/cast_streaming/browser",
+    "//components/cast_streaming/public:config_conversions",
+    "//components/cast_streaming/public/mojom",
+    "//components/cast_streaming/renderer",
     "//components/cdm/renderer",
+    "//components/embedder_support:browser_util",
+    "//components/embedder_support/origin_trials",
+    "//components/favicon/content",
+    "//components/favicon/core",
     "//components/keyed_service/content",
     "//components/media_control/browser",
     "//components/media_control/renderer",
     "//components/on_load_script_injector/browser",
     "//components/on_load_script_injector/renderer",
+    "//components/permissions",
     "//components/policy/content:safe_sites_navigation_throttle",
+    "//components/profile_metrics",
     "//components/site_isolation",
     "//components/strings:components_locale_settings",
     "//components/version_info",
@@ -112,7 +130,7 @@ component("web_engine_core") {
     "//fuchsia/base:legacymetrics",
     "//fuchsia/base:message_port",
     "//fuchsia/base:modular",
-    "//fuchsia/cast_streaming",
+    "//fuchsia/engine/web_instance_host",
     "//google_apis",
     "//gpu/command_buffer/service",
     "//media",
@@ -125,6 +143,7 @@ component("web_engine_core") {
     "//services/media_session/public/mojom",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
+    "//skia",
     "//skia/public/mojom",
     "//third_party/blink/public/common",
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.accessibility.semantics",
@@ -135,6 +154,7 @@ component("web_engine_core") {
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.gfx",
     "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
     "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
+    "//third_party/fuchsia-sdk/sdk/pkg/sys_inspect_cpp",
     "//third_party/widevine/cdm:headers",
     "//ui/accessibility",
     "//ui/aura",
@@ -152,15 +172,21 @@ component("web_engine_core") {
   # as |data_deps| causes metadata (.info) files to also be pulled-in to the
   # package.
   deps += [ ":web_engine_pak" ]
+
   data = [ "$root_gen_dir/common_resources.pak" ]
-  foreach(locale, locales_with_fake_bidi) {
+  foreach(locale, locales_with_pseudolocales) {
     deps += [ ":web_engine_locale_${locale}_pak" ]
     data += [ "$root_gen_dir/locales/${locale}.pak" ]
   }
 
   public_deps = [
     "//content/public/browser",
+    "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.accessibility.semantics",
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.web",
+
+    # Public because tests include Context, Frame, etc headers, which include
+    # Inspect properties.
+    "//third_party/fuchsia-sdk/sdk/pkg/inspect",
   ]
 
   configs += [ ":web_engine_implementation" ]
@@ -170,8 +196,6 @@ component("web_engine_core") {
     "browser/accessibility_bridge.h",
     "browser/ax_tree_converter.cc",
     "browser/ax_tree_converter.h",
-    "browser/cast_streaming_session_client.cc",
-    "browser/cast_streaming_session_client.h",
     "browser/content_directory_loader_factory.cc",
     "browser/content_directory_loader_factory.h",
     "browser/context_impl.cc",
@@ -198,6 +222,8 @@ component("web_engine_core") {
     "browser/navigation_policy_handler.h",
     "browser/navigation_policy_throttle.cc",
     "browser/navigation_policy_throttle.h",
+    "browser/receiver_session_client.cc",
+    "browser/receiver_session_client.h",
     "browser/theme_manager.cc",
     "browser/theme_manager.h",
     "browser/url_request_rewrite_rules_manager.cc",
@@ -230,11 +256,6 @@ component("web_engine_core") {
     "context_provider_impl.h",
     "context_provider_main.cc",
     "context_provider_main.h",
-    "features.h",
-    "renderer/cast_streaming_demuxer.cc",
-    "renderer/cast_streaming_demuxer.h",
-    "renderer/cast_streaming_receiver.cc",
-    "renderer/cast_streaming_receiver.h",
     "renderer/url_request_rules_receiver.cc",
     "renderer/url_request_rules_receiver.h",
     "renderer/web_engine_content_renderer_client.cc",
@@ -252,15 +273,27 @@ component("web_engine_core") {
   visibility = [ ":*" ]
 }
 
+# TODO(crbug.com/1081525): Rename to features_and_switches or collapse into
+# common. Consider moving these and other files in engine/ to common/ or
+# elsewhere.
 source_set("switches") {
+  deps = [ "//base" ]
+
   sources = [
+    "features.h",
     "switches.cc",
     "switches.h",
+  ]
+
+  visibility = [
+    ":*",
+    "web_instance_host",
   ]
 }
 
 executable("web_engine_exe") {
   deps = [
+    ":switches",
     ":web_engine_core",
     "//base",
     "//content/public/app",
@@ -275,113 +308,31 @@ source_set("webui_resources") {
     "$root_gen_dir/ui/resources/webui_resources.pak",
   ]
   deps = [ "//ui/resources" ]
+  visibility = [ ":*" ]
 }
 
 _web_engine_excluded_files = [
-  # TODO(1022542): Swiftshader is never used under Fuchsia.
+  # TODO(crbug.com/1022542): Swiftshader is never used under Fuchsia.
   "lib/libswiftshader_libEGL.so",
   "lib/libswiftshader_libGLESv2.so",
 ]
-
-# TODO(crbug.com/1174013): Remove exclusions when DevTools discontinues the
-# use of "data".
-# Devtools' build configuration currently generates "data" entries that
-# are inert in production but still increase the size of the production
-# package.
-_devtools_excluded_files = [
-  "common/App.js",
-  "common/App.js.map",
-  "common/AppProvider.js",
-  "common/AppProvider.js.map",
-  "common/Base64.js",
-  "common/Base64.js.map",
-  "common/CharacterIdMap.js",
-  "common/CharacterIdMap.js.map",
-  "common/Color.js",
-  "common/Color.js.map",
-  "common/ColorUtils.js",
-  "common/ColorUtils.js.map",
-  "common/common.js",
-  "common/Console.js",
-  "common/Console.js.map",
-  "common/Debouncer.js",
-  "common/Debouncer.js.map",
-  "common/EventTarget.js",
-  "common/EventTarget.js.map",
-  "common/JavaScriptMetaData.js",
-  "common/JavaScriptMetaData.js.map",
-  "common/Lazy.js",
-  "common/Lazy.js.map",
-  "common/Linkifier.js",
-  "common/Linkifier.js.map",
-  "common/Object.js",
-  "common/Object.js.map",
-  "common/ParsedURL.js",
-  "common/ParsedURL.js.map",
-  "common/Progress.js",
-  "common/Progress.js.map",
-  "common/QueryParamHandler.js",
-  "common/QueryParamHandler.js.map",
-  "common/ResourceType.js",
-  "common/ResourceType.js.map",
-  "common/Revealer.js",
-  "common/Revealer.js.map",
-  "common/Runnable.js",
-  "common/Runnable.js.map",
-  "common/SegmentedRange.js",
-  "common/SegmentedRange.js.map",
-  "common/SettingRegistration.js",
-  "common/SettingRegistration.js.map",
-  "common/Settings.js",
-  "common/Settings.js.map",
-  "common/SimpleHistoryManager.js",
-  "common/SimpleHistoryManager.js.map",
-  "common/StringOutputStream.js",
-  "common/StringOutputStream.js.map",
-  "common/TextDictionary.js",
-  "common/TextDictionary.js.map",
-  "common/Throttler.js",
-  "common/Throttler.js.map",
-  "common/Trie.js",
-  "common/Trie.js.map",
-  "common/WasmDisassembly.js",
-  "common/WasmDisassembly.js.map",
-  "common/Worker.js",
-  "common/Worker.js.map",
-  "platform/array-utilities.js",
-  "platform/array-utilities.js.map",
-  "platform/date-utilities.js",
-  "platform/date-utilities.js.map",
-  "platform/keyboard-utilities.js",
-  "platform/keyboard-utilities.js.map",
-  "platform/map-utilities.js",
-  "platform/map-utilities.js.map",
-  "platform/number-utilities.js",
-  "platform/number-utilities.js.map",
-  "platform/platform.js",
-  "platform/set-utilities.js",
-  "platform/set-utilities.js.map",
-  "platform/string-utilities.js",
-  "platform/string-utilities.js.map",
-  "platform/typescript-utilities.js",
-  "platform/typescript-utilities.js.map",
-  "platform/UIString.js",
-  "platform/UIString.js.map",
-  "platform/utilities.js",
-  "platform/utilities.js.map",
-  "root/root.js",
-  "root/Runtime.js",
-  "root/Runtime.js.map",
-]
-foreach(excluded, _devtools_excluded_files) {
-  _web_engine_excluded_files +=
-      [ "third_party/devtools-frontend/src/front_end/${excluded}" ]
-}
 
 # Definitions for the main web_engine package. The package contains the
 # context_provider component definition, and its dependencies.  An installer
 # script is declared for the package, for ease of development.
 
+# Component definition for WebEngine instances, each hosting one or more
+# browsing contexts, accessed via fuchsia.web.Context or fuchsia.web.FrameHost
+# capabilities.
+fuchsia_component("web_instance_component") {
+  manifest = "web_instance.cmx"
+  data_deps = [ ":web_engine_exe" ]
+  visibility = [ ":*" ]
+}
+
+# Component definition for the legacy fuchsia.web.ContextProvider service.
+# TODO(crbug.com/1010222): Remove once all callers have migrated to launching
+# instances directly as Components.
 fuchsia_component("context_provider_component") {
   manifest = "context_provider.cmx"
   data_deps = [ ":web_engine_exe" ]
@@ -389,7 +340,10 @@ fuchsia_component("context_provider_component") {
 }
 
 fuchsia_package("web_engine") {
-  deps = [ ":context_provider_component" ]
+  deps = [
+    ":context_provider_component",
+    ":web_instance_component",
+  ]
   excluded_files = _web_engine_excluded_files
 }
 
@@ -402,9 +356,30 @@ fuchsia_package_runner("web_engine_installer") {
 # resources, to allow e.g. chrome://gpu to be used.  An installer script is
 # defined, for ease of development.
 
+# TODO(crbug.com/1010222): Remove the with-WebUI ContextProvider component
+# definition once all callers have migrated to launching instances directly as
+# Components, or the launcher supports relative component URLs.
+cmc_merge("context_provider_with_webui_manifest") {
+  sources = [
+    "context_provider.cmx",
+    "context_provider_with_webui.test-cmx-fragment",
+  ]
+  output_name = "context_provider_with_webui.cmx"
+  visibility = [ ":*" ]
+}
+
+fuchsia_component("context_provider_with_webui_component") {
+  deps = [ ":context_provider_with_webui_manifest" ]
+  manifest = "$target_out_dir/context_provider_with_webui.cmx"
+  manifest_output_name = "context_provider"
+  data_deps = [ ":web_engine_exe" ]
+  visibility = [ ":*" ]
+}
+
 fuchsia_package("web_engine_with_webui") {
   deps = [
-    ":context_provider_component",
+    ":context_provider_with_webui_component",
+    ":web_instance_component",
     ":webui_resources",
   ]
   excluded_files = _web_engine_excluded_files
@@ -418,6 +393,10 @@ fuchsia_package_runner("web_engine_with_webui_installer") {
 source_set("browsertest_core") {
   testonly = true
   sources = [
+    "test/frame_for_test.cc",
+    "test/frame_for_test.h",
+    "test/scenic_test_helper.cc",
+    "test/scenic_test_helper.h",
     "test/test_data.cc",
     "test/test_data.h",
     "test/web_engine_browser_test.cc",
@@ -430,10 +409,16 @@ source_set("browsertest_core") {
     ":web_engine_core",
     "//content/public/browser",
     "//content/test:test_support",
+    "//fuchsia/base/test:test_support",
     "//net:test_support",
     "//testing/gtest",
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.web",
+    "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
     "//ui/ozone",
+  ]
+  visibility = [
+    ":*",
+    "//fuchsia/runners:*",
   ]
 }
 
@@ -450,13 +435,20 @@ test("web_engine_browsertests") {
     "browser/fake_semantic_tree.h",
     "browser/fake_semantics_manager.cc",
     "browser/fake_semantics_manager.h",
+    "browser/favicon_browsertest.cc",
+    "browser/frame_host_impl_browsertest.cc",
     "browser/frame_impl_browser_test_base.cc",
     "browser/frame_impl_browser_test_base.h",
     "browser/frame_impl_browsertest.cc",
     "browser/headless_browsertest.cc",
+    "browser/input_browsertest.cc",
     "browser/media_browsertest.cc",
+    "browser/mock_virtual_keyboard.cc",
+    "browser/mock_virtual_keyboard.h",
     "browser/navigation_policy_browsertest.cc",
+    "browser/permissions_browsertest.cc",
     "browser/theme_manager_browsertest.cc",
+    "browser/virtual_keyboard_browsertest.cc",
   ]
 
   # TODO(crbug.com/1157909): Move to the list above when the bug is fixed.
@@ -470,23 +462,56 @@ test("web_engine_browsertests") {
     ":web_engine_core",
     "//base/test:test_support",
     "//components/cast/message_port:message_port",
+    "//components/cast_streaming/browser",
+    "//components/cast_streaming/browser:test_sender",
     "//components/policy/content:safe_sites_navigation_throttle",
     "//components/safe_search_api:safe_search_api",
     "//components/safe_search_api:test_support",
     "//content/public/browser",
     "//content/test:test_support",
     "//fuchsia/base",
-    "//fuchsia/base:test_support",
-    "//fuchsia/cast_streaming",
-    "//fuchsia/cast_streaming:cast_streaming_test_sender",
+    "//fuchsia/base/test:test_support",
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.accessibility.semantics",
+    "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.input.virtualkeyboard",
+    "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.mediacodec",
+    "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input3",
     "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
     "//ui/gfx",
     "//ui/ozone",
   ]
+  additional_manifest_fragments = [
+    "//build/config/fuchsia/test/jit_capabilities.test-cmx",
+    "//build/config/fuchsia/test/network_capabilities.test-cmx",
+    "//build/config/fuchsia/test/present_view_capabilities.test-cmx",
+    "//build/config/fuchsia/test/vulkan_capabilities.test-cmx",
+    "//build/config/fuchsia/test/web_engine_required_capabilities.test-cmx",
+  ]
+}
+
+# Creates a component manifest based on the production web_instance.cmx, with
+# the program name replaced with the web_engine_unittests binary name.
+action("web_engine_unittests_fake_instance_manifest") {
+  _manifest_input = "web_instance.cmx"
+  _manifest_output = "$target_gen_dir/web_engine_unittests_fake_instance.cmx"
+
+  script = "//build/config/fuchsia/build_cmx_from_fragment.py"
+
+  inputs = [ _manifest_input ]
+  outputs = [ _manifest_output ]
+
+  args = [
+    "--cmx-fragment",
+    rebase_path(_manifest_input),
+    "--cmx",
+    rebase_path(_manifest_output),
+    "--program",
+    "web_engine_unittests__exec",
+  ]
+
+  visibility = [ ":*" ]
 }
 
 test("web_engine_unittests") {
@@ -510,9 +535,12 @@ test("web_engine_unittests") {
     ":mojom",
     ":switches",
     ":web_engine_core",
+    ":web_engine_unittests_fake_instance_manifest",
     "//base/test:test_support",
+    "//components/cast_streaming/public/mojom",
     "//content/test:test_support",
-    "//fuchsia/base:test_support",
+    "//fuchsia/base/test:test_support",
+    "//fuchsia/engine/web_instance_host",
     "//mojo/core/embedder",
     "//services/media_session/public/mojom",
     "//services/network:network_service",
@@ -524,10 +552,25 @@ test("web_engine_unittests") {
     "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.web",
     "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
   ]
+  additional_manifest_fragments = [
+    "//build/config/fuchsia/test/access_test_data_dir.test-cmx",
+
+    # TODO(crbug.com/1185811): Figure out why jit_capabilities is needed.
+    "//build/config/fuchsia/test/jit_capabilities.test-cmx",
+
+    "//build/config/fuchsia/test/network_capabilities.test-cmx",
+    "//build/config/fuchsia/test/vulkan_capabilities.test-cmx",
+  ]
+  additional_manifests = [
+    # Required by ContextProvider to determine the services list.
+    "web_instance.cmx",
+
+    # Required by ContextProvider unit-tests to launch the FakeContext process.
+    "$target_gen_dir/web_engine_unittests_fake_instance.cmx",
+  ]
 }
 
 test("web_engine_integration_tests") {
-  manifest = "web_engine_integration_tests.cmx"
   sources = [
     "test_debug_listener.cc",
     "test_debug_listener.h",
@@ -536,14 +579,18 @@ test("web_engine_integration_tests") {
     "web_engine_integration_test.cc",
     "web_engine_integration_test_base.cc",
     "web_engine_integration_test_base.h",
+    "web_instance_host_integration_test.cc",
   ]
   data = [ "test/data" ]
   deps = [
+    ":browsertest_core",
     "//base",
     "//base:test_log_listener_safe",
-    "//base/test:run_all_unittests",
+    "//components/version_info",
     "//fuchsia/base",
-    "//fuchsia/base:test_support",
+    "//fuchsia/base:run_all_integration_tests",
+    "//fuchsia/base/test:test_support",
+    "//fuchsia/engine/web_instance_host",
     "//media",
     "//media/fuchsia/audio:test_support",
     "//media/fuchsia/camera:test_support",
@@ -555,6 +602,16 @@ test("web_engine_integration_tests") {
         ":web_engine",
         "web_engine",
       ] ]
+  additional_manifest_fragments = [
+    "//build/config/fuchsia/test/network_capabilities.test-cmx",
+    "//build/config/fuchsia/test/read_debug_data.test-cmx",
+    "//build/config/fuchsia/test/vulkan_capabilities.test-cmx",
+    "//build/config/fuchsia/test/web_engine_required_capabilities.test-cmx",
+    "//build/config/fuchsia/test/web_instance_host_capabilities.test-cmx",
+  ]
+
+  # Required by web_instance_host.
+  additional_manifests = [ "//fuchsia/engine/web_instance.cmx" ]
 }
 
 cr_fuchsia_package("web_engine_shell_pkg") {
@@ -581,6 +638,7 @@ fuchsia_package_runner("web_engine_shell") {
 }
 
 executable("web_engine_shell_exec") {
+  testonly = true
   sources = [ "test/web_engine_shell.cc" ]
 
   data = [ "test/shell_data" ]
@@ -594,13 +652,6 @@ executable("web_engine_shell_exec") {
     "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
     "//url",
   ]
-}
 
-if (is_official_build) {
-  symbol_archive("symbol_archive") {
-    deps = [ ":web_engine" ]
-    ids_txt = "$root_gen_dir/fuchsia/engine/web_engine/ids.txt"
-    archive_name =
-        "$root_gen_dir/fuchsia/engine/web_engine/web_engine.symbols.tar.bz2"
-  }
-}  # is_official_build
+  visibility = [ ":*" ]
+}

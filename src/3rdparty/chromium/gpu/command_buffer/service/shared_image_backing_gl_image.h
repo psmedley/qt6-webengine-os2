@@ -189,6 +189,7 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
   GLenum GetGLTarget() const;
   GLuint GetGLServiceId() const;
   std::unique_ptr<gfx::GpuFence> GetLastWriteGpuFence();
+  void SetReleaseFence(gfx::GpuFenceHandle release_fence);
 
  private:
   // SharedImageBacking:
@@ -212,7 +213,8 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
   std::unique_ptr<SharedImageRepresentationDawn> ProduceDawn(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker,
-      WGPUDevice device) final;
+      WGPUDevice device,
+      WGPUBackendType backend_type) final;
   std::unique_ptr<SharedImageRepresentationSkia> ProduceSkia(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker,
@@ -258,6 +260,10 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
 
   sk_sp<SkPromiseImageTexture> cached_promise_texture_;
   std::unique_ptr<gl::GLFence> last_write_gl_fence_;
+
+  // If this backing was displayed as an overlay, this fence may be set.
+  // Wait on this fence before allowing another access.
+  gfx::GpuFenceHandle release_fence_;
 
   base::WeakPtrFactory<SharedImageBackingGLImage> weak_factory_;
 };

@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
 #include "components/domain_reliability/beacon.h"
 #include "components/domain_reliability/clear_mode.h"
 #include "components/domain_reliability/config.h"
@@ -126,7 +125,7 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
 
   // Gets a Value containing data that can be formatted into a web page for
   // debugging purposes.
-  std::unique_ptr<base::Value> GetWebUIData() const;
+  base::Value GetWebUIData() const;
 
   // Returns pointer to the added context.
   const DomainReliabilityContext* AddContextForTesting(

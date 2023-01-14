@@ -34,6 +34,7 @@
 #include "components/security_interstitials/core/ssl_error_ui.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/mock_navigation_handle.h"
 #include "content/public/test/test_renderer_host.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
@@ -327,11 +328,11 @@ class SSLErrorHandlerNameMismatchTest
 #endif
 
     delegate_ = new TestSSLErrorHandlerDelegate(web_contents(), ssl_info_);
-    error_handler_.reset(new TestSSLErrorHandler(
+    error_handler_ = std::make_unique<TestSSLErrorHandler>(
         std::unique_ptr<SSLErrorHandler::Delegate>(delegate_), web_contents(),
         net::MapCertStatusToNetError(ssl_info_.cert_status), ssl_info_,
         /*network_time_tracker=*/nullptr, GURL() /*request_url*/,
-        captive_portal_service_.get()));
+        captive_portal_service_.get());
   }
 
   void TearDown() override {
@@ -435,7 +436,7 @@ class SSLErrorAssistantProtoTest : public content::RenderViewHostTestHarness {
                                    net::CertStatus cert_status) {
     net::CertificateList certs =
         net::X509Certificate::CreateCertificateListFromBytes(
-            cert_data.data(), cert_data.size(),
+            base::as_bytes(base::make_span(cert_data)),
             net::X509Certificate::FORMAT_AUTO);
     ASSERT_FALSE(certs.empty());
     ResetErrorHandler(certs[0], cert_status);
@@ -603,11 +604,11 @@ class SSLErrorAssistantProtoTest : public content::RenderViewHostTestHarness {
 #endif
 
     delegate_ = new TestSSLErrorHandlerDelegate(web_contents(), ssl_info_);
-    error_handler_.reset(new TestSSLErrorHandler(
+    error_handler_ = std::make_unique<TestSSLErrorHandler>(
         std::unique_ptr<SSLErrorHandler::Delegate>(delegate_), web_contents(),
         net::MapCertStatusToNetError(ssl_info_.cert_status), ssl_info_,
         /*network_time_tracker=*/nullptr, GURL() /*request_url*/,
-        captive_portal_service_.get()));
+        captive_portal_service_.get());
   }
 
   net::SSLInfo ssl_info_;
@@ -653,10 +654,10 @@ class SSLErrorHandlerDateInvalidTest
     shared_url_loader_factory_ = network::SharedURLLoaderFactory::Create(
         std::move(pending_url_loader_factory));
 
-    tracker_.reset(new network_time::NetworkTimeTracker(
+    tracker_ = std::make_unique<network_time::NetworkTimeTracker>(
         std::unique_ptr<base::Clock>(clock_),
         std::unique_ptr<base::TickClock>(tick_clock_), &pref_service_,
-        shared_url_loader_factory_));
+        shared_url_loader_factory_);
     // Do this to be sure that |is_null| returns false.
     clock_->Advance(base::TimeDelta::FromDays(111));
     tick_clock_->Advance(base::TimeDelta::FromDays(222));
@@ -667,11 +668,11 @@ class SSLErrorHandlerDateInvalidTest
     ssl_info_.cert_status = net::CERT_STATUS_DATE_INVALID;
 
     delegate_ = new TestSSLErrorHandlerDelegate(web_contents(), ssl_info_);
-    error_handler_.reset(new TestSSLErrorHandler(
+    error_handler_ = std::make_unique<TestSSLErrorHandler>(
         std::unique_ptr<SSLErrorHandler::Delegate>(delegate_), web_contents(),
         net::MapCertStatusToNetError(ssl_info_.cert_status), ssl_info_,
         tracker_.get(), GURL() /*request_url*/,
-        /*captive_portal_service=*/nullptr));
+        /*captive_portal_service=*/nullptr);
 
     // Fix flakiness in case system time is off and triggers a bad clock
     // interstitial. https://crbug.com/666821#c50
@@ -1603,4 +1604,39 @@ TEST_F(SSLErrorHandlerTest, LegacyTLSInterstitial) {
   histograms.ExpectBucketCount(SSLErrorHandler::GetHistogramNameForTesting(),
                                SSLErrorHandler::SHOW_LEGACY_TLS_INTERSTITIAL,
                                1);
+}
+
+// Tests that non-primary main frame navigations should not affect
+// SSLErrorHandler.
+TEST_F(SSLErrorHandlerTest, NonPrimaryMainframeShouldNotAffectSSLErrorHandler) {
+  net::SSLInfo ssl_info;
+  ssl_info.cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), kOkayCertName);
+  ssl_info.cert_status = net::CERT_STATUS_LEGACY_TLS;
+  ssl_info.public_key_hashes.push_back(net::HashValue(kCertPublicKeyHashValue));
+
+  std::unique_ptr<TestSSLErrorHandlerDelegate> delegate(
+      new TestSSLErrorHandlerDelegate(web_contents(), ssl_info));
+
+  auto error_handler = std::make_unique<TestSSLErrorHandler>(
+      std::move(delegate), web_contents(),
+      net::MapCertStatusToNetError(ssl_info.cert_status), ssl_info,
+      /*network_time_tracker=*/nullptr, /*request_url=*/GURL(),
+      /*captive_portal_service=*/nullptr);
+
+  auto* error_handler_ptr = error_handler.get();
+  web_contents()->SetUserData(SSLErrorHandler::UserDataKey(),
+                              std::move(error_handler));
+
+  std::unique_ptr<content::MockNavigationHandle> handle =
+      std::make_unique<content::MockNavigationHandle>(GURL(), main_rfh());
+  handle->set_is_in_primary_main_frame(false);
+  error_handler_ptr->DidStartNavigation(handle.get());
+  // Make sure that the |SSLErrorHandler| is not deleted.
+  EXPECT_TRUE(SSLErrorHandler::FromWebContents(web_contents()));
+
+  handle->set_is_in_primary_main_frame(true);
+  error_handler_ptr->DidStartNavigation(handle.get());
+  // Make sure that the |SSLErrorHandler| is deleted.
+  EXPECT_FALSE(SSLErrorHandler::FromWebContents(web_contents()));
 }

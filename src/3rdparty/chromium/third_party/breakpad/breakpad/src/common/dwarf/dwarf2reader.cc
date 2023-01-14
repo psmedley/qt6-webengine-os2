@@ -28,8 +28,8 @@
 
 // CFI reader author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 
-// Implementation of dwarf2reader::LineInfo, dwarf2reader::CompilationUnit,
-// and dwarf2reader::CallFrameInfo. See dwarf2reader.h for details.
+// Implementation of LineInfo, CompilationUnit,
+// and CallFrameInfo. See dwarf2reader.h for details.
 
 #include "common/dwarf/dwarf2reader.h"
 
@@ -51,7 +51,7 @@
 #include "common/using_std_string.h"
 #include "google_breakpad/common/breakpad_types.h"
 
-namespace dwarf2reader {
+namespace google_breakpad {
 
 const SectionMap::const_iterator GetSectionByName(const SectionMap&
                                                   sections, const char *name) {
@@ -74,9 +74,9 @@ CompilationUnit::CompilationUnit(const string& path,
       line_string_buffer_(NULL), line_string_buffer_length_(0),
       str_offsets_buffer_(NULL), str_offsets_buffer_length_(0),
       addr_buffer_(NULL), addr_buffer_length_(0),
-      is_split_dwarf_(false), dwo_id_(0), dwo_name_(),
+      is_split_dwarf_(false), is_type_unit_(false), dwo_id_(0), dwo_name_(),
       skeleton_dwo_id_(0), ranges_base_(0), addr_base_(0),
-      have_checked_for_dwp_(false), dwp_path_(),
+      str_offsets_base_(0), have_checked_for_dwp_(false), dwp_path_(),
       dwp_byte_reader_(), dwp_reader_() {}
 
 // Initialize a compilation unit from a .dwo or .dwp file.
@@ -358,6 +358,7 @@ void CompilationUnit::ReadHeader() {
         break;
       case DW_UT_type:
       case DW_UT_split_type:
+	is_type_unit_ = true;
         headerptr += ReadTypeSignature(headerptr);
         headerptr += ReadTypeOffset(headerptr);
         break;
@@ -403,6 +404,8 @@ uint64_t CompilationUnit::Start() {
                                       reader_->OffsetSize(),
                                       header_.length,
                                       header_.version))
+    return ourlength;
+  else if (header_.version == 5 && is_type_unit_)
     return ourlength;
 
   // Otherwise, continue by reading our abbreviation entries.
@@ -454,7 +457,7 @@ void CompilationUnit::ProcessFormStringIndex(
     uint64_t dieoffset, enum DwarfAttribute attr, enum DwarfForm form,
     uint64_t str_index) {
   const uint8_t* offset_ptr =
-      str_offsets_buffer_ + str_index * reader_->OffsetSize();
+      str_offsets_buffer_ + str_offsets_base_ + str_index * reader_->OffsetSize();
   const uint64_t offset = reader_->ReadOffset(offset_ptr);
   if (offset >= string_buffer_length_) {
     return;
@@ -462,6 +465,163 @@ void CompilationUnit::ProcessFormStringIndex(
 
   const char* str = reinterpret_cast<const char*>(string_buffer_) + offset;
   ProcessAttributeString(dieoffset, attr, form, str);
+}
+
+// Special function for pre-processing the
+// DW_AT_str_offsets_base and DW_AT_addr_base in a DW_TAG_compile_unit die (for
+// DWARF v5). We must make sure to find and process the
+// DW_AT_str_offsets_base and DW_AT_addr_base attributes before attempting to
+// read any string and address attribute in the compile unit.
+const uint8_t* CompilationUnit::ProcessOffsetBaseAttribute(
+    uint64_t dieoffset, const uint8_t* start, enum DwarfAttribute attr,
+    enum DwarfForm form, uint64_t implicit_const) {
+  size_t len;
+
+  switch (form) {
+    // DW_FORM_indirect is never used because it is such a space
+    // waster.
+    case DW_FORM_indirect:
+      form = static_cast<enum DwarfForm>(reader_->ReadUnsignedLEB128(start,
+                                                                     &len));
+      start += len;
+      return ProcessOffsetBaseAttribute(dieoffset, start, attr, form,
+					   implicit_const);
+
+    case DW_FORM_flag_present:
+      return start;
+    case DW_FORM_data1:
+    case DW_FORM_flag:
+      return start + 1;
+    case DW_FORM_data2:
+      return start + 2;
+    case DW_FORM_data4:
+      return start + 4;
+    case DW_FORM_data8:
+      return start + 8;
+    case DW_FORM_data16:
+      // This form is designed for an md5 checksum inside line tables.
+      return start + 16;
+    case DW_FORM_string: {
+      const char* str = reinterpret_cast<const char*>(start);
+      return start + strlen(str) + 1;
+    }
+    case DW_FORM_udata:
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+    case DW_FORM_sdata:
+      reader_->ReadSignedLEB128(start, &len);
+      return start + len;
+    case DW_FORM_addr:
+      reader_->ReadAddress(start);
+      return start + reader_->AddressSize();
+
+    // This is the important one here!
+    case DW_FORM_sec_offset:
+      if (attr == DW_AT_str_offsets_base ||
+          attr == DW_AT_addr_base)
+        ProcessAttributeUnsigned(dieoffset, attr, form,
+                                 reader_->ReadOffset(start));
+      else
+        reader_->ReadOffset(start);
+      return start + reader_->OffsetSize();
+
+    case DW_FORM_ref1:
+      return start + 1;
+    case DW_FORM_ref2:
+      return start + 2;
+    case DW_FORM_ref4:
+      return start + 4;
+    case DW_FORM_ref8:
+      return start + 8;
+    case DW_FORM_ref_udata:
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+    case DW_FORM_ref_addr:
+      // DWARF2 and 3/4 differ on whether ref_addr is address size or
+      // offset size.
+      assert(header_.version >= 2);
+      if (header_.version == 2) {
+	reader_->ReadAddress(start);
+        return start + reader_->AddressSize();
+      } else if (header_.version >= 3) {
+	reader_->ReadOffset(start);
+        return start + reader_->OffsetSize();
+      }
+      break;
+    case DW_FORM_ref_sig8:
+      return start + 8;
+    case DW_FORM_implicit_const:
+      return start;
+    case DW_FORM_block1: {
+      uint64_t datalen = reader_->ReadOneByte(start);
+      return start + 1 + datalen;
+    }
+    case DW_FORM_block2: {
+      uint64_t datalen = reader_->ReadTwoBytes(start);
+      return start + 2 + datalen;
+    }
+    case DW_FORM_block4: {
+      uint64_t datalen = reader_->ReadFourBytes(start);
+      return start + 4 + datalen;
+    }
+    case DW_FORM_block:
+    case DW_FORM_exprloc: {
+      uint64_t datalen = reader_->ReadUnsignedLEB128(start, &len);
+      return start + datalen + len;
+    }
+    case DW_FORM_strp: {
+      reader_->ReadOffset(start);
+      return start + reader_->OffsetSize();
+    }
+    case DW_FORM_line_strp: {
+      reader_->ReadOffset(start);
+      return start + reader_->OffsetSize();
+    }
+    case DW_FORM_strp_sup:
+      return start + 4;
+    case DW_FORM_ref_sup4:
+      return start + 4;
+    case DW_FORM_ref_sup8:
+      return start + 8;
+    case DW_FORM_loclistx:
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+    case DW_FORM_strx:
+    case DW_FORM_GNU_str_index: {
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+    }
+    case DW_FORM_strx1: {
+      return start + 1;
+    }
+    case DW_FORM_strx2: {
+      return start + 2;
+    }
+    case DW_FORM_strx3: {
+      return start + 3;
+    }
+    case DW_FORM_strx4: {
+      return start + 4;
+    }
+
+    case DW_FORM_addrx:
+    case DW_FORM_GNU_addr_index:
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+    case DW_FORM_addrx1:
+      return start + 1;
+    case DW_FORM_addrx2:
+      return start + 2;
+    case DW_FORM_addrx3:
+      return start + 3;
+    case DW_FORM_addrx4:
+      return start + 4;
+    case DW_FORM_rnglistx:
+      reader_->ReadUnsignedLEB128(start, &len);
+      return start + len;
+  }
+  fprintf(stderr, "Unhandled form type\n");
+  return NULL;
 }
 
 // If one really wanted, you could merge SkipAttribute and
@@ -699,6 +859,22 @@ const uint8_t* CompilationUnit::ProcessAttribute(
 const uint8_t* CompilationUnit::ProcessDIE(uint64_t dieoffset,
                                            const uint8_t* start,
                                            const Abbrev& abbrev) {
+  // With DWARF v5, the compile_unit die may contain a
+  // DW_AT_str_offsets_base or DW_AT_addr_base.  If it does, that attribute must
+  // be found and processed before trying to process the other attributes;
+  // otherwise the string or address values will all come out incorrect.
+  if (abbrev.tag == DW_TAG_compile_unit && header_.version == 5) {
+    uint64_t dieoffset_copy = dieoffset;
+    const uint8_t* start_copy = start;
+    for (AttributeList::const_iterator i = abbrev.attributes.begin();
+	 i != abbrev.attributes.end();
+	 i++) {
+      start_copy = ProcessOffsetBaseAttribute(dieoffset_copy, start_copy,
+						 i->attr_, i->form_,
+						 i->value_);
+    }
+  }
+
   for (AttributeList::const_iterator i = abbrev.attributes.begin();
        i != abbrev.attributes.end();
        i++)  {
@@ -902,7 +1078,7 @@ void DwpReader::Initialize() {
     if (shndx_pool_ >= cu_index_ + cu_index_size_) {
       version_ = 0;
     }
-  } else if (version_ == 2) {
+  } else if (version_ == 2 || version_ == 5) {
     ncolumns_ = byte_reader_.ReadFourBytes(
         reinterpret_cast<const uint8_t*>(cu_index_) + sizeof(uint32_t));
     nunits_ = byte_reader_.ReadFourBytes(
@@ -980,7 +1156,7 @@ void DwpReader::ReadDebugSectionsForCU(uint64_t dwo_id,
         ".debug_str",
         std::make_pair(reinterpret_cast<const uint8_t*> (string_buffer_),
                        string_buffer_size_)));
-  } else if (version_ == 2) {
+  } else if (version_ == 2 || version_ == 5) {
     uint32_t index = LookupCUv2(dwo_id);
     if (index == 0) {
       return;
@@ -1203,7 +1379,7 @@ void LineInfo::ReadFileRow(const uint8_t** lineptr,
         // MD5 entries help a debugger sort different versions of files with
         // the same name.  It is always paired with a DW_FORM_data16 and is
         // unused in this case.
-        lineptr += 16;
+        *lineptr += 16;
         break;
       default:
         fprintf(stderr, "Unrecognized form in line table header. %d\n",
@@ -1602,54 +1778,6 @@ void LineInfo::ReadLines() {
   after_header_ = lengthstart + header_.total_length;
 }
 
-bool RangeListReader::SetRangesBase(uint64_t offset) {
-  // Versions less than 5 don't use ranges base.
-  if (cu_info_->version_ < 5) {
-    return true;
-  }
-  // Length may not be 12 bytes, but if 12 bytes aren't available
-  // at this point, then the header is too short.
-  if (offset + 12 >= cu_info_->size_) {
-    return false;
-  }
-  // The length of this CU's contribution.
-  uint64_t cu_length = reader_->ReadFourBytes(cu_info_->buffer_ + offset);
-  offset += 4;
-  if (cu_length == 0xffffffffUL) {
-    cu_length = reader_->ReadEightBytes(cu_info_->buffer_ + offset);
-    offset += 8;
-  }
-
-  // Truncating size here results in correctly ignoring everything not from
-  // this cu from here on out.
-  cu_info_->size_ = offset + cu_length;
-
-  // Check for the rest of the header in advance.
-  if (offset + 8 >= cu_info_->size_) {
-    return false;
-  }
-  // Version. Can only read version 5.
-  if (reader_->ReadTwoBytes(cu_info_->buffer_ + offset) != 5) {
-    return false;
-  }
-  offset += 2;
-  // Address size
-  if (reader_->ReadOneByte(cu_info_->buffer_ + offset) !=
-      reader_->AddressSize()) {
-    return false;
-  }
-  offset += 1;
-  // Segment selectors are unsupported
-  if (reader_->ReadOneByte(cu_info_->buffer_ + offset) != 0) {
-    return false;
-  }
-  offset += 1;
-  offset_entry_count_ = reader_->ReadFourBytes(cu_info_->buffer_ + offset);
-  offset += 4;
-  offset_array_ = offset;
-  return true;
-}
-
 bool RangeListReader::ReadRanges(enum DwarfForm form, uint64_t data) {
   if (form == DW_FORM_sec_offset) {
     if (cu_info_->version_ <= 4) {
@@ -1658,15 +1786,12 @@ bool RangeListReader::ReadRanges(enum DwarfForm form, uint64_t data) {
       return ReadDebugRngList(data);
     }
   } else if (form == DW_FORM_rnglistx) {
-    SetRangesBase(cu_info_->ranges_base_);
-    if (data >= offset_entry_count_) {
-      return false;
-    }
+    offset_array_ = cu_info_->ranges_base_;
     uint64_t index_offset = reader_->AddressSize() * data;
     uint64_t range_list_offset =
-        reader_->ReadAddress(cu_info_->buffer_ + offset_array_ + index_offset);
+        reader_->ReadOffset(cu_info_->buffer_ + offset_array_ + index_offset);
 
-    return ReadDebugRngList(range_list_offset);
+    return ReadDebugRngList(offset_array_ + range_list_offset);
   }
   return false;
 }
@@ -3289,4 +3414,4 @@ void CallFrameInfo::Reporter::ClearingCFARule(uint64_t offset,
           section_.c_str(), insn_offset);
 }
 
-}  // namespace dwarf2reader
+}  // namespace google_breakpad

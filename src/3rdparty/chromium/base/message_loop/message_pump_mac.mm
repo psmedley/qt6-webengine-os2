@@ -11,13 +11,13 @@
 
 #include "base/auto_reset.h"
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/message_loop/timer_slack.h"
 #include "base/notreached.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 
@@ -31,6 +31,14 @@ const CFStringRef kMessageLoopExclusiveRunLoopMode =
     CFSTR("kMessageLoopExclusiveRunLoopMode");
 
 namespace {
+
+MessagePumpCFRunLoopBase::LudicrousSlackSetting GetLudicrousSlackSetting() {
+  return base::IsLudicrousTimerSlackEnabled()
+             ? MessagePumpCFRunLoopBase::LudicrousSlackSetting::
+                   kLudicrousSlackOn
+             : MessagePumpCFRunLoopBase::LudicrousSlackSetting::
+                   kLudicrousSlackOff;
+}
 
 // Mask that determines which modes to use.
 enum { kCommonModeMask = 0x1, kAllModesMask = 0xf };
@@ -174,9 +182,37 @@ void MessagePumpCFRunLoopBase::ScheduleDelayedWork(
   ScheduleDelayedWorkImpl(delayed_work_time - TimeTicks::Now());
 }
 
+MessagePumpCFRunLoopBase::LudicrousSlackSetting
+MessagePumpCFRunLoopBase::GetLudicrousSlackState() const {
+  if (ludicrous_slack_setting_ == LudicrousSlackSetting::kLudicrousSlackOn &&
+      IsLudicrousTimerSlackSuspended()) {
+    return LudicrousSlackSetting::kLudicrousSlackSuspended;
+  }
+
+  return ludicrous_slack_setting_;
+}
+
 void MessagePumpCFRunLoopBase::ScheduleDelayedWorkImpl(TimeDelta delta) {
   // The tolerance needs to be set before the fire date or it may be ignored.
-  if (timer_slack_ == TIMER_SLACK_MAXIMUM) {
+
+  // Pickup the ludicrous slack setting as late as possible to work around
+  // initialization issues in base. Note that the main thread won't sleep until
+  // field trial initialization is complete.
+  if (ludicrous_slack_setting_ ==
+      LudicrousSlackSetting::kLudicrousSlackUninitialized) {
+    ludicrous_slack_setting_ = GetLudicrousSlackSetting();
+  } else {
+    // Validate that the setting doesn't change after we cache it.
+    DCHECK_EQ(ludicrous_slack_setting_, GetLudicrousSlackSetting());
+  }
+  DCHECK_NE(ludicrous_slack_setting_,
+            LudicrousSlackSetting::kLudicrousSlackUninitialized);
+
+  if (GetLudicrousSlackState() == LudicrousSlackSetting::kLudicrousSlackOn) {
+    // Specify ludicrous slack when the experiment is enabled and not suspended.
+    CFRunLoopTimerSetTolerance(delayed_work_timer_,
+                               GetLudicrousTimerSlack().InSecondsF());
+  } else if (timer_slack_ == TIMER_SLACK_MAXIMUM) {
     CFRunLoopTimerSetTolerance(delayed_work_timer_, delta.InSecondsF() * 0.5);
   } else {
     CFRunLoopTimerSetTolerance(delayed_work_timer_, 0);
@@ -428,6 +464,15 @@ void MessagePumpCFRunLoopBase::RunNestingDeferredWork() {
   }
 }
 
+void MessagePumpCFRunLoopBase::BeforeWait() {
+  if (!delegate_) {
+    // This point can be reached with a nullptr |delegate_| if Run is not on the
+    // stack but foreign code is spinning the CFRunLoop.
+    return;
+  }
+  delegate_->BeforeWait();
+}
+
 // Called before the run loop goes to sleep or exits, or processes sources.
 void MessagePumpCFRunLoopBase::MaybeScheduleNestingDeferredWork() {
   // deepest_nesting_level_ is set as run loops are entered.  If the deepest
@@ -457,6 +502,9 @@ void MessagePumpCFRunLoopBase::PreWaitObserver(CFRunLoopObserverRef observer,
     // nesting-deferred work may have accumulated.  Schedule it for processing
     // if appropriate.
     self->MaybeScheduleNestingDeferredWork();
+
+    // Notify the delegate that the loop is about to sleep.
+    self->BeforeWait();
   });
 }
 

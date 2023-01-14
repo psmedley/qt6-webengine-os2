@@ -13,7 +13,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process/kill.h"
 #include "base/process/process.h"
+#include "base/process/process_metrics.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/child_process_launcher_helper.h"
 #include "content/common/content_export.h"
@@ -21,6 +23,7 @@
 #include "content/public/browser/child_process_termination_info.h"
 #include "content/public/common/result_codes.h"
 #include "mojo/public/cpp/system/invitation.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_proto.h"
 
 #if defined(OS_ANDROID)
 #include "content/public/browser/android/child_process_importance.h"
@@ -29,6 +32,14 @@
 namespace base {
 class CommandLine;
 }
+
+namespace perfetto {
+namespace protos {
+namespace pbzero {
+class ChildProcessLauncherPriority;
+}
+}  // namespace protos
+}  // namespace perfetto
 
 namespace content {
 
@@ -85,6 +96,10 @@ struct ChildProcessLauncherPriority {
   bool operator!=(const ChildProcessLauncherPriority& other) const {
     return !(*this == other);
   }
+
+  void WriteIntoTrace(
+      perfetto::TracedProto<
+          perfetto::protos::pbzero::ChildProcessLauncherPriority> proto);
 
   // Prefer |is_background()| to inspecting these fields individually (to ensure
   // all logic uses the same notion of "backgrounded").
@@ -190,6 +205,10 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // more discussion of Linux implementation details.
   ChildProcessTerminationInfo GetChildTerminationInfo(bool known_dead);
 
+  // Gather the lifetime process metrics and save them to histograms. Call
+  // right before the process is about to go away.
+  void RecordProcessLifetimeMetrics();
+
   // Changes whether the process runs in the background or not.  Only call
   // this after the process has started.
   void SetProcessPriority(const ChildProcessLauncherPriority& priority);
@@ -225,6 +244,7 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // The process associated with this ChildProcessLauncher. Set in Notify by
   // ChildProcessLauncherHelper once the process was started.
   internal::ChildProcessLauncherHelper::Process process_;
+  base::TimeTicks process_start_time_;
 
   ChildProcessTerminationInfo termination_info_;
   bool starting_;

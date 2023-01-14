@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COMPOSITING_CONTENT_LAYER_CLIENT_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COMPOSITING_CONTENT_LAYER_CLIENT_IMPL_H_
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/layers_as_json.h"
@@ -27,11 +27,13 @@ class PLATFORM_EXPORT ContentLayerClientImpl : public cc::ContentLayerClient,
 
  public:
   ContentLayerClientImpl();
+  ContentLayerClientImpl(const ContentLayerClientImpl&) = delete;
+  ContentLayerClientImpl& operator=(const ContentLayerClientImpl&) = delete;
   ~ContentLayerClientImpl() override;
 
   // cc::ContentLayerClient
   gfx::Rect PaintableRegion() const final {
-    return gfx::Rect(raster_invalidator_.LayerBounds().size());
+    return gfx::Rect(gfx::Size(raster_invalidator_.LayerBounds()));
   }
   scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList() final {
     return cc_display_item_list_;
@@ -52,7 +54,8 @@ class PLATFORM_EXPORT ContentLayerClientImpl : public cc::ContentLayerClient,
 
   scoped_refptr<cc::PictureLayer> UpdateCcPictureLayer(
       const PaintChunkSubset&,
-      const gfx::Rect& layer_bounds,
+      const FloatPoint& layer_offset,
+      const IntSize& layer_bounds,
       const PropertyTreeState&);
 
   RasterInvalidator& GetRasterInvalidator() { return raster_invalidator_; }
@@ -63,7 +66,7 @@ class PLATFORM_EXPORT ContentLayerClientImpl : public cc::ContentLayerClient,
   // Callback from raster_invalidator_.
   void InvalidateRect(const IntRect&);
 
-  base::Optional<PaintChunk::Id> id_;
+  absl::optional<PaintChunk::Id> id_;
   scoped_refptr<cc::PictureLayer> cc_picture_layer_;
   scoped_refptr<cc::DisplayItemList> cc_display_item_list_;
   RasterInvalidator raster_invalidator_;
@@ -72,11 +75,9 @@ class PLATFORM_EXPORT ContentLayerClientImpl : public cc::ContentLayerClient,
   PropertyTreeState layer_state_;
 
   String debug_name_;
-#if DCHECK_IS_ON()
+#if EXPENSIVE_DCHECKS_ARE_ON()
   std::unique_ptr<JSONArray> paint_chunk_debug_data_;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(ContentLayerClientImpl);
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 };
 
 }  // namespace blink

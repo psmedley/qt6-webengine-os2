@@ -14,7 +14,10 @@
 #include "components/page_load_metrics/browser/layout_shift_normalization.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "components/page_load_metrics/common/page_load_metrics.mojom.h"
-#include "third_party/blink/public/common/mobile_metrics/mobile_friendliness.h"
+
+namespace blink {
+struct MobileFriendliness;
+}  // namespace blink
 
 namespace content {
 class NavigationHandle;
@@ -121,9 +124,11 @@ class PageLoadMetricsUpdateDispatcher {
     virtual void OnSubFrameRenderDataChanged(
         content::RenderFrameHost* rfh,
         const mojom::FrameRenderDataUpdate& render_data) = 0;
+    virtual void OnSubFrameMobileFriendlinessChanged(
+        const blink::MobileFriendliness& mobile_friendliness) = 0;
     virtual void UpdateFeaturesUsage(
         content::RenderFrameHost* rfh,
-        const mojom::PageLoadFeatures& new_features) = 0;
+        const std::vector<blink::UseCounterFeature>& new_features) = 0;
     virtual void UpdateResourceDataUse(
         content::RenderFrameHost* rfh,
         const std::vector<mojom::ResourceDataUpdatePtr>& resources) = 0;
@@ -149,7 +154,7 @@ class PageLoadMetricsUpdateDispatcher {
       content::RenderFrameHost* render_frame_host,
       mojom::PageLoadTimingPtr new_timing,
       mojom::FrameMetadataPtr new_metadata,
-      mojom::PageLoadFeaturesPtr new_features,
+      const std::vector<blink::UseCounterFeature>& new_features,
       const std::vector<mojom::ResourceDataUpdatePtr>& resources,
       mojom::FrameRenderDataUpdatePtr render_data,
       mojom::CpuTimingPtr new_cpu_timing,
@@ -164,13 +169,14 @@ class PageLoadMetricsUpdateDispatcher {
   // This method is only intended to be called for PageLoadFeatures being
   // recorded directly from the browser process. Features coming from the
   // renderer process should use the main flow into |UpdateMetrics|.
-  void UpdateFeatures(content::RenderFrameHost* render_frame_host,
-                      const mojom::PageLoadFeatures& new_features);
+  void UpdateFeatures(
+      content::RenderFrameHost* render_frame_host,
+      const std::vector<blink::UseCounterFeature>& new_features);
 
   void DidFinishSubFrameNavigation(
       content::NavigationHandle* navigation_handle);
 
-  void OnFrameDeleted(content::RenderFrameHost* render_frame_host);
+  void OnSubFrameDeleted(int frame_tree_node_id);
 
   void ShutDown();
 
@@ -223,14 +229,17 @@ class PageLoadMetricsUpdateDispatcher {
   void UpdateSubFrameMetadata(content::RenderFrameHost* render_frame_host,
                               mojom::FrameMetadataPtr subframe_metadata);
 
+  void UpdateMainFrameMobileFriendliness(
+      const blink::MobileFriendliness& mobile_friendliness);
+  void UpdateSubFrameMobileFriendliness(
+      const blink::MobileFriendliness& mobile_friendliness);
+
   void UpdatePageInputTiming(const mojom::InputTiming& input_timing_delta);
   void MaybeUpdateFrameIntersection(
       content::RenderFrameHost* render_frame_host,
       const mojom::FrameMetadataPtr& frame_metadata);
 
   void UpdatePageRenderData(const mojom::FrameRenderDataUpdate& render_data);
-  void UpdateMobileFriendliness(
-      const blink::MobileFriendliness& mobile_friendliness);
   void UpdateMainFrameRenderData(
       const mojom::FrameRenderDataUpdate& render_data);
   void OnSubFrameRenderDataChanged(
@@ -275,6 +284,9 @@ class PageLoadMetricsUpdateDispatcher {
 
   // MobileFrienddliness data for current view.
   blink::MobileFriendliness mobile_friendliness_;
+
+  // True if this page load started in prerender.
+  const bool is_prerendered_page_load_;
 
   // In general, page_render_data_ contains combined data across all frames on
   // the page, while main_frame_render_data_ contains data specific to the main

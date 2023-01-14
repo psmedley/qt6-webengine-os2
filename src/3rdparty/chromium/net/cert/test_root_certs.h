@@ -15,6 +15,7 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include "base/win/wincrypt_shim.h"
+#include "crypto/scoped_capi_types.h"
 #elif defined(OS_APPLE)
 #include <CoreFoundation/CFArray.h>
 #include <Security/SecTrust.h>
@@ -65,19 +66,16 @@ class NET_EXPORT TestRootCerts {
   // certificates stored in |temporary_roots_|. If IsEmpty() is true, this
   // does not modify |trust_ref|.
   OSStatus FixupSecTrustRef(SecTrustRef trust_ref) const;
-
-  TrustStore* test_trust_store() { return &test_trust_store_; }
 #elif defined(OS_WIN)
   HCERTSTORE temporary_roots() const { return temporary_roots_; }
 
   // Returns an HCERTCHAINENGINE suitable to be used for certificate
   // validation routines, or NULL to indicate that the default system chain
-  // engine is appropriate. The caller is responsible for freeing the
-  // returned HCERTCHAINENGINE.
-  HCERTCHAINENGINE GetChainEngine() const;
-#elif defined(OS_FUCHSIA) || defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
-  TrustStore* test_trust_store() { return &test_trust_store_; }
+  // engine is appropriate.
+  crypto::ScopedHCERTCHAINENGINE GetChainEngine() const;
 #endif
+
+  TrustStore* test_trust_store() { return &test_trust_store_; }
 
  private:
   friend struct base::LazyInstanceTraitsBase<TestRootCerts>;
@@ -85,23 +83,18 @@ class NET_EXPORT TestRootCerts {
   TestRootCerts();
   ~TestRootCerts();
 
-  // Performs platform-dependent initialization.
+  // Performs platform-dependent operations.
   void Init();
+  bool AddImpl(X509Certificate* certificate);
+  void ClearImpl();
 
 #if defined(OS_WIN)
   HCERTSTORE temporary_roots_;
 #elif defined(OS_APPLE)
   base::ScopedCFTypeRef<CFMutableArrayRef> temporary_roots_;
-  TrustStoreInMemory test_trust_store_;
-#elif defined(OS_FUCHSIA) || defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
-  TrustStoreInMemory test_trust_store_;
 #endif
 
-#if defined(OS_WIN) || defined(OS_ANDROID) || defined(OS_FUCHSIA) || \
-    defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
-  // True if there are no temporarily trusted root certificates.
-  bool empty_ = true;
-#endif
+  TrustStoreInMemory test_trust_store_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRootCerts);
 };

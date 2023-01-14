@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_occlusion_tracker.h"
+#include "ui/compositor/layer.h"
 #include "ui/views/view.h"
 #include "ui/views/view_constants_aura.h"
 
@@ -55,7 +56,7 @@ void GetOrderOfViewsWithLayers(
     order->push_back(view);
   }
 
-  for (views::View* child : view->children())
+  for (views::View* child : view->GetChildrenInZOrder())
     GetOrderOfViewsWithLayers(child, parent_layer, hosts, order);
 }
 

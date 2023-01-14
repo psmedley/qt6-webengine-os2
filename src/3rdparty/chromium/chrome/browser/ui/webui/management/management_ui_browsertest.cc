@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/webui/management/management_ui_handler.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/enterprise/browser/controller/fake_browser_dm_token_storage.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/strings/grit/components_strings.h"
@@ -27,19 +28,18 @@ class ManagementUITest : public InProcessBrowserTest {
   ~ManagementUITest() override = default;
 
   void SetUpInProcessBrowserTestFixture() override {
-    ON_CALL(provider_, IsInitializationComplete(testing::_))
-        .WillByDefault(testing::Return(true));
-    ON_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
-        .WillByDefault(testing::Return(true));
+    provider_.SetDefaultReturns(
+        true /* is_initialization_complete_return */,
+        true /* is_first_policy_load_complete_return */);
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   }
 
   void VerifyTexts(base::Value* actual_values,
-                   std::map<std::string, base::string16>& expected_values) {
+                   std::map<std::string, std::u16string>& expected_values) {
     base::DictionaryValue* values_as_dict = NULL;
     actual_values->GetAsDictionary(&values_as_dict);
     for (const auto& val : expected_values) {
-      base::string16 actual_value;
+      std::u16string actual_value;
       values_as_dict->GetString(val.first, &actual_value);
       ASSERT_EQ(actual_value, val.second);
     }
@@ -52,6 +52,7 @@ class ManagementUITest : public InProcessBrowserTest {
 
  private:
   testing::NiceMock<policy::MockConfigurationPolicyProvider> provider_;
+  policy::FakeBrowserDMTokenStorage fake_dm_token_storage_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagementUITest);
 };
@@ -76,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(ManagementUITest, ManagementStateChange) {
 
   std::unique_ptr<base::Value> unmanaged_value_ptr =
       base::JSONReader::ReadDeprecated(unmanaged_json);
-  std::map<std::string, base::string16> expected_unmanaged_values{
+  std::map<std::string, std::u16string> expected_unmanaged_values{
       {"browserManagementNotice",
        l10n_util::GetStringFUTF16(
            IDS_MANAGEMENT_NOT_MANAGED_NOTICE,
@@ -85,6 +86,8 @@ IN_PROC_BROWSER_TEST_F(ManagementUITest, ManagementStateChange) {
        l10n_util::GetStringUTF16(IDS_MANAGEMENT_EXTENSIONS_INSTALLED)},
       {"pageSubtitle",
        l10n_util::GetStringUTF16(IDS_MANAGEMENT_NOT_MANAGED_SUBTITLE)},
+      {"managedWebsitesSubtitle",
+       l10n_util::GetStringUTF16(IDS_MANAGEMENT_MANAGED_WEBSITES_EXPLANATION)},
   };
 
   VerifyTexts(unmanaged_value_ptr.get(), expected_unmanaged_values);
@@ -107,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(ManagementUITest, ManagementStateChange) {
 
   std::unique_ptr<base::Value> managed_value_ptr =
       base::JSONReader::ReadDeprecated(managed_json);
-  std::map<std::string, base::string16> expected_managed_values{
+  std::map<std::string, std::u16string> expected_managed_values{
       {"browserManagementNotice",
        l10n_util::GetStringFUTF16(
            IDS_MANAGEMENT_BROWSER_NOTICE,
@@ -115,7 +118,8 @@ IN_PROC_BROWSER_TEST_F(ManagementUITest, ManagementStateChange) {
       {"extensionReportingTitle",
        l10n_util::GetStringUTF16(IDS_MANAGEMENT_EXTENSIONS_INSTALLED)},
       {"pageSubtitle", l10n_util::GetStringUTF16(IDS_MANAGEMENT_SUBTITLE)},
-  };
+      {"managedWebsitesSubtitle",
+       l10n_util::GetStringUTF16(IDS_MANAGEMENT_MANAGED_WEBSITES_EXPLANATION)}};
 
   VerifyTexts(managed_value_ptr.get(), expected_managed_values);
 }

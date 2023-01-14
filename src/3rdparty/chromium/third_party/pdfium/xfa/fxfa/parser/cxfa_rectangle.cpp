@@ -6,12 +6,14 @@
 
 #include "xfa/fxfa/parser/cxfa_rectangle.h"
 
-#include <cmath>
+#include <math.h>
+
 #include <utility>
 
 #include "fxjs/xfa/cjx_node.h"
 #include "third_party/base/check.h"
 #include "third_party/base/notreached.h"
+#include "xfa/fgas/graphics/cfgas_gegraphics.h"
 #include "xfa/fxfa/parser/cxfa_corner.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_stroke.h"
@@ -120,7 +122,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
     bool bInverted = corner1->IsInverted();
     bool bRound = corner1->GetJoinType() == XFA_AttributeValue::Round;
     if (bRound) {
-      sy = FX_PI / 2;
+      sy = FXSYS_PI / 2;
     }
     switch (i) {
       case 0:
@@ -131,7 +133,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
         nx = -1;
         ny = 0;
         if (bRound) {
-          sx = bInverted ? FX_PI / 2 : FX_PI;
+          sx = bInverted ? FXSYS_PI / 2 : FXSYS_PI;
         } else {
           sx = 1;
           sy = 0;
@@ -145,7 +147,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
         nx = 0;
         ny = -1;
         if (bRound) {
-          sx = bInverted ? FX_PI : FX_PI * 3 / 2;
+          sx = bInverted ? FXSYS_PI : FXSYS_PI * 3 / 2;
         } else {
           sx = 0;
           sy = 1;
@@ -159,7 +161,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
         nx = 1;
         ny = 0;
         if (bRound) {
-          sx = bInverted ? FX_PI * 3 / 2 : 0;
+          sx = bInverted ? FXSYS_PI * 3 / 2 : 0;
         } else {
           sx = -1;
           sy = 0;
@@ -173,7 +175,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
         nx = 0;
         ny = 1;
         if (bRound) {
-          sx = bInverted ? 0 : FX_PI / 2;
+          sx = bInverted ? 0 : FXSYS_PI / 2;
         } else {
           sx = 0;
           sy = -1;
@@ -185,7 +187,7 @@ void CXFA_Rectangle::GetFillPath(const std::vector<CXFA_Stroke*>& strokes,
 
     if (bRound) {
       if (fRadius1 < 0)
-        sx -= FX_PI;
+        sx -= FXSYS_PI;
       if (bInverted)
         sy *= -1;
 
@@ -226,7 +228,7 @@ void CXFA_Rectangle::Draw(const std::vector<CXFA_Stroke*>& strokes,
     return;
 
   for (int32_t i = 1; i < 8; i += 2) {
-    float fThickness = std::fmax(0.0, strokes[i]->GetThickness());
+    float fThickness = fmax(0.0, strokes[i]->GetThickness());
     float fHalf = fThickness / 2;
     XFA_AttributeValue iHand = GetHand();
     switch (i) {
@@ -339,7 +341,7 @@ void CXFA_Rectangle::Stroke(const std::vector<CXFA_Stroke*>& strokes,
       bool bEmpty = path.IsEmpty();
       if (!bEmpty) {
         if (stroke)
-          stroke->Stroke(&path, pGS, matrix);
+          stroke->Stroke(pGS, path, matrix);
         path.Clear();
       }
       bStart = true;
@@ -350,7 +352,7 @@ void CXFA_Rectangle::Stroke(const std::vector<CXFA_Stroke*>& strokes,
     bStart = !stroke->SameStyles(strokes[(i + 1) % 8], 0);
     if (bStart) {
       if (stroke)
-        stroke->Stroke(&path, pGS, matrix);
+        stroke->Stroke(pGS, path, matrix);
       path.Clear();
     }
   }
@@ -360,7 +362,7 @@ void CXFA_Rectangle::Stroke(const std::vector<CXFA_Stroke*>& strokes,
       path.Close();
     }
     if (strokes[7])
-      strokes[7]->Stroke(&path, pGS, matrix);
+      strokes[7]->Stroke(pGS, path, matrix);
   }
 }
 
@@ -381,8 +383,7 @@ void CXFA_Rectangle::StrokeRect(CFGAS_GEGraphics* pGraphic,
   pathLT.LineTo(CFX_PointF(rt.left + fLineWidth, fBottom - fLineWidth));
   pathLT.LineTo(CFX_PointF(rt.left, fBottom));
   pGraphic->SetFillColor(CFGAS_GEColor(argbTopLeft));
-  pGraphic->FillPath(&pathLT, CFX_FillRenderOptions::FillType::kWinding,
-                     &matrix);
+  pGraphic->FillPath(pathLT, CFX_FillRenderOptions::FillType::kWinding, matrix);
 
   CFGAS_GEPath pathRB;
   pathRB.MoveTo(CFX_PointF(fRight, rt.top));
@@ -393,8 +394,7 @@ void CXFA_Rectangle::StrokeRect(CFGAS_GEGraphics* pGraphic,
   pathRB.LineTo(CFX_PointF(fRight - fLineWidth, rt.top + fLineWidth));
   pathRB.LineTo(CFX_PointF(fRight, rt.top));
   pGraphic->SetFillColor(CFGAS_GEColor(argbBottomRight));
-  pGraphic->FillPath(&pathRB, CFX_FillRenderOptions::FillType::kWinding,
-                     &matrix);
+  pGraphic->FillPath(pathRB, CFX_FillRenderOptions::FillType::kWinding, matrix);
 }
 
 void CXFA_Rectangle::StrokeLowered(CFGAS_GEGraphics* pGS,
@@ -409,8 +409,7 @@ void CXFA_Rectangle::StrokeLowered(CFGAS_GEGraphics* pGS,
   path.AddRectangle(rt.left, rt.top, rt.width, rt.height);
   path.AddRectangle(rtInner.left, rtInner.top, rtInner.width, rtInner.height);
   pGS->SetFillColor(CFGAS_GEColor(0xFF000000));
-  pGS->FillPath(&path, CFX_FillRenderOptions::FillType::kEvenOdd, &matrix);
-
+  pGS->FillPath(path, CFX_FillRenderOptions::FillType::kEvenOdd, matrix);
   StrokeRect(pGS, rtInner, fHalfWidth, matrix, 0xFF808080, 0xFFC0C0C0);
 }
 
@@ -426,8 +425,7 @@ void CXFA_Rectangle::StrokeRaised(CFGAS_GEGraphics* pGS,
   path.AddRectangle(rt.left, rt.top, rt.width, rt.height);
   path.AddRectangle(rtInner.left, rtInner.top, rtInner.width, rtInner.height);
   pGS->SetFillColor(CFGAS_GEColor(0xFF000000));
-  pGS->FillPath(&path, CFX_FillRenderOptions::FillType::kEvenOdd, &matrix);
-
+  pGS->FillPath(path, CFX_FillRenderOptions::FillType::kEvenOdd, matrix);
   StrokeRect(pGS, rtInner, fHalfWidth, matrix, 0xFFFFFFFF, 0xFF808080);
 }
 
@@ -507,7 +505,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
   CFX_PointF cp1;
   CFX_PointF cp2;
   if (bRound)
-    sy = FX_PI / 2;
+    sy = FXSYS_PI / 2;
 
   switch (nIndex) {
     case 0:
@@ -528,7 +526,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
       nx = -1;
       ny = 0;
       if (bRound) {
-        sx = bInverted ? FX_PI / 2 : FX_PI;
+        sx = bInverted ? FXSYS_PI / 2 : FXSYS_PI;
       } else {
         sx = 1;
         sy = 0;
@@ -552,7 +550,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
       nx = 0;
       ny = -1;
       if (bRound) {
-        sx = bInverted ? FX_PI : FX_PI * 3 / 2;
+        sx = bInverted ? FXSYS_PI : FXSYS_PI * 3 / 2;
       } else {
         sx = 0;
         sy = 1;
@@ -576,7 +574,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
       nx = 1;
       ny = 0;
       if (bRound) {
-        sx = bInverted ? FX_PI * 3 / 2 : 0;
+        sx = bInverted ? FXSYS_PI * 3 / 2 : 0;
       } else {
         sx = -1;
         sy = 0;
@@ -600,7 +598,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
       nx = 0;
       ny = 1;
       if (bRound) {
-        sx = bInverted ? 0 : FX_PI / 2;
+        sx = bInverted ? 0 : FXSYS_PI / 2;
       } else {
         sx = 0;
         sy = -1;
@@ -617,7 +615,7 @@ void CXFA_Rectangle::GetPath(const std::vector<CXFA_Stroke*>& strokes,
   }
   if (bRound) {
     if (fRadius1 < 0)
-      sx -= FX_PI;
+      sx -= FXSYS_PI;
     if (bInverted)
       sy *= -1;
 

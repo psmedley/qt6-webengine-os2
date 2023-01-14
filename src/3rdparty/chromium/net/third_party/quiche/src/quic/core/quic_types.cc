@@ -11,6 +11,9 @@
 
 namespace quic {
 
+static_assert(sizeof(StatelessResetToken) == kStatelessResetTokenLength,
+              "bad size");
+
 std::ostream& operator<<(std::ostream& os, const QuicConsumedData& s) {
   os << "bytes_consumed: " << s.bytes_consumed
      << " fin_consumed: " << s.fin_consumed;
@@ -222,7 +225,6 @@ std::string TransmissionTypeToString(TransmissionType transmission_type) {
         return "INVALID_TRANSMISSION_TYPE";
       }
       return absl::StrCat("Unknown(", static_cast<int>(transmission_type), ")");
-      break;
   }
 }
 
@@ -264,7 +266,6 @@ std::string MessageStatusToString(MessageStatus message_status) {
     RETURN_STRING_LITERAL(MESSAGE_STATUS_INTERNAL_ERROR);
     default:
       return absl::StrCat("Unknown(", static_cast<int>(message_status), ")");
-      break;
   }
 }
 
@@ -289,7 +290,6 @@ std::string PacketNumberSpaceToString(PacketNumberSpace packet_number_space) {
     default:
       return absl::StrCat("Unknown(", static_cast<int>(packet_number_space),
                           ")");
-      break;
   }
 }
 
@@ -317,7 +317,6 @@ std::string EncryptionLevelToString(EncryptionLevel level) {
     RETURN_STRING_LITERAL(ENCRYPTION_FORWARD_SECURE);
     default:
       return absl::StrCat("Unknown(", static_cast<int>(level), ")");
-      break;
   }
 }
 
@@ -333,7 +332,6 @@ std::string QuicConnectionCloseTypeString(QuicConnectionCloseType type) {
     RETURN_STRING_LITERAL(IETF_QUIC_APPLICATION_CONNECTION_CLOSE);
     default:
       return absl::StrCat("Unknown(", static_cast<int>(type), ")");
-      break;
   }
 }
 
@@ -375,7 +373,6 @@ std::string KeyUpdateReasonString(KeyUpdateReason reason) {
     RETURN_REASON_LITERAL(kLocalKeyUpdateLimitOverride);
     default:
       return absl::StrCat("Unknown(", static_cast<int>(reason), ")");
-      break;
   }
 #undef RETURN_REASON_LITERAL
 }

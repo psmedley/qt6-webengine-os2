@@ -66,8 +66,6 @@ cast_source_set("base") {
     "pref_names.h",
     "process_utils.cc",
     "process_utils.h",
-    "serializers.cc",
-    "serializers.h",
     "statistics/weighted_mean.cc",
     "statistics/weighted_mean.h",
     "statistics/weighted_moving_average.cc",
@@ -83,13 +81,14 @@ cast_source_set("base") {
   public_deps = [
     ":chromecast_switches",
     ":init_shlib",
+    "//base",
     "//chromecast/base/metrics",
     "//chromecast/public",
   ]
 
   deps = [
-    "//base",
     "//chromecast:chromecast_buildflags",
+    "//third_party/widevine/cdm:buildflags",
   ]
 
   if (chromecast_branding == "public") {
@@ -170,7 +169,6 @@ test("cast_base_unittests") {
     "observer_unittest.cc",
     "path_utils_unittest.cc",
     "process_utils_unittest.cc",
-    "serializers_unittest.cc",
     "statistics/weighted_moving_average_unittest.cc",
     "statistics/weighted_moving_linear_regression_unittest.cc",
     "system_time_change_notifier_unittest.cc",
@@ -228,12 +226,6 @@ if (is_android) {
       "cast_sys_info_android.h",
       "cast_sys_info_android_factory.cc",
     ]
-    if (is_android_things) {
-      sources += [
-        "cast_sys_info_android_things.cc",
-        "cast_sys_info_android_things.h",
-      ]
-    }
   }
 } else {  # !is_android
   # Target for OEM partners to override sys_info shared library, i.e.
@@ -353,7 +345,6 @@ if (is_android) {
 
     deps = [
       "//base:base_java",
-      "//base:jni_java",
       "//third_party/androidx:androidx_annotation_annotation_java",
     ]
     annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
@@ -383,6 +374,7 @@ if (is_android) {
       "$java_test_dir/org/chromium/chromecast/base/ObservableAndTest.java",
       "$java_test_dir/org/chromium/chromecast/base/ObservableAndThenTest.java",
       "$java_test_dir/org/chromium/chromecast/base/ObservableFilterTest.java",
+      "$java_test_dir/org/chromium/chromecast/base/ObservableFlatMapTest.java",
       "$java_test_dir/org/chromium/chromecast/base/ObservableMapTest.java",
       "$java_test_dir/org/chromium/chromecast/base/ObservableMiscellaneousTest.java",
       "$java_test_dir/org/chromium/chromecast/base/ObservableNotTest.java",

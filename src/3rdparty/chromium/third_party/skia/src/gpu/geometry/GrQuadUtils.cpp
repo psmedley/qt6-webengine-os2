@@ -27,11 +27,13 @@ static constexpr float kInvDistTolerance = 1.f / kDistTolerance;
 
 // These rotate the points/edge values either clockwise or counterclockwise assuming tri strip
 // order.
-static AI V4f next_cw(const V4f& v) {
+template<typename T>
+static AI skvx::Vec<4, T> next_cw(const skvx::Vec<4, T>& v) {
     return skvx::shuffle<2, 0, 3, 1>(v);
 }
 
-static AI V4f next_ccw(const V4f& v) {
+template<typename T>
+static AI skvx::Vec<4, T> next_ccw(const skvx::Vec<4, T>& v) {
     return skvx::shuffle<1, 3, 0, 2>(v);
 }
 
@@ -627,6 +629,27 @@ bool CropToRect(const SkRect& cropRect, GrAA cropAA, DrawQuad* quad, bool comput
     return false;
 }
 
+bool WillUseHairline(const GrQuad& quad, GrAAType aaType, GrQuadAAFlags edgeFlags) {
+    if (aaType != GrAAType::kCoverage || edgeFlags != GrQuadAAFlags::kAll) {
+        // Non-aa or msaa don't do any outsetting so they will not be hairlined; mixed edge flags
+        // could be hairlined in theory, but applying hairline bloat would extend beyond the
+        // original tiled shape.
+        return false;
+    }
+
+    if (quad.quadType() == GrQuad::Type::kAxisAligned) {
+        // Fast path that avoids computing edge properties via TessellationHelper.
+        // Taking the absolute value of the diagonals always produces the minimum of width or
+        // height given that this is axis-aligned, regardless of mirror or 90/180-degree rotations.
+        float d = std::min(std::abs(quad.x(3) - quad.x(0)), std::abs(quad.y(3) - quad.y(0)));
+        return d < 1.f;
+    } else {
+        TessellationHelper helper;
+        helper.reset(quad, nullptr);
+        return helper.isSubpixel();
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // TessellationHelper implementation and helper struct implementations
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -708,6 +731,17 @@ V4f TessellationHelper::EdgeEquations::estimateCoverage(const V4f& x2d, const V4
     return w * h;
 }
 
+bool TessellationHelper::EdgeEquations::isSubpixel(const V4f& x2d, const V4f& y2d) const {
+    // Compute the minimum distances from vertices to opposite edges. If all 4 minimum distances
+    // are less than 1px, then the inset geometry would be a point or line and quad rendering
+    // will switch to hairline mode.
+    V4f d = min(x2d * skvx::shuffle<1,2,1,2>(fA) + y2d * skvx::shuffle<1,2,1,2>(fB)
+                        + skvx::shuffle<1,2,1,2>(fC),
+                x2d * skvx::shuffle<3,3,0,0>(fA) + y2d * skvx::shuffle<3,3,0,0>(fB)
+                        + skvx::shuffle<3,3,0,0>(fC));
+    return all(d < 1.f);
+}
+
 int TessellationHelper::EdgeEquations::computeDegenerateQuad(const V4f& signedEdgeDistances,
                                                              V4f* x2d, V4f* y2d,
                                                              M4f* aaMask) const {
@@ -768,6 +802,7 @@ int TessellationHelper::EdgeEquations::computeDegenerateQuad(const V4f& signedEd
                           0.25f * ((*y2d)[0] + (*y2d)[1] + (*y2d)[2] + (*y2d)[3])};
         *x2d = center.fX;
         *y2d = center.fY;
+        *aaMask = any(*aaMask);
         return 1;
     } else if (all(d1Or2)) {
         // Degenerates to a line. Compare p[2] and p[3] to edge 0. If they are on the wrong side,
@@ -776,10 +811,15 @@ int TessellationHelper::EdgeEquations::computeDegenerateQuad(const V4f& signedEd
             // Edges 0 and 3 have crossed over, so make the line from average of (p0,p2) and (p1,p3)
             *x2d = 0.5f * (skvx::shuffle<0, 1, 0, 1>(px) + skvx::shuffle<2, 3, 2, 3>(px));
             *y2d = 0.5f * (skvx::shuffle<0, 1, 0, 1>(py) + skvx::shuffle<2, 3, 2, 3>(py));
+            // If edges 0 and 3 crossed then one must have AA but we moved both 2D points on the
+            // edge so we need moveTo() to be able to move both 3D points along the shared edge. So
+            // ensure both have AA.
+            *aaMask = *aaMask | M4f({1, 0, 0, 1});
         } else {
             // Edges 1 and 2 have crossed over, so make the line from average of (p0,p1) and (p2,p3)
             *x2d = 0.5f * (skvx::shuffle<0, 0, 2, 2>(px) + skvx::shuffle<1, 1, 3, 3>(px));
             *y2d = 0.5f * (skvx::shuffle<0, 0, 2, 2>(py) + skvx::shuffle<1, 1, 3, 3>(py));
+            *aaMask = *aaMask | M4f({0, 1, 1, 0});
         }
         return 2;
     } else {
@@ -826,8 +866,8 @@ int TessellationHelper::EdgeEquations::computeDegenerateQuad(const V4f& signedEd
         // points we're computing here. If we have an AA edge and a non-AA edge we
         // can only move along 1 edge, but now the point we're moving toward isn't
         // on that edge. Thus, we provide an additional degree of freedom by turning
-        // AA on for both edges if either edge is AA.
-        *aaMask = *aaMask | (d1Or2 & skvx::shuffle<2, 0, 3, 1>(*aaMask));
+        // AA on for both edges if either edge is AA at each point.
+        *aaMask = *aaMask | (d1Or2 & next_cw(*aaMask)) | (next_ccw(d1Or2) & next_ccw(*aaMask));
         *x2d = px;
         *y2d = py;
         return 3;
@@ -1154,6 +1194,18 @@ const TessellationHelper::OutsetRequest& TessellationHelper::getOutsetRequest(
         fOutsetRequestValid = true;
     }
     return fOutsetRequest;
+}
+
+bool TessellationHelper::isSubpixel() {
+    SkASSERT(fVerticesValid);
+    if (fDeviceType <= GrQuad::Type::kRectilinear) {
+        // Check the edge lengths, if the shortest is less than 1px it's degenerate, which is the
+        // same as if the max 1/length is greater than 1px.
+        return any(fEdgeVectors.fInvLengths > 1.f);
+    } else {
+        // Compute edge equations and then distance from each vertex to the opposite edges.
+        return this->getEdgeEquations().isSubpixel(fEdgeVectors.fX2D, fEdgeVectors.fY2D);
+    }
 }
 
 const TessellationHelper::EdgeEquations& TessellationHelper::getEdgeEquations() {

@@ -40,6 +40,7 @@ source_set("app_shell_lib") {
     "//base",
     "//build:chromeos_buildflags",
     "//components/feedback",
+    "//components/feedback/content:factory",
     "//components/guest_view/browser",
     "//components/guest_view/renderer",
     "//components/keep_alive_registry",
@@ -60,8 +61,8 @@ source_set("app_shell_lib") {
     "//extensions:shell_and_test_pak",
     "//extensions/browser",
     "//extensions/browser:core_api_provider",
+    "//extensions/browser/api",
     "//extensions/browser/api/messaging",
-    "//extensions/browser/api/system_display",
     "//extensions/browser/kiosk",
     "//extensions/browser/updater",
     "//extensions/common",
@@ -72,6 +73,7 @@ source_set("app_shell_lib") {
     "//extensions/shell/common/api:extensions_features",
     "//services/network/public/mojom",
     "//third_party/blink/public:blink",
+    "//third_party/blink/public/common",
     "//ui/base",
     "//ui/base/ime/init",
   ]
@@ -232,6 +234,10 @@ source_set("app_shell_lib") {
     ]
   }
 
+  if (is_chromeos_ash || is_chromeos_lacros) {
+    deps += [ "//chromeos/dbus/constants" ]
+  }
+
   if (is_chromeos_ash) {
     sources += [
       "browser/shell_screen.cc",
@@ -242,6 +248,7 @@ source_set("app_shell_lib") {
       "//ash/constants",
       "//chromeos/dbus",
       "//chromeos/dbus/audio",
+      "//chromeos/dbus/hermes",
       "//chromeos/dbus/power",
       "//chromeos/disks",
       "//chromeos/login/login_state",
@@ -251,6 +258,9 @@ source_set("app_shell_lib") {
     ]
   }
 
+  if (is_chromeos_lacros) {
+    deps += [ "//chromeos/lacros" ]
+  }
   if (enable_nacl) {
     sources += [
       "browser/shell_nacl_browser_delegate.cc",
@@ -333,6 +343,7 @@ test("app_shell_unittests") {
     "//extensions/common/api",
     "//extensions/shell/browser/system_logs",
     "//testing/gtest",
+    "//ui/display:test_support",
     "//ui/gl:test_support",
     "//ui/platform_window",
   ]
@@ -420,6 +431,10 @@ source_set("browser_tests") {
     "//extensions/common",
     "//ui/base",
   ]
+
+  if (is_chromeos_lacros) {
+    deps += [ "//chromeos/lacros" ]
+  }
 
   if (use_aura) {
     sources += [ "browser/shell_desktop_controller_aura_browsertest.cc" ]

@@ -31,7 +31,7 @@
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
@@ -48,6 +48,7 @@
 namespace blink {
 
 class DocumentMarkerList;
+class Highlight;
 class SuggestionMarkerProperties;
 
 class CORE_EXPORT DocumentMarkerController final
@@ -55,6 +56,8 @@ class CORE_EXPORT DocumentMarkerController final
       public SynchronousMutationObserver {
  public:
   explicit DocumentMarkerController(Document&);
+  DocumentMarkerController(const DocumentMarkerController&) = delete;
+  DocumentMarkerController& operator=(const DocumentMarkerController&) = delete;
 
   void Clear();
   void AddSpellingMarker(const EphemeralRange&,
@@ -77,6 +80,9 @@ class CORE_EXPORT DocumentMarkerController final
   void AddSuggestionMarker(const EphemeralRange&,
                            const SuggestionMarkerProperties&);
   void AddTextFragmentMarker(const EphemeralRange&);
+  void AddHighlightMarker(const EphemeralRange&,
+                          const String& highlight_name,
+                          const Member<Highlight> highlight);
 
   void MoveMarkers(const Text& src_node, int length, const Text& dst_node);
 
@@ -209,8 +215,6 @@ class CORE_EXPORT DocumentMarkerController final
   // without going through the map.
   DocumentMarker::MarkerTypes possibly_existing_marker_types_;
   const Member<Document> document_;
-
-  DISALLOW_COPY_AND_ASSIGN(DocumentMarkerController);
 };
 
 }  // namespace blink

@@ -33,17 +33,17 @@ namespace dawn_native { namespace d3d12 {
     }  // anonymous namespace
 
     // static
-    ResultOrError<QuerySet*> QuerySet::Create(Device* device,
-                                              const QuerySetDescriptor* descriptor) {
+    ResultOrError<Ref<QuerySet>> QuerySet::Create(Device* device,
+                                                  const QuerySetDescriptor* descriptor) {
         Ref<QuerySet> querySet = AcquireRef(new QuerySet(device, descriptor));
         DAWN_TRY(querySet->Initialize());
-        return querySet.Detach();
+        return querySet;
     }
 
     MaybeError QuerySet::Initialize() {
         D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
         queryHeapDesc.Type = D3D12QueryHeapType(GetQueryType());
-        queryHeapDesc.Count = GetQueryCount();
+        queryHeapDesc.Count = std::max(GetQueryCount(), uint32_t(1u));
 
         ID3D12Device* d3d12Device = ToBackend(GetDevice())->GetD3D12Device();
         return CheckOutOfMemoryHRESULT(

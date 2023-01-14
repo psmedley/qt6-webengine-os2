@@ -103,11 +103,11 @@ contribution can be accepted:
 ## Creating a change
 
 First, create a new branch for your change in git. Here, we create a branch
-called `mychange` (use whatever name you want here), with `origin/master` as
+called `mychange` (use whatever name you want here), with `origin/main` as
 the upstream branch.
 
 ```
-git checkout -b mychange -t origin/master
+git checkout -b mychange -t origin/main
 ```
 
 Write and test your change.
@@ -460,12 +460,12 @@ formats.
     number.
 * **Cr-Branched-From:**
   * Automatically added by the git-numberer Gerrit plugin on changes
-    which are submitted to non-master branches.
-  * Aids those reading a non-master branch history in finding when a
-    given commit diverged from master.
+    which are submitted to non-main branches.
+  * Aids those reading a non-main branch history in finding when a
+    given commit diverged from main.
 
 [//]: # (the reference link section should be alphabetically sorted)
-[checkout-and-build]: https://chromium.googlesource.com/chromium/src/+/master/docs/#checking-out-and-building
+[checkout-and-build]: https://chromium.googlesource.com/chromium/src/+/main/docs/#checking-out-and-building
 [chrome-dd-review-process]: http://go/chrome-dd-review-process
 [chromium-design-docs]: https://groups.google.com/a/chromium.org/forum/#!forum/chromium-design-docs
 [code-reviews-owners]: code_reviews.md#OWNERS-files
@@ -475,12 +475,12 @@ formats.
 [core-principles]: https://www.chromium.org/developers/core-principles
 [corporate-cla]: https://cla.developers.google.com/about/google-corporate?csw=1
 [cr-authors]: https://chromium.googlesource.com/chromium/src/+/HEAD/AUTHORS
-[cr-gitiles]: https://chromium.googlesource.com/chromium/src/+/master/
-[cr-styleguide]: https://chromium.googlesource.com/chromium/src/+/master/styleguide/styleguide.md
+[cr-gitiles]: https://chromium.googlesource.com/chromium/src/+/main/
+[cr-styleguide]: https://chromium.googlesource.com/chromium/src/+/main/styleguide/styleguide.md
 [crbug-new]: https://bugs.chromium.org/p/chromium/issues/entry
 [crbug]: https://bugs.chromium.org/p/chromium/issues/list
-[cros-authors]: https://chromium.googlesource.com/chromium/src/+/master/AUTHORS
-[cros-dev-guide]: https://chromium.googlesource.com/chromiumos/docs/+/master/developer_guide.md
+[cros-authors]: https://chromium.googlesource.com/chromium/src/+/main/AUTHORS
+[cros-dev-guide]: https://chromium.googlesource.com/chromiumos/docs/+/main/developer_guide.md
 [crrev]: https://chromium-review.googlesource.com
 [depot-tools-setup]: https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up
 [design-doc-template]: https://docs.google.com/document/d/14YBYKgk-uSfjfwpKFlp_omgUq5hwMVazy_M965s_1KA

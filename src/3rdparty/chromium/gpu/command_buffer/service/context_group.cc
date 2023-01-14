@@ -8,9 +8,11 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 
 #include "base/command_line.h"
+#include "base/containers/cxx20_erase.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/decoder_context.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
@@ -396,11 +398,11 @@ gpu::ContextResult ContextGroup::Initialize(
   // Managers are not used by the passthrough command decoder. Save memory by
   // not allocating them.
   if (!use_passthrough_cmd_decoder_) {
-    texture_manager_.reset(new TextureManager(
+    texture_manager_ = std::make_unique<TextureManager>(
         memory_tracker_.get(), feature_info_.get(), max_texture_size,
         max_cube_map_texture_size, max_rectangle_texture_size,
         max_3d_texture_size, max_array_texture_layers, bind_generates_resource_,
-        progress_reporter_, discardable_manager_));
+        progress_reporter_, discardable_manager_);
   }
 
   const GLint kMinTextureImageUnits = 8;

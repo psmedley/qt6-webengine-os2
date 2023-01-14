@@ -7,10 +7,10 @@
 #include <string>
 
 #include "base/values.h"
+#include "chrome/browser/ash/login/help_app_launcher.h"
+#include "chrome/browser/ash/login/oobe_screen.h"
 #include "chrome/browser/ash/login/screens/reset_screen.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/help_app_launcher.h"
-#include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
@@ -57,8 +57,6 @@ void ResetScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("resetScreenAccessibleTitle", IDS_RESET_SCREEN_TITLE);
   builder->Add("resetScreenIconTitle", IDS_RESET_SCREEN_ICON_TITLE);
-  builder->Add("resetScreenIllustrationTitle",
-               IDS_RESET_SCREEN_ILLUSTRATION_TITLE);
   builder->Add("cancelButton", IDS_CANCEL);
 
   builder->Add("resetButtonRestart", IDS_RELAUNCH_BUTTON);

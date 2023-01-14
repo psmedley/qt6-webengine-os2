@@ -19,15 +19,22 @@ namespace blink {
 class CORE_EXPORT HTMLParserMetrics {
  public:
   HTMLParserMetrics(int64_t source_id, ukm::UkmRecorder*);
+  HTMLParserMetrics(const HTMLParserMetrics&) = delete;
+  HTMLParserMetrics& operator=(const HTMLParserMetrics&) = delete;
   ~HTMLParserMetrics() = default;
 
   void AddChunk(base::TimeDelta elapsed_time, unsigned tokens_parsed);
 
   void AddYieldInterval(base::TimeDelta elapsed_time);
 
-  void ReportMetricsAtParseEnd();
+  void AddInput(unsigned length);
+
+  void ReportMetricsAtParseEnd(bool background_parsing);
 
  private:
+  void ReportBackgroundParsingUMA();
+  void ReportForcedSynchronousParsingUMA();
+
   // UKM System data.
   const int64_t source_id_;
   ukm::UkmRecorder* const recorder_;
@@ -48,7 +55,9 @@ class CORE_EXPORT HTMLParserMetrics {
   base::TimeDelta min_yield_interval_ = base::TimeDelta::Max();
   base::TimeDelta max_yield_interval_;  // Constructed with 0 value
 
-  DISALLOW_COPY_AND_ASSIGN(HTMLParserMetrics);
+  // Track total number of characters parsed in one instantiation of the
+  // parser.
+  unsigned input_character_count = 0;
 };
 
 }  // namespace blink

@@ -11,6 +11,7 @@
 #include "libANGLE/Texture.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/load_functions_table.h"
+#include "libANGLE/renderer/load_texture_border_functions_table.h"
 #include "libANGLE/renderer/vulkan/ContextVk.h"
 #include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/vk_caps_utils.h"
@@ -178,7 +179,7 @@ void Format::initBufferFallback(RendererVk *renderer,
         vertexLoadRequiresConversion = info[i].vertexLoadRequiresConversion;
     }
 
-    if (compressedStartIndex < numInfo)
+    if (renderer->getFeatures().compressVertexData.enabled && compressedStartIndex < numInfo)
     {
         int i = FindSupportedFormat(renderer, info, compressedStartIndex, numInfo,
                                     HasFullBufferFormatSupport);
@@ -281,6 +282,8 @@ void FormatTable::initialize(RendererVk *renderer,
         {
             format.textureLoadFunctions =
                 GetLoadFunctionsMap(format.intendedGLFormat, format.actualImageFormatID);
+            format.textureBorderLoadFunctions = GetLoadTextureBorderFunctionsMap(
+                format.intendedGLFormat, format.actualImageFormatID);
         }
 
         if (angleFormat.isBlock)

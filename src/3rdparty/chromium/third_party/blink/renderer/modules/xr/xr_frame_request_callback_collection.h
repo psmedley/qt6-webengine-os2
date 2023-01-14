@@ -24,6 +24,7 @@ class XRFrameRequestCallbackCollection final
       public NameClient {
  public:
   explicit XRFrameRequestCallbackCollection(ExecutionContext*);
+  ~XRFrameRequestCallbackCollection() override = default;
 
   using CallbackId = int;
   CallbackId RegisterCallback(V8XRFrameRequestCallback*);
@@ -67,4 +68,4 @@ class XRFrameRequestCallbackCollection final
 
 }  // namespace blink
 
-#endif  // FrameRequestCallbackCollection_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_FRAME_REQUEST_CALLBACK_COLLECTION_H_

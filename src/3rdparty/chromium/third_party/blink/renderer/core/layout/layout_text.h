@@ -24,6 +24,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_H_
 
 #include <iterator>
+
+#include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -121,7 +123,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
     NOT_DESTROYED();
     return 0;
   }
-  String PlainText() const;
+  virtual String PlainText() const;
 
   // Returns first letter part of |LayoutTextFragment|.
   virtual LayoutText* GetFirstLetterPart() const {
@@ -285,7 +287,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   // Returns the offset in the |text_| string that corresponds to the given
   // position in DOM; Returns nullopt is the position is not in this LayoutText.
   // TODO(layout-dev): Fix it when text-transform changes text length.
-  virtual base::Optional<unsigned> CaretOffsetForPosition(
+  virtual absl::optional<unsigned> CaretOffsetForPosition(
       const Position&) const;
 
   // Returns true if the offset (0-based in the |text_| string) is next to a
@@ -417,6 +419,9 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   // Returns the size of area occupied by this LayoutText.
   LayoutUnit PhysicalAreaSize() const;
 
+  // Returns the rightmost offset occupied by this LayoutText.
+  LayoutUnit PhysicalRightOffset() const;
+
   // For LayoutShiftTracker. Saves the value of LogicalStartingPoint() value
   // during the previous paint invalidation.
   LogicalOffset PreviousLogicalStartingPoint() const {
@@ -460,6 +465,11 @@ class CORE_EXPORT LayoutText : public LayoutObject {
     NOT_DESTROYED();
     return true;
   }
+
+  // Override |LayoutObject| implementation to invalidate |LayoutNGtextCombine|.
+  // Note: This isn't a virtual function.
+  void SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
+      LayoutInvalidationReasonForTracing reason);
 
  private:
   InlineTextBoxList& MutableTextBoxes();

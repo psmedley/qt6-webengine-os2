@@ -48,8 +48,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "net/base/filename_util.h"
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/cors/cors.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
 #include "url/url_util.h"
 #include "url/url_util_qt.h"
@@ -112,7 +114,7 @@ class InterceptedRequest : public network::mojom::URLLoader
 {
 public:
     InterceptedRequest(ProfileAdapter *profile_adapter,
-                       int process_id, uint64_t request_id, int32_t routing_id, uint32_t options,
+                       int frame_tree_node_id, int32_t request_id, uint32_t options,
                        const network::ResourceRequest &request,
                        const net::MutableNetworkTrafficAnnotationTag &traffic_annotation,
                        mojo::PendingReceiver<network::mojom::URLLoader> loader,
@@ -130,12 +132,13 @@ public:
     void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
     void OnStartLoadingResponseBody(mojo::ScopedDataPipeConsumerHandle body) override;
     void OnComplete(const network::URLLoaderCompletionStatus &status) override;
+    void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr) override {}
 
     // network::mojom::URLLoader
     void FollowRedirect(const std::vector<std::string> &removed_headers,
                         const net::HttpRequestHeaders &modified_headers,
                         const net::HttpRequestHeaders &modified_cors_exempt_headers,
-                        const base::Optional<GURL> &new_url) override;
+                        const absl::optional<GURL> &new_url) override;
     void SetPriority(net::RequestPriority priority, int32_t intra_priority_value) override;
     void PauseReadingBodyFromNet() override;
     void ResumeReadingBodyFromNet() override;
@@ -164,14 +167,15 @@ private:
     QWebEngineUrlRequestInterceptor* getPageInterceptor();
 
     QPointer<ProfileAdapter> profile_adapter_;
-    const int process_id_;
-    const uint64_t request_id_;
-    const int32_t routing_id_;
+    const int frame_tree_node_id_;
+    const int32_t request_id_;
     const uint32_t options_;
     bool allow_local_ = false;
     bool allow_remote_ = true;
     bool local_access_ = false;
     bool remote_access_ = true;
+
+    bool loader_error_seen_ = false;
 
     // If the |target_loader_| called OnComplete with an error this stores it.
     // That way the destructor can send it to OnReceivedError if safe browsing
@@ -195,16 +199,15 @@ private:
 };
 
 InterceptedRequest::InterceptedRequest(ProfileAdapter *profile_adapter,
-                                       int process_id, uint64_t request_id, int32_t routing_id, uint32_t options,
+                                       int frame_tree_node_id, int32_t request_id, uint32_t options,
                                        const network::ResourceRequest &request,
                                        const net::MutableNetworkTrafficAnnotationTag &traffic_annotation,
                                        mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver,
                                        mojo::PendingRemote<network::mojom::URLLoaderClient> client,
                                        mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory)
     : profile_adapter_(profile_adapter)
-    , process_id_(process_id)
+    , frame_tree_node_id_(frame_tree_node_id)
     , request_id_(request_id)
-    , routing_id_(routing_id)
     , options_(options)
     , request_(request)
     , traffic_annotation_(traffic_annotation)
@@ -251,12 +254,9 @@ InterceptedRequest::~InterceptedRequest()
 
 content::WebContents* InterceptedRequest::webContents()
 {
-    if (process_id_) {
-        content::RenderFrameHost *frameHost = content::RenderFrameHost::FromID(process_id_, request_.render_frame_id);
-        return content::WebContents::FromRenderFrameHost(frameHost);
-    }
-
-    return content::WebContents::FromFrameTreeNodeId(request_.render_frame_id);
+    if (frame_tree_node_id_ == content::RenderFrameHost::kNoFrameTreeNodeId)
+        return nullptr;
+    return content::WebContents::FromFrameTreeNodeId(frame_tree_node_id_);
 }
 
 QWebEngineUrlRequestInterceptor* InterceptedRequest::getProfileInterceptor()
@@ -280,15 +280,40 @@ void InterceptedRequest::Restart()
 
     // Check if non-local access is allowed
     if (!allow_remote_ && remote_access_) {
-        target_client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_NETWORK_ACCESS_DENIED));
-        delete this;
-        return;
+        bool granted_special_access = false;
+        switch (ui::PageTransition(request_.transition_type)) {
+        case ui::PAGE_TRANSITION_LINK:
+        case ui::PAGE_TRANSITION_TYPED:
+            if (blink::mojom::ResourceType(request_.resource_type) == blink::mojom::ResourceType::kMainFrame && request_.has_user_gesture)
+                granted_special_access = true; // allow normal explicit navigation
+            break;
+        default:
+            break;
+        }
+        if (!granted_special_access) {
+            target_client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_NETWORK_ACCESS_DENIED));
+            delete this;
+            return;
+        }
     }
+
     // Check if local access is allowed
     if (!allow_local_ && local_access_) {
-        target_client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_ACCESS_DENIED));
-        delete this;
-        return;
+        bool granted_special_access = false;
+        // Check for specifically granted file access:
+        if (auto *frame_tree = content::FrameTreeNode::GloballyFindByID(frame_tree_node_id_)) {
+            const int renderer_id = frame_tree->current_frame_host()->GetProcess()->GetID();
+            base::FilePath file_path;
+            if (net::FileURLToFilePath(request_.url, &file_path)) {
+                if (content::ChildProcessSecurityPolicy::GetInstance()->CanReadFile(renderer_id, file_path))
+                    granted_special_access = true;
+            }
+        }
+        if (!granted_special_access) {
+            target_client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_ACCESS_DENIED));
+            delete this;
+            return;
+        }
     }
 
     // MEMO since all codepatch leading to Restart scheduled and executed as asynchronous tasks in main thread,
@@ -363,7 +388,7 @@ void InterceptedRequest::ContinueAfterIntercept()
                 net::RedirectInfo redirectInfo = net::RedirectInfo::ComputeRedirectInfo(
                         request_.method, request_.url, request_.site_for_cookies,
                         first_party_url_policy, request_.referrer_policy, request_.referrer.spec(),
-                        net::HTTP_TEMPORARY_REDIRECT, toGurl(info.url), base::nullopt,
+                        net::HTTP_TEMPORARY_REDIRECT, toGurl(info.url), absl::nullopt,
                         false /*insecure_scheme_was_upgraded*/);
 
                 // FIXME: Should probably create a new header.
@@ -382,7 +407,8 @@ void InterceptedRequest::ContinueAfterIntercept()
     }
 
     if (!target_loader_ && target_factory_) {
-        target_factory_->CreateLoaderAndStart(target_loader_.BindNewPipeAndPassReceiver(), routing_id_, request_id_,
+        loader_error_seen_ = false;
+        target_factory_->CreateLoaderAndStart(target_loader_.BindNewPipeAndPassReceiver(), request_id_,
                                               options_, request_, proxied_client_receiver_.BindNewPipeAndPassRemote(),
                                               traffic_annotation_);
     }
@@ -442,7 +468,7 @@ void InterceptedRequest::OnComplete(const network::URLLoaderCompletionStatus &st
 void InterceptedRequest::FollowRedirect(const std::vector<std::string> &removed_headers,
                                         const net::HttpRequestHeaders &modified_headers,
                                         const net::HttpRequestHeaders &modified_cors_exempt_headers,
-                                        const base::Optional<GURL> &new_url)
+                                        const absl::optional<GURL> &new_url)
 {
     if (target_loader_)
         target_loader_->FollowRedirect(removed_headers, modified_headers, modified_cors_exempt_headers, new_url);
@@ -487,6 +513,8 @@ void InterceptedRequest::OnURLLoaderError(uint32_t custom_reason, const std::str
     // If CallOnComplete was already called, then this object is ready to be deleted.
     if (!target_client_)
         delete this;
+    else
+        loader_error_seen_ = true;
 }
 
 void InterceptedRequest::CallOnComplete(const network::URLLoaderCompletionStatus &status, bool wait_for_loader_error)
@@ -500,7 +528,7 @@ void InterceptedRequest::CallOnComplete(const network::URLLoaderCompletionStatus
     if (target_client_)
         target_client_->OnComplete(status);
 
-    if (proxied_loader_receiver_.is_bound() && wait_for_loader_error) {
+    if (proxied_loader_receiver_.is_bound() && wait_for_loader_error && !loader_error_seen_) {
         // Since the original client is gone no need to continue loading the
         // request.
         proxied_client_receiver_.reset();
@@ -529,10 +557,10 @@ void InterceptedRequest::SendErrorAndCompleteImmediately(int error_code)
     delete this;
 }
 
-ProxyingURLLoaderFactoryQt::ProxyingURLLoaderFactoryQt(ProfileAdapter *adapter, int process_id,
+ProxyingURLLoaderFactoryQt::ProxyingURLLoaderFactoryQt(ProfileAdapter *adapter, int frame_tree_node_id,
                                                        mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
                                                        mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory_info)
-    : m_profileAdapter(adapter), m_processId(process_id), m_weakFactory(this)
+    : m_profileAdapter(adapter), m_frameTreeNodeId(frame_tree_node_id), m_weakFactory(this)
 {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     if (target_factory_info) {
@@ -550,8 +578,8 @@ ProxyingURLLoaderFactoryQt::~ProxyingURLLoaderFactoryQt()
     m_weakFactory.InvalidateWeakPtrs();
 }
 
-void ProxyingURLLoaderFactoryQt::CreateLoaderAndStart(mojo::PendingReceiver<network::mojom::URLLoader> loader, int32_t routing_id,
-                                                      int32_t request_id, uint32_t options, const network::ResourceRequest &request,
+void ProxyingURLLoaderFactoryQt::CreateLoaderAndStart(mojo::PendingReceiver<network::mojom::URLLoader> loader, int32_t request_id,
+                                                      uint32_t options, const network::ResourceRequest &request,
                                                       mojo::PendingRemote<network::mojom::URLLoaderClient> url_loader_client,
                                                       const net::MutableNetworkTrafficAnnotationTag &traffic_annotation)
 {
@@ -561,7 +589,7 @@ void ProxyingURLLoaderFactoryQt::CreateLoaderAndStart(mojo::PendingReceiver<netw
         m_targetFactory->Clone(target_factory_clone.InitWithNewPipeAndPassReceiver());
 
     // Will manage its own lifetime
-    InterceptedRequest *req = new InterceptedRequest(m_profileAdapter, m_processId, request_id, routing_id, options,
+    InterceptedRequest *req = new InterceptedRequest(m_profileAdapter, m_frameTreeNodeId, request_id, options,
                                                      request, traffic_annotation, std::move(loader),
                                                      std::move(url_loader_client), std::move(target_factory_clone));
     req->Restart();

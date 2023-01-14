@@ -4,6 +4,8 @@
 
 #include <inttypes.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
@@ -24,6 +26,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_status_code.h"
 #include "net/quic/crypto/proof_source_chromium.h"
 #include "net/quic/quic_context.h"
@@ -111,15 +114,14 @@ class URLRequestQuicPerfTest : public ::testing::Test {
     // Host mapping.
     std::unique_ptr<MockHostResolver> resolver(new MockHostResolver());
     resolver->rules()->AddRule(kAltSvcHost, "127.0.0.1");
-    host_resolver_.reset(new MappedHostResolver(std::move(resolver)));
+    host_resolver_ = std::make_unique<MappedHostResolver>(std::move(resolver));
     std::string map_rule = base::StringPrintf("MAP %s 127.0.0.1:%d",
                                               kOriginHost, tcp_server_->port());
     EXPECT_TRUE(host_resolver_->AddRuleFromString(map_rule));
 
-    net::HttpNetworkSession::Context network_session_context;
+    net::HttpNetworkSessionContext network_session_context;
     network_session_context.cert_verifier = &cert_verifier_;
-    std::unique_ptr<HttpNetworkSession::Params> params(
-        new HttpNetworkSession::Params);
+    auto params = std::make_unique<HttpNetworkSessionParams>();
     params->enable_quic = true;
     params->enable_user_alternate_protocol_ports = true;
     quic_context_.params()->allow_remote_alt_svc = true;
@@ -156,10 +158,10 @@ class URLRequestQuicPerfTest : public ::testing::Test {
     quic::QuicConfig config;
     memory_cache_backend_.AddSimpleResponse(kOriginHost, kHelloPath,
                                             kHelloStatus, kHelloAltSvcResponse);
-    quic_server_.reset(new QuicSimpleServer(
+    quic_server_ = std::make_unique<QuicSimpleServer>(
         quic::test::crypto_test_utils::ProofSourceForTesting(), config,
         quic::QuicCryptoServerConfig::ConfigOptions(),
-        quic::AllSupportedVersions(), &memory_cache_backend_));
+        quic::AllSupportedVersions(), &memory_cache_backend_);
     int rv = quic_server_->Listen(
         net::IPEndPoint(net::IPAddress::IPv4AllZeros(), kAltSvcPort));
     ASSERT_GE(rv, 0) << "Quic server fails to start";

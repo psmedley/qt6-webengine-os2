@@ -84,7 +84,14 @@ class CodeGenContext(object):
             "named_property_deleter": None,
             "stringifier": None,
 
-            # Contents of union.
+            # Cache of a tuple of dictionary._DictionaryMember for the own
+            # members of the dictionary of which the Blink class is being
+            # generated.  The cache is used in dictionary.py to save code
+            # generation time.
+            "dictionary_own_members": (),
+            # Cache of a tuple of union._UnionMember for the flattened member
+            # types of the union of which the Blink class is being generated.
+            # The cache is used in union.py to save code generation time.
             "union_members": (),
 
             # The names of the class being generated and its base class.
@@ -95,6 +102,12 @@ class CodeGenContext(object):
             # Used via [PerWorldBindings] to optimize the code path of the main
             # world.
             "for_world": cls.ALL_WORLDS,
+
+            # True when generating a callback of [NoAllocDirectCall].
+            "no_alloc_direct_call": False,
+            # True when generating a (fake) callback of [NoAllocDirectCall] for
+            # testing.
+            "no_alloc_direct_call_for_testing": False,
 
             # Type of V8 callback function which implements IDL attribute,
             # IDL operation, etc.
@@ -109,7 +122,6 @@ class CodeGenContext(object):
             "idl_location",
             "idl_location_and_name",
             "idl_name",
-            "is_return_by_argument",
             "may_throw_exception",
             "member_like",
             "property_",
@@ -238,14 +250,6 @@ class CodeGenContext(object):
         if self.idl_definition:
             return self.idl_definition.identifier
         return "<<unknown name>>"
-
-    @property
-    def is_return_by_argument(self):
-        if self.does_override_idl_return_type:
-            return False
-        if self.return_type is None:
-            return False
-        return self.return_type.unwrap().is_union
 
     @property
     def is_return_type_promise_type(self):

@@ -15,13 +15,13 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/redirect_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 
 namespace content {
 
 WorkerScriptLoader::WorkerScriptLoader(
     int process_id,
     const DedicatedOrSharedWorkerToken& worker_token,
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& resource_request,
@@ -32,8 +32,7 @@ WorkerScriptLoader::WorkerScriptLoader(
     scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
     ukm::SourceId ukm_source_id)
-    : routing_id_(routing_id),
-      request_id_(request_id),
+    : request_id_(request_id),
       options_(options),
       resource_request_(resource_request),
       client_(std::move(client)),
@@ -59,7 +58,8 @@ WorkerScriptLoader::WorkerScriptLoader(
   if (appcache_host) {
     std::unique_ptr<NavigationLoaderInterceptor> appcache_interceptor =
         AppCacheRequestHandler::InitializeForMainResourceNetworkService(
-            resource_request_, appcache_host);
+            resource_request_, appcache_host,
+            RenderFrameHost::kNoFrameTreeNodeId);
     if (appcache_interceptor)
       interceptors_.push_back(std::move(appcache_interceptor));
   }
@@ -135,8 +135,8 @@ void WorkerScriptLoader::MaybeStartLoader(
     url_loader_factory_ = std::move(single_request_factory);
     url_loader_.reset();
     url_loader_factory_->CreateLoaderAndStart(
-        url_loader_.BindNewPipeAndPassReceiver(), routing_id_, request_id_,
-        options_, resource_request_,
+        url_loader_.BindNewPipeAndPassReceiver(), request_id_, options_,
+        resource_request_,
         url_loader_client_receiver_.BindNewPipeAndPassRemote(),
         traffic_annotation_);
     // We continue in URLLoaderClient calls.
@@ -162,9 +162,8 @@ void WorkerScriptLoader::LoadFromNetwork(bool reset_subresource_loader_params) {
   url_loader_factory_ = default_loader_factory_;
   url_loader_.reset();
   url_loader_factory_->CreateLoaderAndStart(
-      url_loader_.BindNewPipeAndPassReceiver(), routing_id_, request_id_,
-      options_, resource_request_,
-      url_loader_client_receiver_.BindNewPipeAndPassRemote(),
+      url_loader_.BindNewPipeAndPassReceiver(), request_id_, options_,
+      resource_request_, url_loader_client_receiver_.BindNewPipeAndPassRemote(),
       traffic_annotation_);
   // We continue in URLLoaderClient calls.
 }
@@ -177,7 +176,7 @@ void WorkerScriptLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!new_url.has_value()) << "Redirect with modified URL was not "
                                   "supported yet. crbug.com/845683";
@@ -235,6 +234,12 @@ void WorkerScriptLoader::ResumeReadingBodyFromNet() {
 // This class forwards any client messages to the outer client in the renderer.
 // Additionally, on redirects it saves the redirect info so if the renderer
 // calls FollowRedirect(), it can do so.
+
+void WorkerScriptLoader::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  client_->OnReceiveEarlyHints(std::move(early_hints));
+}
 
 void WorkerScriptLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head) {

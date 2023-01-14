@@ -9,19 +9,8 @@ interface Window {
   UI: {themeSupport: unknown}
 }
 
-declare class DOM {
-  constructor(doc: Document);
-}
-
 interface RegExp {
   __fromRegExpQuery: boolean;
-}
-
-interface NumberConstructor {
-  withThousandsSeparator(num: number): string;
-  secondsToString(seconds: number, higherResolution?: boolean): string;
-  millisToString(ms: number, higherResolution?: boolean): string;
-  preciseMillisToString(ms: number, precision?: number): string;
 }
 
 declare class AnchorBox {
@@ -83,7 +72,6 @@ declare namespace Adb {
 }
 
 interface Document {
-  createElementWithClass(elementName: string, className?: string, customElementType?: string): Element;
   deepActiveElement(): Element|null;
 }
 
@@ -133,7 +121,6 @@ interface Node {
   childTextNodes(): Node[];
 }
 
-declare function base64ToSize(content: string|null): number;
 declare function isEnterOrSpaceKey(event: Event): boolean;
 declare function isEscKey(event: Event): boolean;
 declare function createPlainTextSearchRegex(query: string, flags?: string): RegExp;

@@ -7,8 +7,6 @@
 
 namespace content {
 
-class StorableConversion;
-
 // Keeps track of per-page-load metrics for conversion measurement. Lifetime is
 // scoped to a single page load.
 class ConversionPageMetrics {
@@ -18,14 +16,23 @@ class ConversionPageMetrics {
 
   ConversionPageMetrics(const ConversionPageMetrics& other) = delete;
   ConversionPageMetrics& operator=(const ConversionPageMetrics& other) = delete;
+  ConversionPageMetrics(ConversionPageMetrics&& other) = delete;
+  ConversionPageMetrics& operator=(ConversionPageMetrics&& other) = delete;
 
   // Called when a conversion is registered.
-  void OnConversion(const StorableConversion& conversion);
+  void OnConversion();
+
+  // Called when an impression is registered.
+  void OnImpression();
 
  private:
   // Keeps track of how many conversion registrations there have been on the
   // current page.
   int num_conversions_on_current_page_ = 0;
+
+  // Keeps track of how many impression registrations there have been on the
+  // current page.
+  int num_impressions_on_current_page_ = 0;
 };
 
 }  // namespace content

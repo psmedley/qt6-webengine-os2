@@ -11,10 +11,11 @@
 #include "include/gpu/GrTypes.h"
 #include "include/gpu/vk/GrVkTypes.h"
 #include "src/gpu/GrNativeRect.h"
-#include "src/gpu/GrPrimitiveProcessor.h"
 #include "src/gpu/vk/GrVkDescriptorSetManager.h"
 
+class GrAttachment;
 class GrSurface;
+class GrVkAttachment;
 class GrVkCommandBuffer;
 class GrVkGpu;
 class GrVkRenderPass;
@@ -29,8 +30,8 @@ public:
     bool loadMSAAFromResolve(GrVkGpu* gpu,
                              GrVkCommandBuffer* commandBuffer,
                              const GrVkRenderPass& renderPass,
-                             GrSurface* dst,
-                             GrSurface* src,
+                             GrAttachment* dst,
+                             GrVkAttachment* src,
                              const SkIRect& srcRect);
 
     void destroyResources(GrVkGpu* gpu);

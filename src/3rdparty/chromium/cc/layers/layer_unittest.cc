@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -149,8 +150,8 @@ class LayerTest : public testing::Test {
     params.task_graph_runner = &task_graph_runner_;
     params.mutator_host = animation_host_.get();
 
-    layer_tree_host_.reset(new StrictMock<MockLayerTreeHost>(
-        &single_thread_client_, std::move(params)));
+    layer_tree_host_ = std::make_unique<StrictMock<MockLayerTreeHost>>(
+        &single_thread_client_, std::move(params));
   }
 
   void TearDown() override {
@@ -1394,7 +1395,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   // layer does not abort either one.
   std::unique_ptr<viz::CopyOutputRequest> request =
       std::make_unique<viz::CopyOutputRequest>(
-          viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+          viz::CopyOutputRequest::ResultFormat::RGBA,
+          viz::CopyOutputRequest::ResultDestination::kSystemMemory,
           base::BindOnce(&ReceiveCopyOutputResultAtomic,
                          base::Unretained(&result_count)));
   layer->RequestCopyOfOutput(std::move(request));
@@ -1403,7 +1405,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   CCTestSuite::RunUntilIdle();
   EXPECT_EQ(0, result_count.load());
   request = std::make_unique<viz::CopyOutputRequest>(
-      viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      viz::CopyOutputRequest::ResultFormat::RGBA,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&ReceiveCopyOutputResultAtomic,
                      base::Unretained(&result_count)));
   layer->RequestCopyOfOutput(std::move(request));
@@ -1425,7 +1428,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   // the second request using |kArbitrarySourceId1| is made.
   int did_receive_first_result_from_this_source = 0;
   request = std::make_unique<viz::CopyOutputRequest>(
-      viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      viz::CopyOutputRequest::ResultFormat::RGBA,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&ReceiveCopyOutputResult,
                      &did_receive_first_result_from_this_source));
   request->set_source(kArbitrarySourceId1);
@@ -1437,7 +1441,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   // Make a request from a different source.
   int did_receive_result_from_different_source = 0;
   request = std::make_unique<viz::CopyOutputRequest>(
-      viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      viz::CopyOutputRequest::ResultFormat::RGBA,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&ReceiveCopyOutputResult,
                      &did_receive_result_from_different_source));
   request->set_source(kArbitrarySourceId2);
@@ -1449,7 +1454,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   // Make a request without specifying the source.
   int did_receive_result_from_anonymous_source = 0;
   request = std::make_unique<viz::CopyOutputRequest>(
-      viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      viz::CopyOutputRequest::ResultFormat::RGBA,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&ReceiveCopyOutputResult,
                      &did_receive_result_from_anonymous_source));
   layer->RequestCopyOfOutput(std::move(request));
@@ -1460,7 +1466,8 @@ TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
   // Make the second request from |kArbitrarySourceId1|.
   int did_receive_second_result_from_this_source = 0;
   request = std::make_unique<viz::CopyOutputRequest>(
-      viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      viz::CopyOutputRequest::ResultFormat::RGBA,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&ReceiveCopyOutputResult,
                      &did_receive_second_result_from_this_source));
   request->set_source(kArbitrarySourceId1);
@@ -1562,12 +1569,16 @@ TEST_F(LayerTest, SetLayerTreeHostNotUsingLayerListsManagesElementId) {
 // commit to be pushed. See https://crbug.com/1083244.
 TEST_F(LayerTest, PushAnimationCountsLazily) {
   EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(0);
-  animation_host_->SetAnimationCounts(0, /* current_frame_had_raf = */ true,
-                                      /* next_frame_has_pending_raf = */ true);
+  animation_host_->SetAnimationCounts(0);
+  animation_host_->SetCurrentFrameHadRaf(true);
+  animation_host_->SetNextFrameHasPendingRaf(true);
+  animation_host_->SetHasSmilAnimation(true);
   EXPECT_FALSE(host_impl_.animation_host()->CurrentFrameHadRAF());
+  EXPECT_FALSE(host_impl_.animation_host()->HasSmilAnimation());
   EXPECT_FALSE(animation_host_->needs_push_properties());
   animation_host_->PushPropertiesTo(host_impl_.animation_host());
   EXPECT_TRUE(host_impl_.animation_host()->CurrentFrameHadRAF());
+  EXPECT_TRUE(host_impl_.animation_host()->HasSmilAnimation());
 }
 
 TEST_F(LayerTest, SetElementIdNotUsingLayerLists) {

@@ -7,6 +7,8 @@
 #include "base/test/scoped_feature_list.h"
 #include "components/send_tab_to_self/features.h"
 #include "components/sync/driver/test_sync_service.h"
+#include "components/sync/protocol/device_info_specifics.pb.h"
+#include "components/sync/protocol/sync_enums.pb.h"
 #include "components/sync_device_info/device_info.h"
 #include "components/sync_device_info/device_info_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,6 +35,7 @@ static std::unique_ptr<syncer::DeviceInfo> CreateFakeDeviceInfo(
   return std::make_unique<syncer::DeviceInfo>(
       id, name, "chrome_version", "user_agent", device_type, "device_id",
       manufacturer_name, model_name,
+      /*full_hardware_class=*/std::string(),
       /*last_updated_timestamp=*/base::Time::Now(),
       syncer::DeviceInfoUtil::GetPulseInterval(),
       /*send_tab_to_self_receiving_enabled=*/false,
@@ -41,6 +44,7 @@ static std::unique_ptr<syncer::DeviceInfo> CreateFakeDeviceInfo(
           {"sender_id_fcm_token", "sender_id_p256dh", "sender_id_auth_secret"},
           std::set<sync_pb::SharingSpecificFields::EnabledFeatures>{
               sync_pb::SharingSpecificFields::CLICK_TO_CALL_V2}),
+      /*paask_info=*/absl::nullopt,
       /*fcm_registration_token=*/std::string(),
       /*interested_data_types=*/syncer::ModelTypeSet());
 }

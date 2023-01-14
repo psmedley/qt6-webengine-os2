@@ -38,7 +38,7 @@
 ****************************************************************************/
 
 #ifndef UI_OZONE_GLX_QT_H_
-#define UI_OZONE_GLX_QT_H
+#define UI_OZONE_GLX_QT_H_
 
 #include "base/macros.h"
 #include "ui/gl/gl_implementation.h"
@@ -53,7 +53,7 @@ public:
     ~GLOzoneGLXQt() override {}
 
     bool InitializeGLOneOffPlatform() override;
-    bool InitializeStaticGLBindings(gl::GLImplementation implementation) override;
+    bool InitializeStaticGLBindings(const gl::GLImplementationParts &implementation) override;
     bool InitializeExtensionSettingsOneOffPlatform() override;
     void ShutdownGL() override;
     void SetDisabledExtensionsPlatform(
@@ -82,4 +82,4 @@ private:
 
 }  // namespace ui
 
-#endif  // UI_OZONE_GLX_QT_H
+#endif  // UI_OZONE_GLX_QT_H_

@@ -14,18 +14,15 @@ if (is_chromeos_device) {
 
   generate_runner_script("cros_update_wrapper") {
     generated_script = "$root_build_dir/bin/cros_update_wrapper"
-    deploy_chrome = true
-  }
-
-  if (cros_boards != "") {
-    foreach(_board, string_split(cros_boards, ":")) {
-      _board_underscore = string_replace(_board, "-", "_")
-      generate_runner_script("cros_update_wrapper_${_board_underscore}") {
-        generated_script =
-            "$root_build_dir/bin/cros_update_wrapper_${_board_underscore}"
-        deploy_chrome = true
-        override_board = _board
-      }
+    if (is_chromeos_ash) {
+      deploy_chrome = true
+    } else {
+      deploy_lacros = true
+      skip_generating_board_args = true
+      data = [
+        # A script needed to launch Lacros in testing environment.
+        "//build/lacros/mojo_connection_lacros_launcher.py",
+      ]
     }
   }
 }
@@ -40,6 +37,9 @@ group("telemetry_chrome_test") {
   data = []
 
   if (is_android) {
+    # TODO(crbug.com/1213269): Remove these APK dependencies and fully switch to
+    # the separate Android targets below once all Android uses of the old target
+    # have been cleaned up.
     data_deps += [
       ":telemetry_weblayer_apks",
       "//android_webview:system_webview_apk",
@@ -85,12 +85,6 @@ group("telemetry_chrome_test") {
 
   if (is_chromeos_device) {
     data_deps += [ ":cros_update_wrapper" ]
-    if (cros_boards != "") {
-      foreach(_board, string_split(cros_boards, ":")) {
-        _board_underscore = string_replace(_board, "-", "_")
-        data_deps += [ ":cros_update_wrapper_${_board_underscore}" ]
-      }
-    }
   }
 
   if (is_chromeos_ash && is_chromeos_device) {
@@ -101,11 +95,88 @@ group("telemetry_chrome_test") {
     ]
   }
 
-  if (is_win && (symbol_level == 1 || symbol_level == 2)) {
+  if (is_win) {
     data_deps += [
       "//build/win:copy_cdb_to_output",
       "//third_party/crashpad/crashpad/tools:crashpad_database_util",
     ]
+  }
+}
+
+# These telemetry_chrome_test_* targets exist to reduce the amount of data
+# included in swarming isolates. Including a bunch of different versions of
+# Chrome and their unstripped .so files that aren't actually used adds gigabytes
+# of data to the isolate, which in turn adds a non-trivial amount of swarming
+# overhead. A new one should be added each time a new type of APK is supported
+# and its suffix added to android_browser_types.gni.
+if (is_android) {
+  group("telemetry_chrome_test_android_chrome") {
+    testonly = true
+
+    data_deps = [
+      ":telemetry_chrome_test",
+      "//chrome/android:chrome_public_apk",
+    ]
+  }
+
+  group("telemetry_chrome_test_android_monochrome") {
+    testonly = true
+
+    data_deps = [
+      ":telemetry_chrome_test",
+      "//chrome/android:monochrome_public_apk",
+    ]
+  }
+
+  group("telemetry_chrome_test_android_monochrome_bundle") {
+    testonly = true
+
+    data_deps = [
+      ":telemetry_chrome_test",
+      "//chrome/android:monochrome_public_bundle",
+    ]
+  }
+
+  group("telemetry_chrome_test_android_weblayer") {
+    testonly = true
+
+    data_deps = [
+      ":telemetry_chrome_test",
+      ":telemetry_weblayer_apks",
+    ]
+  }
+
+  group("telemetry_chrome_test_android_webview") {
+    testonly = true
+
+    data_deps = [
+      ":telemetry_chrome_test",
+      "//android_webview:system_webview_apk",
+      "//android_webview/test:webview_instrumentation_apk",
+      "//android_webview/tools/system_webview_shell:system_webview_shell_apk",
+    ]
+  }
+
+  if (enable_chrome_android_internal) {
+    import("//clank/telemetry_browser_types.gni")
+
+    template("telemetry_chrome_test_clank_template") {
+      forward_variables_from(invoker, [ "telemetry_target_suffix" ])
+      group(target_name) {
+        testonly = true
+        data_deps = [
+          ":telemetry_chrome_test",
+          "//clank:telemetry_clank_test${telemetry_target_suffix}",
+        ]
+      }
+    }
+
+    foreach(_target_suffix, telemetry_clank_browser_target_suffixes) {
+      telemetry_chrome_test_clank_template(
+          "telemetry_chrome_test${_target_suffix}") {
+        telemetry_target_suffix = _target_suffix
+      }
+    }
   }
 }
 
@@ -131,12 +202,11 @@ group("telemetry_chrome_test_without_chrome") {
   data = [
     "//build/android/pylib/",  # chromium_config.py uses pylib to look for Java
     "//components/crash/content/tools/generate_breakpad_symbols.py",
-    "//testing/scripts/common.py",
-    "//testing/xvfb.py",
     "//tools/perf/chrome_telemetry_build/",
     "//tools/perf/core/",  # chrome_telemetry_build/ depends on core/
   ]
   data_deps = [
+    "//testing:test_scripts_shared",
     "//third_party/catapult:telemetry_chrome_test_support",
     "//tools/metrics:metrics_python_tests",
   ]

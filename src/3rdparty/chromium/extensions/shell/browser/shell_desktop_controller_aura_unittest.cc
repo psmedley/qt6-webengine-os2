@@ -30,6 +30,7 @@
 #include "ui/base/ime/input_method_minimal.h"
 #include "ui/display/display.h"
 #include "ui/display/screen_base.h"
+#include "ui/display/test/scoped_screen_override.h"
 #include "ui/events/event.h"
 #include "ui/events/event_dispatcher.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -52,13 +53,14 @@ class ShellDesktopControllerAuraTest : public ShellTestBaseAura {
 
     // Set up a screen with 2 displays.
     screen_ = std::make_unique<display::ScreenBase>();
-    display::Screen::SetScreenInstance(screen_.get());
     screen_->display_list().AddDisplay(
         display::Display(100, gfx::Rect(0, 0, 1920, 1080)),
         display::DisplayList::Type::PRIMARY);
     screen_->display_list().AddDisplay(
         display::Display(200, gfx::Rect(1920, 1080, 800, 600)),
         display::DisplayList::Type::NOT_PRIMARY);
+    screen_override_ =
+        std::make_unique<display::test::ScopedScreenOverride>(screen_.get());
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     chromeos::PowerManagerClient::InitializeFake();
@@ -73,8 +75,8 @@ class ShellDesktopControllerAuraTest : public ShellTestBaseAura {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     chromeos::PowerManagerClient::Shutdown();
 #endif
+    screen_override_.reset();
     screen_.reset();
-    display::Screen::SetScreenInstance(nullptr);
     ShellTestBaseAura::TearDown();
   }
 
@@ -88,6 +90,7 @@ class ShellDesktopControllerAuraTest : public ShellTestBaseAura {
   }
 
   std::unique_ptr<display::ScreenBase> screen_;
+  std::unique_ptr<display::test::ScopedScreenOverride> screen_override_;
   std::unique_ptr<ShellDesktopControllerAura> controller_;
 
  private:
@@ -127,8 +130,7 @@ TEST_F(ShellDesktopControllerAuraTest, InputEvents) {
   EXPECT_EQ(0, client.insert_char_count());
 
   // Dispatch a keypress on the window tree host to verify it is processed.
-  ui::KeyEvent key_press(base::char16(97), ui::VKEY_A, ui::DomCode::NONE,
-                         ui::EF_NONE);
+  ui::KeyEvent key_press(u'a', ui::VKEY_A, ui::DomCode::NONE, ui::EF_NONE);
   ui::EventDispatchDetails details =
       controller_->GetPrimaryHost()->dispatcher()->DispatchEvent(
           controller_->GetPrimaryHost()->window(), &key_press);

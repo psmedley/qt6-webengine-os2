@@ -16,6 +16,8 @@
 #include "quic/core/crypto/null_encrypter.h"
 #include "quic/core/http/http_constants.h"
 #include "quic/core/http/quic_spdy_client_stream.h"
+#include "quic/core/http/web_transport_http3.h"
+#include "quic/core/quic_connection.h"
 #include "quic/core/quic_data_writer.h"
 #include "quic/core/quic_epoll_connection_helper.h"
 #include "quic/core/quic_error_codes.h"
@@ -24,6 +26,7 @@
 #include "quic/core/quic_packet_writer_wrapper.h"
 #include "quic/core/quic_packets.h"
 #include "quic/core/quic_session.h"
+#include "quic/core/quic_types.h"
 #include "quic/core/quic_utils.h"
 #include "quic/platform/api/quic_epoll.h"
 #include "quic/platform/api/quic_error_code_wrappers.h"
@@ -41,7 +44,6 @@
 #include "quic/test_tools/packet_reordering_writer.h"
 #include "quic/test_tools/qpack/qpack_encoder_peer.h"
 #include "quic/test_tools/qpack/qpack_encoder_test_utils.h"
-#include "quic/test_tools/qpack/qpack_header_table_peer.h"
 #include "quic/test_tools/qpack/qpack_test_utils.h"
 #include "quic/test_tools/quic_client_peer.h"
 #include "quic/test_tools/quic_config_peer.h"
@@ -55,9 +57,11 @@
 #include "quic/test_tools/quic_stream_id_manager_peer.h"
 #include "quic/test_tools/quic_stream_peer.h"
 #include "quic/test_tools/quic_stream_sequencer_peer.h"
+#include "quic/test_tools/quic_test_backend.h"
 #include "quic/test_tools/quic_test_client.h"
 #include "quic/test_tools/quic_test_server.h"
 #include "quic/test_tools/quic_test_utils.h"
+#include "quic/test_tools/quic_transport_test_tools.h"
 #include "quic/test_tools/server_thread.h"
 #include "quic/test_tools/simple_session_cache.h"
 #include "quic/tools/quic_backend_response.h"
@@ -66,7 +70,6 @@
 #include "quic/tools/quic_server.h"
 #include "quic/tools/quic_simple_client_stream.h"
 #include "quic/tools/quic_simple_server_stream.h"
-#include "common/platform/api/quiche_text_utils.h"
 
 using spdy::kV3LowestPriority;
 using spdy::SpdyFramer;
@@ -74,8 +77,10 @@ using spdy::SpdyHeaderBlock;
 using spdy::SpdySerializedFrame;
 using spdy::SpdySettingsIR;
 using ::testing::_;
+using ::testing::Assign;
 using ::testing::Invoke;
 using ::testing::NiceMock;
+using testing::NotNull;
 
 namespace quic {
 namespace test {
@@ -198,7 +203,6 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
     AddToCache("/foo", 200, kFooResponseBody);
     AddToCache("/bar", 200, kBarResponseBody);
     // Enable fixes for bugs found in tests and prod.
-    SetQuicRestartFlag(quic_enable_zero_rtt_for_tls_v2, true);
   }
 
   ~EndToEndTest() override { QuicRecyclePort(server_address_.port()); }
@@ -221,6 +225,7 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
     client->UseConnectionIdLength(override_server_connection_id_length_);
     client->UseClientConnectionIdLength(override_client_connection_id_length_);
     client->client()->set_connection_debug_visitor(connection_debug_visitor_);
+    client->client()->set_enable_web_transport(enable_web_transport_);
     client->Connect();
     return client;
   }
@@ -357,6 +362,10 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
   }
 
   bool Initialize() {
+    if (enable_web_transport_) {
+      memory_cache_backend_.set_enable_webtransport(true);
+    }
+
     QuicTagVector copt;
     server_config_.SetConnectionOptionsToSend(copt);
     copt = client_extra_copts_;
@@ -369,6 +378,7 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
       copt.push_back(kILD0);
     }
     copt.push_back(kPLE1);
+    copt.push_back(kRVCM);
     client_config_.SetConnectionOptionsToSend(copt);
 
     // Start the server first, because CreateQuicClient() attempts
@@ -669,6 +679,89 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
     return WaitForFooResponseAndCheckIt(client_.get());
   }
 
+  WebTransportHttp3* CreateWebTransportSession(const std::string& path,
+                                               bool wait_for_server_response) {
+    // Wait until we receive the settings from the server indicating
+    // WebTransport support.
+    client_->WaitUntil(
+        2000, [this]() { return GetClientSession()->SupportsWebTransport(); });
+    if (!GetClientSession()->SupportsWebTransport()) {
+      return nullptr;
+    }
+
+    spdy::SpdyHeaderBlock headers;
+    headers[":scheme"] = "https";
+    headers[":authority"] = "localhost";
+    headers[":path"] = path;
+    headers[":method"] = "CONNECT";
+    headers[":protocol"] = "webtransport";
+
+    client_->SendMessage(headers, "", /*fin=*/false);
+    QuicSpdyStream* stream = client_->latest_created_stream();
+    if (stream->web_transport() == nullptr) {
+      return nullptr;
+    }
+    WebTransportSessionId id = client_->latest_created_stream()->id();
+    QuicSpdySession* client_session = GetClientSession();
+    if (client_session->GetWebTransportSession(id) == nullptr) {
+      return nullptr;
+    }
+    WebTransportHttp3* session = client_session->GetWebTransportSession(id);
+    if (wait_for_server_response) {
+      client_->WaitUntil(-1,
+                         [stream]() { return stream->headers_decompressed(); });
+      EXPECT_TRUE(session->ready());
+    }
+    return session;
+  }
+
+  NiceMock<MockClientVisitor>& SetupWebTransportVisitor(
+      WebTransportHttp3* session) {
+    auto visitor_owned = std::make_unique<NiceMock<MockClientVisitor>>();
+    NiceMock<MockClientVisitor>& visitor = *visitor_owned;
+    session->SetVisitor(std::move(visitor_owned));
+    return visitor;
+  }
+
+  std::string ReadDataFromWebTransportStreamUntilFin(
+      WebTransportStream* stream) {
+    std::string buffer;
+    while (true) {
+      bool can_read = false;
+      auto visitor = std::make_unique<MockStreamVisitor>();
+      EXPECT_CALL(*visitor, OnCanRead()).WillOnce(Assign(&can_read, true));
+      stream->SetVisitor(std::move(visitor));
+      client_->WaitUntil(5000 /*ms*/, [&can_read]() { return can_read; });
+      if (!can_read) {
+        ADD_FAILURE() << "Waiting for readable data on stream "
+                      << stream->GetStreamId() << " timed out";
+        return buffer;
+      }
+
+      WebTransportStream::ReadResult result = stream->Read(&buffer);
+      if (result.fin) {
+        return buffer;
+      }
+      if (result.bytes_read == 0) {
+        ADD_FAILURE() << "No progress made while reading from stream "
+                      << stream->GetStreamId();
+        return buffer;
+      }
+    }
+  }
+
+  void WaitForNewConnectionIds() {
+    // Wait until a new server CID is available for another migration.
+    const auto* client_connection = GetClientConnection();
+    while (!QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(
+               client_connection) ||
+           (!client_connection->client_connection_id().IsEmpty() &&
+            !QuicConnectionPeer::HasSelfIssuedConnectionIdToConsume(
+                client_connection))) {
+      client_->client()->WaitForEvents();
+    }
+  }
+
   ScopedEnvironmentForThreads environment_;
   bool initialized_;
   // If true, the Initialize() function will create |client_| and starts to
@@ -677,7 +770,7 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
   bool connect_to_server_on_initialize_;
   QuicSocketAddress server_address_;
   std::string server_hostname_;
-  QuicMemoryCacheBackend memory_cache_backend_;
+  QuicTestBackend memory_cache_backend_;
   std::unique_ptr<ServerThread> server_thread_;
   std::unique_ptr<QuicTestClient> client_;
   QuicConnectionDebugVisitor* connection_debug_visitor_ = nullptr;
@@ -696,6 +789,7 @@ class EndToEndTest : public QuicTestWithParam<TestParams> {
   int override_server_connection_id_length_ = -1;
   int override_client_connection_id_length_ = -1;
   uint8_t expected_server_connection_id_length_;
+  bool enable_web_transport_ = false;
 };
 
 // Run all end to end tests with all supported versions.
@@ -1470,17 +1564,11 @@ TEST_P(EndToEndTest, AddressToken) {
   server_thread_->Pause();
   QuicConnection* server_connection = GetServerConnection();
   if (server_connection != nullptr) {
-    if (GetQuicReloadableFlag(quic_enable_token_based_address_validation)) {
-      // Verify address is validated via validating token received in INITIAL
-      // packet.
-      EXPECT_FALSE(server_connection->GetStats()
-                       .address_validated_via_decrypting_packet);
-      EXPECT_TRUE(server_connection->GetStats().address_validated_via_token);
-    } else {
-      EXPECT_TRUE(server_connection->GetStats()
-                      .address_validated_via_decrypting_packet);
-      EXPECT_FALSE(server_connection->GetStats().address_validated_via_token);
-    }
+    // Verify address is validated via validating token received in INITIAL
+    // packet.
+    EXPECT_FALSE(
+        server_connection->GetStats().address_validated_via_decrypting_packet);
+    EXPECT_TRUE(server_connection->GetStats().address_validated_via_token);
   } else {
     ADD_FAILURE() << "Missing server connection";
   }
@@ -1794,8 +1882,6 @@ TEST_P(EndToEndTest, RetransmissionAfterZeroRTTRejectBeforeOneRtt) {
 
   ON_CALL(visitor, OnZeroRttRejected(_)).WillByDefault(Invoke([this]() {
     EXPECT_FALSE(GetClientSession()->IsEncryptionEstablished());
-    // Trigger an OnCanWrite() to make sure no unencrypted data will be written.
-    GetClientSession()->OnCanWrite();
   }));
 
   // The 0-RTT handshake should fail.
@@ -2386,6 +2472,38 @@ TEST_P(EndToEndTest, ResetConnection) {
   SendSynchronousBarRequestAndCheckResponse();
 }
 
+// Regression test for b/180737158.
+TEST_P(
+    EndToEndTest,
+    HalfRttResponseBlocksShloRetransmissionWithoutTokenBasedAddressValidation) {
+  // Turn off token based address validation to make the server get constrained
+  // by amplification factor during handshake.
+  SetQuicFlag(FLAGS_quic_reject_retry_token_in_initial_packet, true);
+  ASSERT_TRUE(Initialize());
+  if (!version_.SupportsAntiAmplificationLimit()) {
+    return;
+  }
+  // Perform a full 1-RTT handshake to get the new session ticket such that the
+  // next connection will perform a 0-RTT handshake.
+  EXPECT_TRUE(client_->client()->WaitForHandshakeConfirmed());
+  client_->Disconnect();
+
+  server_thread_->Pause();
+  // Drop the 1st server packet which is the coalesced INITIAL + HANDSHAKE +
+  // 1RTT.
+  PacketDroppingTestWriter* writer = new PacketDroppingTestWriter();
+  writer->set_fake_drop_first_n_packets(1);
+  QuicDispatcherPeer::UseWriter(
+      QuicServerPeer::GetDispatcher(server_thread_->server()), writer);
+  server_thread_->Resume();
+
+  // Large response (100KB) for 0-RTT request.
+  std::string large_body(102400, 'a');
+  AddToCache("/large_response", 200, large_body);
+  SendSynchronousRequestAndCheckResponse(client_.get(), "/large_response",
+                                         large_body);
+}
+
 TEST_P(EndToEndTest, MaxStreamsUberTest) {
   // Connect with lower fake packet loss than we'd like to test.  Until
   // b/10126687 is fixed, losing handshake packets is pretty brutal.
@@ -2491,6 +2609,253 @@ TEST_P(EndToEndTest, ConnectionMigrationClientIPChanged) {
   server_thread_->Resume();
 }
 
+TEST_P(EndToEndTest, IetfConnectionMigrationClientIPChangedMultipleTimes) {
+  ASSERT_TRUE(Initialize());
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
+    return;
+  }
+  SendSynchronousFooRequestAndCheckResponse();
+
+  // Store the client IP address which was used to send the first request.
+  QuicIpAddress host0 =
+      client_->client()->network_helper()->GetLatestClientAddress().host();
+  QuicConnection* client_connection = GetClientConnection();
+  ASSERT_TRUE(client_connection != nullptr);
+
+  // Migrate socket to a new IP address.
+  QuicIpAddress host1 = TestLoopback(2);
+  EXPECT_NE(host0, host1);
+  ASSERT_TRUE(
+      QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(client_connection));
+  QuicConnectionId server_cid0 = client_connection->connection_id();
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(client_->client()->MigrateSocket(host1));
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+  EXPECT_FALSE(server_cid1.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid1);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send a request using the new socket.
+  SendSynchronousBarRequestAndCheckResponse();
+  EXPECT_EQ(1u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  // Send another request and wait for response making sure path response is
+  // received at server.
+  SendSynchronousBarRequestAndCheckResponse();
+
+  // Migrate socket to a new IP address.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(1u, client_connection->GetStats().num_retire_connection_id_sent);
+  QuicIpAddress host2 = TestLoopback(3);
+  EXPECT_NE(host0, host2);
+  EXPECT_NE(host1, host2);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(client_->client()->MigrateSocket(host2));
+  QuicConnectionId server_cid2 = client_connection->connection_id();
+  EXPECT_FALSE(server_cid2.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid2);
+  EXPECT_NE(server_cid1, server_cid2);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send another request using the new socket and wait for response making sure
+  // path response is received at server.
+  SendSynchronousBarRequestAndCheckResponse();
+  EXPECT_EQ(2u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  // Migrate socket back to an old IP address.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(2u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(client_->client()->MigrateSocket(host1));
+  QuicConnectionId server_cid3 = client_connection->connection_id();
+  EXPECT_FALSE(server_cid3.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid3);
+  EXPECT_NE(server_cid1, server_cid3);
+  EXPECT_NE(server_cid2, server_cid3);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  const auto* client_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(client_connection);
+  EXPECT_TRUE(client_packet_creator->GetClientConnectionId().IsEmpty());
+  EXPECT_EQ(server_cid3, client_packet_creator->GetServerConnectionId());
+
+  // Send another request using the new socket and wait for response making sure
+  // path response is received at server.
+  SendSynchronousBarRequestAndCheckResponse();
+  // Even this is an old path, server has forgotten about it and thus needs to
+  // validate the path again.
+  EXPECT_EQ(3u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  WaitForNewConnectionIds();
+  EXPECT_EQ(3u, client_connection->GetStats().num_retire_connection_id_sent);
+
+  server_thread_->Pause();
+  QuicConnection* server_connection = GetServerConnection();
+  // By the time the 2nd request is completed, the PATH_RESPONSE must have been
+  // received by the server.
+  EXPECT_FALSE(server_connection->HasPendingPathValidation());
+  EXPECT_EQ(3u, server_connection->GetStats().num_validated_peer_migration);
+  EXPECT_EQ(server_cid3, server_connection->connection_id());
+  const auto* server_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(server_connection);
+  EXPECT_EQ(server_cid3, server_packet_creator->GetServerConnectionId());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  server_connection)
+                  .IsEmpty());
+  EXPECT_EQ(4u, server_connection->GetStats().num_new_connection_id_sent);
+  server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest,
+       ConnectionMigrationWithNonZeroConnectionIDClientIPChangedMultipleTimes) {
+  if (!version_.SupportsClientConnectionIds()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  override_client_connection_id_length_ = kQuicDefaultConnectionIdLength;
+  ASSERT_TRUE(Initialize());
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
+    return;
+  }
+  SendSynchronousFooRequestAndCheckResponse();
+
+  // Store the client IP address which was used to send the first request.
+  QuicIpAddress host0 =
+      client_->client()->network_helper()->GetLatestClientAddress().host();
+  QuicConnection* client_connection = GetClientConnection();
+  ASSERT_TRUE(client_connection != nullptr);
+
+  // Migrate socket to a new IP address.
+  QuicIpAddress host1 = TestLoopback(2);
+  EXPECT_NE(host0, host1);
+  ASSERT_TRUE(
+      QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(client_connection));
+  QuicConnectionId server_cid0 = client_connection->connection_id();
+  QuicConnectionId client_cid0 = client_connection->client_connection_id();
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(client_->client()->MigrateSocket(host1));
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+  QuicConnectionId client_cid1 = client_connection->client_connection_id();
+  EXPECT_FALSE(server_cid1.IsEmpty());
+  EXPECT_FALSE(client_cid1.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid1);
+  EXPECT_NE(client_cid0, client_cid1);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send another request to ensure that the server will have time to finish the
+  // reverse path validation and send address token.
+  SendSynchronousBarRequestAndCheckResponse();
+  EXPECT_EQ(1u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  // Migrate socket to a new IP address.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(1u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(2u, client_connection->GetStats().num_new_connection_id_sent);
+  QuicIpAddress host2 = TestLoopback(3);
+  EXPECT_NE(host0, host2);
+  EXPECT_NE(host1, host2);
+  EXPECT_TRUE(client_->client()->MigrateSocket(host2));
+  QuicConnectionId server_cid2 = client_connection->connection_id();
+  QuicConnectionId client_cid2 = client_connection->client_connection_id();
+  EXPECT_FALSE(server_cid2.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid2);
+  EXPECT_NE(server_cid1, server_cid2);
+  EXPECT_FALSE(client_cid2.IsEmpty());
+  EXPECT_NE(client_cid0, client_cid2);
+  EXPECT_NE(client_cid1, client_cid2);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_TRUE(QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send another request to ensure that the server will have time to finish the
+  // reverse path validation and send address token.
+  SendSynchronousBarRequestAndCheckResponse();
+  EXPECT_EQ(2u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  // Migrate socket back to an old IP address.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(2u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(3u, client_connection->GetStats().num_new_connection_id_sent);
+  EXPECT_TRUE(client_->client()->MigrateSocket(host1));
+  QuicConnectionId server_cid3 = client_connection->connection_id();
+  QuicConnectionId client_cid3 = client_connection->client_connection_id();
+  EXPECT_FALSE(server_cid3.IsEmpty());
+  EXPECT_NE(server_cid0, server_cid3);
+  EXPECT_NE(server_cid1, server_cid3);
+  EXPECT_NE(server_cid2, server_cid3);
+  EXPECT_FALSE(client_cid3.IsEmpty());
+  EXPECT_NE(client_cid0, client_cid3);
+  EXPECT_NE(client_cid1, client_cid3);
+  EXPECT_NE(client_cid2, client_cid3);
+  const auto* client_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(client_connection);
+  EXPECT_EQ(client_cid3, client_packet_creator->GetClientConnectionId());
+  EXPECT_EQ(server_cid3, client_packet_creator->GetServerConnectionId());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send another request to ensure that the server will have time to finish the
+  // reverse path validation and send address token.
+  SendSynchronousBarRequestAndCheckResponse();
+  // Even this is an old path, server has forgotten about it and thus needs to
+  // validate the path again.
+  EXPECT_EQ(3u,
+            client_connection->GetStats().num_connectivity_probing_received);
+
+  WaitForNewConnectionIds();
+  EXPECT_EQ(3u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(4u, client_connection->GetStats().num_new_connection_id_sent);
+
+  server_thread_->Pause();
+  // By the time the 2nd request is completed, the PATH_RESPONSE must have been
+  // received by the server.
+  QuicConnection* server_connection = GetServerConnection();
+  EXPECT_FALSE(server_connection->HasPendingPathValidation());
+  EXPECT_EQ(3u, server_connection->GetStats().num_validated_peer_migration);
+  EXPECT_EQ(server_cid3, server_connection->connection_id());
+  EXPECT_EQ(client_cid3, server_connection->client_connection_id());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  server_connection)
+                  .IsEmpty());
+  const auto* server_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(server_connection);
+  EXPECT_EQ(client_cid3, server_packet_creator->GetClientConnectionId());
+  EXPECT_EQ(server_cid3, server_packet_creator->GetServerConnectionId());
+  EXPECT_EQ(3u, server_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(4u, server_connection->GetStats().num_new_connection_id_sent);
+  server_thread_->Resume();
+}
+
 TEST_P(EndToEndTest, ConnectionMigrationNewTokenForNewIp) {
   ASSERT_TRUE(Initialize());
   if (!version_.HasIetfQuicFrames() ||
@@ -2515,7 +2880,7 @@ TEST_P(EndToEndTest, ConnectionMigrationNewTokenForNewIp) {
   EXPECT_EQ(1u,
             client_connection->GetStats().num_connectivity_probing_received);
 
-  // Send another request to ensure that the server will time to finish the
+  // Send another request to ensure that the server will have time to finish the
   // reverse path validation and send address token.
   SendSynchronousBarRequestAndCheckResponse();
 
@@ -2532,17 +2897,11 @@ TEST_P(EndToEndTest, ConnectionMigrationNewTokenForNewIp) {
   server_thread_->Pause();
   QuicConnection* server_connection = GetServerConnection();
   if (server_connection != nullptr) {
-    if (GetQuicReloadableFlag(quic_enable_token_based_address_validation)) {
-      // Verify address is validated via validating token received in INITIAL
-      // packet.
-      EXPECT_FALSE(server_connection->GetStats()
-                       .address_validated_via_decrypting_packet);
-      EXPECT_TRUE(server_connection->GetStats().address_validated_via_token);
-    } else {
-      EXPECT_TRUE(server_connection->GetStats()
-                      .address_validated_via_decrypting_packet);
-      EXPECT_FALSE(server_connection->GetStats().address_validated_via_token);
-    }
+    // Verify address is validated via validating token received in INITIAL
+    // packet.
+    EXPECT_FALSE(
+        server_connection->GetStats().address_validated_via_decrypting_packet);
+    EXPECT_TRUE(server_connection->GetStats().address_validated_via_token);
   } else {
     ADD_FAILURE() << "Missing server connection";
   }
@@ -2580,14 +2939,19 @@ class DuplicatePacketWithSpoofedSelfAddressWriter
 
 TEST_P(EndToEndTest, ClientAddressSpoofedForSomePeriod) {
   ASSERT_TRUE(Initialize());
-  if (!version_.HasIetfQuicFrames() ||
-      !client_->client()->session()->connection()->validate_client_address()) {
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
     return;
   }
   auto writer = new DuplicatePacketWithSpoofedSelfAddressWriter();
   client_.reset(CreateQuicClient(writer));
+
+  // Make sure client has unused peer connection ID before migration.
+  SendSynchronousFooRequestAndCheckResponse();
+  ASSERT_TRUE(QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(
+      GetClientConnection()));
+
   QuicIpAddress real_host = TestLoopback(1);
-  client_->MigrateSocket(real_host);
+  ASSERT_TRUE(client_->MigrateSocket(real_host));
   SendSynchronousFooRequestAndCheckResponse();
   EXPECT_EQ(
       0u, GetClientConnection()->GetStats().num_connectivity_probing_received);
@@ -2626,10 +2990,107 @@ TEST_P(EndToEndTest, ClientAddressSpoofedForSomePeriod) {
   EXPECT_EQ(large_body, client_->response_body());
 }
 
-TEST_P(EndToEndTest, AsynchronousConnectionMigrationClientIPChanged) {
+TEST_P(EndToEndTest,
+       AsynchronousConnectionMigrationClientIPChangedMultipleTimes) {
   ASSERT_TRUE(Initialize());
-  if (!version_.HasIetfQuicFrames() ||
-      !client_->client()->session()->connection()->use_path_validator()) {
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
+    return;
+  }
+  client_.reset(CreateQuicClient(nullptr));
+
+  SendSynchronousFooRequestAndCheckResponse();
+
+  // Store the client IP address which was used to send the first request.
+  QuicIpAddress host0 =
+      client_->client()->network_helper()->GetLatestClientAddress().host();
+  QuicConnection* client_connection = GetClientConnection();
+  QuicConnectionId server_cid0 = client_connection->connection_id();
+  // Server should have one new connection ID upon handshake completion.
+  ASSERT_TRUE(
+      QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(client_connection));
+
+  // Migrate socket to new IP address #1.
+  QuicIpAddress host1 = TestLoopback(2);
+  EXPECT_NE(host0, host1);
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host1));
+  while (client_->client()->HasPendingPathValidation()) {
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(host1, client_->client()->session()->self_address().host());
+  EXPECT_EQ(1u,
+            client_connection->GetStats().num_connectivity_probing_received);
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+  EXPECT_NE(server_cid0, server_cid1);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send a request using the new socket.
+  SendSynchronousBarRequestAndCheckResponse();
+
+  // Migrate socket to new IP address #2.
+  WaitForNewConnectionIds();
+  QuicIpAddress host2 = TestLoopback(3);
+  EXPECT_NE(host0, host1);
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host2));
+
+  while (client_->client()->HasPendingPathValidation()) {
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(host2, client_->client()->session()->self_address().host());
+  EXPECT_EQ(2u,
+            client_connection->GetStats().num_connectivity_probing_received);
+  QuicConnectionId server_cid2 = client_connection->connection_id();
+  EXPECT_NE(server_cid0, server_cid2);
+  EXPECT_NE(server_cid1, server_cid2);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send a request using the new socket.
+  SendSynchronousBarRequestAndCheckResponse();
+
+  // Migrate socket back to IP address #1.
+  WaitForNewConnectionIds();
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host1));
+
+  while (client_->client()->HasPendingPathValidation()) {
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(host1, client_->client()->session()->self_address().host());
+  EXPECT_EQ(3u,
+            client_connection->GetStats().num_connectivity_probing_received);
+  QuicConnectionId server_cid3 = client_connection->connection_id();
+  EXPECT_NE(server_cid0, server_cid3);
+  EXPECT_NE(server_cid1, server_cid3);
+  EXPECT_NE(server_cid2, server_cid3);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+
+  // Send a request using the new socket.
+  SendSynchronousBarRequestAndCheckResponse();
+  server_thread_->Pause();
+  const QuicConnection* server_connection = GetServerConnection();
+  EXPECT_EQ(server_connection->connection_id(), server_cid3);
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  server_connection)
+                  .IsEmpty());
+  server_thread_->Resume();
+
+  // There should be 1 new connection ID issued by the server.
+  WaitForNewConnectionIds();
+}
+
+TEST_P(EndToEndTest,
+       AsynchronousConnectionMigrationClientIPChangedWithNonEmptyClientCID) {
+  if (!version_.SupportsClientConnectionIds()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  override_client_connection_id_length_ = kQuicDefaultConnectionIdLength;
+  ASSERT_TRUE(Initialize());
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
     return;
   }
   client_.reset(CreateQuicClient(nullptr));
@@ -2639,6 +3100,9 @@ TEST_P(EndToEndTest, AsynchronousConnectionMigrationClientIPChanged) {
   // Store the client IP address which was used to send the first request.
   QuicIpAddress old_host =
       client_->client()->network_helper()->GetLatestClientAddress().host();
+  auto* client_connection = GetClientConnection();
+  QuicConnectionId client_cid0 = client_connection->client_connection_id();
+  QuicConnectionId server_cid0 = client_connection->connection_id();
 
   // Migrate socket to the new IP address.
   QuicIpAddress new_host = TestLoopback(2);
@@ -2649,12 +3113,26 @@ TEST_P(EndToEndTest, AsynchronousConnectionMigrationClientIPChanged) {
     client_->client()->WaitForEvents();
   }
   EXPECT_EQ(new_host, client_->client()->session()->self_address().host());
-  QuicConnection* client_connection = GetClientConnection();
-  ASSERT_TRUE(client_connection);
-  EXPECT_EQ(client_connection->validate_client_address() ? 1u : 0,
+  EXPECT_EQ(1u,
             client_connection->GetStats().num_connectivity_probing_received);
+  QuicConnectionId client_cid1 = client_connection->client_connection_id();
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+  const auto* client_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(client_connection);
+  EXPECT_EQ(client_cid1, client_packet_creator->GetClientConnectionId());
+  EXPECT_EQ(server_cid1, client_packet_creator->GetServerConnectionId());
   // Send a request using the new socket.
   SendSynchronousBarRequestAndCheckResponse();
+
+  server_thread_->Pause();
+  QuicConnection* server_connection = GetServerConnection();
+  EXPECT_EQ(client_cid1, server_connection->client_connection_id());
+  EXPECT_EQ(server_cid1, server_connection->connection_id());
+  const auto* server_packet_creator =
+      QuicConnectionPeer::GetPacketCreator(server_connection);
+  EXPECT_EQ(client_cid1, server_packet_creator->GetClientConnectionId());
+  EXPECT_EQ(server_cid1, server_packet_creator->GetServerConnectionId());
+  server_thread_->Resume();
 }
 
 TEST_P(EndToEndTest, ConnectionMigrationClientPortChanged) {
@@ -3128,13 +3606,13 @@ TEST_P(EndToEndTest, AckNotifierWithPacketLossAndBlockedSocket) {
         ADD_FAILURE() << "Missing QPACK encoder";
         return;
       }
-      QpackHeaderTable* header_table =
+      QpackEncoderHeaderTable* header_table =
           QpackEncoderPeer::header_table(qpack_encoder);
       if (header_table == nullptr) {
         ADD_FAILURE() << "Missing header table";
         return;
       }
-      if (QpackHeaderTablePeer::dynamic_table_capacity(header_table) > 0) {
+      if (header_table->dynamic_table_capacity() > 0) {
         break;
       }
     }
@@ -3209,7 +3687,8 @@ TEST_P(EndToEndTest, ServerSendPublicReset) {
   QuicConfig* config = client_session->config();
   ASSERT_TRUE(config);
   EXPECT_TRUE(config->HasReceivedStatelessResetToken());
-  QuicUint128 stateless_reset_token = config->ReceivedStatelessResetToken();
+  StatelessResetToken stateless_reset_token =
+      config->ReceivedStatelessResetToken();
 
   // Send the public reset.
   QuicConnection* client_connection = GetClientConnection();
@@ -3221,8 +3700,8 @@ TEST_P(EndToEndTest, ServerSendPublicReset) {
                     Perspective::IS_SERVER, kQuicDefaultConnectionIdLength);
   std::unique_ptr<QuicEncryptedPacket> packet;
   if (version_.HasIetfInvariantHeader()) {
-    packet = framer.BuildIetfStatelessResetPacket(connection_id,
-                                                  stateless_reset_token);
+    packet = framer.BuildIetfStatelessResetPacket(
+        connection_id, /*received_packet_length=*/100, stateless_reset_token);
   } else {
     packet = framer.BuildPublicResetPacket(header);
   }
@@ -3251,7 +3730,8 @@ TEST_P(EndToEndTest, ServerSendPublicResetWithDifferentConnectionId) {
   QuicConfig* config = client_session->config();
   ASSERT_TRUE(config);
   EXPECT_TRUE(config->HasReceivedStatelessResetToken());
-  QuicUint128 stateless_reset_token = config->ReceivedStatelessResetToken();
+  StatelessResetToken stateless_reset_token =
+      config->ReceivedStatelessResetToken();
   // Send the public reset.
   QuicConnection* client_connection = GetClientConnection();
   ASSERT_TRUE(client_connection);
@@ -3265,8 +3745,9 @@ TEST_P(EndToEndTest, ServerSendPublicResetWithDifferentConnectionId) {
   NiceMock<MockQuicConnectionDebugVisitor> visitor;
   client_connection->set_debug_visitor(&visitor);
   if (version_.HasIetfInvariantHeader()) {
-    packet = framer.BuildIetfStatelessResetPacket(incorrect_connection_id,
-                                                  stateless_reset_token);
+    packet = framer.BuildIetfStatelessResetPacket(
+        incorrect_connection_id, /*received_packet_length=*/100,
+        stateless_reset_token);
     EXPECT_CALL(visitor, OnIncorrectConnectionId(incorrect_connection_id))
         .Times(0);
   } else {
@@ -3395,7 +3876,7 @@ TEST_P(EndToEndTest, BadPacketHeaderFlags) {
   SendSynchronousFooRequestAndCheckResponse();
 
   // Packet with invalid public flags.
-  char packet[] = {
+  uint8_t packet[] = {
       // invalid public flags
       0xFF,
       // connection_id
@@ -3418,7 +3899,7 @@ TEST_P(EndToEndTest, BadPacketHeaderFlags) {
       0x00,
   };
   client_writer_->WritePacket(
-      &packet[0], sizeof(packet),
+      reinterpret_cast<const char*>(packet), sizeof(packet),
       client_->client()->network_helper()->GetLatestClientAddress().host(),
       server_address_, nullptr);
 
@@ -3518,8 +3999,7 @@ class ServerStreamWithErrorResponseBody : public QuicSimpleServerStream {
     QUIC_DLOG(INFO) << "Sending error response for stream " << id();
     SpdyHeaderBlock headers;
     headers[":status"] = "500";
-    headers["content-length"] =
-        quiche::QuicheTextUtils::Uint64ToString(response_body_.size());
+    headers["content-length"] = absl::StrCat(response_body_.size());
     // This method must call CloseReadSide to cause the test case, StopReading
     // is not sufficient.
     QuicStreamPeer::CloseReadSide(this);
@@ -3736,8 +4216,7 @@ TEST_P(EndToEndTest, Trailers) {
 
   SpdyHeaderBlock headers;
   headers[":status"] = "200";
-  headers["content-length"] =
-      quiche::QuicheTextUtils::Uint64ToString(kBody.size());
+  headers["content-length"] = absl::StrCat(kBody.size());
 
   SpdyHeaderBlock trailers;
   trailers["some-trailing-header"] = "trailing-header-value";
@@ -3748,321 +4227,6 @@ TEST_P(EndToEndTest, Trailers) {
 
   SendSynchronousRequestAndCheckResponse("/trailer_url", kBody);
   EXPECT_EQ(trailers, client_->response_trailers());
-}
-
-// TODO(b/151749109): Test server push for IETF QUIC.
-class EndToEndTestServerPush : public EndToEndTest {
- protected:
-  const size_t kNumMaxStreams = 10;
-
-  EndToEndTestServerPush() : EndToEndTest() {
-    SetQuicFlag(FLAGS_quic_enable_http3_server_push, true);
-    client_config_.SetMaxBidirectionalStreamsToSend(kNumMaxStreams);
-    server_config_.SetMaxBidirectionalStreamsToSend(kNumMaxStreams);
-    client_config_.SetMaxUnidirectionalStreamsToSend(kNumMaxStreams);
-    server_config_.SetMaxUnidirectionalStreamsToSend(kNumMaxStreams);
-  }
-
-  // Add a request with its response and |num_resources| push resources into
-  // cache.
-  // If |resource_size| == 0, response body of push resources use default string
-  // concatenating with resource url. Otherwise, generate a string of
-  // |resource_size| as body.
-  void AddRequestAndResponseWithServerPush(std::string host,
-                                           std::string path,
-                                           std::string response_body,
-                                           std::string* push_urls,
-                                           const size_t num_resources,
-                                           const size_t resource_size) {
-    bool use_large_response = resource_size != 0;
-    std::string large_resource;
-    if (use_large_response) {
-      // Generate a response common body larger than flow control window for
-      // push response.
-      large_resource = std::string(resource_size, 'a');
-    }
-    std::list<QuicBackendResponse::ServerPushInfo> push_resources;
-    for (size_t i = 0; i < num_resources; ++i) {
-      std::string url = push_urls[i];
-      QuicUrl resource_url(url);
-      std::string body =
-          use_large_response
-              ? large_resource
-              : absl::StrCat("This is server push response body for ", url);
-      SpdyHeaderBlock response_headers;
-      response_headers[":status"] = "200";
-      response_headers["content-length"] =
-          quiche::QuicheTextUtils::Uint64ToString(body.size());
-      push_resources.push_back(QuicBackendResponse::ServerPushInfo(
-          resource_url, std::move(response_headers), kV3LowestPriority, body));
-    }
-
-    memory_cache_backend_.AddSimpleResponseWithServerPushResources(
-        host, path, 200, response_body, push_resources);
-  }
-};
-
-// Run all server push end to end tests with all supported versions.
-INSTANTIATE_TEST_SUITE_P(EndToEndTestsServerPush,
-                         EndToEndTestServerPush,
-                         ::testing::ValuesIn(GetTestParams()),
-                         ::testing::PrintToStringParamName());
-
-TEST_P(EndToEndTestServerPush, ServerPush) {
-  ASSERT_TRUE(Initialize());
-  EXPECT_TRUE(client_->client()->WaitForOneRttKeysAvailable());
-
-  // Set reordering to ensure that body arriving before PUSH_PROMISE is ok.
-  SetPacketSendDelay(QuicTime::Delta::FromMilliseconds(2));
-  SetReorderPercentage(30);
-
-  // Add a response with headers, body, and push resources.
-  const std::string kBody = "body content";
-  size_t kNumResources = 4;
-  std::string push_urls[] = {"https://example.com/font.woff",
-                             "https://example.com/script.js",
-                             "https://fonts.example.com/font.woff",
-                             "https://example.com/logo-hires.jpg"};
-  AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
-                                      push_urls, kNumResources, 0);
-
-  client_->client()->set_response_listener(
-      std::unique_ptr<QuicSpdyClientBase::ResponseListener>(
-          new TestResponseListener));
-
-  QUIC_DVLOG(1) << "send request for /push_example";
-  EXPECT_EQ(kBody, client_->SendSynchronousRequest(
-                       "https://example.com/push_example"));
-  QuicStreamSequencer* sequencer = nullptr;
-  if (!version_.UsesHttp3()) {
-    QuicSpdyClientSession* client_session = GetClientSession();
-    ASSERT_TRUE(client_session);
-    QuicHeadersStream* headers_stream =
-        QuicSpdySessionPeer::GetHeadersStream(client_session);
-    ASSERT_TRUE(headers_stream);
-    sequencer = QuicStreamPeer::sequencer(headers_stream);
-    ASSERT_TRUE(sequencer);
-    // Headers stream's sequencer buffer shouldn't be released because server
-    // push hasn't finished yet.
-    EXPECT_TRUE(
-        QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
-  }
-
-  for (const std::string& url : push_urls) {
-    QUIC_DVLOG(1) << "send request for pushed stream on url " << url;
-    std::string expected_body =
-        absl::StrCat("This is server push response body for ", url);
-    std::string response_body = client_->SendSynchronousRequest(url);
-    QUIC_DVLOG(1) << "response body " << response_body;
-    EXPECT_EQ(expected_body, response_body);
-  }
-  if (!version_.UsesHttp3()) {
-    ASSERT_TRUE(sequencer);
-    EXPECT_FALSE(
-        QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
-  }
-}
-
-TEST_P(EndToEndTestServerPush, ServerPushUnderLimit) {
-  // Tests that sending a request which has 4 push resources will trigger server
-  // to push those 4 resources and client can handle pushed resources and match
-  // them with requests later.
-  ASSERT_TRUE(Initialize());
-
-  EXPECT_TRUE(client_->client()->WaitForOneRttKeysAvailable());
-  if (version_.UsesHttp3()) {
-    static_cast<QuicSpdySession*>(client_->client()->session())
-        ->SetMaxPushId(kMaxQuicStreamId);
-  }
-
-  // Set reordering to ensure that body arriving before PUSH_PROMISE is ok.
-  SetPacketSendDelay(QuicTime::Delta::FromMilliseconds(2));
-  SetReorderPercentage(30);
-
-  // Add a response with headers, body, and push resources.
-  const std::string kBody = "body content";
-  size_t const kNumResources = 4;
-  std::string push_urls[] = {
-      "https://example.com/font.woff",
-      "https://example.com/script.js",
-      "https://fonts.example.com/font.woff",
-      "https://example.com/logo-hires.jpg",
-  };
-  AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
-                                      push_urls, kNumResources, 0);
-  client_->client()->set_response_listener(
-      std::unique_ptr<QuicSpdyClientBase::ResponseListener>(
-          new TestResponseListener));
-
-  // Send the first request: this will trigger the server to send all the push
-  // resources associated with this request, and these will be cached by the
-  // client.
-  EXPECT_EQ(kBody, client_->SendSynchronousRequest(
-                       "https://example.com/push_example"));
-
-  for (const std::string& url : push_urls) {
-    // Sending subsequent requesets will not actually send anything on the wire,
-    // as the responses are already in the client's cache.
-    QUIC_DVLOG(1) << "send request for pushed stream on url " << url;
-    std::string expected_body =
-        absl::StrCat("This is server push response body for ", url);
-    std::string response_body = client_->SendSynchronousRequest(url);
-    QUIC_DVLOG(1) << "response body " << response_body;
-    EXPECT_EQ(expected_body, response_body);
-  }
-  // Expect only original request has been sent and push responses have been
-  // received as normal response.
-  EXPECT_EQ(1u, client_->num_requests());
-  EXPECT_EQ(1u + kNumResources, client_->num_responses());
-}
-
-TEST_P(EndToEndTestServerPush, ServerPushOverLimitNonBlocking) {
-  if (version_.UsesHttp3()) {
-    // TODO(b/142504641): Re-enable this test when we support push streams
-    // arriving before the corresponding promises.
-    ASSERT_TRUE(Initialize());
-    return;
-  }
-  // Tests that when streams are not blocked by flow control or congestion
-  // control, pushing even more resources than max number of open outgoing
-  // streams should still work because all response streams get closed
-  // immediately after pushing resources.
-  ASSERT_TRUE(Initialize());
-  EXPECT_TRUE(client_->client()->WaitForOneRttKeysAvailable());
-  if (version_.UsesHttp3()) {
-    static_cast<QuicSpdySession*>(client_->client()->session())
-        ->SetMaxPushId(kMaxQuicStreamId);
-  }
-
-  // Set reordering to ensure that body arriving before PUSH_PROMISE is ok.
-  SetPacketSendDelay(QuicTime::Delta::FromMilliseconds(2));
-  SetReorderPercentage(30);
-
-  // Add a response with headers, body, and push resources.
-  const std::string kBody = "body content";
-
-  // One more resource than max number of outgoing stream of this session.
-  const size_t kNumResources = 1 + kNumMaxStreams;  // 11.
-  std::string push_urls[11];
-  for (size_t i = 0; i < kNumResources; ++i) {
-    push_urls[i] = absl::StrCat("https://example.com/push_resources", i);
-  }
-  AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
-                                      push_urls, kNumResources, 0);
-  client_->client()->set_response_listener(
-      std::unique_ptr<QuicSpdyClientBase::ResponseListener>(
-          new TestResponseListener));
-
-  // Send the first request: this will trigger the server to send all the push
-  // resources associated with this request, and these will be cached by the
-  // client.
-  EXPECT_EQ(kBody, client_->SendSynchronousRequest(
-                       "https://example.com/push_example"));
-
-  for (const std::string& url : push_urls) {
-    // Sending subsequent requesets will not actually send anything on the wire,
-    // as the responses are already in the client's cache.
-    EXPECT_EQ(absl::StrCat("This is server push response body for ", url),
-              client_->SendSynchronousRequest(url));
-  }
-
-  // Only 1 request should have been sent.
-  EXPECT_EQ(1u, client_->num_requests());
-  // The responses to the original request and all the promised resources
-  // should have been received.
-  EXPECT_EQ(12u, client_->num_responses());
-}
-
-TEST_P(EndToEndTestServerPush, ServerPushOverLimitWithBlocking) {
-  // Tests that when server tries to send more large resources(large enough to
-  // be blocked by flow control window or congestion control window) than max
-  // open outgoing streams , server can open upto max number of outgoing
-  // streams for them, and the rest will be queued up.
-
-  // Reset flow control windows.
-  size_t kFlowControlWnd = 20 * 1024;  // 20KB.
-  // Response body is larger than 1 flow controlblock window.
-  size_t kBodySize = kFlowControlWnd * 2;
-  set_client_initial_stream_flow_control_receive_window(kFlowControlWnd);
-  // Make sure conntection level flow control window is large enough not to
-  // block data being sent out though they will be blocked by stream level one.
-  set_client_initial_session_flow_control_receive_window(
-      kBodySize * kNumMaxStreams + 1024);
-
-  ASSERT_TRUE(Initialize());
-  EXPECT_TRUE(client_->client()->WaitForOneRttKeysAvailable());
-  if (version_.UsesHttp3()) {
-    static_cast<QuicSpdySession*>(client_->client()->session())
-        ->SetMaxPushId(kMaxQuicStreamId);
-  }
-
-  // Set reordering to ensure that body arriving before PUSH_PROMISE is ok.
-  SetPacketSendDelay(QuicTime::Delta::FromMilliseconds(2));
-  SetReorderPercentage(30);
-
-  // Add a response with headers, body, and push resources.
-  const std::string kBody = "body content";
-
-  const size_t kNumResources = kNumMaxStreams + 1;
-  std::string push_urls[11];
-  for (size_t i = 0; i < kNumResources; ++i) {
-    push_urls[i] = absl::StrCat("http://example.com/push_resources", i);
-  }
-  AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
-                                      push_urls, kNumResources, kBodySize);
-
-  client_->client()->set_response_listener(
-      std::unique_ptr<QuicSpdyClientBase::ResponseListener>(
-          new TestResponseListener));
-
-  client_->SendRequest("https://example.com/push_example");
-
-  // Pause after the first response arrives.
-  while (!client_->response_complete()) {
-    // Because of priority, the first response arrived should be to original
-    // request.
-    client_->WaitForResponse();
-    ASSERT_TRUE(client_->connected());
-  }
-
-  // Check server session to see if it has max number of outgoing streams opened
-  // though more resources need to be pushed.
-  if (!version_.HasIetfQuicFrames()) {
-    server_thread_->Pause();
-    QuicSession* server_session = GetServerSession();
-    if (server_session != nullptr) {
-      EXPECT_EQ(kNumMaxStreams,
-                QuicSessionPeer::GetStreamIdManager(server_session)
-                    ->num_open_outgoing_streams());
-    } else {
-      ADD_FAILURE() << "Missing server session";
-    }
-    server_thread_->Resume();
-  }
-
-  EXPECT_EQ(1u, client_->num_requests());
-  EXPECT_EQ(1u, client_->num_responses());
-  EXPECT_EQ(kBody, client_->response_body());
-
-  // "Send" request for a promised resources will not really send out it because
-  // its response is being pushed(but blocked). And the following ack and
-  // flow control behavior of SendSynchronousRequests()
-  // will unblock the stream to finish receiving response.
-  client_->SendSynchronousRequest(push_urls[0]);
-  EXPECT_EQ(1u, client_->num_requests());
-  EXPECT_EQ(2u, client_->num_responses());
-
-  // Do same thing for the rest 10 resources.
-  for (size_t i = 1; i < kNumResources; ++i) {
-    client_->SendSynchronousRequest(push_urls[i]);
-  }
-
-  // Because of server push, client gets all pushed resources without actually
-  // sending requests for them.
-  EXPECT_EQ(1u, client_->num_requests());
-  // Including response to original request, 12 responses in total were
-  // received.
-  EXPECT_EQ(12u, client_->num_responses());
 }
 
 // TODO(fayang): this test seems to cause net_unittests timeouts :|
@@ -4092,8 +4256,7 @@ TEST_P(EndToEndTest, DISABLED_TestHugePostWithPacketLoss) {
   headers[":path"] = "/foo";
   headers[":scheme"] = "https";
   headers[":authority"] = server_hostname_;
-  headers["content-length"] =
-      quiche::QuicheTextUtils::Uint64ToString(request_body_size_bytes);
+  headers["content-length"] = absl::StrCat(request_body_size_bytes);
 
   client_->SendMessage(headers, "", /*fin=*/false);
 
@@ -4418,7 +4581,7 @@ TEST_P(EndToEndTest, PreSharedKey) {
 
   if (version_.UsesTls()) {
     // TODO(b/154162689) add PSK support to QUIC+TLS.
-    bool ok;
+    bool ok = true;
     EXPECT_QUIC_BUG(ok = Initialize(),
                     "QUIC client pre-shared keys not yet supported with TLS");
     EXPECT_FALSE(ok);
@@ -4441,7 +4604,7 @@ TEST_P(EndToEndTest, QUIC_TEST_DISABLED_IN_CHROME(PreSharedKeyMismatch)) {
 
   if (version_.UsesTls()) {
     // TODO(b/154162689) add PSK support to QUIC+TLS.
-    bool ok;
+    bool ok = true;
     EXPECT_QUIC_BUG(ok = Initialize(),
                     "QUIC client pre-shared keys not yet supported with TLS");
     EXPECT_FALSE(ok);
@@ -4468,7 +4631,7 @@ TEST_P(EndToEndTest, QUIC_TEST_DISABLED_IN_CHROME(PreSharedKeyNoClient)) {
 
   if (version_.UsesTls()) {
     // TODO(b/154162689) add PSK support to QUIC+TLS.
-    bool ok;
+    bool ok = true;
     EXPECT_QUIC_BUG(ok = Initialize(),
                     "QUIC server pre-shared keys not yet supported with TLS");
     EXPECT_FALSE(ok);
@@ -4489,7 +4652,7 @@ TEST_P(EndToEndTest, QUIC_TEST_DISABLED_IN_CHROME(PreSharedKeyNoServer)) {
 
   if (version_.UsesTls()) {
     // TODO(b/154162689) add PSK support to QUIC+TLS.
-    bool ok;
+    bool ok = true;
     EXPECT_QUIC_BUG(ok = Initialize(),
                     "QUIC client pre-shared keys not yet supported with TLS");
     EXPECT_FALSE(ok);
@@ -4508,9 +4671,8 @@ TEST_P(EndToEndTest, RequestAndStreamRstInOnePacket) {
   // (and the FIN) after the response body.
   std::string response_body(1305, 'a');
   SpdyHeaderBlock response_headers;
-  response_headers[":status"] = quiche::QuicheTextUtils::Uint64ToString(200);
-  response_headers["content-length"] =
-      quiche::QuicheTextUtils::Uint64ToString(response_body.length());
+  response_headers[":status"] = absl::StrCat(200);
+  response_headers["content-length"] = absl::StrCat(response_body.length());
   memory_cache_backend_.AddSpecialResponse(
       server_hostname_, "/test_url", std::move(response_headers), response_body,
       QuicBackendResponse::INCOMPLETE_RESPONSE);
@@ -4571,20 +4733,15 @@ TEST_P(EndToEndTest, SendMessages) {
   ASSERT_LT(0, client_session->GetCurrentLargestMessagePayload());
 
   std::string message_string(kMaxOutgoingPacketSize, 'a');
-  absl::string_view message_buffer(message_string);
   QuicRandom* random =
       QuicConnectionPeer::GetHelper(client_connection)->GetRandomGenerator();
-  QuicMemSliceStorage storage(nullptr, 0, nullptr, 0);
   {
     QuicConnection::ScopedPacketFlusher flusher(client_session->connection());
     // Verify the largest message gets successfully sent.
     EXPECT_EQ(MessageResult(MESSAGE_STATUS_SUCCESS, 1),
-              client_session->SendMessage(MakeSpan(
-                  client_connection->helper()->GetStreamSendBufferAllocator(),
-                  absl::string_view(
-                      message_buffer.data(),
-                      client_session->GetCurrentLargestMessagePayload()),
-                  &storage)));
+              client_session->SendMessage(MemSliceFromString(absl::string_view(
+                  message_string.data(),
+                  client_session->GetCurrentLargestMessagePayload()))));
     // Send more messages with size (0, largest_payload] until connection is
     // write blocked.
     const int kTestMaxNumberOfMessages = 100;
@@ -4593,9 +4750,8 @@ TEST_P(EndToEndTest, SendMessages) {
           random->RandUint64() %
               client_session->GetGuaranteedLargestMessagePayload() +
           1;
-      MessageResult result = client_session->SendMessage(MakeSpan(
-          client_connection->helper()->GetStreamSendBufferAllocator(),
-          absl::string_view(message_buffer.data(), message_length), &storage));
+      MessageResult result = client_session->SendMessage(MemSliceFromString(
+          absl::string_view(message_string.data(), message_length)));
       if (result.status == MESSAGE_STATUS_BLOCKED) {
         // Connection is write blocked.
         break;
@@ -4607,12 +4763,9 @@ TEST_P(EndToEndTest, SendMessages) {
   client_->WaitForDelayedAcks();
   EXPECT_EQ(MESSAGE_STATUS_TOO_LARGE,
             client_session
-                ->SendMessage(MakeSpan(
-                    client_connection->helper()->GetStreamSendBufferAllocator(),
-                    absl::string_view(
-                        message_buffer.data(),
-                        client_session->GetCurrentLargestMessagePayload() + 1),
-                    &storage))
+                ->SendMessage(MemSliceFromString(absl::string_view(
+                    message_string.data(),
+                    client_session->GetCurrentLargestMessagePayload() + 1)))
                 .status);
   EXPECT_THAT(client_->connection_error(), IsQuicNoError());
 }
@@ -4884,6 +5037,207 @@ TEST_P(EndToEndPacketReorderingTest, PathValidationFailure) {
   server_thread_->Resume();
 }
 
+TEST_P(EndToEndPacketReorderingTest, MigrateAgainAfterPathValidationFailure) {
+  ASSERT_TRUE(Initialize());
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
+    return;
+  }
+
+  client_.reset(CreateQuicClient(nullptr));
+  // Finish one request to make sure handshake established.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+
+  // Wait for the connection to become idle, to make sure the packet gets
+  // delayed is the connectivity probing packet.
+  client_->WaitForDelayedAcks();
+
+  QuicSocketAddress addr1 = client_->client()->session()->self_address();
+  QuicConnection* client_connection = GetClientConnection();
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+
+  // Migrate socket to the new IP address.
+  QuicIpAddress host2 = TestLoopback(2);
+  EXPECT_NE(addr1.host(), host2);
+
+  // Drop PATH_RESPONSE packets to timeout the path validation.
+  server_writer_->set_fake_packet_loss_percentage(100);
+  ASSERT_TRUE(
+      QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(client_connection));
+
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host2));
+
+  QuicConnectionId server_cid2 =
+      QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_FALSE(server_cid2.IsEmpty());
+  EXPECT_NE(server_cid2, server_cid1);
+  // Wait until path validation fails at the client.
+  while (client_->client()->HasPendingPathValidation()) {
+    EXPECT_EQ(server_cid2,
+              QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection));
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(addr1, client_->client()->session()->self_address());
+  EXPECT_EQ(server_cid1, GetClientConnection()->connection_id());
+
+  server_writer_->set_fake_packet_loss_percentage(0);
+  EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
+
+  WaitForNewConnectionIds();
+  EXPECT_EQ(1u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(0u, client_connection->GetStats().num_new_connection_id_sent);
+
+  server_thread_->Pause();
+  QuicConnection* server_connection = GetServerConnection();
+  // Server has received 3 path challenges.
+  EXPECT_EQ(3u,
+            server_connection->GetStats().num_connectivity_probing_received);
+  EXPECT_EQ(server_cid1, server_connection->connection_id());
+  EXPECT_EQ(0u, server_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(2u, server_connection->GetStats().num_new_connection_id_sent);
+  server_thread_->Resume();
+
+  // Migrate socket to a new IP address again.
+  QuicIpAddress host3 = TestLoopback(3);
+  EXPECT_NE(addr1.host(), host3);
+  EXPECT_NE(host2, host3);
+
+  WaitForNewConnectionIds();
+  EXPECT_EQ(1u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(0u, client_connection->GetStats().num_new_connection_id_sent);
+
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host3));
+  QuicConnectionId server_cid3 =
+      QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_FALSE(server_cid3.IsEmpty());
+  EXPECT_NE(server_cid1, server_cid3);
+  EXPECT_NE(server_cid2, server_cid3);
+  while (client_->client()->HasPendingPathValidation()) {
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(host3, client_->client()->session()->self_address().host());
+  EXPECT_EQ(server_cid3, GetClientConnection()->connection_id());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
+
+  // Server should send a new connection ID to client.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(2u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(0u, client_connection->GetStats().num_new_connection_id_sent);
+}
+
+TEST_P(EndToEndPacketReorderingTest,
+       MigrateAgainAfterPathValidationFailureWithNonZeroClientConnectionId) {
+  if (!version_.SupportsClientConnectionIds()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  override_client_connection_id_length_ = kQuicDefaultConnectionIdLength;
+  ASSERT_TRUE(Initialize());
+  if (!GetClientConnection()->connection_migration_use_new_cid()) {
+    return;
+  }
+
+  client_.reset(CreateQuicClient(nullptr));
+  // Finish one request to make sure handshake established.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+
+  // Wait for the connection to become idle, to make sure the packet gets
+  // delayed is the connectivity probing packet.
+  client_->WaitForDelayedAcks();
+
+  QuicSocketAddress addr1 = client_->client()->session()->self_address();
+  QuicConnection* client_connection = GetClientConnection();
+  QuicConnectionId server_cid1 = client_connection->connection_id();
+  QuicConnectionId client_cid1 = client_connection->client_connection_id();
+
+  // Migrate socket to the new IP address.
+  QuicIpAddress host2 = TestLoopback(2);
+  EXPECT_NE(addr1.host(), host2);
+
+  // Drop PATH_RESPONSE packets to timeout the path validation.
+  server_writer_->set_fake_packet_loss_percentage(100);
+  ASSERT_TRUE(
+      QuicConnectionPeer::HasUnusedPeerIssuedConnectionId(client_connection));
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host2));
+  QuicConnectionId server_cid2 =
+      QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_FALSE(server_cid2.IsEmpty());
+  EXPECT_NE(server_cid2, server_cid1);
+  QuicConnectionId client_cid2 =
+      QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_FALSE(client_cid2.IsEmpty());
+  EXPECT_NE(client_cid2, client_cid1);
+  while (client_->client()->HasPendingPathValidation()) {
+    EXPECT_EQ(server_cid2,
+              QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection));
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(addr1, client_->client()->session()->self_address());
+  EXPECT_EQ(server_cid1, GetClientConnection()->connection_id());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  server_writer_->set_fake_packet_loss_percentage(0);
+  EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
+  WaitForNewConnectionIds();
+  EXPECT_EQ(1u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(2u, client_connection->GetStats().num_new_connection_id_sent);
+
+  server_thread_->Pause();
+  QuicConnection* server_connection = GetServerConnection();
+  if (server_connection != nullptr) {
+    EXPECT_EQ(3u,
+              server_connection->GetStats().num_connectivity_probing_received);
+    EXPECT_EQ(server_cid1, server_connection->connection_id());
+  } else {
+    ADD_FAILURE() << "Missing server connection";
+  }
+  EXPECT_EQ(1u, server_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(2u, server_connection->GetStats().num_new_connection_id_sent);
+  server_thread_->Resume();
+
+  // Migrate socket to a new IP address again.
+  QuicIpAddress host3 = TestLoopback(3);
+  EXPECT_NE(addr1.host(), host3);
+  EXPECT_NE(host2, host3);
+  ASSERT_TRUE(client_->client()->ValidateAndMigrateSocket(host3));
+
+  QuicConnectionId server_cid3 =
+      QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_FALSE(server_cid3.IsEmpty());
+  EXPECT_NE(server_cid1, server_cid3);
+  EXPECT_NE(server_cid2, server_cid3);
+  QuicConnectionId client_cid3 =
+      QuicConnectionPeer::GetClientConnectionIdOnAlternativePath(
+          client_connection);
+  EXPECT_NE(client_cid1, client_cid3);
+  EXPECT_NE(client_cid2, client_cid3);
+  while (client_->client()->HasPendingPathValidation()) {
+    client_->client()->WaitForEvents();
+  }
+  EXPECT_EQ(host3, client_->client()->session()->self_address().host());
+  EXPECT_EQ(server_cid3, GetClientConnection()->connection_id());
+  EXPECT_TRUE(QuicConnectionPeer::GetServerConnectionIdOnAlternativePath(
+                  client_connection)
+                  .IsEmpty());
+  EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
+
+  // Server should send new server connection ID to client and retires old
+  // client connection ID.
+  WaitForNewConnectionIds();
+  EXPECT_EQ(2u, client_connection->GetStats().num_retire_connection_id_sent);
+  EXPECT_EQ(3u, client_connection->GetStats().num_new_connection_id_sent);
+}
+
 TEST_P(EndToEndPacketReorderingTest, Buffer0RttRequest) {
   ASSERT_TRUE(Initialize());
   // Finish one request to make sure handshake established.
@@ -5127,34 +5481,6 @@ TEST_P(EndToEndTest, TooBigStreamIdClosesConnection) {
       IS_IETF_STREAM_FRAME(client_session->transport_close_frame_type()));
 }
 
-TEST_P(EndToEndTest, TestMaxPushId) {
-  if (!version_.HasIetfQuicFrames()) {
-    // MaxPushId is only implemented for IETF QUIC.
-    Initialize();
-    return;
-  }
-  SetQuicFlag(FLAGS_quic_enable_http3_server_push, true);
-  ASSERT_TRUE(Initialize());
-
-  EXPECT_TRUE(client_->client()->WaitForOneRttKeysAvailable());
-  QuicSpdyClientSession* client_session = GetClientSession();
-  ASSERT_TRUE(client_session);
-  client_session->SetMaxPushId(kMaxQuicStreamId);
-
-  client_->SendSynchronousRequest("/foo");
-
-  EXPECT_TRUE(client_session->CanCreatePushStreamWithId(kMaxQuicStreamId));
-
-  server_thread_->Pause();
-  QuicSpdySession* server_session = GetServerSession();
-  if (server_session != nullptr) {
-    EXPECT_TRUE(server_session->CanCreatePushStreamWithId(kMaxQuicStreamId));
-  } else {
-    ADD_FAILURE() << "Missing server session";
-  }
-  server_thread_->Resume();
-}
-
 TEST_P(EndToEndTest, CustomTransportParameters) {
   if (!version_.UsesTls()) {
     // Custom transport parameters are only supported with TLS.
@@ -5287,6 +5613,86 @@ TEST_P(EndToEndTest, LegacyVersionEncapsulationWithLoss) {
   EXPECT_GT(
       client_connection->GetStats().sent_legacy_version_encapsulated_packets,
       0u);
+}
+
+// Testing packet writer that makes a copy of the first sent packets before
+// sending them. Useful for tests that need access to sent packets.
+class CopyingPacketWriter : public PacketDroppingTestWriter {
+ public:
+  explicit CopyingPacketWriter(int num_packets_to_copy)
+      : num_packets_to_copy_(num_packets_to_copy) {}
+  WriteResult WritePacket(const char* buffer,
+                          size_t buf_len,
+                          const QuicIpAddress& self_address,
+                          const QuicSocketAddress& peer_address,
+                          PerPacketOptions* options) override {
+    if (num_packets_to_copy_ > 0) {
+      num_packets_to_copy_--;
+      packets_.push_back(
+          QuicEncryptedPacket(buffer, buf_len, /*owns_buffer=*/false).Clone());
+    }
+    return PacketDroppingTestWriter::WritePacket(buffer, buf_len, self_address,
+                                                 peer_address, options);
+  }
+
+  std::vector<std::unique_ptr<QuicEncryptedPacket>>& packets() {
+    return packets_;
+  }
+
+ private:
+  int num_packets_to_copy_;
+  std::vector<std::unique_ptr<QuicEncryptedPacket>> packets_;
+};
+
+TEST_P(EndToEndTest, ChaosProtection) {
+  if (!version_.UsesCryptoFrames()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  // Replace the client's writer with one that'll save the first packet.
+  auto copying_writer = new CopyingPacketWriter(1);
+  delete client_writer_;
+  client_writer_ = copying_writer;
+  // Enable chaos protection and perform an HTTP request.
+  client_config_.SetClientConnectionOptions(QuicTagVector{kCHSP});
+  ASSERT_TRUE(Initialize());
+  SendSynchronousFooRequestAndCheckResponse();
+  // Parse the saved packet to make sure it's valid.
+  SimpleQuicFramer validation_framer({version_});
+  validation_framer.framer()->SetInitialObfuscators(
+      GetClientConnection()->connection_id());
+  ASSERT_GT(copying_writer->packets().size(), 0u);
+  EXPECT_TRUE(validation_framer.ProcessPacket(*copying_writer->packets()[0]));
+  // TODO(dschinazi) figure out a way to use a MockRandom in this test so we
+  // can inspect the contents of this packet.
+}
+
+TEST_P(EndToEndTest, ChaosProtectionWithMultiPacketChlo) {
+  if (!version_.UsesCryptoFrames()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  // Enable chaos protection.
+  client_config_.SetClientConnectionOptions(QuicTagVector{kCHSP});
+  // Add a transport parameter to make the client hello span multiple packets.
+  constexpr auto kCustomParameter =
+      static_cast<TransportParameters::TransportParameterId>(0xff34);
+  client_config_.custom_transport_parameters_to_send()[kCustomParameter] =
+      std::string(2000, '?');
+  ASSERT_TRUE(Initialize());
+  SendSynchronousFooRequestAndCheckResponse();
+}
+
+TEST_P(EndToEndTest, PermuteTlsExtensions) {
+  if (!version_.UsesTls()) {
+    ASSERT_TRUE(Initialize());
+    return;
+  }
+  // Enable TLS extension permutation and perform an HTTP request.
+  client_config_.SetClientConnectionOptions(QuicTagVector{kBPTE});
+  ASSERT_TRUE(Initialize());
+  EXPECT_TRUE(GetClientSession()->permutes_tls_extensions());
+  SendSynchronousFooRequestAndCheckResponse();
 }
 
 TEST_P(EndToEndTest, KeyUpdateInitiatedByClient) {
@@ -5622,6 +6028,215 @@ TEST_P(EndToEndTest, TlsResumptionDisabledOnTheFly) {
   }
 
   ADD_FAILURE() << "Client should not have 10 resumption tickets.";
+}
+
+TEST_P(EndToEndTest, WebTransportSessionSetup) {
+  enable_web_transport_ = true;
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* web_transport =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/true);
+  ASSERT_NE(web_transport, nullptr);
+
+  server_thread_->Pause();
+  QuicSpdySession* server_session = GetServerSession();
+  EXPECT_TRUE(server_session->GetWebTransportSession(web_transport->id()) !=
+              nullptr);
+  server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest, WebTransportSessionWithLoss) {
+  enable_web_transport_ = true;
+  // Enable loss to verify all permutations of receiving SETTINGS and
+  // request/response data.
+  SetPacketLossPercentage(30);
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* web_transport =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/true);
+  ASSERT_NE(web_transport, nullptr);
+
+  server_thread_->Pause();
+  QuicSpdySession* server_session = GetServerSession();
+  EXPECT_TRUE(server_session->GetWebTransportSession(web_transport->id()) !=
+              nullptr);
+  server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest, WebTransportSessionUnidirectionalStream) {
+  enable_web_transport_ = true;
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/true);
+  ASSERT_TRUE(session != nullptr);
+  NiceMock<MockClientVisitor>& visitor = SetupWebTransportVisitor(session);
+
+  WebTransportStream* outgoing_stream =
+      session->OpenOutgoingUnidirectionalStream();
+  ASSERT_TRUE(outgoing_stream != nullptr);
+  EXPECT_TRUE(outgoing_stream->Write("test"));
+  EXPECT_TRUE(outgoing_stream->SendFin());
+
+  bool stream_received = false;
+  EXPECT_CALL(visitor, OnIncomingUnidirectionalStreamAvailable())
+      .WillOnce(Assign(&stream_received, true));
+  client_->WaitUntil(2000, [&stream_received]() { return stream_received; });
+  EXPECT_TRUE(stream_received);
+  WebTransportStream* received_stream =
+      session->AcceptIncomingUnidirectionalStream();
+  ASSERT_TRUE(received_stream != nullptr);
+  std::string received_data;
+  WebTransportStream::ReadResult result = received_stream->Read(&received_data);
+  EXPECT_EQ(received_data, "test");
+  EXPECT_TRUE(result.fin);
+}
+
+TEST_P(EndToEndTest, WebTransportSessionUnidirectionalStreamSentEarly) {
+  enable_web_transport_ = true;
+  SetPacketLossPercentage(30);
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/false);
+  ASSERT_TRUE(session != nullptr);
+  NiceMock<MockClientVisitor>& visitor = SetupWebTransportVisitor(session);
+
+  WebTransportStream* outgoing_stream =
+      session->OpenOutgoingUnidirectionalStream();
+  ASSERT_TRUE(outgoing_stream != nullptr);
+  EXPECT_TRUE(outgoing_stream->Write("test"));
+  EXPECT_TRUE(outgoing_stream->SendFin());
+
+  bool stream_received = false;
+  EXPECT_CALL(visitor, OnIncomingUnidirectionalStreamAvailable())
+      .WillOnce(Assign(&stream_received, true));
+  client_->WaitUntil(5000, [&stream_received]() { return stream_received; });
+  EXPECT_TRUE(stream_received);
+  WebTransportStream* received_stream =
+      session->AcceptIncomingUnidirectionalStream();
+  ASSERT_TRUE(received_stream != nullptr);
+  std::string received_data;
+  WebTransportStream::ReadResult result = received_stream->Read(&received_data);
+  EXPECT_EQ(received_data, "test");
+  EXPECT_TRUE(result.fin);
+}
+
+TEST_P(EndToEndTest, WebTransportSessionBidirectionalStream) {
+  enable_web_transport_ = true;
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/true);
+  ASSERT_TRUE(session != nullptr);
+
+  WebTransportStream* stream = session->OpenOutgoingBidirectionalStream();
+  ASSERT_TRUE(stream != nullptr);
+  EXPECT_TRUE(stream->Write("test"));
+  EXPECT_TRUE(stream->SendFin());
+
+  std::string received_data = ReadDataFromWebTransportStreamUntilFin(stream);
+  EXPECT_EQ(received_data, "test");
+}
+
+TEST_P(EndToEndTest, WebTransportSessionBidirectionalStreamWithBuffering) {
+  enable_web_transport_ = true;
+  SetPacketLossPercentage(30);
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/false);
+  ASSERT_TRUE(session != nullptr);
+
+  WebTransportStream* stream = session->OpenOutgoingBidirectionalStream();
+  ASSERT_TRUE(stream != nullptr);
+  EXPECT_TRUE(stream->Write("test"));
+  EXPECT_TRUE(stream->SendFin());
+
+  std::string received_data = ReadDataFromWebTransportStreamUntilFin(stream);
+  EXPECT_EQ(received_data, "test");
+}
+
+TEST_P(EndToEndTest, WebTransportSessionServerBidirectionalStream) {
+  enable_web_transport_ = true;
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/false);
+  ASSERT_TRUE(session != nullptr);
+  NiceMock<MockClientVisitor>& visitor = SetupWebTransportVisitor(session);
+
+  bool stream_received = false;
+  EXPECT_CALL(visitor, OnIncomingBidirectionalStreamAvailable())
+      .WillOnce(Assign(&stream_received, true));
+  client_->WaitUntil(5000, [&stream_received]() { return stream_received; });
+  EXPECT_TRUE(stream_received);
+
+  WebTransportStream* stream = session->AcceptIncomingBidirectionalStream();
+  ASSERT_TRUE(stream != nullptr);
+  EXPECT_TRUE(stream->Write("test"));
+  EXPECT_TRUE(stream->SendFin());
+
+  std::string received_data = ReadDataFromWebTransportStreamUntilFin(stream);
+  EXPECT_EQ(received_data, "test");
+}
+
+TEST_P(EndToEndTest, WebTransportDatagrams) {
+  enable_web_transport_ = true;
+  ASSERT_TRUE(Initialize());
+
+  if (!version_.UsesHttp3()) {
+    return;
+  }
+
+  WebTransportHttp3* session =
+      CreateWebTransportSession("/echo", /*wait_for_server_response=*/true);
+  ASSERT_TRUE(session != nullptr);
+  NiceMock<MockClientVisitor>& visitor = SetupWebTransportVisitor(session);
+
+  SimpleBufferAllocator allocator;
+  for (int i = 0; i < 10; i++) {
+    absl::string_view datagram = "test";
+    auto buffer = MakeUniqueBuffer(&allocator, datagram.size());
+    memcpy(buffer.get(), datagram.data(), datagram.size());
+    QuicMemSlice slice(std::move(buffer), datagram.size());
+    session->SendOrQueueDatagram(std::move(slice));
+  }
+
+  int received = 0;
+  EXPECT_CALL(visitor, OnDatagramReceived(_)).WillRepeatedly([&received]() {
+    received++;
+  });
+  client_->WaitUntil(5000, [&received]() { return received > 0; });
+  EXPECT_GT(received, 0);
 }
 
 }  // namespace

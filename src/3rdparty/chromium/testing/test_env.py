@@ -56,8 +56,8 @@ def fix_python_path(cmd):
   return out
 
 
-def get_sanitizer_env(cmd, asan, lsan, msan, tsan, cfi_diag):
-  """Returns the envirnoment flags needed for sanitizer tools."""
+def get_sanitizer_env(asan, lsan, msan, tsan, cfi_diag):
+  """Returns the environment flags needed for sanitizer tools."""
 
   extra_env = {}
 
@@ -101,13 +101,6 @@ def get_sanitizer_env(cmd, asan, lsan, msan, tsan, cfi_diag):
 
     if asan_options:
       extra_env['ASAN_OPTIONS'] = ' '.join(asan_options)
-
-    if sys.platform == 'darwin':
-      isolate_output_dir = os.path.abspath(os.path.dirname(cmd[0]))
-      # This is needed because the test binary has @executable_path embedded in
-      # it that the OS tries to resolve to the cache directory and not the
-      # mapped directory.
-      extra_env['DYLD_LIBRARY_PATH'] = str(isolate_output_dir)
 
   if lsan:
     if asan or msan:
@@ -185,7 +178,7 @@ def run_command_with_output(argv, stdoutfile, env=None, cwd=None):
   """Run command and stream its stdout/stderr to the console & |stdoutfile|.
 
   Also forward_signals to obey
-  https://chromium.googlesource.com/infra/luci/luci-py/+/master/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
+  https://chromium.googlesource.com/infra/luci/luci-py/+/main/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
 
   Returns:
     integer returncode of the subprocess.
@@ -212,7 +205,7 @@ def run_command(argv, env=None, cwd=None, log=True):
   """Run command and stream its stdout/stderr both to stdout.
 
   Also forward_signals to obey
-  https://chromium.googlesource.com/infra/luci/luci-py/+/master/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
+  https://chromium.googlesource.com/infra/luci/luci-py/+/main/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
 
   Returns:
     integer returncode of the subprocess.
@@ -228,7 +221,7 @@ def run_command_output_to_handle(argv, file_handle, env=None, cwd=None):
   """Run command and stream its stdout/stderr both to |file_handle|.
 
   Also forward_signals to obey
-  https://chromium.googlesource.com/infra/luci/luci-py/+/master/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
+  https://chromium.googlesource.com/infra/luci/luci-py/+/main/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
 
   Returns:
     integer returncode of the subprocess.
@@ -268,7 +261,7 @@ def forward_signals(procs):
   """Forwards unix's SIGTERM or win's CTRL_BREAK_EVENT to the given processes.
 
   This plays nicely with swarming's timeout handling. See also
-  https://chromium.googlesource.com/infra/luci/luci-py/+/master/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
+  https://chromium.googlesource.com/infra/luci/luci-py/+/main/appengine/swarming/doc/Bot.md#graceful-termination_aka-the-sigterm-and-sigkill-dance
 
   Args:
       procs: A list of subprocess.Popen objects representing child processes.
@@ -328,7 +321,7 @@ def run_executable(cmd, env, stdoutfile=None):
     use_symbolization_script = (asan or msan or cfi_diag or lsan or tsan)
 
   if asan or lsan or msan or tsan or cfi_diag:
-    extra_env.update(get_sanitizer_env(cmd, asan, lsan, msan, tsan, cfi_diag))
+    extra_env.update(get_sanitizer_env(asan, lsan, msan, tsan, cfi_diag))
 
   if lsan or tsan:
     # LSan and TSan are not sandbox-friendly.
@@ -393,4 +386,9 @@ def main():
 
 
 if __name__ == '__main__':
+  if sys.platform == 'win32':
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        'scripts'))
+    import common
+    common.set_lpac_acls(ROOT_DIR, is_test_script=True)
   sys.exit(main())

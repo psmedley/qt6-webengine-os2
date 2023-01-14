@@ -7,13 +7,13 @@ This documents shutdown steps on Windows, Mac and Linux.
 On Android, the system can terminate the Chrome app at any point without running
 any shutdown step.
 
-TODO: Document ChromeOS shutdown.
+See below for how the process differs on ChromeOS.
 
 ## Step 1: Exiting the main loop
 
 Shutdown starts when nothing keeps Chrome alive. Typically, this happens when
 all browser windows are closed, but other things can [keep Chrome
-alive](https://source.chromium.org/chromium/chromium/src/+/master:components/keep_alive_registry/keep_alive_types.h).
+alive](https://source.chromium.org/chromium/chromium/src/+/main:components/keep_alive_registry/keep_alive_types.h).
 
 When nothing keeps Chrome alive, `BrowserProcessImpl::Unpin` asks the main
 thread's message loop to quit as soon as it no longer has tasks ready to run
@@ -94,3 +94,17 @@ content::BrowserMainLoop::ShutdownThreadsAndCleanUp
 content::BrowserMainLoop::ShutdownThreadsAndCleanUp
 content::BrowserMainRunnerImpl::Shutdown
 ```
+
+## ChromeOS differences
+On ChromeOS, the ash browser is only supposed to exit when the user logs out.
+
+When the user logs out, the browser sends a `StopSession` message to the
+[session_manager](https://chromium.googlesource.com/chromiumos/platform2/+/refs/heads/main/login_manager/README.md).
+The session_manager then sends a SIGTERM to the main browser process to cause an
+exit. Once SIGTERM is received, it starts shutting down the main loop and
+cleaning up in the sequence described above.
+
+Unlike other desktop platforms, the shutdown is time limited. If the browser
+process has not exited within a certain time frame (normally, 3 seconds), the
+session_manager will SIGKILL the browser process since the user is looking at
+a blank screen and unable to use their Chromebook until the browser exits.

@@ -36,7 +36,6 @@ module.exports = {
      * Enforced rules
      */
 
-
     // syntax preferences
     'quotes': [2, 'single', {'avoidEscape': true, 'allowTemplateLiterals': false}],
     'semi': 2,
@@ -85,28 +84,8 @@ module.exports = {
     'require-yield': 2,
     'template-curly-spacing': [2, 'never'],
 
-    // spacing details
-    'space-infix-ops': 2,
-    'space-in-parens': [2, 'never'],
-    'space-before-function-paren': [2, {'anonymous': 'never', 'named': 'never', 'asyncArrow': 'always'}],
-    'no-whitespace-before-property': 2,
-    'keyword-spacing': [
-      2, {
-        'overrides': {
-          'if': {'after': true},
-          'else': {'after': true},
-          'for': {'after': true},
-          'while': {'after': true},
-          'do': {'after': true},
-          'switch': {'after': true},
-          'return': {'after': true}
-        }
-      }
-    ],
-    'arrow-spacing': [2, {'after': true, 'before': true}],
-
     // file whitespace
-    'no-multiple-empty-lines': [2, {'max': 2}],
+    'no-multiple-empty-lines': [2, {'max': 1}],
     'no-mixed-spaces-and-tabs': 2,
     'no-trailing-spaces': 2,
     'linebreak-style': [2, 'unix'],
@@ -137,13 +116,19 @@ module.exports = {
     // Closure does not properly typecheck default exports
     'import/no-default-export': 2,
 
+    // Try to spot '// console.log()' left over from debugging
+    'rulesdir/commented_out_console': 2,
+
     // DevTools specific rules
     'rulesdir/es_modules_import': 2,
     'rulesdir/check_license_header': 2,
-    'rulesdir/l10n_filename_matches': 2,
   },
   'overrides': [{
     'files': ['*.ts'],
+    'parserOptions': {
+      'allowAutomaticSingleRunInference': true,
+      'project': './config/typescript/tsconfig.eslint.json',
+    },
     'rules': {
       '@typescript-eslint/explicit-member-accessibility': [2, {'accessibility': 'no-public'}],
       'comma-dangle': 'off',
@@ -185,12 +170,10 @@ module.exports = {
        * this.foo!.toLowerCase()
        */
       '@typescript-eslint/no-non-null-assertion': 2,
+      '@typescript-eslint/consistent-type-imports': 2,
       'rulesdir/const_enum': 2,
       'rulesdir/no_underscored_properties': 2,
       'rulesdir/prefer_readonly_keyword': 2,
-      'space-before-function-paren': 'off',
-      '@typescript-eslint/space-before-function-paren':
-          ['error', {'anonymous': 'never', 'named': 'never', 'asyncArrow': 'always'}]
     }
   }]
 };

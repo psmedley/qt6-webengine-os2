@@ -258,12 +258,12 @@ void WebSharedWorkerImpl::StartWorkerContext(
       MakeGarbageCollected<WorkerClients>(),
       std::make_unique<SharedWorkerContentSettingsProxy>(
           std::move(content_settings)),
-      base::nullopt /* response_address_space */,
+      absl::nullopt /* response_address_space */,
       nullptr /* origin_trial_tokens */, devtools_worker_token,
       std::move(worker_settings), mojom::blink::V8CacheOptions::kDefault,
       nullptr /* worklet_module_response_map */,
       std::move(browser_interface_broker), BeginFrameProviderParams(),
-      nullptr /* parent_feature_policy */, base::UnguessableToken(),
+      nullptr /* parent_permissions_policy */, base::UnguessableToken(),
       ukm_source_id);
 
   auto thread_startup_data = WorkerBackingThreadStartupData::CreateDefault();

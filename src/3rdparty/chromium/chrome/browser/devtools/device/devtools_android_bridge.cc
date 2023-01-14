@@ -320,7 +320,7 @@ void DevToolsAndroidBridge::ReceivedDeviceCount(int count) {
 static std::set<net::HostPortPair> ParseTargetDiscoveryPreferenceValue(
     const base::ListValue* preferenceValue) {
   std::set<net::HostPortPair> targets;
-  if (!preferenceValue || preferenceValue->empty())
+  if (!preferenceValue || preferenceValue->GetList().empty())
     return targets;
   std::string address;
   for (size_t i = 0; i < preferenceValue->GetSize(); i++) {
@@ -385,8 +385,7 @@ void DevToolsAndroidBridge::CreateDeviceProviders() {
       service->FindPreference(prefs::kDevToolsDiscoverUsbDevicesEnabled);
   const base::Value* pref_value = pref->GetValue();
 
-  bool enabled;
-  if (pref_value->GetAsBoolean(&enabled) && enabled) {
+  if (pref_value->is_bool() && pref_value->GetBool()) {
     device_providers.push_back(new UsbDeviceProvider(profile_));
   }
 

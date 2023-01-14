@@ -9,7 +9,6 @@
 #include <type_traits>
 
 #include "base/containers/contains.h"
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -371,6 +370,15 @@ TYPED_TEST_P(AbstractOriginTest, TupleOrigins) {
       {"file:///etc/passwd", {"file", "", 0}},
       {"file://example.com/etc/passwd", {"file", "example.com", 0}},
       {"file:///", {"file", "", 0}},
+
+#ifdef WIN32
+      // TODO(https://crbug.com/1214098): Consider unifying URL parsing behavior
+      // on all platforms (or at least make sure that serialization always
+      // round-trips - see https://crbug.com/1214098).
+      {"file://hostname/C:/dir/file.txt", {"file", "", 0}},
+#else
+      {"file://hostname/C:/dir/file.txt", {"file", "hostname", 0}},
+#endif
 
       // HTTP URLs
       {"http://example.com/", {"http", "example.com", 80}},

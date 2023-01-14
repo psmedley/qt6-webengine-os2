@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -20,28 +19,25 @@ ForeignLayerDisplayItem::ForeignLayerDisplayItem(
     const DisplayItemClient& client,
     Type type,
     scoped_refptr<cc::Layer> layer,
-    const IntPoint& offset)
+    const IntPoint& offset,
+    PaintInvalidationReason paint_invalidation_reason)
     : DisplayItem(client,
                   type,
-                  sizeof(*this),
-                  IntRect(offset, IntSize(layer->bounds()))),
-      offset_(offset),
+                  IntRect(offset, IntSize(layer->bounds())),
+                  paint_invalidation_reason),
       layer_(std::move(layer)) {
   DCHECK(IsForeignLayerType(type));
 }
 
-bool ForeignLayerDisplayItem::Equals(const DisplayItem& other) const {
-  return DisplayItem::Equals(other) &&
-         GetLayer() ==
-             static_cast<const ForeignLayerDisplayItem&>(other).GetLayer();
+bool ForeignLayerDisplayItem::EqualsForUnderInvalidationImpl(
+    const ForeignLayerDisplayItem& other) const {
+  DCHECK(RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled());
+  return GetLayer() == other.GetLayer();
 }
 
 #if DCHECK_IS_ON()
-void ForeignLayerDisplayItem::PropertiesAsJSON(JSONObject& json) const {
-  DisplayItem::PropertiesAsJSON(json);
+void ForeignLayerDisplayItem::PropertiesAsJSONImpl(JSONObject& json) const {
   json.SetInteger("layer", GetLayer()->id());
-  json.SetDouble("offset_x", Offset().X());
-  json.SetDouble("offset_y", Offset().Y());
 }
 #endif
 
@@ -52,15 +48,24 @@ void RecordForeignLayer(GraphicsContext& context,
                         const IntPoint& offset,
                         const PropertyTreeStateOrAlias* properties) {
   PaintController& paint_controller = context.GetPaintController();
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    // Only record the first fragment's cc::Layer to prevent duplicate layers.
+    // This is not needed for link highlights which do support fragmentation.
+    if (type != DisplayItem::kForeignLayerLinkHighlight &&
+        paint_controller.CurrentFragment() != 0) {
+      return;
+    }
+  }
   // This is like ScopedPaintChunkProperties but uses null id because foreign
   // layer chunk doesn't need an id nor a client.
-  base::Optional<PropertyTreeStateOrAlias> previous_properties;
+  absl::optional<PropertyTreeStateOrAlias> previous_properties;
   if (properties) {
     previous_properties.emplace(paint_controller.CurrentPaintChunkProperties());
     paint_controller.UpdateCurrentPaintChunkProperties(nullptr, *properties);
   }
   paint_controller.CreateAndAppend<ForeignLayerDisplayItem>(
-      client, type, std::move(layer), offset);
+      client, type, std::move(layer), offset,
+      client.GetPaintInvalidationReason());
   if (properties) {
     paint_controller.UpdateCurrentPaintChunkProperties(nullptr,
                                                        *previous_properties);

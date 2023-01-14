@@ -28,12 +28,12 @@ class CrossTrafficRouteImpl final : public CrossTrafficRoute {
  public:
   CrossTrafficRouteImpl(Clock* clock,
                         EmulatedNetworkReceiverInterface* receiver,
-                        EmulatedEndpoint* endpoint);
+                        EmulatedEndpointImpl* endpoint);
   ~CrossTrafficRouteImpl();
 
-  // Triggers sending of dummy packets with size |packet_size| bytes.
+  // Triggers sending of dummy packets with size `packet_size` bytes.
   void TriggerPacketBurst(size_t num_packets, size_t packet_size) override;
-  // Sends a packet over the nodes and runs |action| when it has been delivered.
+  // Sends a packet over the nodes and runs `action` when it has been delivered.
   void NetworkDelayedAction(size_t packet_size,
                             std::function<void()> action) override;
 
@@ -44,7 +44,7 @@ class CrossTrafficRouteImpl final : public CrossTrafficRoute {
 
   Clock* const clock_;
   EmulatedNetworkReceiverInterface* const receiver_;
-  EmulatedEndpoint* const endpoint_;
+  EmulatedEndpointImpl* const endpoint_;
 
   uint16_t null_receiver_port_;
   std::unique_ptr<EmulatedNetworkReceiverInterface> null_receiver_;

@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_DOM_SNAPSHOT_AGENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_DOM_SNAPSHOT_AGENT_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_contrast.h"
 #include "third_party/blink/renderer/core/inspector/protocol/DOMSnapshot.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -28,6 +28,9 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
     : public InspectorBaseAgent<protocol::DOMSnapshot::Metainfo> {
  public:
   InspectorDOMSnapshotAgent(InspectedFrames*, InspectorDOMDebuggerAgent*);
+  InspectorDOMSnapshotAgent(const InspectorDOMSnapshotAgent&) = delete;
+  InspectorDOMSnapshotAgent& operator=(const InspectorDOMSnapshotAgent&) =
+      delete;
   ~InspectorDOMSnapshotAgent() override;
   void Trace(Visitor*) const override;
 
@@ -50,6 +53,8 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
       std::unique_ptr<protocol::Array<String>> computed_styles,
       protocol::Maybe<bool> include_paint_order,
       protocol::Maybe<bool> include_dom_rects,
+      protocol::Maybe<bool> include_blended_background_colors,
+      protocol::Maybe<bool> include_text_color_opacities,
       std::unique_ptr<protocol::Array<protocol::DOMSnapshot::DocumentSnapshot>>*
           documents,
       std::unique_ptr<protocol::Array<String>>* strings) override;
@@ -82,11 +87,16 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
   void SetRare(protocol::DOMSnapshot::RareBooleanData* data, int index);
   void VisitDocument(Document*);
 
-  void VisitNode(Node*, int parent_index);
+  void VisitNode(Node*, int parent_index, InspectorContrast& contrast);
   void VisitContainerChildren(Node* container, int parent_index);
-  void VisitPseudoElements(Element* parent, int parent_index);
+  void VisitPseudoElements(Element* parent,
+                           int parent_index,
+                           InspectorContrast& contrast);
   std::unique_ptr<protocol::Array<int>> BuildArrayForElementAttributes(Node*);
-  int BuildLayoutTreeNode(LayoutObject*, Node*, int node_index);
+  int BuildLayoutTreeNode(LayoutObject*,
+                          Node*,
+                          int node_index,
+                          InspectorContrast& contrast);
   std::unique_ptr<protocol::Array<int>> BuildStylesForNode(Node*);
 
   static void TraversePaintLayerTree(Document*, PaintOrderMap* paint_order_map);
@@ -114,6 +124,8 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
   std::unique_ptr<protocol::DOMSnapshot::DocumentSnapshot> document_;
 
   bool include_snapshot_dom_rects_ = false;
+  bool include_blended_background_colors_ = false;
+  bool include_text_color_opacities_ = false;
   std::unique_ptr<CSSPropertyFilter> css_property_filter_;
   // Maps a PaintLayer to its paint order index.
   std::unique_ptr<PaintOrderMap> paint_order_map_;
@@ -125,8 +137,6 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
   Member<InspectedFrames> inspected_frames_;
   Member<InspectorDOMDebuggerAgent> dom_debugger_agent_;
   InspectorAgentState::Boolean enabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(InspectorDOMSnapshotAgent);
 };
 
 }  // namespace blink

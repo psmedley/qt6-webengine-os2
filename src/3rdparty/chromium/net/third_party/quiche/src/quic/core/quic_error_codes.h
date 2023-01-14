@@ -103,8 +103,14 @@ enum QuicRstStreamErrorCode {
   // IETF RESET_FRAME application error code not matching any HTTP/3 or QPACK
   // error codes.
   QUIC_STREAM_UNKNOWN_APPLICATION_ERROR_CODE = 35,
+  // WebTransport session is going away, causing all underlying streams to be
+  // reset.
+  QUIC_STREAM_WEBTRANSPORT_SESSION_GONE = 36,
+  // There is no corresponding WebTransport session to associate this stream
+  // with, and the limit for buffered streams has been exceeded.
+  QUIC_STREAM_WEBTRANSPORT_BUFFERED_STREAMS_LIMIT_EXCEEDED = 37,
   // No error. Used as bound while iterating.
-  QUIC_STREAM_LAST_ERROR = 36,
+  QUIC_STREAM_LAST_ERROR = 38,
 };
 // QuicRstStreamErrorCode is encoded as a single octet on-the-wire.
 static_assert(static_cast<int>(QUIC_STREAM_LAST_ERROR) <=
@@ -453,8 +459,12 @@ enum QuicErrorCode {
   // Received multiple close offset.
   QUIC_STREAM_MULTIPLE_OFFSET = 130,
 
-  // Internal error codes for HTTP/3 errors.
+  // HTTP/3 errors.
+
+  // Frame payload larger than what HttpDecoder is willing to buffer.
   QUIC_HTTP_FRAME_TOO_LARGE = 131,
+  // Malformed HTTP/3 frame, or PUSH_PROMISE or CANCEL_PUSH received (which is
+  // an error because MAX_PUSH_ID is never sent).
   QUIC_HTTP_FRAME_ERROR = 132,
   // A frame that is never allowed on a request stream is received.
   QUIC_HTTP_FRAME_UNEXPECTED_ON_SPDY_STREAM = 133,
@@ -500,6 +510,9 @@ enum QuicErrorCode {
   QUIC_HTTP_RECEIVE_SPDY_SETTING = 169,
   // HTTP/3 session received an HTTP/2 only frame.
   QUIC_HTTP_RECEIVE_SPDY_FRAME = 171,
+  // HTTP/3 session received SERVER_PUSH stream, which is an error because
+  // PUSH_PROMISE is not accepted.
+  QUIC_HTTP_RECEIVE_SERVER_PUSH = 205,
 
   // HPACK header block decoding errors.
   // Index varint beyond implementation limit.
@@ -587,7 +600,7 @@ enum QuicErrorCode {
   QUIC_TLS_CERTIFICATE_REQUIRED = 202,
 
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 205,
+  QUIC_LAST_ERROR = 206,
 };
 // QuicErrorCodes is encoded as four octets on-the-wire when doing Google QUIC,
 // or a varint62 when doing IETF QUIC. Ensure that its value does not exceed

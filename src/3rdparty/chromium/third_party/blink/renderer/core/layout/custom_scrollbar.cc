@@ -25,7 +25,8 @@
 
 #include "third_party/blink/renderer/core/layout/custom_scrollbar.h"
 
-#include "third_party/blink/renderer/core/css/pseudo_style_request.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
@@ -147,7 +148,7 @@ CustomScrollbar::GetScrollbarPseudoElementStyle(ScrollbarPart part_type,
   const ComputedStyle* source_style = element->GetLayoutObject()->Style();
   scoped_refptr<const ComputedStyle> part_style =
       element->UncachedStyleForPseudoElement(
-          PseudoElementStyleRequest(pseudo_id, this, part_type), source_style);
+          StyleRequest(pseudo_id, this, part_type, source_style));
   if (!part_style)
     return nullptr;
   return source_style->AddCachedPseudoElementStyle(std::move(part_style));
@@ -171,8 +172,9 @@ void CustomScrollbar::UpdateScrollbarParts() {
   bool is_horizontal = Orientation() == kHorizontalScrollbar;
   int old_thickness = is_horizontal ? Height() : Width();
   int new_thickness = 0;
-  if (auto* part = parts_.at(kScrollbarBGPart))
-    new_thickness = part->ComputeThickness();
+  auto it = parts_.find(kScrollbarBGPart);
+  if (it != parts_.end())
+    new_thickness = it->value->ComputeThickness();
 
   if (new_thickness != old_thickness) {
     SetFrameRect(
@@ -259,7 +261,9 @@ void CustomScrollbar::UpdateScrollbarPart(ScrollbarPart part_type) {
     }
   }
 
-  LayoutCustomScrollbarPart* part_layout_object = parts_.at(part_type);
+  auto it = parts_.find(part_type);
+  LayoutCustomScrollbarPart* part_layout_object =
+      it != parts_.end() ? it->value : nullptr;
   if (!part_layout_object && need_layout_object && scrollable_area_) {
     part_layout_object = LayoutCustomScrollbarPart::CreateAnonymous(
         &StyleSource()->GetDocument(), scrollable_area_, this, part_type);
@@ -277,12 +281,12 @@ void CustomScrollbar::UpdateScrollbarPart(ScrollbarPart part_type) {
 }
 
 IntRect CustomScrollbar::ButtonRect(ScrollbarPart part_type) const {
-  LayoutCustomScrollbarPart* part_layout_object = parts_.at(part_type);
-  if (!part_layout_object)
+  auto it = parts_.find(part_type);
+  if (it == parts_.end())
     return IntRect();
 
   bool is_horizontal = Orientation() == kHorizontalScrollbar;
-  int button_length = part_layout_object->ComputeLength();
+  int button_length = it->value->ComputeLength();
   IntRect button_rect(Location(), is_horizontal
                                       ? IntSize(button_length, Height())
                                       : IntSize(Width(), button_length));

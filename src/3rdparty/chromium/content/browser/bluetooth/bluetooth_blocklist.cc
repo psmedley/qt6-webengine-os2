@@ -6,10 +6,10 @@
 
 #include "base/check.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/string_split.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using device::BluetoothUUID;
 
@@ -44,31 +44,25 @@ void BluetoothBlocklist::Add(base::StringPiece blocklist_string) {
   if (blocklist_string.empty())
     return;
   base::StringPairs kv_pairs;
-  bool parsed_values = false;
-  bool invalid_values = false;
-  SplitStringIntoKeyValuePairs(blocklist_string,
-                               ':',  // Key-value delimiter
-                               ',',  // Key-value pair delimiter
-                               &kv_pairs);
+  base::SplitStringIntoKeyValuePairs(blocklist_string,
+                                     ':',  // Key-value delimiter
+                                     ',',  // Key-value pair delimiter
+                                     &kv_pairs);
   for (const auto& pair : kv_pairs) {
     BluetoothUUID uuid(pair.first);
     if (uuid.IsValid() && pair.second.size() == 1u) {
       switch (pair.second[0]) {
         case 'e':
           Add(uuid, Value::EXCLUDE);
-          parsed_values = true;
           continue;
         case 'r':
           Add(uuid, Value::EXCLUDE_READS);
-          parsed_values = true;
           continue;
         case 'w':
           Add(uuid, Value::EXCLUDE_WRITES);
-          parsed_values = true;
           continue;
       }
     }
-    invalid_values = true;
   }
 }
 

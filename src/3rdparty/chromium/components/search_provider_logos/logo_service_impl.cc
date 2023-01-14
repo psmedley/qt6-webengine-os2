@@ -5,6 +5,7 @@
 #include "components/search_provider_logos/logo_service_impl.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -31,8 +32,10 @@
 #include "components/search_provider_logos/switches.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "ui/gfx/image/image.h"
 
 namespace search_provider_logos {
@@ -84,7 +87,7 @@ class ImageDecodedHandlerWithTimeout {
 void ObserverOnLogoAvailable(LogoObserver* observer,
                              bool from_cache,
                              LogoCallbackReason type,
-                             const base::Optional<Logo>& logo) {
+                             const absl::optional<Logo>& logo) {
   switch (type) {
     case LogoCallbackReason::DISABLED:
     case LogoCallbackReason::CANCELED:
@@ -107,19 +110,19 @@ void ObserverOnLogoAvailable(LogoObserver* observer,
 void RunCallbacksWithDisabled(LogoCallbacks callbacks) {
   if (callbacks.on_cached_encoded_logo_available) {
     std::move(callbacks.on_cached_encoded_logo_available)
-        .Run(LogoCallbackReason::DISABLED, base::nullopt);
+        .Run(LogoCallbackReason::DISABLED, absl::nullopt);
   }
   if (callbacks.on_cached_decoded_logo_available) {
     std::move(callbacks.on_cached_decoded_logo_available)
-        .Run(LogoCallbackReason::DISABLED, base::nullopt);
+        .Run(LogoCallbackReason::DISABLED, absl::nullopt);
   }
   if (callbacks.on_fresh_encoded_logo_available) {
     std::move(callbacks.on_fresh_encoded_logo_available)
-        .Run(LogoCallbackReason::DISABLED, base::nullopt);
+        .Run(LogoCallbackReason::DISABLED, absl::nullopt);
   }
   if (callbacks.on_fresh_decoded_logo_available) {
     std::move(callbacks.on_fresh_decoded_logo_available)
-        .Run(LogoCallbackReason::DISABLED, base::nullopt);
+        .Run(LogoCallbackReason::DISABLED, absl::nullopt);
   }
 }
 
@@ -160,14 +163,14 @@ void NotifyAndClear(std::vector<EncodedLogoCallback>* encoded_callbacks,
                     const EncodedLogo* encoded_logo,
                     const Logo* decoded_logo) {
   auto opt_encoded_logo =
-      encoded_logo ? base::Optional<EncodedLogo>(*encoded_logo) : base::nullopt;
+      encoded_logo ? absl::optional<EncodedLogo>(*encoded_logo) : absl::nullopt;
   for (EncodedLogoCallback& callback : *encoded_callbacks) {
     std::move(callback).Run(type, opt_encoded_logo);
   }
   encoded_callbacks->clear();
 
   auto opt_decoded_logo =
-      decoded_logo ? base::Optional<Logo>(*decoded_logo) : base::nullopt;
+      decoded_logo ? absl::optional<Logo>(*decoded_logo) : absl::nullopt;
   for (LogoCallback& callback : *decoded_callbacks) {
     std::move(callback).Run(type, opt_decoded_logo);
   }
@@ -610,7 +613,7 @@ void LogoServiceImpl::OnFreshLogoAvailable(
       UMA_HISTOGRAM_BOOLEAN("NewTabPage.LogoImageDownloaded", from_http_cache);
 
       DCHECK(!encoded_logo->encoded_image || !image.isNull());
-      logo.reset(new Logo());
+      logo = std::make_unique<Logo>();
       logo->metadata = encoded_logo->metadata;
       logo->image = image;
       logo->dark_image = dark_image;

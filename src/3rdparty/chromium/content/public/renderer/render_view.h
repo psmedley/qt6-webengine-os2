@@ -9,7 +9,6 @@
 
 #include "build/build_config.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace blink {
@@ -35,20 +34,14 @@ class RenderViewVisitor;
 // agnostic of frames and document content or structure. For more context,
 // please see https://crbug.com/467770 and
 // https://www.chromium.org/developers/design-documents/site-isolation.
-class CONTENT_EXPORT RenderView : public IPC::Sender {
+class CONTENT_EXPORT RenderView {
  public:
   // Returns the RenderView containing the given WebView.
   static RenderView* FromWebView(blink::WebView* webview);
 
-  // Returns the number of live RenderView instances in this process.
-  static size_t GetRenderViewCount();
-
   // Visit all RenderViews with a live WebView (i.e., RenderViews that have
   // been closed but not yet destroyed are excluded).
   static void ForEach(RenderViewVisitor* visitor);
-
-  // Returns the main RenderFrame.
-  virtual RenderFrame* GetMainRenderFrame() = 0;
 
   // Get the routing ID of the view.
   virtual int GetRoutingID() = 0;
@@ -57,7 +50,7 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   virtual blink::WebView* GetWebView() = 0;
 
  protected:
-  ~RenderView() override {}
+  virtual ~RenderView() {}
 
  private:
   // This interface should only be implemented inside content.

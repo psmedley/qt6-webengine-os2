@@ -44,13 +44,16 @@ class FrameCaret;
 class GraphicsContext;
 class LayoutBlock;
 class LocalFrame;
-class SelectionEditor;
+class NGPhysicalBoxFragment;
 struct PaintInvalidatorContext;
 struct PhysicalOffset;
+class SelectionEditor;
 
 class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
  public:
   FrameCaret(LocalFrame&, const SelectionEditor&);
+  FrameCaret(const FrameCaret&) = delete;
+  FrameCaret& operator=(const FrameCaret&) = delete;
   ~FrameCaret();
 
   bool IsActive() const;
@@ -67,15 +70,13 @@ class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
   void SetCaretEnabled(bool);
   IntRect AbsoluteCaretBounds() const;
 
-  bool ShouldShowBlockCursor() const { return should_show_block_cursor_; }
-  void SetShouldShowBlockCursor(bool);
-
   // Paint invalidation methods delegating to DisplayItemClient.
   void LayoutBlockWillBeDestroyed(const LayoutBlock&);
   void UpdateStyleAndLayoutIfNeeded();
   void InvalidatePaint(const LayoutBlock&, const PaintInvalidatorContext&);
 
   bool ShouldPaintCaret(const LayoutBlock&) const;
+  bool ShouldPaintCaret(const NGPhysicalBoxFragment&) const;
   void PaintCaret(GraphicsContext&, const PhysicalOffset&) const;
 
   // For unit tests.
@@ -106,9 +107,6 @@ class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
   bool is_caret_enabled_ = false;
   bool should_show_caret_ = false;
   bool is_caret_blinking_suspended_ = false;
-  bool should_show_block_cursor_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameCaret);
 };
 
 }  // namespace blink

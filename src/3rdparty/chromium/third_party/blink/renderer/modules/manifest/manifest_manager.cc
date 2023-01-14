@@ -19,7 +19,6 @@
 #include "third_party/blink/renderer/modules/manifest/manifest_change_notifier.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_fetcher.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_parser.h"
-#include "third_party/blink/renderer/modules/manifest/manifest_type_converters.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_uma_util.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -96,7 +95,7 @@ void ManifestManager::RequestManifestForTesting(
       [](WebManifestManager::Callback callback, const KURL& manifest_url,
          const mojom::blink::ManifestPtr& manifest,
          const mojom::blink::ManifestDebugInfo* debug_info) {
-        std::move(callback).Run(manifest_url, manifest.To<Manifest>());
+        std::move(callback).Run(manifest_url);
       },
       std::move(callback)));
 }
@@ -176,7 +175,12 @@ void ManifestManager::OnManifestFetchComplete(const KURL& document_url,
   }
 
   ManifestUmaUtil::FetchSucceeded();
-  ManifestParser parser(data, response.CurrentRequestUrl(), document_url);
+  // We are using the document as our FeatureContext for checking origin trials.
+  // Note that any origin trials delivered in the manifest HTTP headers will be
+  // ignored, only ones associated with the page will be used.
+  const FeatureContext* feature_context = GetExecutionContext();
+  ManifestParser parser(data, response.CurrentRequestUrl(), document_url,
+                        feature_context);
   parser.Parse();
 
   manifest_debug_info_ = mojom::blink::ManifestDebugInfo::New();
@@ -211,6 +215,24 @@ void ManifestManager::RecordMetrics(const mojom::blink::Manifest& manifest) {
   if (manifest.capture_links != mojom::blink::CaptureLinks::kUndefined) {
     UseCounter::Count(GetSupplementable(),
                       WebFeature::kWebAppManifestCaptureLinks);
+  }
+
+  if (!manifest.url_handlers.IsEmpty()) {
+    UseCounter::Count(GetSupplementable(),
+                      WebFeature::kWebAppManifestUrlHandlers);
+  }
+
+  if (!manifest.protocol_handlers.IsEmpty()) {
+    UseCounter::Count(GetSupplementable(),
+                      WebFeature::kWebAppManifestProtocolHandlers);
+  }
+
+  for (const mojom::blink::DisplayMode& display_override :
+       manifest.display_override) {
+    if (display_override == mojom::blink::DisplayMode::kWindowControlsOverlay) {
+      UseCounter::Count(GetSupplementable(),
+                        WebFeature::kWebAppWindowControlsOverlay);
+    }
   }
 }
 

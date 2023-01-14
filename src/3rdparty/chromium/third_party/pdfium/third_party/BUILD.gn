@@ -370,7 +370,12 @@ group("libopenjpeg2") {
 
 config("fx_libopenjpeg_warnings") {
   visibility = [ ":*" ]
-  if (is_win && !is_clang && target_cpu == "x86") {
+  if (is_clang) {
+    cflags = [
+      # Various files convert MAX_INT to double and similar without casting.
+      "-Wno-implicit-int-float-conversion",
+    ]
+  } else if (is_win && target_cpu == "x86") {
     cflags = [
       # Signed/unsigned comparisons.
       "/wd4018",
@@ -421,18 +426,11 @@ config("system_libpng_config") {
   defines = [ "USE_SYSTEM_LIBPNG" ]
 }
 
-if(pdfium_use_qt_libpng) {
-  config("qt_libpng_config") {
-    include_dirs = [ pdfium_qt_libpng_includes ]
-    defines = [ "USE_SYSTEM_LIBPNG" ]
-  }
-}
-
 group("png") {
   if (pdfium_use_system_libpng) {
     public_configs = [ ":system_libpng_config" ]
   } else if (pdfium_use_qt_libpng) {
-    public_configs = [ ":qt_libpng_config" ]
+    public_configs = [ qt_libpng_config ]
   } else {
     public_deps = [ ":fx_lpng" ]
   }
@@ -605,6 +603,8 @@ source_set("pdfium_base") {
     "base/check_op.h",
     "base/compiler_specific.h",
     "base/containers/adapters.h",
+    "base/containers/contains.h",
+    "base/cxx17_backports.h",
     "base/debug/alias.cc",
     "base/debug/alias.h",
     "base/immediate_crash.h",
@@ -625,7 +625,6 @@ source_set("pdfium_base") {
     "base/numerics/safe_math_shared_impl.h",
     "base/optional.h",
     "base/span.h",
-    "base/stl_util.h",
     "base/sys_byteorder.h",
     "base/template_util.h",
   ]
@@ -647,11 +646,7 @@ source_set("pdfium_base") {
 
 source_set("pdfium_base_test_support") {
   testonly = true
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [
-    "//build/config/compiler:no_chromium_code",
-    ":pdfium_third_party_config",
-  ]
+  configs += [ "../:pdfium_strict_config" ]
   sources = []
   deps = []
 
@@ -665,11 +660,7 @@ source_set("pdfium_base_test_support") {
 }
 
 source_set("skia_shared") {
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [
-    "//build/config/compiler:no_chromium_code",
-    ":pdfium_third_party_config",
-  ]
+  configs += [ "../:pdfium_strict_config" ]
   sources = [
     "skia_shared/SkFloatToDecimal.cpp",
     "skia_shared/SkFloatToDecimal.h",

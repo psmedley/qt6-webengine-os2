@@ -16,9 +16,11 @@
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_sink.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
 #include "third_party/blink/public/web/modules/mediastream/encoded_video_frame.h"
+#include "third_party/blink/public/web/modules/mediastream/media_stream_video_sink.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -46,12 +48,12 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
   static WebMediaStreamTrack CreateVideoTrack(
       MediaStreamVideoSource* source,
       const VideoTrackAdapterSettings& adapter_settings,
-      const base::Optional<bool>& noise_reduction,
+      const absl::optional<bool>& noise_reduction,
       bool is_screencast,
-      const base::Optional<double>& min_frame_rate,
-      const base::Optional<double>& pan,
-      const base::Optional<double>& tilt,
-      const base::Optional<double>& zoom,
+      const absl::optional<double>& min_frame_rate,
+      const absl::optional<double>& pan,
+      const absl::optional<double>& tilt,
+      const absl::optional<double>& zoom,
       bool pan_tilt_zoom_allowed,
       MediaStreamVideoSource::ConstraintsOnceCallback callback,
       bool enabled);
@@ -66,12 +68,12 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
   MediaStreamVideoTrack(
       MediaStreamVideoSource* source,
       const VideoTrackAdapterSettings& adapter_settings,
-      const base::Optional<bool>& noise_reduction,
+      const absl::optional<bool>& noise_reduction,
       bool is_screen_cast,
-      const base::Optional<double>& min_frame_rate,
-      const base::Optional<double>& pan,
-      const base::Optional<double>& tilt,
-      const base::Optional<double>& zoom,
+      const absl::optional<double>& min_frame_rate,
+      const absl::optional<double>& pan,
+      const absl::optional<double>& tilt,
+      const absl::optional<double>& zoom,
       bool pan_tilt_zoom_allowed,
       MediaStreamVideoSource::ConstraintsOnceCallback callback,
       bool enabled);
@@ -83,13 +85,15 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
       WebMediaStreamTrack::ContentHintType content_hint) override;
   void StopAndNotify(base::OnceClosure callback) override;
   void GetSettings(MediaStreamTrackPlatform::Settings& settings) override;
+  MediaStreamTrackPlatform::CaptureHandle GetCaptureHandle() override;
 
   // Add |sink| to receive state changes on the main render thread and video
   // frames in the |callback| method on the IO-thread.
   // |callback| will be reset on the render thread.
   void AddSink(WebMediaStreamSink* sink,
                const VideoCaptureDeliverFrameCB& callback,
-               bool is_sink_secure);
+               MediaStreamVideoSink::IsSecure is_secure,
+               MediaStreamVideoSink::UsesAlpha uses_alpha);
   void RemoveSink(WebMediaStreamSink* sink);
 
   // Returns the number of currently connected sinks.
@@ -108,22 +112,22 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
 
   void OnReadyStateChanged(WebMediaStreamSource::ReadyState state);
 
-  const base::Optional<bool>& noise_reduction() const {
+  const absl::optional<bool>& noise_reduction() const {
     return noise_reduction_;
   }
   bool is_screencast() const { return is_screencast_; }
-  const base::Optional<double>& min_frame_rate() const {
+  const absl::optional<double>& min_frame_rate() const {
     return min_frame_rate_;
   }
-  const base::Optional<double>& max_frame_rate() const {
+  const absl::optional<double>& max_frame_rate() const {
     return max_frame_rate_;
   }
   const VideoTrackAdapterSettings& adapter_settings() const {
     return *adapter_settings_;
   }
-  const base::Optional<double>& pan() const { return pan_; }
-  const base::Optional<double>& tilt() const { return tilt_; }
-  const base::Optional<double>& zoom() const { return zoom_; }
+  const absl::optional<double>& pan() const { return pan_; }
+  const absl::optional<double>& tilt() const { return tilt_; }
+  const absl::optional<double>& zoom() const { return zoom_; }
   bool pan_tilt_zoom_allowed() const { return pan_tilt_zoom_allowed_; }
 
   // Setting information about the track size.
@@ -200,13 +204,13 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
 
   // TODO(guidou): Make this field a regular field instead of a unique_ptr.
   std::unique_ptr<VideoTrackAdapterSettings> adapter_settings_;
-  base::Optional<bool> noise_reduction_;
+  absl::optional<bool> noise_reduction_;
   bool is_screencast_;
-  base::Optional<double> min_frame_rate_;
-  base::Optional<double> max_frame_rate_;
-  base::Optional<double> pan_;
-  base::Optional<double> tilt_;
-  base::Optional<double> zoom_;
+  absl::optional<double> min_frame_rate_;
+  absl::optional<double> max_frame_rate_;
+  absl::optional<double> pan_;
+  absl::optional<double> tilt_;
+  absl::optional<double> zoom_;
   bool pan_tilt_zoom_allowed_ = false;
 
   // Weak ref to the source this tracks is connected to.
@@ -215,11 +219,15 @@ class MODULES_EXPORT MediaStreamVideoTrack : public MediaStreamTrackPlatform {
   // This is used for tracking if all connected video sinks are secure.
   SecureDisplayLinkTracker<WebMediaStreamSink> secure_tracker_;
 
+  // This is used for tracking if no connected video use alpha.
+  HashSet<WebMediaStreamSink*> alpha_using_sinks_;
+  HashSet<WebMediaStreamSink*> alpha_discarding_sinks_;
+
   // Remembering our desired video size and frame rate.
   int width_ = 0;
   int height_ = 0;
   double frame_rate_ = 0.0;
-  base::Optional<double> computed_frame_rate_;
+  absl::optional<double> computed_frame_rate_;
   media::VideoCaptureFormat computed_source_format_;
   base::RepeatingTimer refresh_timer_;
 

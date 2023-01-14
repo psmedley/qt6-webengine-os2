@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/xattr.h>
 
@@ -18,7 +20,6 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
-#include "base/mac/rosetta.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_ioobject.h"
 #include "base/mac/scoped_nsobject.h"
@@ -77,8 +78,11 @@ class LoginItemsFileList {
           reinterpret_cast<LSSharedFileListItemRef>(login_item);
 #pragma clang diagnostic push  // https://crbug.com/1154377
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-      ScopedCFTypeRef<CFURLRef> item_url(
-          LSSharedFileListItemCopyResolvedURL(item, 0, nullptr));
+      // kLSSharedFileListDoNotMountVolumes is used so that we don't trigger
+      // mounting when it's not expected by a user. Just listing the login
+      // items should not cause any side-effects.
+      ScopedCFTypeRef<CFURLRef> item_url(LSSharedFileListItemCopyResolvedURL(
+          item, kLSSharedFileListDoNotMountVolumes, nullptr));
 #pragma clang diagnostic pop
 
       if (item_url && CFEqual(item_url, url)) {
@@ -387,9 +391,6 @@ int MacOSVersionInternal() {
   // correspondence between Darwin's major version numbers and macOS major
   // version numbers.
   int macos_major_version = darwin_major_version - 9;
-  DLOG_IF(WARNING, darwin_major_version > 20)
-      << "Assuming Darwin " << base::NumberToString(darwin_major_version)
-      << " is macOS " << base::NumberToString(macos_major_version);
 
   return macos_major_version * 100;
 }
@@ -404,6 +405,21 @@ int MacOSVersion() {
 }
 
 }  // namespace internal
+
+namespace {
+
+#if defined(ARCH_CPU_X86_64)
+// https://developer.apple.com/documentation/apple_silicon/about_the_rosetta_translation_environment#3616845
+bool ProcessIsTranslated() {
+  int ret = 0;
+  size_t size = sizeof(ret);
+  if (sysctlbyname("sysctl.proc_translated", &ret, &size, nullptr, 0) == -1)
+    return false;
+  return ret;
+}
+#endif  // ARCH_CPU_X86_64
+
+}  // namespace
 
 CPUType GetCPUType() {
 #if defined(ARCH_CPU_ARM64)

@@ -4,8 +4,11 @@
 
 #include "chrome/browser/media/webrtc/test_stats_dictionary.h"
 
+#include <memory>
+
 #include "base/check.h"
 #include "base/json/json_writer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
@@ -43,8 +46,7 @@ std::unique_ptr<TestStatsDictionary> TestStatsReportDictionary::Get(
   const base::DictionaryValue* dictionary;
   if (!report_->GetDictionary(id, &dictionary))
     return nullptr;
-  return std::unique_ptr<TestStatsDictionary>(
-      new TestStatsDictionary(this, dictionary));
+  return std::make_unique<TestStatsDictionary>(this, dictionary);
 }
 
 std::vector<TestStatsDictionary> TestStatsReportDictionary::GetAll() {
@@ -175,17 +177,19 @@ bool TestStatsDictionary::GetSequenceBoolean(
 bool TestStatsDictionary::GetSequenceNumber(
     const std::string& key,
     std::vector<double>* out) const {
-  const base::ListValue* list;
-  if (!stats_->GetList(key, &list))
+  const base::Value* number_sequence = stats_->FindListKey(key);
+  if (!number_sequence)
     return false;
-  std::vector<double> sequence;
-  double element;
-  for (size_t i = 0; i < list->GetSize(); ++i) {
-    if (!list->GetDouble(i, &element))
+
+  out->clear();
+  for (const base::Value& element : number_sequence->GetList()) {
+    absl::optional<double> double_value = element.GetIfDouble();
+    if (!double_value)
       return false;
-    sequence.push_back(element);
+
+    out->push_back(*double_value);
   }
-  *out = std::move(sequence);
+
   return true;
 }
 

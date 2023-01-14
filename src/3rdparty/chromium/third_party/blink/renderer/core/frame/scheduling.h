@@ -15,6 +15,7 @@
 namespace blink {
 
 class IsInputPendingOptions;
+class Navigator;
 
 // Low-level scheduling primitives for JS scheduler implementations.
 class CORE_EXPORT Scheduling : public ScriptWrappable,

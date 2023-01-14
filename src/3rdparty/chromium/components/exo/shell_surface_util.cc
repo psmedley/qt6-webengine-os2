@@ -12,7 +12,9 @@
 #include "components/exo/permission.h"
 #include "components/exo/shell_surface_base.h"
 #include "components/exo/surface.h"
+#include "components/exo/window_properties.h"
 #include "components/exo/wm_helper.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
@@ -23,7 +25,9 @@
 #include "ui/wm/core/window_util.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/public/cpp/window_properties.h"
 #include "chromeos/ui/base/window_properties.h"
+#include "components/exo/client_controlled_shell_surface.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace exo {
@@ -32,16 +36,15 @@ namespace {
 
 DEFINE_UI_CLASS_PROPERTY_KEY(Surface*, kRootSurfaceKey, nullptr)
 
-// Application Id set by the client. For example:
-// "org.chromium.arc.<task-id>" for ARC++ shell surfaces.
-// "org.chromium.lacros.<window-id>" for Lacros browser shell surfaces.
-DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(std::string, kApplicationIdKey, nullptr)
-
 // Startup Id set by the client.
 DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(std::string, kStartupIdKey, nullptr)
 
-// Accessibility Id set by the client.
-DEFINE_UI_CLASS_PROPERTY_KEY(int32_t, kClientAccessibilityIdKey, -1)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// A property key containing the client controlled shell surface.
+DEFINE_UI_CLASS_PROPERTY_KEY(ClientControlledShellSurface*,
+                             kClientControlledShellSurface,
+                             nullptr)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Returns true if the component for a located event should be taken care of
 // by the window system.
@@ -74,7 +77,7 @@ aura::WindowTargeter* FindTargeter(ui::EventTarget* target) {
 }  // namespace
 
 void SetShellApplicationId(ui::PropertyHandler* property_handler,
-                           const base::Optional<std::string>& id) {
+                           const absl::optional<std::string>& id) {
   TRACE_EVENT1("exo", "SetApplicationId", "application_id", id ? *id : "null");
 
   if (id)
@@ -88,7 +91,7 @@ const std::string* GetShellApplicationId(const aura::Window* property_handler) {
 }
 
 void SetShellStartupId(ui::PropertyHandler* property_handler,
-                       const base::Optional<std::string>& id) {
+                       const absl::optional<std::string>& id) {
   TRACE_EVENT1("exo", "SetStartupId", "startup_id", id ? *id : "null");
 
   if (id)
@@ -97,7 +100,7 @@ void SetShellStartupId(ui::PropertyHandler* property_handler,
     property_handler->ClearProperty(kStartupIdKey);
 }
 
-const std::string* GetShellStartupId(aura::Window* window) {
+const std::string* GetShellStartupId(const aura::Window* window) {
   return window->GetProperty(kStartupIdKey);
 }
 
@@ -111,25 +114,51 @@ void SetShellUseImmersiveForFullscreen(aura::Window* window, bool value) {
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+
 void SetShellClientAccessibilityId(aura::Window* window,
-                                   const base::Optional<int32_t>& id) {
+                                   const absl::optional<int32_t>& id) {
   TRACE_EVENT1("exo", "SetClientAccessibilityId", "id",
                id ? base::NumberToString(*id) : "null");
 
   if (id)
-    window->SetProperty(kClientAccessibilityIdKey, *id);
+    window->SetProperty(ash::kClientAccessibilityIdKey, *id);
   else
-    window->ClearProperty(kClientAccessibilityIdKey);
+    window->ClearProperty(ash::kClientAccessibilityIdKey);
 }
 
-const base::Optional<int32_t> GetShellClientAccessibilityId(
+const absl::optional<int32_t> GetShellClientAccessibilityId(
     aura::Window* window) {
-  auto id = window->GetProperty(kClientAccessibilityIdKey);
+  auto id = window->GetProperty(ash::kClientAccessibilityIdKey);
   if (id < 0)
-    return base::nullopt;
+    return absl::nullopt;
   else
     return id;
 }
+
+void SetShellClientControlledShellSurface(
+    ui::PropertyHandler* property_handler,
+    const absl::optional<ClientControlledShellSurface*>& shell_surface) {
+  if (shell_surface)
+    property_handler->SetProperty(kClientControlledShellSurface,
+                                  shell_surface.value());
+  else
+    property_handler->ClearProperty(kClientControlledShellSurface);
+}
+
+ClientControlledShellSurface* GetShellClientControlledShellSurface(
+    ui::PropertyHandler* property_handler) {
+  return property_handler->GetProperty(kClientControlledShellSurface);
+}
+
+int GetWindowDeskStateChanged(const aura::Window* window) {
+  constexpr int kToggleVisibleOnAllWorkspacesValue = -1;
+  return window->GetProperty(aura::client::kVisibleOnAllWorkspacesKey)
+             ? kToggleVisibleOnAllWorkspacesValue
+             : window->GetProperty(aura::client::kWindowWorkspaceKey);
+}
+
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void SetShellRootSurface(ui::PropertyHandler* property_handler,
                          Surface* surface) {
@@ -147,7 +176,14 @@ ShellSurfaceBase* GetShellSurfaceBaseForWindow(aura::Window* window) {
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
   if (!widget)
     return nullptr;
-  return static_cast<ShellSurfaceBase*>(widget->widget_delegate());
+  ShellSurfaceBase* shell_surface_base =
+      static_cast<ShellSurfaceBase*>(widget->widget_delegate());
+  // We can obtain widget from native window, but not |shell_surface_base|.
+  // This means we are in the process of destroying this surface so we should
+  // return nullptr.
+  if (!shell_surface_base || !shell_surface_base->GetWidget())
+    return nullptr;
+  return shell_surface_base;
 }
 
 Surface* GetTargetSurfaceForLocatedEvent(
@@ -168,6 +204,14 @@ Surface* GetTargetSurfaceForLocatedEvent(
     root_surface = GetShellRootSurface(widget->GetNativeWindow());
     if (!root_surface)
       return nullptr;
+
+    ShellSurfaceBase* shell_surface_base =
+        GetShellSurfaceBaseForWindow(widget->GetNativeWindow());
+    // Check if it's overlay window.
+    if (!shell_surface_base->host_window()->Contains(window) &&
+        shell_surface_base->GetWidget()->GetNativeWindow() != window) {
+      return nullptr;
+    }
   }
 
   // Create a clone of the event as targeter may update it during the
@@ -184,7 +228,6 @@ Surface* GetTargetSurfaceForLocatedEvent(
 
     aura::Window* focused =
         static_cast<aura::Window*>(targeter->FindTargetForEvent(window, event));
-
     if (focused) {
       Surface* surface = Surface::AsSurface(focused);
       if (focused != window)
@@ -216,12 +259,41 @@ Surface* GetTargetSurfaceForLocatedEvent(
   }
 }
 
+Surface* GetTargetSurfaceForKeyboardFocus(aura::Window* window) {
+  if (!window)
+    return nullptr;
+  // The keyboard focus should be set to the root surface.
+  ShellSurfaceBase* shell_surface_base = nullptr;
+  for (auto* current = window; current && !shell_surface_base;
+       current = current->parent()) {
+    shell_surface_base = GetShellSurfaceBaseForWindow(current);
+  }
+  // Make sure the |window| is the toplevel or a host window, but not
+  // another window added to the toplevel.
+  if (shell_surface_base && !shell_surface_base->HasOverlay() &&
+      (shell_surface_base->GetWidget()->GetNativeWindow() == window ||
+       shell_surface_base->host_window()->Contains(window))) {
+    return shell_surface_base->root_surface();
+  }
+
+  // Fallback to the window's surface if any. This is used for
+  // notifications.
+  return Surface::AsSurface(window);
+}
+
 void GrantPermissionToActivate(aura::Window* window, base::TimeDelta timeout) {
   // Activation is the only permission, so just set the property. The window
   // owns the Permission object.
   window->SetProperty(
       kPermissionKey,
       new Permission(Permission::Capability::kActivate, timeout));
+}
+
+void GrantPermissionToActivateIndefinitely(aura::Window* window) {
+  // Activation is the only permission, so just set the property. The window
+  // owns the Permission object.
+  window->SetProperty(kPermissionKey,
+                      new Permission(Permission::Capability::kActivate));
 }
 
 void RevokePermissionToActivate(aura::Window* window) {
@@ -273,7 +345,7 @@ bool ConsumedByIme(aura::Window* window, const ui::KeyEvent& event) {
   // treat keydown as a trigger of text inputs. We need suppression for keydown.
   //
   // Same condition as components/arc/ime/arc_ime_service.cc#InsertChar.
-  const base::char16 ch = event.GetCharacter();
+  const char16_t ch = event.GetCharacter();
   const bool is_control_char =
       (0x00 <= ch && ch <= 0x1f) || (0x7f <= ch && ch <= 0x9f);
   if (!is_control_char && !ui::IsSystemKeyModifier(event.flags()))
@@ -295,6 +367,14 @@ bool ConsumedByIme(aura::Window* window, const ui::KeyEvent& event) {
   }
 
   return false;
+}
+
+void SetSkipImeProcessingToDescendentSurfaces(aura::Window* window,
+                                              bool value) {
+  if (Surface::AsSurface(window))
+    window->SetProperty(aura::client::kSkipImeProcessing, value);
+  for (aura::Window* child : window->children())
+    SetSkipImeProcessingToDescendentSurfaces(child, value);
 }
 
 }  // namespace exo

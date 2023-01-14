@@ -37,16 +37,16 @@ bool MockInputRouter::HasPendingEvents() const {
   return false;
 }
 
-base::Optional<cc::TouchAction> MockInputRouter::AllowedTouchAction() {
+absl::optional<cc::TouchAction> MockInputRouter::AllowedTouchAction() {
   return cc::TouchAction::kAuto;
 }
 
-base::Optional<cc::TouchAction> MockInputRouter::ActiveTouchAction() {
+absl::optional<cc::TouchAction> MockInputRouter::ActiveTouchAction() {
   return cc::TouchAction::kAuto;
 }
 
 mojo::PendingRemote<blink::mojom::WidgetInputHandlerHost>
-MockInputRouter::BindNewHost() {
+MockInputRouter::BindNewHost(scoped_refptr<base::SequencedTaskRunner>) {
   return mojo::NullRemote();
 }
 

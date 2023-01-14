@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_BODY_STREAM_BUFFER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_BODY_STREAM_BUFFER_H_
 
-#include <memory>
 #include "base/types/pass_key.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom-blink.h"
@@ -58,6 +57,9 @@ class CORE_EXPORT BodyStreamBuffer final : public UnderlyingSourceBase,
                    ReadableStream* stream,
                    ScriptCachedMetadataHandler* cached_metadata_handler,
                    scoped_refptr<BlobDataHandle> side_data_blob = nullptr);
+
+  BodyStreamBuffer(const BodyStreamBuffer&) = delete;
+  BodyStreamBuffer& operator=(const BodyStreamBuffer&) = delete;
 
   ReadableStream* Stream() { return stream_; }
 
@@ -156,8 +158,6 @@ class CORE_EXPORT BodyStreamBuffer final : public UnderlyingSourceBase,
 
   // TODO(ricea): Remove remaining uses of |stream_broken_|.
   bool stream_broken_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(BodyStreamBuffer);
 };
 
 }  // namespace blink

@@ -144,11 +144,6 @@ class WEBVIEW_EXPORT WebView : public View,
                               content::RenderFrameHost* new_host) override;
   void DidToggleFullscreenModeForTab(bool entered_fullscreen,
                                      bool will_cause_resize) override;
-  // Workaround for MSVC++ linker bug/feature that requires
-  // instantiation of the inline IPC::Listener methods in all translation units.
-  void OnChannelConnected(int32_t peer_id) override {}
-  void OnChannelError() override {}
-  void OnBadMessageReceived(const IPC::Message& message) override {}
   void OnWebContentsFocused(
       content::RenderWidgetHost* render_widget_host) override;
   void AXTreeIDForMainFrameHasChanged() override;
@@ -196,10 +191,6 @@ class WEBVIEW_EXPORT WebView : public View,
   // Empty if auto resize is not enabled.
   gfx::Size min_size_;
   gfx::Size max_size_;
-
-  // Tracks the child accessibility tree id which is associated with the
-  // WebContents's main RenderFrameHost.
-  ui::AXTreeID child_ax_tree_id_;
 
   DISALLOW_COPY_AND_ASSIGN(WebView);
 };

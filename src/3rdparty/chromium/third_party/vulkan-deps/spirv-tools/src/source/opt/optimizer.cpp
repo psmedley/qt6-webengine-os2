@@ -155,7 +155,8 @@ Optimizer& Optimizer::RegisterLegalizationPasses() {
           .RegisterPass(CreateVectorDCEPass())
           .RegisterPass(CreateDeadInsertElimPass())
           .RegisterPass(CreateReduceLoadSizePass())
-          .RegisterPass(CreateAggressiveDCEPass());
+          .RegisterPass(CreateAggressiveDCEPass())
+          .RegisterPass(CreateInterpolateFixupPass());
 }
 
 Optimizer& Optimizer::RegisterPerformancePasses() {
@@ -488,12 +489,16 @@ bool Optimizer::RegisterPassFromFlag(const std::string& flag) {
     RegisterSizePasses();
   } else if (pass_name == "legalize-hlsl") {
     RegisterLegalizationPasses();
+  } else if (pass_name == "remove-unused-interface-variables") {
+    RegisterPass(CreateRemoveUnusedInterfaceVariablesPass());
   } else if (pass_name == "graphics-robust-access") {
     RegisterPass(CreateGraphicsRobustAccessPass());
   } else if (pass_name == "wrap-opkill") {
     RegisterPass(CreateWrapOpKillPass());
   } else if (pass_name == "amd-ext-to-khr") {
     RegisterPass(CreateAmdExtToKhrPass());
+  } else if (pass_name == "interpolate-fixup") {
+    RegisterPass(CreateInterpolateFixupPass());
   } else {
     Errorf(consumer(), nullptr, {},
            "Unknown flag '--%s'. Use --help for a list of valid flags",
@@ -726,6 +731,11 @@ Optimizer::PassToken CreateAggressiveDCEPass() {
       MakeUnique<opt::AggressiveDCEPass>());
 }
 
+Optimizer::PassToken CreateRemoveUnusedInterfaceVariablesPass() {
+  return MakeUnique<Optimizer::PassToken::Impl>(
+      MakeUnique<opt::RemoveUnusedInterfaceVariablesPass>());
+}
+
 Optimizer::PassToken CreatePropagateLineInfoPass() {
   return MakeUnique<Optimizer::PassToken::Impl>(MakeUnique<opt::EmptyPass>());
 }
@@ -923,6 +933,11 @@ Optimizer::PassToken CreateWrapOpKillPass() {
 Optimizer::PassToken CreateAmdExtToKhrPass() {
   return MakeUnique<Optimizer::PassToken::Impl>(
       MakeUnique<opt::AmdExtensionToKhrPass>());
+}
+
+Optimizer::PassToken CreateInterpolateFixupPass() {
+  return MakeUnique<Optimizer::PassToken::Impl>(
+      MakeUnique<opt::InterpFixupPass>());
 }
 
 }  // namespace spvtools

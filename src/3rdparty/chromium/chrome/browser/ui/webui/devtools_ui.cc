@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/devtools_ui.h"
 
 #include "base/command_line.h"
+#include "base/strings/stringprintf.h"
 #ifndef TOOLKIT_QT
 #include "chrome/browser/devtools/url_constants.h"
 #endif
@@ -18,7 +19,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/user_agent.h"
-#include "net/base/load_flags.h"
 
 // static
 GURL DevToolsUI::GetProxyURL(const std::string& frontend_url) {
@@ -41,11 +41,9 @@ GURL DevToolsUI::GetProxyURL(const std::string& frontend_url) {
 // static
 GURL DevToolsUI::GetRemoteBaseURL() {
 #ifndef TOOLKIT_QT
-  return GURL(base::StringPrintf(
-      "%s%s/%s/",
-      kRemoteFrontendBase,
-      kRemoteFrontendPath,
-      content::GetWebKitRevision().c_str()));
+  return GURL(base::StringPrintf("%s%s/%s/", kRemoteFrontendBase,
+                                 kRemoteFrontendPath,
+                                 content::GetChromiumGitRevision().c_str()));
 #else
   return GURL();
 #endif
@@ -81,8 +79,9 @@ DevToolsUI::DevToolsUI(content::WebUI* web_ui)
 #endif
 {
   web_ui->SetBindings(content::BINDINGS_POLICY_NONE);
-  auto factory = content::BrowserContext::GetDefaultStoragePartition(
-                     web_ui->GetWebContents()->GetBrowserContext())
+  auto factory = web_ui->GetWebContents()
+                     ->GetBrowserContext()
+                     ->GetDefaultStoragePartition()
                      ->GetURLLoaderFactoryForBrowserProcess();
   content::URLDataSource::Add(
       web_ui->GetWebContents()->GetBrowserContext(),

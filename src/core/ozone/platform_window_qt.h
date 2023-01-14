@@ -60,9 +60,9 @@ public:
     void SetBounds(const gfx::Rect& bounds) override;
     void Show(bool inactive = false) override { }
     void Hide() override { }
-    void Close() override { }
+    void Close() override;
     bool IsVisible() const override { return true; }
-    void SetTitle(const base::string16&) override { }
+    void SetTitle(const std::u16string&) override { }
     void SetCapture() override { }
     void ReleaseCapture() override { }
     bool HasCapture() const override { return false; }
@@ -71,7 +71,7 @@ public:
     void Minimize() override { }
     void Restore() override { }
     PlatformWindowState GetPlatformWindowState() const override { return PlatformWindowState::kUnknown; }
-    void SetCursor(PlatformCursor) override { }
+    void SetCursor(scoped_refptr<PlatformCursor>) override { }
     void MoveCursorTo(const gfx::Point&) override { }
     void ConfineCursorToBounds(const gfx::Rect&) override { }
     void SetRestoredBoundsInPixels(const gfx::Rect& bounds) override { }

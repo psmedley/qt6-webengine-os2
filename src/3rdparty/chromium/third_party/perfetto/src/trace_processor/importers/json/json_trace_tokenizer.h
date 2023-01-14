@@ -19,7 +19,8 @@
 
 #include <stdint.h>
 
-#include "src/trace_processor/chunked_trace_reader.h"
+#include "src/trace_processor/importers/common/chunked_trace_reader.h"
+#include "src/trace_processor/importers/json/json_utils.h"
 #include "src/trace_processor/importers/systrace/systrace_line_tokenizer.h"
 #include "src/trace_processor/storage/trace_storage.h"
 
@@ -32,14 +33,12 @@ namespace trace_processor {
 
 class TraceProcessorContext;
 
-#if PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
 // Visible for testing.
 enum class ReadDictRes {
   kFoundDict,
   kNeedsMoreData,
   kEndOfTrace,
   kEndOfArray,
-  kFatalError,
 };
 
 // Parses at most one JSON dictionary and returns a pointer to the end of it,
@@ -50,7 +49,7 @@ enum class ReadDictRes {
 // Visible for testing.
 ReadDictRes ReadOneJsonDict(const char* start,
                             const char* end,
-                            Json::Value* value,
+                            base::StringView* value,
                             const char** next);
 
 enum class ReadKeyRes {
@@ -73,6 +72,16 @@ ReadKeyRes ReadOneJsonKey(const char* start,
                           std::string* key,
                           const char** next);
 
+// Takes as input a JSON dictionary and returns the value associated with
+// the provided key (if it exists).
+// Implementation note: this method does not currently support dictionaries
+// which have arrays as JSON values because current users of this method
+// do not require this.
+// Visible for testing.
+util::Status ExtractValueForJsonKey(base::StringView dict,
+                                    const std::string& key,
+                                    base::Optional<std::string>* value);
+
 enum class ReadSystemLineRes {
   kFoundLine,
   kNeedsMoreData,
@@ -84,7 +93,11 @@ ReadSystemLineRes ReadOneSystemTraceLine(const char* start,
                                          const char* end,
                                          std::string* line,
                                          const char** next);
-#endif
+
+// Parses the "displayTimeUnit" key from the given trace buffer
+// and returns the associated time unit if one exists.
+base::Optional<json::TimeUnit> MaybeParseDisplayTimeUnit(
+    base::StringView buffer);
 
 // Reads a JSON trace in chunks and extracts top level json objects.
 class JsonTraceTokenizer : public ChunkedTraceReader {
@@ -130,11 +143,9 @@ class JsonTraceTokenizer : public ChunkedTraceReader {
     kEof,
   };
 
-#if PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
   util::Status ParseInternal(const char* start,
                              const char* end,
                              const char** next);
-#endif
 
   TraceProcessorContext* const context_;
 

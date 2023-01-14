@@ -15,8 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "extensions/browser/api/declarative_net_request/action_tracker.h"
 #include "extensions/browser/api/declarative_net_request/global_rules_tracker.h"
 #include "extensions/browser/api/declarative_net_request/ruleset_manager.h"
@@ -25,6 +24,7 @@
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/api/declarative_net_request/constants.h"
 #include "extensions/common/extension_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -54,7 +54,7 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
                             public ExtensionRegistryObserver {
  public:
   using ApiCallback =
-      base::OnceCallback<void(base::Optional<std::string> error)>;
+      base::OnceCallback<void(absl::optional<std::string> error)>;
 
   // An observer used in tests.
   class TestObserver {
@@ -193,7 +193,7 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
   // response to UpdateDynamicRules.
   void OnDynamicRulesUpdated(ApiCallback callback,
                              LoadRequestData load_data,
-                             base::Optional<std::string> error);
+                             absl::optional<std::string> error);
 
   // Unloads all rulesets for the given |extension_id|.
   void RemoveCompositeMatcher(const ExtensionId& extension_id);
@@ -218,8 +218,8 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
   // checksum in preferences from |load_data|.
   void LogMetricsAndUpdateChecksumsIfNeeded(const LoadRequestData& load_data);
 
-  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      registry_observer_{this};
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      registry_observation_{this};
 
   // Helper to bridge tasks to a sequence which allows file IO.
   std::unique_ptr<const FileSequenceBridge> file_sequence_bridge_;

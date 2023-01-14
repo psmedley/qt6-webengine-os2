@@ -38,11 +38,8 @@ AXMenuList::AXMenuList(LayoutObject* layout_object,
   DCHECK(IsA<HTMLSelectElement>(layout_object->GetNode()));
 }
 
-ax::mojom::Role AXMenuList::DetermineAccessibilityRole() {
-  if ((aria_role_ = DetermineAriaRoleAttribute()) != ax::mojom::Role::kUnknown)
-    return aria_role_;
-
-  return ax::mojom::Role::kPopUpButton;
+ax::mojom::blink::Role AXMenuList::NativeRoleIgnoringAria() const {
+  return ax::mojom::blink::Role::kPopUpButton;
 }
 
 bool AXMenuList::OnNativeClickAction() {
@@ -54,6 +51,10 @@ bool AXMenuList::OnNativeClickAction() {
     select->HidePopup();
   else
     select->ShowPopup();
+
+  // Send notification that action has been handled.
+  AXObjectCache().HandleClicked(GetNode());
+
   return true;
 }
 
@@ -111,7 +112,18 @@ void AXMenuList::AddChildren() {
   DCHECK(children_dirty_);
   children_dirty_ = false;
 
-  // Ensure mock AXMenuListPopup exists.
+  AXObject* ax_popup_child = GetOrCreateMockPopupChild();
+
+  // Update mock AXMenuListPopup children.
+  ax_popup_child->SetNeedsToUpdateChildren();
+  ax_popup_child->UpdateChildrenIfNecessary();
+}
+
+AXObject* AXMenuList::GetOrCreateMockPopupChild() {
+  if (IsDetached())
+    return nullptr;
+
+  // Ensure mock AXMenuListPopup exists as first and only child.
   if (children_.IsEmpty()) {
     AXObjectCacheImpl& cache = AXObjectCache();
     AXObject* popup =
@@ -121,10 +133,8 @@ void AXMenuList::AddChildren() {
     DCHECK(popup->CachedParentObject());
     children_.push_back(popup);
   }
-
-  // Update mock AXMenuListPopup children.
-  children_[0]->SetNeedsToUpdateChildren();
-  children_[0]->UpdateChildrenIfNecessary();
+  DCHECK_EQ(children_.size(), 1U);
+  return children_[0];
 }
 
 bool AXMenuList::IsCollapsed() const {
@@ -143,9 +153,11 @@ AccessibilityExpanded AXMenuList::IsExpanded() const {
   return kExpandedExpanded;
 }
 
-void AXMenuList::DidUpdateActiveOption(int option_index) {
-  bool suppress_notifications =
-      (GetNode() && !GetNode()->IsFinishedParsingChildren());
+void AXMenuList::DidUpdateActiveOption() {
+  if (!GetNode())
+    return;
+
+  bool suppress_notifications = !GetNode()->IsFinishedParsingChildren();
 
   // TODO(aleventhal) The  NeedsToUpdateChildren() check is necessary to avoid a
   // illegal lifecycle while adding children, since this can be called at any
@@ -155,7 +167,10 @@ void AXMenuList::DidUpdateActiveOption(int option_index) {
     if (!child_objects.IsEmpty()) {
       DCHECK_EQ(child_objects.size(), 1ul);
       DCHECK(IsA<AXMenuListPopup>(child_objects[0].Get()));
-
+      HTMLSelectElement* select = To<HTMLSelectElement>(GetNode());
+      DCHECK(select);
+      HTMLOptionElement* active_option = select->OptionToBeShown();
+      int option_index = active_option ? active_option->index() : -1;
       if (auto* popup = DynamicTo<AXMenuListPopup>(child_objects[0].Get()))
         popup->DidUpdateActiveOption(option_index, !suppress_notifications);
     }

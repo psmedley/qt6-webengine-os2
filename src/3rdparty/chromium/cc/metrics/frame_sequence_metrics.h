@@ -5,10 +5,10 @@
 #ifndef CC_METRICS_FRAME_SEQUENCE_METRICS_H_
 #define CC_METRICS_FRAME_SEQUENCE_METRICS_H_
 
+#include <bitset>
 #include <memory>
 
 #include "base/callback.h"
-#include "base/optional.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/cc_export.h"
 
@@ -33,6 +33,33 @@ enum class FrameSequenceTrackerType {
   kJSAnimation = 11,
   kMaxType
 };
+
+using ActiveTrackers =
+    std::bitset<static_cast<size_t>(FrameSequenceTrackerType::kMaxType)>;
+
+inline bool IsScrollActive(const ActiveTrackers& trackers) {
+  return trackers.test(
+             static_cast<size_t>(FrameSequenceTrackerType::kWheelScroll)) ||
+         trackers.test(
+             static_cast<size_t>(FrameSequenceTrackerType::kTouchScroll)) ||
+         trackers.test(
+             static_cast<size_t>(FrameSequenceTrackerType::kScrollbarScroll));
+}
+
+inline bool HasMainThreadAnimation(const ActiveTrackers& trackers) {
+  return trackers.test(static_cast<size_t>(
+             FrameSequenceTrackerType::kMainThreadAnimation)) ||
+         trackers.test(
+             static_cast<size_t>(FrameSequenceTrackerType::kCanvasAnimation)) ||
+         trackers.test(
+             static_cast<size_t>(FrameSequenceTrackerType::kJSAnimation)) ||
+         trackers.test(static_cast<size_t>(FrameSequenceTrackerType::kRAF));
+}
+
+inline bool HasCompositorThreadAnimation(const ActiveTrackers& trackers) {
+  return trackers.test(
+      static_cast<size_t>(FrameSequenceTrackerType::kCompositorAnimation));
+}
 
 class CC_EXPORT FrameSequenceMetrics {
  public:
@@ -119,7 +146,7 @@ class CC_EXPORT FrameSequenceMetrics {
   struct CustomReportData {
     uint32_t frames_expected = 0;
     uint32_t frames_produced = 0;
-    uint32_t jank_count = 0;
+    int jank_count = 0;
   };
   using CustomReporter = base::OnceCallback<void(const CustomReportData& data)>;
   // Sets reporter callback for kCustom typed sequence.
@@ -201,6 +228,14 @@ class CC_EXPORT FrameSequenceMetrics {
 
   std::unique_ptr<JankMetrics> jank_reporter_;
 };
+
+bool ShouldReportForAnimation(FrameSequenceTrackerType sequence_type,
+                              FrameSequenceMetrics::ThreadType thread_type);
+
+bool ShouldReportForInteraction(
+    FrameSequenceTrackerType sequence_type,
+    FrameSequenceMetrics::ThreadType reporting_thread_type,
+    FrameSequenceMetrics::ThreadType metrics_effective_thread_type);
 
 }  // namespace cc
 

@@ -55,17 +55,7 @@
 
 namespace ui {
 
-base::NativeLibrary LoadLibrary(const base::FilePath& filename) {
-    base::NativeLibraryLoadError error;
-    base::NativeLibrary library = base::LoadNativeLibrary(filename, &error);
-    if (!library) {
-        LOG(ERROR) << "Failed to load " << filename.MaybeAsASCII() << ": " << error.ToString();
-        return NULL;
-    }
-    return library;
-}
-
-bool GLOzoneEGLQt::LoadGLES2Bindings(gl::GLImplementation /*implementation*/)
+bool GLOzoneEGLQt::LoadGLES2Bindings(const gl::GLImplementationParts & /*implementation*/)
 {
     base::NativeLibrary eglgles2Library = dlopen(NULL, RTLD_LAZY);
     if (!eglgles2Library) {

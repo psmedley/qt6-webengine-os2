@@ -13,12 +13,12 @@
 #include "base/compiler_specific.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "components/power_scheduler/power_mode_voter.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/frame_timing_details_map.h"
 #include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/surfaces/frame_sink_bundle_id.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/service/frame_sinks/begin_frame_tracker.h"
@@ -31,6 +31,7 @@
 #include "components/viz/service/viz_service_export.h"
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 #include "services/viz/public/mojom/hit_test/hit_test_region_list.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace viz {
 
@@ -111,6 +112,13 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // This allows the FrameSinkManagerImpl to pass a BeginFrameSource to use.
   void SetBeginFrameSource(BeginFrameSource* begin_frame_source);
 
+  // Sets the ID of the FrameSinkBundle to which this sink should belong. If the
+  // sink is incompatible with the bundle (i.e. uses a different
+  // BeginFrameSource than this CompositorFrameSinkSupport) then the sink will
+  // be removed from the bundle and destroyed asynchronously, disconnecting its
+  // client.
+  void SetBundle(const FrameSinkBundleId& bundle_id);
+
   base::TimeDelta GetPreferredFrameInterval(
       mojom::CompositorFrameSinkType* type) const;
   void InitializeCompositorFrameSinkType(mojom::CompositorFrameSinkType type);
@@ -124,8 +132,8 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   void OnSurfaceWillDraw(Surface* surface) override;
   void RefResources(
       const std::vector<TransferableResource>& resources) override;
-  void UnrefResources(const std::vector<ReturnedResource>& resources) override;
-  void ReturnResources(const std::vector<ReturnedResource>& resources) override;
+  void UnrefResources(std::vector<ReturnedResource> resources) override;
+  void ReturnResources(std::vector<ReturnedResource> resources) override;
   void ReceiveFromChild(
       const std::vector<TransferableResource>& resources) override;
   // Takes the CopyOutputRequests that were requested for a surface with at
@@ -144,6 +152,7 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
                           base::TimeTicks draw_start_timestamp,
                           const gfx::SwapTimings& swap_timings,
                           const gfx::PresentationFeedback& feedback) override;
+  bool IsVideoCaptureStarted() override;
 
   // mojom::CompositorFrameSink helpers.
   void SetNeedsBeginFrame(bool needs_begin_frame);
@@ -152,7 +161,7 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   void SubmitCompositorFrame(
       const LocalSurfaceId& local_surface_id,
       CompositorFrame frame,
-      base::Optional<HitTestRegionList> hit_test_region_list = base::nullopt,
+      absl::optional<HitTestRegionList> hit_test_region_list = absl::nullopt,
       uint64_t submit_time = 0);
   // Returns false if the notification was not valid (a duplicate).
   bool DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion region,
@@ -174,14 +183,17 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   SubmitResult MaybeSubmitCompositorFrame(
       const LocalSurfaceId& local_surface_id,
       CompositorFrame frame,
-      base::Optional<HitTestRegionList> hit_test_region_list,
+      absl::optional<HitTestRegionList> hit_test_region_list,
       uint64_t submit_time,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback callback);
 
   // CapturableFrameSink implementation.
   void AttachCaptureClient(CapturableFrameSink::Client* client) override;
   void DetachCaptureClient(CapturableFrameSink::Client* client) override;
-  gfx::Size GetActiveFrameSize() override;
+  gfx::Size GetCopyOutputRequestSize(
+      SubtreeCaptureId subtree_id) const override;
+  void OnClientCaptureStarted() override;
+  void OnClientCaptureStopped() override;
   void RequestCopyOfOutput(
       PendingCopyOutputRequest pending_copy_output_request) override;
   const CompositorFrameMetadata* GetLastActivatedFrameMetadata() override;
@@ -205,10 +217,13 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
     return copy_output_requests_;
   }
 
+  void OnCompositorFrameTransitionDirectiveProcessed(uint32_t sequence_id);
+
  private:
   friend class CompositorFrameSinkSupportTest;
   friend class DisplayTest;
   friend class FrameSinkManagerTest;
+  friend class SurfaceAggregatorWithResourcesTest;
 
   // Creates a surface reference from the top-level root to |surface_id|.
   SurfaceReference MakeTopLevelRootReference(const SurfaceId& surface_id);
@@ -251,6 +266,19 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // deadline has passed. This is called every BeginFrame.
   void CheckPendingSurfaces();
 
+  // When throttling is requested by a client, a BeginFrame will not be sent
+  // until the time elapsed has passed the requested throttle interval since the
+  // last sent BeginFrame. This function returns true if such interval has
+  // passed and a BeginFrame should be sent.
+  bool ShouldThrottleBeginFrameAsRequested(base::TimeTicks frame_time);
+
+  // Instructs the FrameSinkManager to destroy our CompositorFrameSinkImpl.
+  // To avoid reentrancy issues, this should be called from its own task.
+  void DestroySelf();
+
+  // Posts a task to invoke DestroySelf() ASAP.
+  void ScheduleSelfDestruction();
+
   mojom::CompositorFrameSinkClient* const client_;
 
   FrameSinkManagerImpl* const frame_sink_manager_;
@@ -263,7 +291,7 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // If this contains a value then a surface reference from the top-level root
   // to SurfaceId(frame_sink_id_, referenced_local_surface_id_.value()) was
   // added. This will not contain a value if |is_root_| is false.
-  base::Optional<LocalSurfaceId> referenced_local_surface_id_;
+  absl::optional<LocalSurfaceId> referenced_local_surface_id_;
 
   SurfaceResourceHolder surface_resource_holder_;
 
@@ -288,6 +316,9 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   bool added_frame_observer_ = false;
 
   bool wants_animate_only_begin_frames_ = false;
+
+  // Indicates the FrameSinkBundle to which this sink belongs, if any.
+  absl::optional<FrameSinkBundleId> bundle_id_;
 
   const bool is_root_;
 
@@ -363,7 +394,13 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // single-page-app transitions.
   SurfaceAnimationManager surface_animation_manager_;
 
-  std::unique_ptr<power_scheduler::PowerModeVoter> animation_power_mode_voter_;
+  std::unique_ptr<power_scheduler::PowerModeVoter> power_mode_voter_;
+
+  // Number of frames skipped during throttling since last BeginFrame sent.
+  uint64_t frames_throttled_since_last_ = 0;
+
+  // Number of clients that have started video capturing.
+  uint32_t number_clients_capturing_ = 0;
 
   base::WeakPtrFactory<CompositorFrameSinkSupport> weak_factory_{this};
 

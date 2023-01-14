@@ -23,7 +23,6 @@
 #include "quic/test_tools/quic_connection_peer.h"
 #include "quic/test_tools/quic_session_peer.h"
 #include "quic/test_tools/quic_test_utils.h"
-#include "common/platform/api/quiche_text_utils.h"
 
 namespace quic {
 namespace test {
@@ -116,6 +115,14 @@ class IndirectionProofSource : public ProofSource {
     proof_source_->ComputeTlsSignature(server_address, client_address, hostname,
                                        signature_algorithm, in,
                                        std::move(callback));
+  }
+
+  absl::InlinedVector<uint16_t, 8> SupportedTlsSignatureAlgorithms()
+      const override {
+    if (!proof_source_) {
+      return {};
+    }
+    return proof_source_->SupportedTlsSignatureAlgorithms();
   }
 
   TicketCrypter* GetTicketCrypter() override { return nullptr; }

@@ -523,8 +523,8 @@
       "os": {
         "type": "android"
       },
-      "gl_vendor": "Imagination.*",
-      "gl_renderer": "PowerVR SGX 5.*",
+      "gl_vendor": ".*Imagination.*",
+      "gl_renderer": ".*PowerVR SGX 5.*",
       "features": [
         "etc1_power_of_two_only"
       ]
@@ -711,16 +711,13 @@
           "value2": "5.1.99"
         }
       },
-      "gl_vendor": "Imagination.*",
-      "gl_renderer": "PowerVR Rogue.*",
+      "gl_vendor": ".*Imagination.*",
+      "gl_renderer": ".*PowerVR Rogue.*",
       "driver_version": {
         "op": "between",
         "value": "1.3",
         "value2": "1.4"
       },
-      "features": [
-        "avoid_egl_image_target_texture_reuse"
-      ],
       "disabled_extensions": [
         "EGL_KHR_wait_sync"
       ]
@@ -862,23 +859,6 @@
       ]
     },
     {
-      "id": 118,
-      "cr_bugs": [477306],
-      "description": "NVIDIA 331 series drivers shader compiler may crash when attempting to optimize pow()",
-      "os": {
-        "type": "linux"
-      },
-      "driver_version": {
-        "op": "<=",
-        "value": "331"
-      },
-      "vendor_id": "0x10de",
-      "gl_vendor": "NVIDIA.*",
-      "features": [
-        "remove_pow_with_constant_exponent"
-      ]
-    },
-    {
       "id": 119,
       "description": "Context lost recovery often fails on Mali-400/450 on Android.",
       "cr_bugs": [496438],
@@ -924,7 +904,7 @@
       "os": {
         "type": "android"
       },
-      "gl_renderer": "Adreno \\(TM\\) 3.*",
+      "gl_renderer": ".*Adreno \\(TM\\) 3.*",
       "features": [
         "disable_program_cache"
       ]
@@ -1712,19 +1692,6 @@
       ]
     },
     {
-      "id": 201,
-      "cr_bugs": [659326,639760],
-      "description": "AMD drivers in Linux require invariant qualifier to match between vertex and fragment shaders",
-      "os": {
-        "type": "linux"
-      },
-      "vendor_id": "0x1002",
-      "features": [
-        "dont_remove_invariant_for_fragment_input",
-        "remove_invariant_and_centroid_for_essl3"
-      ]
-    },
-    {
       "id": 202,
       "cr_bugs": [639760,641129],
       "description": "Mac driver GL 4.1 requires invariant and centroid to match between shaders",
@@ -2148,21 +2115,6 @@
       ]
     },
     {
-      "id": 237,
-      "description": "eglSwapBuffers intermittently fails on Android when app goes to background",
-      "cr_bugs": [744678],
-      "os": {
-        "type": "android",
-        "version": {
-          "op": "<",
-          "value": "9.0"
-        }
-      },
-      "features": [
-        "dont_disable_webgl_when_compositor_context_lost"
-      ]
-    },
-    {
       "id": 239,
       "description": "Reset TexImage2D base level to 0 on Intel Mac 10.12.4",
       "cr_bugs": [705865],
@@ -2367,14 +2319,17 @@
     },
     {
       "id": 256,
-      "description": "Don't expose disjoint_timer_query extensions to WebGL unless site isolation is enabled",
-      "cr_bugs": [808744],
-      "os": {
-        "type": "android"
-      },
-      "disabled_webgl_extensions": [
-        "EXT_disjoint_timer_query",
-        "EXT_disjoint_timer_query_webgl2"
+      "description": "Expose WebGL's disjoint_timer_query extensions on platforms with site isolation",
+      "cr_bugs": [808744, 870491],
+      "features": [
+        "enable_webgl_timer_query_extensions"
+      ],
+      "exceptions": [
+        {
+          "os": {
+            "type": "android"
+          }
+        }
       ]
     },
     {
@@ -2869,7 +2824,7 @@
       "driver_version": {
         "schema": "intel_driver",
         "op": "<",
-        "value": "0.0.0.9999"
+        "value": "0.0.100.0"
       },
       "features": [
         "disable_nv12_dynamic_textures"
@@ -2992,7 +2947,7 @@
       "os": {
         "type": "android"
       },
-      "gl_renderer": "Adreno.*",
+      "gl_renderer": ".*Adreno.*",
       "disabled_extensions": [
         "GL_EXT_shader_framebuffer_fetch"
       ]
@@ -3285,7 +3240,7 @@
         "value": "24.21.13.9827"
       },
       "features": [
-        "disable_mediafoundation_async_h264_encoding"
+        "disable_media_foundation_async_h264_encoding"
       ]
     },
     {
@@ -3451,24 +3406,6 @@
       "vendor_id": "0x8086",
       "features": [
         "enable_bgra8_overlays_with_yuv_overlay_support"
-      ]
-    },
-    {
-      "id": 348,
-      "cr_bugs": [1120411],
-      "description": "VP8 video encoding hangs on Intel Gen 9.5 GPUs",
-      "os": {
-        "type": "chromeos"
-      },
-      "vendor_id": "0x8086",
-      "intel_gpu_series": [
-        "geminilake",
-        "kabylake",
-        "whiskeylake",
-        "cometlake"
-      ],
-      "features": [
-        "disable_accelerated_vp8_encode"
       ]
     },
     {
@@ -3638,6 +3575,7 @@
         "type": "win"
       },
       "vendor_id": "0x1002",
+      "multi_gpu_category": "any",
       "features": [
         "disable_direct_composition_sw_video_overlays"
       ]
@@ -3655,19 +3593,6 @@
       ]
     },
     {
-      "id": 366,
-      "cr_bugs": [1179557],
-      "description": "The hardware video encoder on the SC7180 SoC has poor quality.",
-      "os": {
-        "type": "chromeos"
-      },
-      "gl_vendor": "freedreno",
-      "features": [
-          "disable_accelerated_h264_encode",
-          "disable_accelerated_vp8_encode"
-        ]
-    },
-    {
       "id": 367,
       "cr_bugs": [1180962],
       "description": "ANGLE cannot recover from context lost",
@@ -3677,18 +3602,6 @@
       "gl_renderer": "ANGLE.*",
       "features": [
         "exit_on_context_lost"
-      ]
-    },
-    {
-      "id": 368,
-      "cr_bugs": [1181358],
-      "description": "High D3D11VideoDecoder error rates for AV1 content on Intel GPUs",
-      "os": {
-        "type": "win"
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "disable_accelerated_av1_decode_d3d11"
       ]
     },
     {
@@ -3724,9 +3637,144 @@
       "os": {
         "type": "win"
       },
+      "multi_gpu_category": "any",
       "vendor_id": "0x8086",
       "features": [
         "disable_direct_composition_sw_video_overlays"
+      ]
+    },
+    {
+      "id": 372,
+      "cr_bugs": [1103852],
+      "description": "Check YCbCr_Studio_G22_Left_P709 color space for NV12 overlay support on Intel",
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x8086",
+      "intel_gpu_generation": {
+        "op": "=",
+        "value": "9"
+      },
+      "features": [
+        "check_ycbcr_studio_g22_left_p709_for_nv12_support"
+      ]
+    },
+    {
+      "id": 373,
+      "cr_bugs": [1198714],
+      "description": "VP9 Profile 2 HW decoding on Qualcomm SC7180 is broken",
+      "os": {
+        "type": "chromeos"
+      },
+      "gl_vendor": "freedreno",
+      "features": [
+        "disable_accelerated_vp9_profile2_decode"
+      ]
+    },
+    {
+      "id": 374,
+      "cr_bugs": [1087422],
+      "description": "VP9 resilient mode causes corruptions with AMD VCN HW decoders, using DXVA",
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x1002",
+      "features": [
+        "disallow_vp9_resilient_dxva_decoding"
+      ]
+    },
+    {
+      "id": 375,
+      "cr_bugs": [1212825],
+      "description": "Always force direct composition full damage on older Windows 10 releases",
+      "os": {
+        "type": "win",
+        "version": {
+          "op": "<",
+          "value": "10.0.19041.508"
+        }
+      },
+      "features": [
+        "force_direct_composition_full_damage_always"
+      ]
+    },
+    {
+      "id": 376,
+      "cr_bugs": [1219028],
+      "description": "Don't use Media Foundation hardware security on Turing-architecture NVIDIA GPUs.",
+      "os": {
+        "type" : "win"
+      },
+      "vendor_id": "0x10de",
+      "device_id": [
+        "0x1f82", "0x1f92",
+        "0x2182", "0x2184", "0x21d1", "0x2191",
+        "0x1f08", "0x1f06", "0x1f47", "0x1f42", "0x1f51", "0x1f11",
+        "0x1f02", "0x1f07", "0x1ec2", "0x1ec7", "0x1e84", "0x1f50", "0x1f10",
+        "0x1e82", "0x1e87", "0x1e81", "0x1ed0", "0x1e90", "0x1e07", "0x1e04",
+        "0x1eb1", "0x1eb6",
+        "0x1eb0", "0x1eb5",
+        "0x1e02", "0x1e30", "0x1eb8"
+      ],
+      "driver_version": {
+        "op": "<",
+        "value": "26.21.14.4140"
+      },
+      "features": [
+        "disable_media_foundation_hardware_security"
+      ]
+    },
+    {
+      "id": 377,
+      "cr_bugs": [1219028],
+      "description": "Don't use Media Foundation hardware security on Pascal-architecture NVIDIA GPUs.",
+      "os": {
+        "type" : "win"
+      },
+      "vendor_id": "0x10de",
+      "device_id": [
+        "0x1d01", "0x1d10", "0x1d12",
+        "0x1c81", "0x1c82", "0x1c83", "0x1c8c", "0x1c8d", "0x1c8f", "0x1c92",
+        "0x1c02", "0x1c03", "0x1c20", "0x1c23", "0x1c60", "0x1c61", "0x1c62",
+        "0x1b81", "0x1b82", "0x1b83", "0x1b84", "0x1ba0", "0x1ba1", "0x1ba2",
+        "0x1be0", "0x1be1", "0x1b06",
+        "0x1b00", "0x1b02",
+        "0x17e4", "0x174d"
+      ],
+      "driver_version": {
+        "op": "<",
+        "value": "26.21.14.4140"
+      },
+      "features": [
+        "disable_media_foundation_hardware_security"
+      ]
+    },
+    {
+      "id": 378,
+      "cr_bugs": [1227033],
+      "description": "Don't use the OOPR Canvas feature on Macs with NVIDIA GPUs",
+      "os": {
+        "type" : "macosx"
+      },
+      "vendor_id": "0x10de",
+      "features": [
+        "disable_canvas_oop_rasterization"
+      ]
+    },
+    {
+      "id": 379,
+      "cr_bugs": [1217298],
+      "description": "Disable VP9 HW encode on Intel Gen 9.5 SoCs using the i965 VA driver backend",
+      "os": {
+        "type": "chromeos"
+      },
+      "vendor_id": "0x8086",
+      "intel_gpu_series": [
+        "kabylake",
+        "geminilake"
+      ],
+      "features": [
+        "disable_accelerated_vp9_encode"
       ]
     }
   ]

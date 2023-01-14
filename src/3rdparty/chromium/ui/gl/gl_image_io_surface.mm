@@ -192,6 +192,7 @@ GLImageIOSurface::~GLImageIOSurface() {
 }
 
 bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
+                                  uint32_t io_surface_plane,
                                   gfx::GenericSharedMemoryId io_surface_id,
                                   gfx::BufferFormat format) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -215,11 +216,20 @@ bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
   format_ = format;
   io_surface_.reset(io_surface, base::scoped_policy::RETAIN);
   io_surface_id_ = io_surface_id;
+
+  // YUV_420_BIPLANAR and P010 are not supported by BindTexImage. CopyTexImage
+  // is supported by these formats as that performs conversion to RGB as part of
+  // the copy operation.
+  if (format_ != gfx::BufferFormat::YUV_420_BIPLANAR &&
+      format_ != gfx::BufferFormat::P010) {
+    io_surface_plane_ = io_surface_plane;
+  }
   return true;
 }
 
 bool GLImageIOSurface::InitializeWithCVPixelBuffer(
     CVPixelBufferRef cv_pixel_buffer,
+    uint32_t io_surface_plane,
     gfx::GenericSharedMemoryId io_surface_id,
     gfx::BufferFormat format) {
   IOSurfaceRef io_surface = CVPixelBufferGetIOSurface(cv_pixel_buffer);
@@ -228,7 +238,7 @@ bool GLImageIOSurface::InitializeWithCVPixelBuffer(
     return false;
   }
 
-  if (!Initialize(io_surface, io_surface_id, format))
+  if (!Initialize(io_surface, io_surface_plane, io_surface_id, format))
     return false;
 
   cv_pixel_buffer_.reset(cv_pixel_buffer, base::scoped_policy::RETAIN);
@@ -248,13 +258,7 @@ unsigned GLImageIOSurface::GetDataType() {
 }
 
 GLImageIOSurface::BindOrCopy GLImageIOSurface::ShouldBindOrCopy() {
-  // YUV_420_BIPLANAR and P010 are not supported by BindTexImage. CopyTexImage
-  // is supported by these formats as that performs conversion to RGB as part of
-  // the copy operation.
-  return (format_ == gfx::BufferFormat::YUV_420_BIPLANAR ||
-          format_ == gfx::BufferFormat::P010)
-             ? COPY
-             : BIND;
+  return io_surface_plane_ == kInvalidIOSurfacePlane ? COPY : BIND;
 }
 
 bool GLImageIOSurface::BindTexImage(unsigned target) {
@@ -296,7 +300,7 @@ bool GLImageIOSurface::BindTexImageImpl(unsigned target,
   CGLError cgl_error = CGLTexImageIOSurface2D(
       cgl_context, GL_TEXTURE_RECTANGLE_ARB, texture_format, size_.width(),
       size_.height(), DataFormat(format_), DataType(format_), io_surface_.get(),
-      0);
+      io_surface_plane_);
   if (cgl_error != kCGLNoError) {
     LOG(ERROR) << "Error in CGLTexImageIOSurface2D: "
                << CGLErrorString(cgl_error);
@@ -396,9 +400,16 @@ bool GLImageIOSurface::ScheduleOverlayPlane(
 void GLImageIOSurface::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                                     uint64_t process_tracing_id,
                                     const std::string& dump_name) {
-  // IOSurfaceGetAllocSize will return 0 if io_surface_ is invalid. In this case
-  // we log 0 for consistency with other GLImage memory dump functions.
-  size_t size_bytes = IOSurfaceGetAllocSize(io_surface_);
+  size_t size_bytes = 0;
+  if (io_surface_) {
+    if (io_surface_plane_ == kInvalidIOSurfacePlane) {
+      size_bytes = IOSurfaceGetAllocSize(io_surface_);
+    } else {
+      size_bytes =
+          IOSurfaceGetBytesPerRowOfPlane(io_surface_, io_surface_plane_) *
+          IOSurfaceGetHeightOfPlane(io_surface_, io_surface_plane_);
+    }
+  }
 
   base::trace_event::MemoryAllocatorDump* dump =
       pmd->CreateAllocatorDump(dump_name);
@@ -513,6 +524,7 @@ GLImageIOSurface* GLImageIOSurface::FromGLImage(GLImage* image) {
 bool GLImageIOSurface::ValidFormat(gfx::BufferFormat format) {
   switch (format) {
     case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
@@ -522,7 +534,6 @@ bool GLImageIOSurface::ValidFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::P010:
       return true;
     case gfx::BufferFormat::R_16:
-    case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:

@@ -40,7 +40,10 @@ WebuiLoadTimer::~WebuiLoadTimer() = default;
 
 void WebuiLoadTimer::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() ||
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument()) {
     return;
   }
@@ -55,7 +58,8 @@ void WebuiLoadTimer::DOMContentLoaded(
   CallUmaHistogramTimes(document_initial_load_uma_id_, timer_->Elapsed());
 }
 
-void WebuiLoadTimer::DocumentOnLoadCompletedInMainFrame() {
+void WebuiLoadTimer::DocumentOnLoadCompletedInMainFrame(
+    content::RenderFrameHost* render_frame_host) {
   // The WebContents could have been created for a child RenderFrameHost so it
   // would never receive a DidStartNavigation with the main frame, however it
   // will receive this callback.

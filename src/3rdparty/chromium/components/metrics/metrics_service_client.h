@@ -11,7 +11,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/metrics/metrics_log_store.h"
 #include "components/metrics/metrics_log_uploader.h"
@@ -48,6 +47,10 @@ class MetricsServiceClient {
   // Returns the UkmService instance that this client is associated with.
   virtual ukm::UkmService* GetUkmService();
 
+  // Returns true if metrics should be uploaded for the given |user_id|, which
+  // corresponds to the |user_id| field in ChromeUserMetricsExtension.
+  virtual bool ShouldUploadMetricsForUserId(uint64_t user_id);
+
   // Registers the client id with other services (e.g. crash reporting), called
   // when metrics recording gets enabled.
   virtual void SetMetricsClientId(const std::string& client_id) = 0;
@@ -67,6 +70,9 @@ class MetricsServiceClient {
   // Returns the release channel (e.g. stable, beta, etc) of the application.
   virtual SystemProfileProto::Channel GetChannel() = 0;
 
+  // Returns true if the application is on the extended stable channel.
+  virtual bool IsExtendedStableChannel() = 0;
+
   // Returns the version of the application as a string.
   virtual std::string GetVersionString() = 0;
 
@@ -75,9 +81,6 @@ class MetricsServiceClient {
   // |serialized_environment| are consumed by the call, but the caller maintains
   // ownership.
   virtual void OnEnvironmentUpdate(std::string* serialized_environment) {}
-
-  // Called by the metrics service to record a clean shutdown.
-  virtual void OnLogCleanShutdown() {}
 
   // Called prior to a metrics log being closed, allowing the client to collect
   // extra histograms that will go in that log. Asynchronous API - the client
@@ -112,6 +115,9 @@ class MetricsServiceClient {
   // can override this in tests if tests need to make assertions on the log
   // data.
   virtual bool ShouldStartUpFastForTesting() const;
+
+  // Called when loading state changed, e.g. start/stop loading.
+  virtual void LoadingStateChanged(bool is_loading) {}
 
   // Called on plugin loading errors.
   virtual void OnPluginLoadingError(const base::FilePath& plugin_path) {}
@@ -151,7 +157,7 @@ class MetricsServiceClient {
   // string (this is the same as the default behavior). If the package name
   // should not be logged for privacy/fingerprintability reasons, the embedder
   // should return the empty string.
-  virtual std::string GetAppPackageName();
+  virtual std::string GetAppPackageNameIfLoggable();
 
   // Gets the key used to sign metrics uploads. This will be used to compute an
   // HMAC-SHA256 signature of an uploaded log.

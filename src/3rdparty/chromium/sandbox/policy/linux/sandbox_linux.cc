@@ -446,7 +446,7 @@ rlim_t GetProcessDataSizeLimit(SandboxType sandbox_type) {
       return 32 * GB;
     } else if (physical_memory > 16 * GB) {
       return 16 * GB;
-    } else if (physical_memory > 8 * GB) {
+    } else {
       return 8 * GB;
     }
   }
@@ -491,8 +491,12 @@ void SandboxLinux::StartBrokerProcess(
     PreSandboxHook broker_side_hook,
     const Options& options) {
   // Leaked at shutdown, so use bare |new|.
+  // Use EACCES as the policy's default error number to remain consistent with
+  // other LSMs like AppArmor and Landlock. Some userspace code, such as
+  // glibc's |dlopen|, expect to see EACCES rather than EPERM. See
+  // crbug.com/1233028 for an example.
   broker_process_ = new syscall_broker::BrokerProcess(
-      BPFBasePolicy::GetFSDeniedErrno(), allowed_command_set, permissions,
+      EACCES, allowed_command_set, permissions,
       syscall_broker::BrokerProcess::BrokerType::SIGNAL_BASED);
 
   // The initialization callback will perform generic initialization and then

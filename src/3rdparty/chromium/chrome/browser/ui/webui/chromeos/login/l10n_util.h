@@ -10,8 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/chromeos/base/locale_util.h"
+#include "chrome/browser/ash/base/locale_util.h"
 
 namespace base {
 class ListValue;
@@ -75,10 +74,9 @@ std::string FindMostRelevantLocale(
 // activates them if `activate_keyboards` is true, so that they can be selected
 // by the user (e.g. by cycling through keyboard layouts via keyboard
 // shortcuts).
-std::unique_ptr<base::ListValue> GetAndActivateLoginKeyboardLayouts(
-    const std::string& locale,
-    const std::string& selected,
-    bool activate_keyboards);
+base::ListValue GetAndActivateLoginKeyboardLayouts(const std::string& locale,
+                                                   const std::string& selected,
+                                                   bool activate_keyboards);
 
 // Invokes `callback` with a list of keyboard layouts that can be used for
 // `locale`. Each list entry is a dictionary that contains data such as an ID
@@ -92,5 +90,14 @@ void GetKeyboardLayoutsForLocale(GetKeyboardLayoutsForLocaleCallback callback,
                                  const std::string& locale);
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove when ch/br/ui/webui/chromeos is moved
+// to ash.
+namespace ash {
+using ::chromeos::FindMostRelevantLocale;
+using ::chromeos::GetUILanguageList;
+using ::chromeos::kMostRelevantLanguagesDivider;
+using ::chromeos::ResolveUILanguageList;
+}  // namespace ash
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_L10N_UTIL_H_

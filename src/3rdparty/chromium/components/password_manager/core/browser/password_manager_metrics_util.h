@@ -224,6 +224,7 @@ enum AccessPasswordInSettingsEvent {
 // numeric values should never be reused. Needs to stay in sync with
 // "PasswordManager.ReauthResult" in enums.xml.
 // Metrics: PasswordManager.ReauthToAccessPasswordInSettings
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.password_manager
 enum class ReauthResult {
   kSuccess = 0,
   kFailure = 1,
@@ -456,7 +457,10 @@ enum class MoveToAccountStoreTrigger {
   kExplicitlyTriggeredInSettings = 1,
   // The user explicitly asked to move multiple passwords at once in Settings.
   kExplicitlyTriggeredForMultiplePasswordsInSettings = 2,
-  kMaxValue = kExplicitlyTriggeredForMultiplePasswordsInSettings,
+  // After saving a password locally, the user opted in to saving this and
+  // future passwords in the account.
+  kUserOptedInAfterSavingLocally = 3,
+  kMaxValue = kUserOptedInAfterSavingLocally,
 };
 
 // Used to record metrics for the usage and timing of the GetChangePasswordUrl
@@ -519,7 +523,7 @@ void LogGeneralUIDismissalReason(UIDismissalReason reason);
 // user-state-specific histogram.
 void LogSaveUIDismissalReason(
     UIDismissalReason reason,
-    base::Optional<PasswordAccountStorageUserState> user_state);
+    absl::optional<PasswordAccountStorageUserState> user_state);
 
 // Log the |reason| a user dismissed the save password prompt after previously
 // having unblocklisted the origin while on the page.

@@ -315,12 +315,12 @@ RUNTIME_FUNCTION(Runtime_StringToArray) {
   int position = 0;
   if (s->IsFlat() && s->IsOneByteRepresentation()) {
     // Try using cached chars where possible.
-    elements = isolate->factory()->NewUninitializedFixedArray(length);
+    elements = isolate->factory()->NewFixedArray(length);
 
     DisallowGarbageCollection no_gc;
     String::FlatContent content = s->GetFlatContent(no_gc);
     if (content.IsOneByte()) {
-      Vector<const uint8_t> chars = content.ToOneByteVector();
+      base::Vector<const uint8_t> chars = content.ToOneByteVector();
       // Note, this will initialize all elements (not only the prefix)
       // to prevent GC from seeing partially initialized array.
       position = CopyCachedOneByteCharsToArray(isolate->heap(), chars.begin(),

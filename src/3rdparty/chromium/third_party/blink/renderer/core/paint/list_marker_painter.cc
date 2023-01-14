@@ -8,10 +8,8 @@
 #include "third_party/blink/renderer/core/layout/layout_list_item.h"
 #include "third_party/blink/renderer/core/layout/layout_list_marker.h"
 #include "third_party/blink/renderer/core/layout/list_marker.h"
-#include "third_party/blink/renderer/core/layout/list_marker_text.h"
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
 #include "third_party/blink/renderer/core/paint/box_painter.h"
-#include "third_party/blink/renderer/core/paint/details_marker_painter.h"
 #include "third_party/blink/renderer/core/paint/highlight_painting_utils.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
@@ -23,13 +21,72 @@
 
 namespace blink {
 
+namespace {
+
+enum class DisclosureOrientation { kLeft, kRight, kUp, kDown };
+
+DisclosureOrientation GetDisclosureOrientation(const ComputedStyle& style,
+                                               bool is_open) {
+  // TODO(layout-dev): Sideways-lr and sideways-rl are not yet supported.
+  const auto mode = style.GetWritingMode();
+  DCHECK_NE(mode, WritingMode::kSidewaysRl);
+  DCHECK_NE(mode, WritingMode::kSidewaysLr);
+
+  if (is_open) {
+    if (blink::IsHorizontalWritingMode(mode))
+      return DisclosureOrientation::kDown;
+    return IsFlippedBlocksWritingMode(mode) ? DisclosureOrientation::kLeft
+                                            : DisclosureOrientation::kRight;
+  }
+  if (blink::IsHorizontalWritingMode(mode)) {
+    return style.IsLeftToRightDirection() ? DisclosureOrientation::kRight
+                                          : DisclosureOrientation::kLeft;
+  }
+  return style.IsLeftToRightDirection() ? DisclosureOrientation::kDown
+                                        : DisclosureOrientation::kUp;
+}
+
+Path CreatePath(const FloatPoint* path) {
+  Path result;
+  result.MoveTo(FloatPoint(path[0].X(), path[0].Y()));
+  for (int i = 1; i < 4; ++i)
+    result.AddLineTo(FloatPoint(path[i].X(), path[i].Y()));
+  return result;
+}
+
+Path GetCanonicalDisclosurePath(const ComputedStyle& style, bool is_open) {
+  constexpr FloatPoint kLeftPoints[4] = {
+      {1.0f, 0.0f}, {0.14f, 0.5f}, {1.0f, 1.0f}, {1.0f, 0.0f}};
+  constexpr FloatPoint kRightPoints[4] = {
+      {0.0f, 0.0f}, {0.86f, 0.5f}, {0.0f, 1.0f}, {0.0f, 0.0f}};
+  constexpr FloatPoint kUpPoints[4] = {
+      {0.0f, 0.93f}, {0.5f, 0.07f}, {1.0f, 0.93f}, {0.0f, 0.93f}};
+  constexpr FloatPoint kDownPoints[4] = {
+      {0.0f, 0.07f}, {0.5f, 0.93f}, {1.0f, 0.07f}, {0.0f, 0.07f}};
+
+  switch (GetDisclosureOrientation(style, is_open)) {
+    case DisclosureOrientation::kLeft:
+      return CreatePath(kLeftPoints);
+    case DisclosureOrientation::kRight:
+      return CreatePath(kRightPoints);
+    case DisclosureOrientation::kUp:
+      return CreatePath(kUpPoints);
+    case DisclosureOrientation::kDown:
+      return CreatePath(kDownPoints);
+  }
+
+  return Path();
+}
+
+}  // namespace
+
 void ListMarkerPainter::PaintSymbol(const PaintInfo& paint_info,
                                     const LayoutObject* object,
                                     const ComputedStyle& style,
                                     const LayoutRect& marker) {
   DCHECK(object);
-  DCHECK(style.GetListStyleType());
-  DCHECK(style.GetListStyleType()->IsCounterStyle());
+  DCHECK(style.ListStyleType());
+  DCHECK(style.ListStyleType()->IsCounterStyle());
   GraphicsContext& context = paint_info.context;
   ScopedDarkModeElementRoleOverride list_symbol(
       &context, DarkModeFilter::ElementRole::kListSymbol);
@@ -43,7 +100,7 @@ void ListMarkerPainter::PaintSymbol(const PaintInfo& paint_info,
   context.SetStrokeStyle(kSolidStroke);
   context.SetStrokeThickness(1.0f);
   IntRect snapped_rect = PixelSnappedIntRect(marker);
-  const AtomicString& type = style.GetListStyleType()->GetCounterStyleName();
+  const AtomicString& type = style.ListStyleType()->GetCounterStyleName();
   if (type == "disc") {
     context.FillEllipse(FloatRect(snapped_rect));
   } else if (type == "circle") {
@@ -51,8 +108,7 @@ void ListMarkerPainter::PaintSymbol(const PaintInfo& paint_info,
   } else if (type == "square") {
     context.FillRect(snapped_rect);
   } else if (type == "disclosure-open" || type == "disclosure-closed") {
-    Path path = DetailsMarkerPainter::GetCanonicalPath(
-        style, type == "disclosure-open");
+    Path path = GetCanonicalDisclosurePath(style, type == "disclosure-open");
     path.Transform(AffineTransform().Scale(marker.Width(), marker.Height()));
     path.Translate(FloatSize(marker.X(), marker.Y()));
     context.FillPath(path);
@@ -175,17 +231,9 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
 
   String prefix_str;
   String suffix_str;
-  if (RuntimeEnabledFeatures::CSSAtRuleCounterStyleEnabled()) {
-    const CounterStyle& counter_style = layout_list_marker_.GetCounterStyle();
-    prefix_str = counter_style.GetPrefix();
-    suffix_str = counter_style.GetSuffix();
-  } else {
-    UChar chars[] = {
-        list_marker_text::Suffix(layout_list_marker_.StyleRef().ListStyleType(),
-                                 layout_list_marker_.ListItem()->Value()),
-        ' '};
-    suffix_str = String(chars, 2);
-  }
+  const CounterStyle& counter_style = layout_list_marker_.GetCounterStyle();
+  prefix_str = counter_style.GetPrefix();
+  suffix_str = counter_style.GetSuffix();
   TextRun prefix_run =
       ConstructTextRun(font, prefix_str, layout_list_marker_.StyleRef(),
                        layout_list_marker_.StyleRef().Direction());

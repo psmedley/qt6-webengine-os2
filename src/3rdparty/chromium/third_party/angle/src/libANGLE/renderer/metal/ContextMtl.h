@@ -157,6 +157,12 @@ class ContextMtl : public ContextImpl, public mtl::Context
                                                                    const GLint *baseVertices,
                                                                    const GLuint *baseInstances,
                                                                    GLsizei drawcount) override;
+    angle::Result drawElementsSimpleTypesPrimitiveRestart(const gl::Context *context,
+                                                          gl::PrimitiveMode mode,
+                                                          GLsizei count,
+                                                          gl::DrawElementsType type,
+                                                          const void *indices,
+                                                          GLsizei instances);
 
     // Device loss
     gl::GraphicsResetStatus getResetStatus() override;
@@ -191,6 +197,8 @@ class ContextMtl : public ContextImpl, public mtl::Context
     const gl::TextureCapsMap &getNativeTextureCaps() const override;
     const gl::Extensions &getNativeExtensions() const override;
     const gl::Limitations &getNativeLimitations() const override;
+
+    const ProgramMtl *getProgram() const { return mProgram; }
 
     // Shader creation
     CompilerImpl *createCompiler() override;
@@ -294,7 +302,7 @@ class ContextMtl : public ContextImpl, public mtl::Context
     void serverWaitEvent(const mtl::SharedEventRef &event, uint64_t value);
 
     const mtl::ClearColorValue &getClearColorValue() const;
-    MTLColorWriteMask getColorMask() const;
+    const mtl::WriteMaskArray &getWriteMaskArray() const;
     float getClearDepthValue() const;
     uint32_t getClearStencilValue() const;
     // Return front facing stencil write mask
@@ -420,6 +428,7 @@ class ContextMtl : public ContextImpl, public mtl::Context
                         float nearPlane,
                         float farPlane);
     void updateDepthRange(float nearPlane, float farPlane);
+    void updateBlendDescArray(const gl::BlendStateExt &blendStateExt);
     void updateScissor(const gl::State &glState);
     void updateCullMode(const gl::State &glState);
     void updateFrontFace(const gl::State &glState);
@@ -466,10 +475,13 @@ class ContextMtl : public ContextImpl, public mtl::Context
         DIRTY_BIT_RENDER_PIPELINE,
         DIRTY_BIT_UNIFORM_BUFFERS_BINDING,
         DIRTY_BIT_RASTERIZER_DISCARD,
-        DIRTY_BIT_MAX,
+
+        DIRTY_BIT_INVALID,
+        DIRTY_BIT_MAX = DIRTY_BIT_INVALID,
     };
 
-    // See compiler/translator/TranslatorVulkan.cpp: AddDriverUniformsToShader()
+    // Must keep this in sync with DriverUniformExtended::createUniformFields in:
+    // src/compiler/translator/tree_util/DriverUniform.h
     struct DriverUniforms
     {
         float viewport[4];
@@ -492,6 +504,7 @@ class ContextMtl : public ContextImpl, public mtl::Context
         float halfRenderArea[2];
         float flipXY[2];
         float negFlipXY[2];
+        uint32_t emulatedInstanceID;
         uint32_t coverageMask;
         uint32_t padding;
     };
@@ -522,7 +535,8 @@ class ContextMtl : public ContextImpl, public mtl::Context
     // State
     mtl::RenderPipelineDesc mRenderPipelineDesc;
     mtl::DepthStencilDesc mDepthStencilDesc;
-    mtl::BlendDesc mBlendDesc;
+    mtl::BlendDescArray mBlendDescArray;
+    mtl::WriteMaskArray mWriteMaskArray;
     mtl::ClearColorValue mClearColor;
     uint32_t mClearStencil    = 0;
     uint32_t mStencilRefFront = 0;

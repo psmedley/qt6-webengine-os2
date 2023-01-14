@@ -8,30 +8,54 @@
 #include "src/gpu/ops/GrAtlasTextOp.h"
 
 #include "include/core/SkPoint3.h"
+#include "include/core/SkSpan.h"
 #include "include/gpu/GrRecordingContext.h"
 #include "src/core/SkMathPriv.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/core/SkMatrixProvider.h"
-#include "src/core/SkSpan.h"
 #include "src/core/SkStrikeCache.h"
 #include "src/gpu/GrCaps.h"
 #include "src/gpu/GrMemoryPool.h"
 #include "src/gpu/GrOpFlushState.h"
 #include "src/gpu/GrRecordingContextPriv.h"
 #include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/SkGr.h"
 #include "src/gpu/effects/GrBitmapTextGeoProc.h"
 #include "src/gpu/effects/GrDistanceFieldGeoProc.h"
 #include "src/gpu/ops/GrSimpleMeshDrawOpHelper.h"
 #include "src/gpu/text/GrAtlasManager.h"
 #include "src/gpu/text/GrDistanceFieldAdjustTable.h"
-
-#if GR_TEST_UTILS
-#include "src/gpu/GrDrawOpTest.h"
+#if SK_GPU_V1
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 #endif
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
+#include <new>
+#include <utility>
+
+// If we have thread local, then cache memory for a single GrAtlasTextOp.
+#if defined(GR_HAS_THREAD_LOCAL)
+static thread_local void* gCache = nullptr;
+void* GrAtlasTextOp::operator new(size_t s) {
+    if (gCache != nullptr) {
+        return std::exchange(gCache, nullptr);
+    }
+
+    return ::operator new(s);
+}
+
+void GrAtlasTextOp::operator delete(void* bytes) noexcept {
+    if (gCache == nullptr) {
+        gCache = bytes;
+        return;
+    }
+    ::operator delete(bytes);
+}
+
+void GrAtlasTextOp::ClearCache() {
+    ::operator delete(gCache);
+    gCache = nullptr;
+}
+#endif
 
 GrAtlasTextOp::GrAtlasTextOp(MaskType maskType,
                              bool needsTransform,
@@ -81,22 +105,24 @@ GrAtlasTextOp::GrAtlasTextOp(MaskType maskType,
     this->setBounds(deviceRect, HasAABloat::kNo, IsHairline::kNo);
 }
 
-auto GrAtlasTextOp::Geometry::Make(GrRecordingContext* rc,
-                                   const GrAtlasSubRun& subRun,
-                                   const SkMatrix& drawMatrix,
-                                   SkPoint drawOrigin,
-                                   SkIRect clipRect,
-                                   sk_sp<GrTextBlob> blob,
-                                   const SkPMColor4f& color) -> Geometry* {
-    return new Geometry{subRun,
-                        drawMatrix,
-                        drawOrigin,
-                        clipRect,
-                        std::move(blob),
-                        color};
+auto GrAtlasTextOp::Geometry::MakeForBlob(const GrAtlasSubRun& subRun,
+                                          const SkMatrix& drawMatrix,
+                                          SkPoint drawOrigin,
+                                          SkIRect clipRect,
+                                          sk_sp<GrTextBlob> blob,
+                                          const SkPMColor4f& color,
+                                          SkArenaAlloc* alloc) -> Geometry* {
+    // Bypass the automatic dtor behavior in SkArenaAlloc. I'm leaving this up to the Op to run
+    // all geometry dtors for now.
+    void* geo = alloc->makeBytesAlignedTo(sizeof(Geometry), alignof(Geometry));
+    return new(geo) Geometry{subRun,
+                             drawMatrix,
+                             drawOrigin,
+                             clipRect,
+                             std::move(blob),
+                             nullptr,
+                             color};
 }
-
-
 
 void GrAtlasTextOp::Geometry::fillVertexData(void *dst, int offset, int count) const {
     SkMatrix positionMatrix = fDrawMatrix;
@@ -105,7 +131,7 @@ void GrAtlasTextOp::Geometry::fillVertexData(void *dst, int offset, int count) c
             dst, offset, count, fColor.toBytes_RGBA(), positionMatrix, fClipRect);
 }
 
-void GrAtlasTextOp::visitProxies(const VisitProxyFunc& func) const {
+void GrAtlasTextOp::visitProxies(const GrVisitProxyFunc& func) const {
     fProcessors.visitProxies(func);
 }
 
@@ -130,9 +156,8 @@ GrDrawOp::FixedFunctionFlags GrAtlasTextOp::fixedFunctionFlags() const {
     return FixedFunctionFlags::kNone;
 }
 
-GrProcessorSet::Analysis GrAtlasTextOp::finalize(
-        const GrCaps& caps, const GrAppliedClip* clip, bool hasMixedSampledCoverage,
-        GrClampType clampType) {
+GrProcessorSet::Analysis GrAtlasTextOp::finalize(const GrCaps& caps, const GrAppliedClip* clip,
+                                                 GrClampType clampType) {
     GrProcessorAnalysisCoverage coverage;
     GrProcessorAnalysisColor color;
     if (this->maskType() == MaskType::kColorBitmap) {
@@ -159,9 +184,8 @@ GrProcessorSet::Analysis GrAtlasTextOp::finalize(
             break;
     }
 
-    auto analysis = fProcessors.finalize(
-            color, coverage, clip, &GrUserStencilSettings::kUnused, hasMixedSampledCoverage, caps,
-            clampType, &fHead->fColor);
+    auto analysis = fProcessors.finalize(color, coverage, clip, &GrUserStencilSettings::kUnused,
+                                         caps, clampType, &fHead->fColor);
     // TODO(michaelludwig): Once processor analysis can be done external to op creation/finalization
     // the atlas op metadata can be fully const. This is okay for now since finalize() happens
     // before the op is merged, so during combineIfPossible, metadata is effectively const.
@@ -169,7 +193,7 @@ GrProcessorSet::Analysis GrAtlasTextOp::finalize(
     return analysis;
 }
 
-void GrAtlasTextOp::onPrepareDraws(Target* target) {
+void GrAtlasTextOp::onPrepareDraws(GrMeshDrawTarget* target) {
     auto resourceProvider = target->resourceProvider();
 
     // If we need local coordinates, compute an inverse view matrix. If this is solid color, the
@@ -257,7 +281,9 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) {
 
     for (const Geometry* geo = fHead; geo != nullptr; geo = geo->fNext) {
         const GrAtlasSubRun& subRun = geo->fSubRun;
-        SkASSERT((int) subRun.vertexStride(geo->fDrawMatrix) == vertexStride);
+        SkASSERTF((int) subRun.vertexStride(geo->fDrawMatrix) == vertexStride,
+                  "subRun stride: %d vertex buffer stride: %d\n",
+                  (int)subRun.vertexStride(geo->fDrawMatrix), vertexStride);
 
         const int subRunEnd = subRun.glyphCount();
         for (int subRunCursor = 0; subRunCursor < subRunEnd;) {
@@ -297,16 +323,18 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) {
 }
 
 void GrAtlasTextOp::onExecute(GrOpFlushState* flushState, const SkRect& chainBounds) {
+    auto pipelineFlags = flushState->usesMSAASurface() ? GrPipeline::InputFlags::kHWAntialias
+                                                       : GrPipeline::InputFlags::kNone;
     auto pipeline = GrSimpleMeshDrawOpHelper::CreatePipeline(flushState,
                                                              std::move(fProcessors),
-                                                             GrPipeline::InputFlags::kNone);
+                                                             pipelineFlags);
 
     flushState->executeDrawsAndUploadsForMeshDrawOp(this, chainBounds, pipeline,
                                                     &GrUserStencilSettings::kUnused);
 }
 
 void GrAtlasTextOp::createDrawForGeneratedGlyphs(
-        GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
+        GrMeshDrawTarget* target, FlushInfo* flushInfo) const {
     if (!flushInfo->fGlyphsToFlush) {
         return;
     }
@@ -456,9 +484,10 @@ GrGeometryProcessor* GrAtlasTextOp::setupDfProcessor(SkArenaAlloc* arena,
     }
 }
 
-#if GR_TEST_UTILS
+#if GR_TEST_UTILS && SK_GPU_V1
+#include "src/gpu/GrDrawOpTest.h"
 
-GrOp::Owner GrAtlasTextOp::CreateOpTestingOnly(GrSurfaceDrawContext* rtc,
+GrOp::Owner GrAtlasTextOp::CreateOpTestingOnly(skgpu::v1::SurfaceDrawContext* sdc,
                                                const SkPaint& skPaint,
                                                const SkFont& font,
                                                const SkMatrixProvider& mtxProvider,
@@ -467,29 +496,22 @@ GrOp::Owner GrAtlasTextOp::CreateOpTestingOnly(GrSurfaceDrawContext* rtc,
                                                int y) {
     size_t textLen = (int)strlen(text);
 
-    const SkMatrix& drawMatrix(mtxProvider.localToDevice());
-
+    SkMatrix drawMatrix(mtxProvider.localToDevice());
+    drawMatrix.preTranslate(x, y);
     auto drawOrigin = SkPoint::Make(x, y);
     SkGlyphRunBuilder builder;
-    builder.drawTextUTF8(skPaint, font, text, textLen, drawOrigin);
-
-    auto glyphRunList = builder.useGlyphRunList();
+    auto glyphRunList = builder.textToGlyphRunList(font, skPaint, text, textLen, drawOrigin);
     if (glyphRunList.empty()) {
         return nullptr;
     }
 
-    auto rContext = rtc->recordingContext();
-    GrSDFTOptions SDFOptions = rContext->priv().SDFTOptions();
+    auto rContext = sdc->recordingContext();
+    GrSDFTControl control =
+            rContext->priv().getSDFTControl(sdc->surfaceProps().isUseDeviceIndependentFonts());
 
-    sk_sp<GrTextBlob> blob = GrTextBlob::Make(glyphRunList, drawMatrix);
-    SkGlyphRunListPainter* painter = rtc->glyphRunPainter();
-    painter->processGlyphRun(
-            *glyphRunList.begin(),
-            drawMatrix, glyphRunList.origin(),
-            glyphRunList.paint(),
-            rtc->surfaceProps(),
-            rContext->priv().caps()->shaderCaps()->supportsDistanceFieldText(),
-            SDFOptions, blob.get());
+    SkGlyphRunListPainter* painter = sdc->glyphRunPainter();
+    sk_sp<GrTextBlob> blob = GrTextBlob::Make(glyphRunList, skPaint, drawMatrix, control, painter);
+
     if (blob->subRunList().isEmpty()) {
         return nullptr;
     }
@@ -497,15 +519,12 @@ GrOp::Owner GrAtlasTextOp::CreateOpTestingOnly(GrSurfaceDrawContext* rtc,
     GrAtlasSubRun* subRun = blob->subRunList().front().testingOnly_atlasSubRun();
     SkASSERT(subRun);
     GrOp::Owner op;
-    std::tie(std::ignore, op) = subRun->makeAtlasTextOp(nullptr, mtxProvider, glyphRunList, rtc);
+    std::tie(std::ignore, op) = subRun->makeAtlasTextOp(
+            nullptr, mtxProvider, glyphRunList, skPaint, sdc, nullptr);
     return op;
 }
 
 GR_DRAW_OP_TEST_DEFINE(GrAtlasTextOp) {
-    // Setup dummy SkPaint / GrPaint / GrSurfaceDrawContext
-    auto rtc = GrSurfaceDrawContext::Make(
-            context, GrColorType::kRGBA_8888, nullptr, SkBackingFit::kApprox, {1024, 1024});
-
     SkSimpleMatrixProvider matrixProvider(GrTest::TestMatrixInvertible(random));
 
     SkPaint skPaint;
@@ -528,8 +547,7 @@ GR_DRAW_OP_TEST_DEFINE(GrAtlasTextOp) {
     int xInt = (random->nextU() % kMaxTrans) * xPos;
     int yInt = (random->nextU() % kMaxTrans) * yPos;
 
-    return GrAtlasTextOp::CreateOpTestingOnly(
-            rtc.get(), skPaint, font, matrixProvider, text, xInt, yInt);
+    return GrAtlasTextOp::CreateOpTestingOnly(sdc, skPaint, font, matrixProvider, text, xInt, yInt);
 }
 
 #endif

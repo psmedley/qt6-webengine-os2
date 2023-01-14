@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,8 +34,8 @@ class WebAudioMediaStreamAudioSinkTest : public testing::Test {
     component_ = MakeGarbageCollected<MediaStreamComponent>(
         String::FromUTF8("audio_track"), audio_source);
     component_->SetPlatformTrack(std::make_unique<MediaStreamAudioTrack>(true));
-    source_provider_.reset(
-        new WebAudioMediaStreamAudioSink(component_, context_sample_rate));
+    source_provider_ = std::make_unique<WebAudioMediaStreamAudioSink>(
+        component_, context_sample_rate);
     source_provider_->SetSinkParamsForTesting(sink_params_);
     source_provider_->OnSetFormat(source_params_);
   }
@@ -58,7 +60,7 @@ TEST_F(WebAudioMediaStreamAudioSinkTest, VerifyDataFlow) {
 
   // Point the WebVector into memory owned by |sink_bus_|.
   WebVector<float*> audio_data(static_cast<size_t>(sink_bus_->channels()));
-  for (size_t i = 0; i < audio_data.size(); ++i)
+  for (int i = 0; i < sink_bus_->channels(); ++i)
     audio_data[i] = sink_bus_->channel(i);
 
   // Enable the |source_provider_| by asking for data. This will inject

@@ -10,8 +10,6 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "chrome/common/search/instant_types.h"
 #include "chrome/common/search/ntp_logging_events.h"
 #include "chrome/common/search/search.mojom.h"
@@ -22,6 +20,7 @@
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 // The renderer-side implementation of the embeddedSearch API (see
@@ -36,8 +35,8 @@ class SearchBox : public content::RenderFrameObserver,
    public:
     IconURLHelper();
     virtual ~IconURLHelper();
-    // Retruns view id for validating icon URL.
-    virtual int GetViewID() const = 0;
+    // Returns main frame id for validating icon URL.
+    virtual int GetMainFrameID() const = 0;
     // Returns the page URL string for |rid|, or empty string for invalid |rid|.
     virtual std::string GetURLStringFromRestrictedID(InstantRestrictedID rid)
         const = 0;
@@ -92,9 +91,6 @@ class SearchBox : public content::RenderFrameObserver,
   bool GetMostVisitedItemWithID(InstantRestrictedID most_visited_item_id,
                                 InstantMostVisitedItem* item) const;
 
-  // Sends PasteAndOpenDropdown to the browser.
-  void Paste(const base::string16& text);
-
   // Will return null if the theme info hasn't been set yet.
   const NtpTheme* GetNtpTheme() const;
 
@@ -110,45 +106,8 @@ class SearchBox : public content::RenderFrameObserver,
   // Sends UndoMostVisitedDeletion to the browser.
   void UndoMostVisitedDeletion(InstantRestrictedID most_visited_item_id);
 
-  // Returns true if the most visited items are custom links.
-  bool IsCustomLinks() const;
-
-  // Returns true if most visited is enabled instead of custom links.
-  bool IsUsingMostVisited() const;
-
-  // Returns true if the shortcuts are visible and not hidden by the user.
-  bool AreShortcutsVisible() const;
-
-  // Sends AddCustomLink to the browser.
-  void AddCustomLink(const GURL& url, const std::string& title);
-
-  // Sends UpdateCustomLink to the browser.
-  void UpdateCustomLink(InstantRestrictedID link_id,
-                        const GURL& new_url,
-                        const std::string& new_title);
-
-  // Sends ReorderCustomLink to the browser.
-  void ReorderCustomLink(InstantRestrictedID link_id, int new_pos);
-
-  // Sends DeleteCustomLink to the browser.
-  void DeleteCustomLink(InstantRestrictedID most_visited_item_id);
-
-  // Sends UndoCustomLinkAction to the browser.
-  void UndoCustomLinkAction();
-
-  // Sends ResetCustomLinks to the browser.
-  void ResetCustomLinks();
-
-  // Sends ToggleMostVisitedOrCustomLinks to the browser.
-  void ToggleMostVisitedOrCustomLinks();
-
   // Sends ToggleShortcutsVisibility to the browser.
   void ToggleShortcutsVisibility(bool do_notify);
-
-  // Attempts to fix obviously invalid URLs. Uses the "https" scheme unless
-  // otherwise specified. Returns the fixed URL if valid, otherwise returns an
-  // empty string.
-  std::string FixupAndValidateUrl(const std::string& url) const;
 
   // Updates the NTP custom background preferences, sometimes this includes
   // image attributions.
@@ -190,52 +149,6 @@ class SearchBox : public content::RenderFrameObserver,
   // Confirms applied theme changes.
   void ConfirmThemeChanges();
 
-  // Queries the autocomplete backend for realbox results for |input| as a
-  // search term. |prevent_inline_autocomplete| is true if the result set should
-  // not require inline autocomplete for the default match. Handled by
-  // |QueryAutocompleteResult|.
-  void QueryAutocomplete(const base::string16& input,
-                         bool prevent_inline_autocomplete);
-
-  // Deletes |AutocompleteMatch| by index of the result.
-  void DeleteAutocompleteMatch(uint8_t line);
-
-  // Cancels the current autocomplete query. Clears the result set if
-  // |clear_result| is true.
-  void StopAutocomplete(bool clear_result);
-
-  // Logs the time it took in milliseconds since the first character (in a
-  // series of characters) was typed until Autocomplete results were painted.
-  void LogCharTypedToRepaintLatency(uint32_t latency_ms);
-
-  // Called when a user dismisses a promo.
-  void BlocklistPromo(const std::string& promo_id);
-
-  // Handles navigation to the chrome://extensions page by calling the browser
-  // to do the navigation.
-  void OpenExtensionsPage(double button,
-                          bool alt_key,
-                          bool ctrl_key,
-                          bool meta_key,
-                          bool shift_key);
-
-  // Handles navigation to privileged (i.e. chrome://) URLs by calling the
-  // browser to do the navigation.
-  void OpenAutocompleteMatch(uint8_t line,
-                             const GURL& url,
-                             bool are_matches_showing,
-                             double time_elapsed_since_last_focus,
-                             double button,
-                             bool alt_key,
-                             bool ctrl_key,
-                             bool meta_key,
-                             bool shift_key);
-
-  // Tells the browser to allow suggestions with the given suggestion group ID
-  // to appear in the results if they currently are not allowed to or to prevent
-  // them from appearing in the results if they are currently permitted to.
-  void ToggleSuggestionGroupIdVisibility(int32_t suggestion_group_id);
-
   bool is_focused() const { return is_focused_; }
   bool is_input_in_progress() const { return is_input_in_progress_; }
   bool is_key_capture_enabled() const { return is_key_capture_enabled_; }
@@ -246,11 +159,6 @@ class SearchBox : public content::RenderFrameObserver,
   void OnDestruct() override;
 
   // Overridden from search::mojom::EmbeddedSearchClient:
-  void AutocompleteResultChanged(
-      search::mojom::AutocompleteResultPtr result) override;
-  void AutocompleteMatchImageAvailable(uint32_t match_index,
-                                       const std::string& image_url,
-                                       const std::string& data_url) override;
   void SetPageSequenceNumber(int page_seq_no) override;
   void FocusChanged(OmniboxFocusState new_focus_state,
                     OmniboxFocusChangeReason reason) override;
@@ -294,7 +202,7 @@ class SearchBox : public content::RenderFrameObserver,
   // comparing most visited items.
   InstantMostVisitedInfo most_visited_info_;
   bool has_received_most_visited_;
-  base::Optional<NtpTheme> theme_;
+  absl::optional<NtpTheme> theme_;
 
   base::WeakPtrFactory<SearchBox> weak_ptr_factory_{this};
 

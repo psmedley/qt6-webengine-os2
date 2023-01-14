@@ -29,13 +29,14 @@
 #include "third_party/blink/renderer/core/css/css_axis_value.h"
 #include "third_party/blink/renderer/core/css/css_basic_shape_values.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_content_distribution_value.h"
 #include "third_party/blink/renderer/core/css/css_counter_value.h"
 #include "third_party/blink/renderer/core/css/css_crossfade_value.h"
 #include "third_party/blink/renderer/core/css/css_cursor_image_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/css_cyclic_variable_value.h"
 #include "third_party/blink/renderer/core/css/css_element_offset_value.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
@@ -64,6 +65,7 @@
 #include "third_party/blink/renderer/core/css/css_paint_value.h"
 #include "third_party/blink/renderer/core/css/css_path_value.h"
 #include "third_party/blink/renderer/core/css/css_pending_substitution_value.h"
+#include "third_party/blink/renderer/core/css/css_pending_system_font_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_quad_value.h"
 #include "third_party/blink/renderer/core/css/css_ray_value.h"
@@ -95,6 +97,7 @@ CSSValue* CSSValue::Create(const Length& value, float zoom) {
     case Length::kMaxContent:
     case Length::kFillAvailable:
     case Length::kFitContent:
+    case Length::kContent:
     case Length::kExtendToZoom:
       return CSSIdentifierValue::Create(value);
     case Length::kPercent:
@@ -178,7 +181,7 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<cssvalue::CSSBorderImageSliceValue>(*this,
                                                                     other);
       case kColorClass:
-        return CompareCSSValues<cssvalue::CSSColorValue>(*this, other);
+        return CompareCSSValues<cssvalue::CSSColor>(*this, other);
       case kCounterClass:
         return CompareCSSValues<cssvalue::CSSCounterValue>(*this, other);
       case kCursorImageClass:
@@ -277,8 +280,13 @@ bool CSSValue::operator==(const CSSValue& other) const {
       case kPendingSubstitutionValueClass:
         return CompareCSSValues<cssvalue::CSSPendingSubstitutionValue>(*this,
                                                                        other);
+      case kPendingSystemFontValueClass:
+        return CompareCSSValues<cssvalue::CSSPendingSystemFontValue>(*this,
+                                                                     other);
       case kInvalidVariableValueClass:
         return CompareCSSValues<CSSInvalidVariableValue>(*this, other);
+      case kCyclicVariableValueClass:
+        return CompareCSSValues<CSSCyclicVariableValue>(*this, other);
       case kLightDarkValuePairClass:
         return CompareCSSValues<CSSLightDarkValuePair>(*this, other);
       case kIdSelectorClass:
@@ -307,7 +315,7 @@ String CSSValue::CssText() const {
     case kBorderImageSliceClass:
       return To<cssvalue::CSSBorderImageSliceValue>(this)->CustomCSSText();
     case kColorClass:
-      return To<cssvalue::CSSColorValue>(this)->CustomCSSText();
+      return To<cssvalue::CSSColor>(this)->CustomCSSText();
     case kCounterClass:
       return To<cssvalue::CSSCounterValue>(this)->CustomCSSText();
     case kCursorImageClass:
@@ -401,8 +409,12 @@ String CSSValue::CssText() const {
       return To<CSSCustomPropertyDeclaration>(this)->CustomCSSText();
     case kPendingSubstitutionValueClass:
       return To<cssvalue::CSSPendingSubstitutionValue>(this)->CustomCSSText();
+    case kPendingSystemFontValueClass:
+      return To<cssvalue::CSSPendingSystemFontValue>(this)->CustomCSSText();
     case kInvalidVariableValueClass:
       return To<CSSInvalidVariableValue>(this)->CustomCSSText();
+    case kCyclicVariableValueClass:
+      return To<CSSCyclicVariableValue>(this)->CustomCSSText();
     case kLightDarkValuePairClass:
       return To<CSSLightDarkValuePair>(this)->CustomCSSText();
     case kIdSelectorClass:
@@ -437,7 +449,7 @@ void CSSValue::FinalizeGarbageCollectedObject() {
       To<cssvalue::CSSBorderImageSliceValue>(this)->~CSSBorderImageSliceValue();
       return;
     case kColorClass:
-      To<cssvalue::CSSColorValue>(this)->~CSSColorValue();
+      To<cssvalue::CSSColor>(this)->~CSSColor();
       return;
     case kCounterClass:
       To<cssvalue::CSSCounterValue>(this)->~CSSCounterValue();
@@ -583,8 +595,15 @@ void CSSValue::FinalizeGarbageCollectedObject() {
       To<cssvalue::CSSPendingSubstitutionValue>(this)
           ->~CSSPendingSubstitutionValue();
       return;
+    case kPendingSystemFontValueClass:
+      To<cssvalue::CSSPendingSystemFontValue>(this)
+          ->~CSSPendingSystemFontValue();
+      return;
     case kInvalidVariableValueClass:
       To<CSSInvalidVariableValue>(this)->~CSSInvalidVariableValue();
+      return;
+    case kCyclicVariableValueClass:
+      To<CSSCyclicVariableValue>(this)->~CSSCyclicVariableValue();
       return;
     case kLightDarkValuePairClass:
       To<CSSLightDarkValuePair>(this)->~CSSLightDarkValuePair();
@@ -622,7 +641,7 @@ void CSSValue::Trace(Visitor* visitor) const {
       To<cssvalue::CSSBorderImageSliceValue>(this)->TraceAfterDispatch(visitor);
       return;
     case kColorClass:
-      To<cssvalue::CSSColorValue>(this)->TraceAfterDispatch(visitor);
+      To<cssvalue::CSSColor>(this)->TraceAfterDispatch(visitor);
       return;
     case kCounterClass:
       To<cssvalue::CSSCounterValue>(this)->TraceAfterDispatch(visitor);
@@ -768,8 +787,15 @@ void CSSValue::Trace(Visitor* visitor) const {
       To<cssvalue::CSSPendingSubstitutionValue>(this)->TraceAfterDispatch(
           visitor);
       return;
+    case kPendingSystemFontValueClass:
+      To<cssvalue::CSSPendingSystemFontValue>(this)->TraceAfterDispatch(
+          visitor);
+      return;
     case kInvalidVariableValueClass:
       To<CSSInvalidVariableValue>(this)->TraceAfterDispatch(visitor);
+      return;
+    case kCyclicVariableValueClass:
+      To<CSSCyclicVariableValue>(this)->TraceAfterDispatch(visitor);
       return;
     case kLightDarkValuePairClass:
       To<CSSLightDarkValuePair>(this)->TraceAfterDispatch(visitor);

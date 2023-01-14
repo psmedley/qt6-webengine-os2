@@ -33,14 +33,12 @@
 #include <algorithm>
 #include <memory>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/char_traits.h"
 #include "third_party/blink/public/platform/web_crypto_algorithm_params.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer_view.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_object_string.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_crypto_key.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
@@ -299,14 +297,23 @@ bool GetOptionalBufferSource(const Dictionary& raw,
   has_property = true;
 
   if (v8_value->IsArrayBufferView()) {
-    bytes = CopyBytes(
-        V8ArrayBufferView::ToImpl(v8::Local<v8::Object>::Cast(v8_value)));
+    DOMArrayBufferView* array_buffer_view =
+        NativeValueTraits<NotShared<DOMArrayBufferView>>::NativeValue(
+            raw.GetIsolate(), v8_value, exception_state)
+            .Get();
+    if (exception_state.HadException())
+      return false;
+    bytes = CopyBytes(array_buffer_view);
     return true;
   }
 
   if (v8_value->IsArrayBuffer()) {
-    bytes =
-        CopyBytes(V8ArrayBuffer::ToImpl(v8::Local<v8::Object>::Cast(v8_value)));
+    DOMArrayBuffer* array_buffer =
+        NativeValueTraits<DOMArrayBuffer>::NativeValue(
+            raw.GetIsolate(), v8_value, exception_state);
+    if (exception_state.HadException())
+      return false;
+    bytes = CopyBytes(array_buffer);
     return true;
   }
 
@@ -496,12 +503,11 @@ bool GetOptionalUint8(const Dictionary& raw,
   return true;
 }
 
-bool GetAlgorithmIdentifier(v8::Isolate* isolate,
-                            const Dictionary& raw,
-                            const char* property_name,
-                            AlgorithmIdentifier& value,
-                            const ErrorContext& context,
-                            ExceptionState& exception_state) {
+V8AlgorithmIdentifier* GetAlgorithmIdentifier(v8::Isolate* isolate,
+                                              const Dictionary& raw,
+                                              const char* property_name,
+                                              const ErrorContext& context,
+                                              ExceptionState& exception_state) {
   // FIXME: This is not correct: http://crbug.com/438060
   //   (1) It may retrieve the property twice from the dictionary, whereas it
   //       should be reading the v8 value once to avoid issues with getters.
@@ -509,8 +515,8 @@ bool GetAlgorithmIdentifier(v8::Isolate* isolate,
   //       instance of DOMString).
   Dictionary dictionary;
   if (raw.Get(property_name, dictionary) && dictionary.IsObject()) {
-    value.SetObject(ScriptValue(isolate, dictionary.V8Value()));
-    return true;
+    return MakeGarbageCollected<V8AlgorithmIdentifier>(
+        ScriptValue(isolate, dictionary.V8Value()));
   }
 
   String algorithm_name;
@@ -518,11 +524,10 @@ bool GetAlgorithmIdentifier(v8::Isolate* isolate,
     SetTypeError(context.ToString(property_name,
                                   "Missing or not an AlgorithmIdentifier"),
                  exception_state);
-    return false;
+    return nullptr;
   }
 
-  value.SetString(algorithm_name);
-  return true;
+  return MakeGarbageCollected<V8AlgorithmIdentifier>(algorithm_name);
 }
 
 // Defined by the WebCrypto spec as:
@@ -560,7 +565,7 @@ bool ParseAesKeyGenParams(const Dictionary& raw,
 }
 
 bool ParseAlgorithmIdentifier(v8::Isolate*,
-                              const AlgorithmIdentifier&,
+                              const V8AlgorithmIdentifier&,
                               WebCryptoOperation,
                               WebCryptoAlgorithm&,
                               ErrorContext,
@@ -571,13 +576,15 @@ bool ParseHash(v8::Isolate* isolate,
                WebCryptoAlgorithm& hash,
                ErrorContext context,
                ExceptionState& exception_state) {
-  AlgorithmIdentifier raw_hash;
-  if (!GetAlgorithmIdentifier(isolate, raw, "hash", raw_hash, context,
-                              exception_state))
+  V8AlgorithmIdentifier* raw_hash =
+      GetAlgorithmIdentifier(isolate, raw, "hash", context, exception_state);
+  if (!raw_hash) {
+    DCHECK(exception_state.HadException());
     return false;
+  }
 
   context.Add("hash");
-  return ParseAlgorithmIdentifier(isolate, raw_hash, kWebCryptoOperationDigest,
+  return ParseAlgorithmIdentifier(isolate, *raw_hash, kWebCryptoOperationDigest,
                                   hash, context, exception_state);
 }
 
@@ -1170,7 +1177,7 @@ bool ParseAlgorithmDictionary(v8::Isolate* isolate,
 }
 
 bool ParseAlgorithmIdentifier(v8::Isolate* isolate,
-                              const AlgorithmIdentifier& raw,
+                              const V8AlgorithmIdentifier& raw,
                               WebCryptoOperation op,
                               WebCryptoAlgorithm& algorithm,
                               ErrorContext context,
@@ -1203,11 +1210,12 @@ bool ParseAlgorithmIdentifier(v8::Isolate* isolate,
 }  // namespace
 
 bool NormalizeAlgorithm(v8::Isolate* isolate,
-                        const AlgorithmIdentifier& raw,
+                        const V8AlgorithmIdentifier* raw,
                         WebCryptoOperation op,
                         WebCryptoAlgorithm& algorithm,
                         ExceptionState& exception_state) {
-  return ParseAlgorithmIdentifier(isolate, raw, op, algorithm, ErrorContext(),
+  DCHECK(raw);
+  return ParseAlgorithmIdentifier(isolate, *raw, op, algorithm, ErrorContext(),
                                   exception_state);
 }
 

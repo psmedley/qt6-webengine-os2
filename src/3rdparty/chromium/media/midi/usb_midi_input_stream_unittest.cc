@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "media/midi/usb_midi_device.h"
@@ -62,7 +62,7 @@ class MockDelegate : public UsbMidiInputStream::Delegate {
 class UsbMidiInputStreamTest : public ::testing::Test {
  protected:
   UsbMidiInputStreamTest() {
-    stream_.reset(new UsbMidiInputStream(&delegate_));
+    stream_ = std::make_unique<UsbMidiInputStream>(&delegate_);
 
     stream_->Add(UsbMidiJack(&device1_,
                              84,  // jack_id

@@ -19,7 +19,7 @@
 
 // For libgav1::RefCountedBufferPtr.
 #include "third_party/libgav1/src/src/buffer_pool.h"
-// For libgav1::ObuSequenceHeader. base::Optional demands ObuSequenceHeader to
+// For libgav1::ObuSequenceHeader. absl::optional demands ObuSequenceHeader to
 // fulfill std::is_trivially_constructible if it is forward-declared. But
 // ObuSequenceHeader doesn't.
 #include "third_party/libgav1/src/src/obu_parser.h"
@@ -46,6 +46,24 @@ class MEDIA_GPU_EXPORT AV1Decoder : public AcceleratedVideoDecoder {
  public:
   class MEDIA_GPU_EXPORT AV1Accelerator {
    public:
+    // Methods may return kTryAgain if they need additional data (provided
+    // independently) in order to proceed. Examples are things like not having
+    // an appropriate key to decode encrypted content. This is not considered an
+    // unrecoverable error, but rather a pause to allow an application to
+    // independently provide the required data. When AV1Decoder::Decode()
+    // is called again, it will attempt to resume processing of the stream
+    // by calling the same method again.
+    enum class Status {
+      // Operation completed successfully.
+      kOk,
+
+      // Operation failed.
+      kFail,
+
+      // Operation failed because some external data is missing. Retry the same
+      // operation later, once the data has been provided.
+      kTryAgain,
+    };
     AV1Accelerator() = default;
     virtual ~AV1Accelerator() = default;
     AV1Accelerator(const AV1Accelerator&) = delete;
@@ -74,8 +92,7 @@ class MEDIA_GPU_EXPORT AV1Decoder : public AcceleratedVideoDecoder {
     // process is finished, but the caller may drop its references to |pic|
     // and |ref_frames| immediately, and |data| does not need to remain valid
     // after this method returns.
-    // Returns true when successful, false otherwise.
-    virtual bool SubmitDecode(
+    virtual Status SubmitDecode(
         const AV1Picture& pic,
         const libgav1::ObuSequenceHeader& sequence_header,
         const AV1ReferenceFrameVector& ref_frames,
@@ -114,7 +131,7 @@ class MEDIA_GPU_EXPORT AV1Decoder : public AcceleratedVideoDecoder {
  private:
   friend class AV1DecoderTest;
 
-  bool DecodeAndOutputPicture(
+  AV1Accelerator::Status DecodeAndOutputPicture(
       scoped_refptr<AV1Picture> pic,
       const libgav1::Vector<libgav1::TileBuffer>& tile_buffers);
   void UpdateReferenceFrames(scoped_refptr<AV1Picture> pic);
@@ -138,8 +155,8 @@ class MEDIA_GPU_EXPORT AV1Decoder : public AcceleratedVideoDecoder {
   const std::unique_ptr<AV1Accelerator> accelerator_;
   AV1ReferenceFrameVector ref_frames_;
 
-  base::Optional<libgav1::ObuSequenceHeader> current_sequence_header_;
-  base::Optional<libgav1::ObuFrameHeader> current_frame_header_;
+  absl::optional<libgav1::ObuSequenceHeader> current_sequence_header_;
+  absl::optional<libgav1::ObuFrameHeader> current_frame_header_;
   libgav1::RefCountedBufferPtr current_frame_;
 
   gfx::Rect visible_rect_;
@@ -151,6 +168,10 @@ class MEDIA_GPU_EXPORT AV1Decoder : public AcceleratedVideoDecoder {
   int32_t stream_id_ = 0;
   const uint8_t* stream_ = nullptr;
   size_t stream_size_ = 0;
+  std::unique_ptr<DecryptConfig> decrypt_config_;
+
+  // Pending picture for decode when accelerator returns kTryAgain.
+  scoped_refptr<AV1Picture> pending_pic_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

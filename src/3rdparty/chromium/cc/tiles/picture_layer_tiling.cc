@@ -13,11 +13,12 @@
 
 #include "base/check_op.h"
 #include "base/containers/flat_map.h"
+#include "base/cxx17_backports.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/base/math_util.h"
+#include "cc/layers/picture_layer_impl.h"
 #include "cc/raster/raster_source.h"
 #include "cc/tiles/prioritized_tile.h"
 #include "cc/tiles/tile.h"
@@ -52,7 +53,8 @@ PictureLayerTiling::PictureLayerTiling(
 
 #if DCHECK_IS_ON()
   gfx::SizeF scaled_source_size(gfx::ScaleSize(
-      gfx::SizeF(raster_source_->GetSize()), raster_transform.scale()));
+      gfx::SizeF(raster_source_->GetSize()), raster_transform.scale().x(),
+      raster_transform.scale().y()));
   gfx::Size floored_size = gfx::ToFlooredSize(scaled_source_size);
   bool is_width_empty =
       !floored_size.width() &&
@@ -397,13 +399,13 @@ PictureLayerTiling::CoverageIterator::CoverageIterator(
     const gfx::Rect& coverage_rect)
     : tiling_(tiling),
       coverage_rect_(coverage_rect),
-      coverage_to_content_(tiling->raster_transform().scale() / coverage_scale,
-                           tiling->raster_transform().translation()) {
+      coverage_to_content_(PreScaleAxisTransform2d(tiling->raster_transform(),
+                                                   1 / coverage_scale)) {
   DCHECK(tiling_);
   // In order to avoid artifacts in geometry_rect scaling and clamping to ints,
   // the |coverage_scale| should always be at least as big as the tiling's
   // raster scales.
-  DCHECK_GE(coverage_scale, tiling_->raster_transform_.scale());
+  DCHECK_GE(coverage_scale, tiling_->contents_scale_key());
 
   // Clamp |coverage_rect| to the bounds of this tiling's raster source.
   coverage_rect_max_bounds_ =
@@ -606,7 +608,7 @@ void PictureLayerTiling::ComputeTilePriorityRects(
   }
 
   const float content_to_screen_scale =
-      ideal_contents_scale / raster_transform_.scale();
+      ideal_contents_scale / contents_scale_key();
 
   const gfx::Rect* input_rects[] = {
       &visible_rect_in_layer_space, &skewport_in_layer_space,
@@ -898,6 +900,15 @@ PrioritizedTile PictureLayerTiling::MakePrioritizedTile(
       (tile_priority.distance_to_visible > max_preraster_distance_ ||
        tile_priority.distance_to_visible >
            0.5f * max_skewport_extent_in_screen_space_);
+
+  // If the tile is within max_skewport_extent and a scroll interaction
+  // experiencing checkerboarding is currently taking place, then
+  // continue to rasterize the tile right now rather than for images only.
+  if (tile_priority.distance_to_visible <
+          max_skewport_extent_in_screen_space_ &&
+      client_->ScrollInteractionInProgress() &&
+      client_->CurrentScrollDidCheckerboardLargeArea())
+    process_for_images_only = false;
   return PrioritizedTile(tile, this, tile_priority, IsTileOccluded(tile),
                          process_for_images_only,
                          ShouldDecodeCheckeredImagesForTile(tile));
@@ -922,9 +933,16 @@ TilePriority PictureLayerTiling::ComputePriorityForTile(
   DCHECK_EQ(ComputePriorityRectTypeForTile(tile), priority_rect_type);
   DCHECK_EQ(TileAt(tile->tiling_i_index(), tile->tiling_j_index()), tile);
 
-  TilePriority::PriorityBin priority_bin = client_->HasValidTilePriorities()
-                                               ? TilePriority::NOW
-                                               : TilePriority::EVENTUALLY;
+  TilePriority::PriorityBin priority_bin;
+  if (client_->HasValidTilePriorities()) {
+    // Occluded tiles are given a lower PriorityBin to ensure they are evicted
+    // before non-occluded tiles.
+    priority_bin =
+        IsTileOccluded(tile) ? TilePriority::SOON : TilePriority::NOW;
+  } else {
+    priority_bin = TilePriority::EVENTUALLY;
+  }
+
   switch (priority_rect_type) {
     case VISIBLE_RECT:
     case PENDING_VISIBLE_RECT:
@@ -985,11 +1003,16 @@ void PictureLayerTiling::AsValueInto(
   state->SetInteger("num_tiles", base::saturated_cast<int>(tiles_.size()));
   state->SetDouble("content_scale", contents_scale_key());
 
-  state->BeginArray("raster_transform");
-  state->AppendDouble(raster_transform_.scale());
+  state->BeginDictionary("raster_transform");
+  state->BeginArray("scale");
+  state->AppendDouble(raster_transform_.scale().x());
+  state->AppendDouble(raster_transform_.scale().y());
+  state->EndArray();
+  state->BeginArray("translation");
   state->AppendDouble(raster_transform_.translation().x());
   state->AppendDouble(raster_transform_.translation().y());
   state->EndArray();
+  state->EndDictionary();
 
   MathUtil::AddToTracedValue("visible_rect", current_visible_rect_, state);
   MathUtil::AddToTracedValue("skewport_rect", current_skewport_rect_, state);

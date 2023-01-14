@@ -7,7 +7,6 @@
 
 #include <stdint.h>
 
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"

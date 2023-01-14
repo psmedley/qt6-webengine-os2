@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_FRAME_PROVIDER_H_
 
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
@@ -17,6 +18,7 @@
 
 namespace blink {
 
+class LocalDOMWindow;
 class XRFrameTransport;
 class XRSession;
 class XRSystem;
@@ -48,7 +50,7 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   void OnSessionEnded(XRSession* session);
   void RestartNonImmersiveFrameLoop();
 
-  void RequestFrame(XRSession*);
+  void RequestFrame(XRSession* session);
 
   void OnNonImmersiveVSync(double high_res_now_ms);
 
@@ -100,19 +102,25 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   void OnPreDispatchInlineFrame(
       XRSession* session,
       double timestamp,
-      const base::Optional<gpu::MailboxHolder>& output_mailbox_holder,
-      const base::Optional<gpu::MailboxHolder>& camera_image_mailbox_holder);
+      const absl::optional<gpu::MailboxHolder>& output_mailbox_holder,
+      const absl::optional<gpu::MailboxHolder>& camera_image_mailbox_holder);
+
+  // Updates the |first_immersive_frame_time_| and
+  // |first_immersive_frame_time_delta_| members and returns the computed high
+  // resolution timestamp for the received frame. The result corresponds to
+  // WebXR's XRFrame's `time` attribute.
+  double UpdateImmersiveFrameTime(
+      LocalDOMWindow* window,
+      const device::mojom::blink::XRFrameData& data);
 
   const Member<XRSystem> xr_;
 
   // Immersive session state
   Member<XRSession> immersive_session_;
   Member<XRFrameTransport> frame_transport_;
-  HeapMojoRemote<device::mojom::blink::XRFrameDataProvider,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<device::mojom::blink::XRFrameDataProvider>
       immersive_data_provider_;
-  HeapMojoRemote<device::mojom::blink::XRPresentationProvider,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<device::mojom::blink::XRPresentationProvider>
       immersive_presentation_provider_;
   device::mojom::blink::VRPosePtr immersive_frame_pose_;
   bool is_immersive_frame_position_emulated_ = false;
@@ -123,15 +131,14 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
 
   // Time the first immersive frame has arrived - used to align the monotonic
   // clock the devices use with the base::TimeTicks.
-  base::Optional<base::TimeTicks> first_immersive_frame_time_;
+  absl::optional<base::TimeTicks> first_immersive_frame_time_;
   // The time_delta value of the first immersive frame that has arrived.
-  base::Optional<base::TimeDelta> first_immersive_frame_time_delta_;
+  absl::optional<base::TimeDelta> first_immersive_frame_time_delta_;
 
   // Non-immersive session state
   HeapHashMap<Member<XRSession>,
-              Member<DisallowNewWrapper<HeapMojoRemote<
-                  device::mojom::blink::XRFrameDataProvider,
-                  HeapMojoWrapperMode::kWithoutContextObserver>>>>
+              Member<DisallowNewWrapper<
+                  HeapMojoRemote<device::mojom::blink::XRFrameDataProvider>>>>
       non_immersive_data_providers_;
   HeapHashMap<Member<XRSession>, device::mojom::blink::XRFrameDataPtr>
       requesting_sessions_;
@@ -143,8 +150,8 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   bool pending_immersive_vsync_ = false;
   bool pending_non_immersive_vsync_ = false;
 
-  base::Optional<gpu::MailboxHolder> buffer_mailbox_holder_;
-  base::Optional<gpu::MailboxHolder> camera_image_mailbox_holder_;
+  absl::optional<gpu::MailboxHolder> buffer_mailbox_holder_;
+  absl::optional<gpu::MailboxHolder> camera_image_mailbox_holder_;
   bool last_has_focus_ = false;
 };
 

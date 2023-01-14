@@ -2,19 +2,37 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {addSingletonGetter} from 'chrome://resources/js/cr.m.js';
-import {BrowserProxy} from '../browser_proxy.js';
-import {ModuleDescriptor} from './module_descriptor.js';
+import {NewTabPageProxy} from '../new_tab_page_proxy.js';
+
+import {Module, ModuleDescriptor} from './module_descriptor.js';
+import {descriptors} from './module_descriptors.js';
 
 /**
  * @fileoverview The module registry holds the descriptors of NTP modules and
  * provides management function such as instantiating the local module UIs.
  */
 
+/** @type {ModuleRegistry} */
+let instance = null;
+
 export class ModuleRegistry {
-  constructor() {
+  /** @return {!ModuleRegistry} */
+  static getInstance() {
+    return instance || (instance = new ModuleRegistry(descriptors));
+  }
+
+  /** @param {ModuleRegistry} newInstance */
+  static setInstance(newInstance) {
+    instance = newInstance;
+  }
+
+  /**
+   * Creates a registry populated with a list of descriptors
+   * @param {!Array<!ModuleDescriptor>} descriptors
+   */
+  constructor(descriptors) {
     /** @private {!Array<!ModuleDescriptor>} */
-    this.descriptors_ = [];
+    this.descriptors_ = descriptors;
   }
 
   /** @return {!Array<!ModuleDescriptor>} */
@@ -23,38 +41,41 @@ export class ModuleRegistry {
   }
 
   /**
-   * Registers modules via their descriptors.
-   * @param {!Array<!ModuleDescriptor>} descriptors
-   */
-  registerModules(descriptors) {
-    /** @type {!Array<!ModuleDescriptor>} */
-    this.descriptors_ = descriptors;
-  }
-
-  /**
    * Initializes enabled modules previously set via |registerModules| and
-   * returns the initialized descriptors.
+   * returns the initialized modules.
    * @param {number} timeout Timeout in milliseconds after which initialization
    *     of a particular module aborts.
-   * @return {!Promise<!Array<!ModuleDescriptor>>}
+   * @return {!Promise<!Array<!Module>>}
    */
   async initializeModules(timeout) {
     // Capture updateDisabledModules -> setDisabledModules round trip in a
     // promise for convenience.
     const disabledIds = await new Promise((resolve, _) => {
-      const callbackRouter = BrowserProxy.getInstance().callbackRouter;
+      const callbackRouter = NewTabPageProxy.getInstance().callbackRouter;
       const listenerId =
           callbackRouter.setDisabledModules.addListener((all, ids) => {
             callbackRouter.removeListener(listenerId);
             resolve(all ? this.descriptors_.map(({id}) => id) : ids);
           });
-      BrowserProxy.getInstance().handler.updateDisabledModules();
+      NewTabPageProxy.getInstance().handler.updateDisabledModules();
     });
-    await Promise.all(
-        this.descriptors_.filter(d => disabledIds.indexOf(d.id) < 0)
-            .map(d => d.initialize(timeout)));
-    return this.descriptors_.filter(descriptor => !!descriptor.element);
+    const descriptors =
+        this.descriptors_.filter(d => !disabledIds.includes(d.id));
+
+    const order = await NewTabPageProxy.getInstance().handler.getModulesOrder();
+    const orderedIds = order.moduleIds;
+    // Only conform to the persisted order if there exists one in the pref.
+    // |orderedIds| will be an empty array if the user has not reordered
+    // the modules before.
+    if (orderedIds.length > 0) {
+      descriptors.sort((a, b) => {
+        return orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id);
+      });
+    }
+
+    const elements =
+        await Promise.all(descriptors.map(d => d.initialize(timeout)));
+    return elements.map((e, i) => ({element: e, descriptor: descriptors[i]}))
+        .filter(m => !!m.element);
   }
 }
-
-addSingletonGetter(ModuleRegistry);

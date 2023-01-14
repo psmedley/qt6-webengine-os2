@@ -14,9 +14,9 @@ const String& CSSURLImageValue::url() const {
   return value_->RelativeUrl();
 }
 
-base::Optional<IntSize> CSSURLImageValue::IntrinsicSize() const {
+absl::optional<IntSize> CSSURLImageValue::IntrinsicSize() const {
   if (Status() != ResourceStatus::kCached)
-    return base::nullopt;
+    return absl::nullopt;
 
   DCHECK(!value_->IsCachePending());
   ImageResourceContent* resource_content = value_->CachedImage()->CachedImage();
@@ -34,7 +34,10 @@ ResourceStatus CSSURLImageValue::Status() const {
 
 scoped_refptr<Image> CSSURLImageValue::GetSourceImageForCanvas(
     SourceImageStatus*,
-    const FloatSize&) {
+    const FloatSize&,
+    const AlphaDisposition alpha_disposition) {
+  // UnpremultiplyAlpha is not implemented yet.
+  DCHECK_EQ(alpha_disposition, kPremultiplyAlpha);
   return GetImage();
 }
 

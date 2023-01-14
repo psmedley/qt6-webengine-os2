@@ -12,6 +12,7 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/net_adapters.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 
 namespace content {
@@ -113,7 +114,7 @@ void ServiceWorkerInstalledScriptReader::Start() {
 void ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete(
     int result,
     network::mojom::URLResponseHeadPtr response_head,
-    base::Optional<mojo_base::BigBuffer> metadata) {
+    absl::optional<mojo_base::BigBuffer> metadata) {
   DCHECK(client_);
   TRACE_EVENT0(
       "ServiceWorker",
@@ -140,7 +141,7 @@ void ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete(
 
 void ServiceWorkerInstalledScriptReader::OnReadDataStarted(
     network::mojom::URLResponseHeadPtr response_head,
-    base::Optional<mojo_base::BigBuffer> metadata,
+    absl::optional<mojo_base::BigBuffer> metadata,
     mojo::ScopedDataPipeConsumerHandle body_consumer_handle) {
   if (!body_consumer_handle) {
     CompleteSendIfNeeded(FinishedReason::kCreateDataPipeError);

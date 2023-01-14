@@ -59,7 +59,6 @@ void CheckGpuPreferencesEqual(GpuPreferences left, GpuPreferences right) {
   EXPECT_EQ(left.enable_threaded_texture_mailboxes,
             right.enable_threaded_texture_mailboxes);
   EXPECT_EQ(left.gl_shader_interm_output, right.gl_shader_interm_output);
-  EXPECT_EQ(left.emulate_shader_precision, right.emulate_shader_precision);
   EXPECT_EQ(left.enable_gpu_service_logging, right.enable_gpu_service_logging);
   EXPECT_EQ(left.enable_gpu_service_tracing, right.enable_gpu_service_tracing);
   EXPECT_EQ(left.use_passthrough_cmd_decoder,
@@ -97,7 +96,7 @@ void CheckGpuPreferencesEqual(GpuPreferences left, GpuPreferences right) {
 #endif
   EXPECT_EQ(left.enable_native_gpu_memory_buffers,
             right.enable_native_gpu_memory_buffers);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
   EXPECT_EQ(left.enable_chromeos_direct_video_decoder,
             right.enable_chromeos_direct_video_decoder);
 #endif
@@ -163,7 +162,6 @@ TEST(GpuPreferencesTest, EncodeDecode) {
     GPU_PREFERENCES_FIELD(disable_gpu_shader_disk_cache, true)
     GPU_PREFERENCES_FIELD(enable_threaded_texture_mailboxes, true)
     GPU_PREFERENCES_FIELD(gl_shader_interm_output, true)
-    GPU_PREFERENCES_FIELD(emulate_shader_precision, true)
     GPU_PREFERENCES_FIELD(enable_gpu_service_logging, true)
     GPU_PREFERENCES_FIELD(enable_gpu_service_tracing, true)
     GPU_PREFERENCES_FIELD(use_passthrough_cmd_decoder, true)
@@ -181,7 +179,9 @@ TEST(GpuPreferencesTest, EncodeDecode) {
     GPU_PREFERENCES_FIELD(vulkan_sync_cpu_memory_limit, 1);
     GPU_PREFERENCES_FIELD(enable_gpu_benchmarking_extension, true)
     GPU_PREFERENCES_FIELD(enable_webgpu, true)
-    GPU_PREFERENCES_FIELD(enable_dawn_backend_validation, true)
+    GPU_PREFERENCES_FIELD_ENUM(enable_dawn_backend_validation,
+                               DawnBackendValidationLevel::kPartial,
+                               mojom::DawnBackendValidationLevel::kPartial)
     GPU_PREFERENCES_FIELD(enable_gpu_blocked_time_metric, true)
     GPU_PREFERENCES_FIELD(enable_perf_data_collection, true)
 #if defined(USE_OZONE)
@@ -189,7 +189,7 @@ TEST(GpuPreferencesTest, EncodeDecode) {
                                base::MessagePumpType::UI)
 #endif
     GPU_PREFERENCES_FIELD(enable_native_gpu_memory_buffers, true);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
     GPU_PREFERENCES_FIELD(enable_chromeos_direct_video_decoder, true);
 #endif
 
@@ -257,7 +257,6 @@ TEST(GpuPreferencesTest, DISABLED_DecodePreferences) {
   PRINT_BOOL(disable_gpu_shader_disk_cache);
   PRINT_BOOL(enable_threaded_texture_mailboxes);
   PRINT_BOOL(gl_shader_interm_output);
-  PRINT_BOOL(emulate_shader_precision);
   PRINT_BOOL(enable_gpu_service_logging);
   PRINT_BOOL(enable_gpu_service_tracing);
   PRINT_BOOL(use_passthrough_cmd_decoder);
@@ -277,14 +276,14 @@ TEST(GpuPreferencesTest, DISABLED_DecodePreferences) {
   PRINT_INT(vulkan_sync_cpu_memory_limit);
   PRINT_BOOL(enable_gpu_benchmarking_extension);
   PRINT_BOOL(enable_webgpu);
-  PRINT_BOOL(enable_dawn_backend_validation);
+  PRINT_INT(enable_dawn_backend_validation);
   PRINT_BOOL(enable_gpu_blocked_time_metric);
   PRINT_BOOL(enable_perf_data_collection);
 #if defined(USE_OZONE)
   PRINT_INT(message_pump_type);
 #endif
   PRINT_BOOL(enable_native_gpu_memory_buffers);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
   PRINT_BOOL(enable_chromeos_direct_video_decoder);
 #endif
   printf("}\n");

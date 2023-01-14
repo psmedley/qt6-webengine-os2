@@ -32,8 +32,8 @@
 #include "base/memory/ptr_util.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/paint/display_item_list.h"
+#include "skia/ext/skia_matrix_44.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -63,7 +63,6 @@
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "third_party/skia/include/core/SkMatrix44.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -115,7 +114,7 @@ LinkHighlightImpl::LinkHighlightImpl(Node* node)
 
   DCHECK(GetLayoutObject());
   GetLayoutObject()->SetNeedsPaintPropertyUpdate();
-  SetPaintArtifactCompositorNeedsUpdate();
+  SetNeedsRepaintAndCompositingUpdate();
 
 #if DCHECK_IS_ON()
   effect_->SetDebugName("LinkHighlightEffect");
@@ -138,7 +137,7 @@ void LinkHighlightImpl::ReleaseResources() {
   if (auto* layout_object = GetLayoutObject())
     layout_object->SetNeedsPaintPropertyUpdate();
 
-  SetPaintArtifactCompositorNeedsUpdate();
+  SetNeedsRepaintAndCompositingUpdate();
 
   node_.Clear();
 }
@@ -218,7 +217,9 @@ void LinkHighlightImpl::StartHighlightAnimationIfNeeded() {
       timing_function));
 
   auto keyframe_model = std::make_unique<CompositorKeyframeModel>(
-      *curve, compositor_target_property::OPACITY, 0, 0);
+      *curve, 0, 0,
+      CompositorKeyframeModel::TargetPropertyId(
+          compositor_target_property::OPACITY));
 
   compositor_animation_->AddKeyframeModel(std::move(keyframe_model));
 }
@@ -245,14 +246,14 @@ void LinkHighlightImpl::UpdateAfterPrePaint() {
     return;
   DCHECK(!object->GetFrameView()->ShouldThrottleRendering());
 
-  size_t fragment_count = 0;
+  wtf_size_t fragment_count = 0;
   for (const auto* fragment = &object->FirstFragment(); fragment;
        fragment = fragment->NextFragment())
     ++fragment_count;
 
   if (fragment_count != fragments_.size()) {
     fragments_.resize(fragment_count);
-    SetPaintArtifactCompositorNeedsUpdate();
+    SetNeedsRepaintAndCompositingUpdate();
   }
 }
 
@@ -341,15 +342,24 @@ void LinkHighlightImpl::Paint(GraphicsContext& context) {
   DCHECK_EQ(index, fragments_.size());
 }
 
-void LinkHighlightImpl::SetPaintArtifactCompositorNeedsUpdate() {
+void LinkHighlightImpl::SetNeedsRepaintAndCompositingUpdate() {
   DCHECK(node_);
-  if (auto* frame_view = node_->GetDocument().View())
+  if (auto* frame_view = node_->GetDocument().View()) {
+    frame_view->SetVisualViewportOrOverlayNeedsRepaint();
     frame_view->SetPaintArtifactCompositorNeedsUpdate();
+  }
 }
 
 void LinkHighlightImpl::UpdateOpacity(float opacity) {
-  effect_->Update(EffectPaintPropertyNode::Root(),
-                  LinkHighlightEffectNodeState(opacity, element_id_));
+  auto change =
+      effect_->Update(EffectPaintPropertyNode::Root(),
+                      LinkHighlightEffectNodeState(opacity, element_id_));
+  // If there is no |node_|, |ReleaseResources| has already handled the call to
+  // |SetNeedsRepaintAndCompositingUpdate|.
+  if (!node_)
+    return;
+  if (change > PaintPropertyChangeType::kChangedOnlyCompositedValues)
+    SetNeedsRepaintAndCompositingUpdate();
 }
 
 }  // namespace blink

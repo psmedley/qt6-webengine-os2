@@ -8,11 +8,11 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/task/thread_pool.h"
 #include "content/browser/notifications/blink_notification_service_impl.h"
 #include "content/browser/notifications/notification_database.h"
@@ -198,7 +198,7 @@ void PlatformNotificationContextImpl::DoSyncNotificationData(
     return;
 
   // Reset |next_trigger_| to keep track of the next trigger timestamp.
-  next_trigger_ = base::nullopt;
+  next_trigger_ = absl::nullopt;
 
   // Iterate over all notifications and delete all expired ones.
   std::set<std::string> close_notification_ids;
@@ -285,10 +285,11 @@ void PlatformNotificationContextImpl::Shutdown() {
 
 void PlatformNotificationContextImpl::CreateService(
     const url::Origin& origin,
+    const GURL& document_url,
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   services_.push_back(std::make_unique<BlinkNotificationServiceImpl>(
-      this, browser_context_, service_worker_context_, origin,
+      this, browser_context_, service_worker_context_, origin, document_url,
       std::move(receiver)));
 }
 
@@ -357,7 +358,7 @@ void PlatformNotificationContextImpl::CheckPermissionsAndDeleteBlocked(
   }
 
   content::PermissionController* controller =
-      BrowserContext::GetPermissionController(browser_context_);
+      browser_context_->GetPermissionController();
   if (!controller) {
     std::move(callback).Run(/* success= */ false, /* deleted_count= */ 0);
     return;
@@ -377,12 +378,14 @@ void PlatformNotificationContextImpl::CheckPermissionsAndDeleteBlocked(
 
   InitializeDatabase(base::BindOnce(
       &PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins,
-      this, std::move(origins), /* tag= */ std::string(), std::move(callback)));
+      this, std::move(origins), /* tag= */ std::string(),
+      /* is_shown_by_browser= */ absl::nullopt, std::move(callback)));
 }
 
 void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
     std::set<GURL> origins,
     const std::string& tag,
+    absl::optional<bool> is_shown_by_browser,
     DeleteAllResultCallback callback,
     bool initialized) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
@@ -397,7 +400,7 @@ void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
   NotificationDatabase::Status status = NotificationDatabase::STATUS_OK;
   for (const auto& origin : origins) {
     status = database_->DeleteAllNotificationDataForOrigin(
-        origin, tag, &deleted_notification_ids);
+        origin, tag, is_shown_by_browser, &deleted_notification_ids);
     if (status != NotificationDatabase::STATUS_OK)
       break;
   }
@@ -425,13 +428,14 @@ void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
 
 void PlatformNotificationContextImpl::DeleteAllNotificationDataWithTag(
     const std::string& tag,
+    absl::optional<bool> is_shown_by_browser,
     const GURL& origin,
     DeleteAllResultCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::set<GURL> origins = {origin};
   InitializeDatabase(base::BindOnce(
       &PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins,
-      this, std::move(origins), tag, std::move(callback)));
+      this, std::move(origins), tag, is_shown_by_browser, std::move(callback)));
 }
 
 void PlatformNotificationContextImpl::ReadNotificationDataAndRecordInteraction(
@@ -793,9 +797,12 @@ void PlatformNotificationContextImpl::
 
   std::vector<NotificationDatabaseData> notification_datas;
 
+  // TODO(crbug.com/1202149): Pass in via an argument whether we want to include
+  // notifications shown by the browser or not.
   NotificationDatabase::Status status =
       database_->ReadAllNotificationDataForServiceWorkerRegistration(
-          origin, service_worker_registration_id, &notification_datas);
+          origin, service_worker_registration_id,
+          /* is_shown_by_browser= */ false, &notification_datas);
 
   UMA_HISTOGRAM_ENUMERATION("Notifications.Database.ReadForServiceWorkerResult",
                             status, NotificationDatabase::STATUS_COUNT);
@@ -935,7 +942,7 @@ void PlatformNotificationContextImpl::DoWriteNotificationData(
   std::string notification_id =
       notification_id_generator_.GenerateForPersistentNotification(
           origin, database_data.notification_data.tag,
-          persistent_notification_id);
+          database_data.is_shown_by_browser, persistent_notification_id);
 
   // Eagerly delete data for replaced notifications from the database.
   if (!database_data.notification_data.tag.empty()) {
@@ -943,7 +950,7 @@ void PlatformNotificationContextImpl::DoWriteNotificationData(
     NotificationDatabase::Status delete_status =
         database_->DeleteAllNotificationDataForOrigin(
             origin, database_data.notification_data.tag,
-            &deleted_notification_ids);
+            database_data.is_shown_by_browser, &deleted_notification_ids);
 
     replaces_existing = deleted_notification_ids.count(notification_id) != 0;
 
@@ -980,7 +987,7 @@ void PlatformNotificationContextImpl::DoWriteNotificationData(
 
   // Only store resources for notifications that will be scheduled.
   if (!CanTrigger(write_database_data))
-    write_database_data.notification_resources = base::nullopt;
+    write_database_data.notification_resources = absl::nullopt;
 
   NotificationDatabase::Status status =
       database_->WriteNotificationData(origin, write_database_data);
@@ -1061,6 +1068,9 @@ void PlatformNotificationContextImpl::DoDeleteNotificationData(
     }
   }
 
+  // TODO(crbug.com/1202149): Should we verify that websites don't try to close
+  // notifications shown by the browser (is_shown_by_browser == true)?
+
   NotificationDatabase::Status status =
       database_->DeleteNotificationData(notification_id, origin);
 
@@ -1083,7 +1093,8 @@ void PlatformNotificationContextImpl::DoDeleteNotificationData(
 
 void PlatformNotificationContextImpl::OnRegistrationDeleted(
     int64_t registration_id,
-    const GURL& pattern) {
+    const GURL& pattern,
+    const blink::StorageKey& key) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   InitializeDatabase(
       base::BindOnce(&PlatformNotificationContextImpl::

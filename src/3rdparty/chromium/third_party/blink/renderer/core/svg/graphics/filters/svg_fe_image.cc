@@ -76,7 +76,7 @@ static AffineTransform MakeMapBetweenRects(const FloatRect& source,
   return transform;
 }
 
-static base::Optional<AffineTransform> ComputeViewportAdjustmentTransform(
+static absl::optional<AffineTransform> ComputeViewportAdjustmentTransform(
     const SVGElement* element,
     const FloatRect& target_rect) {
   // If we're referencing an element with percentage units, eg. <rect
@@ -88,7 +88,7 @@ static base::Optional<AffineTransform> ComputeViewportAdjustmentTransform(
   SVGLengthContext length_context(element);
   FloatSize viewport_size;
   if (!length_context.DetermineViewport(viewport_size))
-    return base::nullopt;
+    return absl::nullopt;
   return MakeMapBetweenRects(FloatRect(FloatPoint(), viewport_size),
                              target_rect);
 }
@@ -208,7 +208,7 @@ sk_sp<PaintFilter> FEImage::CreateImageFilter() {
     if (crop_rect != dst_rect)
       src_rect = blink::MapRect(crop_rect, dst_rect, src_rect);
     return sk_make_sp<ImagePaintFilter>(std::move(image), src_rect, crop_rect,
-                                        kHigh_SkFilterQuality);
+                                        cc::PaintFlags::FilterQuality::kHigh);
   }
   // "A href reference that is an empty image (zero width or zero height),
   //  that fails to download, is non-existent, or that cannot be displayed

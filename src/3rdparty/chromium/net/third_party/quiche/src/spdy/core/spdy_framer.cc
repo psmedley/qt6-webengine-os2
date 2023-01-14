@@ -13,13 +13,11 @@
 
 #include "absl/memory/memory.h"
 #include "http2/platform/api/http2_macros.h"
+#include "common/platform/api/quiche_bug_tracker.h"
+#include "common/platform/api/quiche_logging.h"
 #include "spdy/core/spdy_bitmasks.h"
 #include "spdy/core/spdy_frame_builder.h"
 #include "spdy/core/spdy_frame_reader.h"
-#include "spdy/platform/api/spdy_bug_tracker.h"
-#include "spdy/platform/api/spdy_estimate_memory_usage.h"
-#include "spdy/platform/api/spdy_logging.h"
-#include "spdy/platform/api/spdy_string_utils.h"
 
 namespace spdy {
 
@@ -129,7 +127,8 @@ bool SerializeHeadersGivenEncoding(const SpdyHeadersIR& headers,
   }
 
   if (!ret) {
-    SPDY_DLOG(WARNING) << "Failed to build HEADERS. Not enough space in output";
+    QUICHE_DLOG(WARNING)
+        << "Failed to build HEADERS. Not enough space in output";
   }
   return ret;
 }
@@ -159,7 +158,7 @@ bool SerializePushPromiseGivenEncoding(const SpdyPushPromiseIR& push_promise,
     ok = builder.WriteBytes(padding.data(), padding.length());
   }
 
-  SPDY_DLOG_IF(ERROR, !ok)
+  QUICHE_DLOG_IF(ERROR, !ok)
       << "Failed to write PUSH_PROMISE encoding, not enough "
       << "space in output";
   return ok;
@@ -177,8 +176,8 @@ bool WritePayloadWithContinuation(SpdyFrameBuilder* builder,
   } else if (type == SpdyFrameType::PUSH_PROMISE) {
     end_flag = PUSH_PROMISE_FLAG_END_PUSH_PROMISE;
   } else {
-    SPDY_DLOG(FATAL) << "CONTINUATION frames cannot be used with frame type "
-                     << FrameTypeToString(type);
+    QUICHE_DLOG(FATAL) << "CONTINUATION frames cannot be used with frame type "
+                       << FrameTypeToString(type);
   }
 
   // Write all the padding payload and as much of the data payload as possible
@@ -294,16 +293,16 @@ SpdyFramer::SpdyFrameIterator::~SpdyFrameIterator() = default;
 size_t SpdyFramer::SpdyFrameIterator::NextFrame(ZeroCopyOutputBuffer* output) {
   const SpdyFrameIR& frame_ir = GetIR();
   if (!has_next_frame_) {
-    SPDY_BUG << "SpdyFramer::SpdyFrameIterator::NextFrame called without "
-             << "a next frame.";
+    QUICHE_BUG(spdy_bug_75_1)
+        << "SpdyFramer::SpdyFrameIterator::NextFrame called without "
+        << "a next frame.";
     return false;
   }
 
   const size_t size_without_block =
       is_first_frame_ ? GetFrameSizeSansBlock() : kContinuationFrameMinimumSize;
-  auto encoding = std::make_unique<std::string>();
-  encoder_->Next(kHttp2MaxControlFrameSendSize - size_without_block,
-                 encoding.get());
+  std::string encoding;
+  encoder_->Next(kHttp2MaxControlFrameSendSize - size_without_block, &encoding);
   has_next_frame_ = encoder_->HasNext();
 
   if (framer_->debug_visitor_ != nullptr) {
@@ -314,14 +313,14 @@ size_t SpdyFramer::SpdyFrameIterator::NextFrame(ZeroCopyOutputBuffer* output) {
     framer_->debug_visitor_->OnSendCompressedFrame(
         frame_ir.stream_id(),
         is_first_frame_ ? frame_ir.frame_type() : SpdyFrameType::CONTINUATION,
-        header_list_size, size_without_block + encoding->size());
+        header_list_size, size_without_block + encoding.size());
   }
 
   const size_t free_bytes_before = output->BytesFree();
   bool ok = false;
   if (is_first_frame_) {
     is_first_frame_ = false;
-    ok = SerializeGivenEncoding(*encoding, output);
+    ok = SerializeGivenEncoding(encoding, output);
   } else {
     SpdyContinuationIR continuation_ir(frame_ir.stream_id());
     continuation_ir.take_encoding(std::move(encoding));
@@ -406,7 +405,6 @@ const SpdyFrameIR& SpdyFramer::SpdyControlFrameIterator::GetIR() const {
   return *(frame_ir_.get());
 }
 
-// TODO(yasong): remove all the static_casts.
 std::unique_ptr<SpdyFrameSequence> SpdyFramer::CreateIterator(
     SpdyFramer* framer,
     std::unique_ptr<const SpdyFrameIR> frame_ir) {
@@ -418,11 +416,11 @@ std::unique_ptr<SpdyFrameSequence> SpdyFramer::CreateIterator(
     }
     case SpdyFrameType::PUSH_PROMISE: {
       return std::make_unique<SpdyPushPromiseFrameIterator>(
-          framer, absl::WrapUnique(
-                      static_cast<const SpdyPushPromiseIR*>(frame_ir.release())));
+          framer, absl::WrapUnique(static_cast<const SpdyPushPromiseIR*>(
+                      frame_ir.release())));
     }
     case SpdyFrameType::DATA: {
-      SPDY_DVLOG(1) << "Serialize a stream end DATA frame for VTL";
+      QUICHE_DVLOG(1) << "Serialize a stream end DATA frame for VTL";
       HTTP2_FALLTHROUGH;
     }
     default: {
@@ -1377,15 +1375,6 @@ size_t SpdyFramer::header_encoder_table_size() const {
   } else {
     return hpack_encoder_->CurrentHeaderTableSizeSetting();
   }
-}
-
-void SpdyFramer::SetEncoderHeaderTableDebugVisitor(
-    std::unique_ptr<HpackHeaderTable::DebugVisitorInterface> visitor) {
-  GetHpackEncoder()->SetHeaderTableDebugVisitor(std::move(visitor));
-}
-
-size_t SpdyFramer::EstimateMemoryUsage() const {
-  return SpdyEstimateMemoryUsage(hpack_encoder_);
 }
 
 }  // namespace spdy

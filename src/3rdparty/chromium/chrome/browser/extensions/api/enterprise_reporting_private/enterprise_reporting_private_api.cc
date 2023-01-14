@@ -15,51 +15,122 @@
 #include "build/build_config.h"
 #include "chrome/browser/enterprise/connectors/connectors_service.h"
 #include "chrome/browser/enterprise/signals/device_info_fetcher.h"
-#include "chrome/browser/extensions/api/enterprise_reporting_private/context_info_fetcher.h"
+#include "chrome/browser/enterprise/signals/signals_common.h"
+#include "chrome/browser/enterprise/util/managed_browser_utils.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/enterprise/browser/controller/browser_dm_token_storage.h"
+#include "net/cert/x509_util.h"
 
 namespace extensions {
 
 namespace {
+#if !defined(OS_CHROMEOS)
 const char kEndpointVerificationRetrievalFailed[] =
     "Failed to retrieve the endpoint verification data.";
 const char kEndpointVerificationStoreFailed[] =
     "Failed to store the endpoint verification data.";
+#endif  // !defined(OS_CHROMEOS)
 
 api::enterprise_reporting_private::SettingValue ToInfoSettingValue(
-    enterprise_signals::DeviceInfo::SettingValue value) {
-  using SettingValue = enterprise_signals::DeviceInfo::SettingValue;
+    enterprise_signals::SettingValue value) {
   switch (value) {
-    case SettingValue::NONE:
+    case enterprise_signals::SettingValue::NONE:
       return api::enterprise_reporting_private::SETTING_VALUE_NONE;
-    case SettingValue::UNKNOWN:
+    case enterprise_signals::SettingValue::UNKNOWN:
       return api::enterprise_reporting_private::SETTING_VALUE_UNKNOWN;
-    case SettingValue::DISABLED:
+    case enterprise_signals::SettingValue::DISABLED:
       return api::enterprise_reporting_private::SETTING_VALUE_DISABLED;
-    case SettingValue::ENABLED:
+    case enterprise_signals::SettingValue::ENABLED:
       return api::enterprise_reporting_private::SETTING_VALUE_ENABLED;
   }
 }
 
-api::enterprise_reporting_private::DeviceInfo ToDeviceInfo(
-    const enterprise_signals::DeviceInfo& device_signals) {
-  api::enterprise_reporting_private::DeviceInfo device_info;
+api::enterprise_reporting_private::ContextInfo ToContextInfo(
+    enterprise_signals::ContextInfo&& signals) {
+  api::enterprise_reporting_private::ContextInfo info;
 
-  device_info.os_name = device_signals.os_name;
-  device_info.os_version = device_signals.os_version;
-  device_info.device_host_name = device_signals.device_host_name;
-  device_info.device_model = device_signals.device_model;
-  device_info.serial_number = device_signals.serial_number;
-  device_info.screen_lock_secured =
-      ToInfoSettingValue(device_signals.screen_lock_secured);
-  device_info.disk_encrypted =
-      ToInfoSettingValue(device_signals.disk_encrypted);
+  info.browser_affiliation_ids = std::move(signals.browser_affiliation_ids);
+  info.profile_affiliation_ids = std::move(signals.profile_affiliation_ids);
+  info.on_file_attached_providers =
+      std::move(signals.on_file_attached_providers);
+  info.on_file_downloaded_providers =
+      std::move(signals.on_file_downloaded_providers);
+  info.on_bulk_data_entry_providers =
+      std::move(signals.on_bulk_data_entry_providers);
+  info.on_security_event_providers =
+      std::move(signals.on_security_event_providers);
+  info.site_isolation_enabled = signals.site_isolation_enabled;
+  info.chrome_cleanup_enabled =
+      signals.chrome_cleanup_enabled.has_value()
+          ? std::make_unique<bool>(signals.chrome_cleanup_enabled.value())
+          : nullptr;
+  info.chrome_remote_desktop_app_blocked =
+      signals.chrome_remote_desktop_app_blocked;
+  info.third_party_blocking_enabled =
+      signals.third_party_blocking_enabled.has_value()
+          ? std::make_unique<bool>(signals.third_party_blocking_enabled.value())
+          : nullptr;
+  info.os_firewall = ToInfoSettingValue(signals.os_firewall);
+  switch (signals.realtime_url_check_mode) {
+    case safe_browsing::REAL_TIME_CHECK_DISABLED:
+      info.realtime_url_check_mode = extensions::api::
+          enterprise_reporting_private::REALTIME_URL_CHECK_MODE_DISABLED;
+      break;
+    case safe_browsing::REAL_TIME_CHECK_FOR_MAINFRAME_ENABLED:
+      info.realtime_url_check_mode =
+          extensions::api::enterprise_reporting_private::
+              REALTIME_URL_CHECK_MODE_ENABLED_MAIN_FRAME;
+      break;
+  }
+  info.browser_version = std::move(signals.browser_version);
+  info.built_in_dns_client_enabled = signals.built_in_dns_client_enabled;
 
-  return device_info;
+  switch (signals.safe_browsing_protection_level) {
+    case safe_browsing::NO_SAFE_BROWSING:
+      info.safe_browsing_protection_level = extensions::api::
+          enterprise_reporting_private::SAFE_BROWSING_LEVEL_DISABLED;
+      break;
+    case safe_browsing::STANDARD_PROTECTION:
+      info.safe_browsing_protection_level = extensions::api::
+          enterprise_reporting_private::SAFE_BROWSING_LEVEL_STANDARD;
+      break;
+    case safe_browsing::ENHANCED_PROTECTION:
+      info.safe_browsing_protection_level = extensions::api::
+          enterprise_reporting_private::SAFE_BROWSING_LEVEL_ENHANCED;
+      break;
+  }
+  if (!signals.password_protection_warning_trigger.has_value()) {
+    info.password_protection_warning_trigger = extensions::api::
+        enterprise_reporting_private::PASSWORD_PROTECTION_TRIGGER_POLICY_UNSET;
+  } else {
+    switch (signals.password_protection_warning_trigger.value()) {
+      case safe_browsing::PASSWORD_PROTECTION_OFF:
+        info.password_protection_warning_trigger =
+            extensions::api::enterprise_reporting_private::
+                PASSWORD_PROTECTION_TRIGGER_PASSWORD_PROTECTION_OFF;
+        break;
+      case safe_browsing::PASSWORD_REUSE:
+        info.password_protection_warning_trigger =
+            extensions::api::enterprise_reporting_private::
+                PASSWORD_PROTECTION_TRIGGER_PASSWORD_REUSE;
+        break;
+      case safe_browsing::PHISHING_REUSE:
+        info.password_protection_warning_trigger =
+            extensions::api::enterprise_reporting_private::
+                PASSWORD_PROTECTION_TRIGGER_PHISHING_REUSE;
+        break;
+      case safe_browsing::PASSWORD_PROTECTION_TRIGGER_MAX:
+        NOTREACHED();
+        break;
+    }
+  }
+
+  return info;
 }
 
 }  // namespace
 
+#if !defined(OS_CHROMEOS)
 namespace enterprise_reporting {
 const char kDeviceIdNotFound[] = "Failed to retrieve the device id.";
 }  // namespace enterprise_reporting
@@ -82,6 +153,9 @@ EnterpriseReportingPrivateGetDeviceIdFunction::
     ~EnterpriseReportingPrivateGetDeviceIdFunction() = default;
 
 // getPersistentSecret
+
+#if !defined(OS_LINUX)
+
 EnterpriseReportingPrivateGetPersistentSecretFunction::
     EnterpriseReportingPrivateGetPersistentSecretFunction() = default;
 EnterpriseReportingPrivateGetPersistentSecretFunction::
@@ -132,6 +206,8 @@ void EnterpriseReportingPrivateGetPersistentSecretFunction::SendResponse(
   }
 }
 
+#endif  // !defined(OS_LINUX)
+
 // getDeviceData
 
 EnterpriseReportingPrivateGetDeviceDataFunction::
@@ -179,7 +255,7 @@ void EnterpriseReportingPrivateGetDeviceDataFunction::SendResponse(
       return;
     case RetrieveDeviceDataStatus::kDataRecordNotFound:
       VLOG(1) << "The Endpoint Verification data is not present.";
-      Respond(NoArguments());
+      Respond(OneArgument(base::Value(base::Value::BlobStorage())));
       return;
     default:
       VLOG(1) << "Endpoint Verification data retrieval error: "
@@ -240,6 +316,26 @@ EnterpriseReportingPrivateGetDeviceInfoFunction::
 EnterpriseReportingPrivateGetDeviceInfoFunction::
     ~EnterpriseReportingPrivateGetDeviceInfoFunction() = default;
 
+// static
+api::enterprise_reporting_private::DeviceInfo
+EnterpriseReportingPrivateGetDeviceInfoFunction::ToDeviceInfo(
+    enterprise_signals::DeviceInfo&& device_signals) {
+  api::enterprise_reporting_private::DeviceInfo device_info;
+
+  device_info.os_name = std::move(device_signals.os_name);
+  device_info.os_version = std::move(device_signals.os_version);
+  device_info.device_host_name = std::move(device_signals.device_host_name);
+  device_info.device_model = std::move(device_signals.device_model);
+  device_info.serial_number = std::move(device_signals.serial_number);
+  device_info.screen_lock_secured =
+      ToInfoSettingValue(device_signals.screen_lock_secured);
+  device_info.disk_encrypted =
+      ToInfoSettingValue(device_signals.disk_encrypted);
+  device_info.mac_addresses = std::move(device_signals.mac_addresses);
+
+  return device_info;
+}
+
 ExtensionFunction::ResponseAction
 EnterpriseReportingPrivateGetDeviceInfoFunction::Run() {
 #if defined(OS_WIN)
@@ -264,10 +360,12 @@ EnterpriseReportingPrivateGetDeviceInfoFunction::Run() {
 }
 
 void EnterpriseReportingPrivateGetDeviceInfoFunction::OnDeviceInfoRetrieved(
-    const enterprise_signals::DeviceInfo& device_signals) {
-  Respond(OneArgument(
-      base::Value::FromUniquePtrValue(ToDeviceInfo(device_signals).ToValue())));
+    enterprise_signals::DeviceInfo device_signals) {
+  Respond(OneArgument(base::Value::FromUniquePtrValue(
+      ToDeviceInfo(std::move(device_signals)).ToValue())));
 }
+
+#endif  // !defined(OS_CHROMEOS)
 
 // getContextInfo
 
@@ -284,7 +382,7 @@ EnterpriseReportingPrivateGetContextInfoFunction::Run() {
   DCHECK(connectors_service);
 
   context_info_fetcher_ =
-      enterprise_reporting::ContextInfoFetcher::CreateInstance(
+      enterprise_signals::ContextInfoFetcher::CreateInstance(
           browser_context(), connectors_service);
   context_info_fetcher_->Fetch(base::BindOnce(
       &EnterpriseReportingPrivateGetContextInfoFunction::OnContextInfoRetrieved,
@@ -294,8 +392,64 @@ EnterpriseReportingPrivateGetContextInfoFunction::Run() {
 }
 
 void EnterpriseReportingPrivateGetContextInfoFunction::OnContextInfoRetrieved(
-    api::enterprise_reporting_private::ContextInfo context_info) {
-  Respond(OneArgument(base::Value::FromUniquePtrValue(context_info.ToValue())));
+    enterprise_signals::ContextInfo context_info) {
+  Respond(OneArgument(base::Value::FromUniquePtrValue(
+      ToContextInfo(std::move(context_info)).ToValue())));
+}
+
+// getCertificate
+
+EnterpriseReportingPrivateGetCertificateFunction::
+    EnterpriseReportingPrivateGetCertificateFunction() = default;
+EnterpriseReportingPrivateGetCertificateFunction::
+    ~EnterpriseReportingPrivateGetCertificateFunction() = default;
+
+ExtensionFunction::ResponseAction
+EnterpriseReportingPrivateGetCertificateFunction::Run() {
+  std::unique_ptr<api::enterprise_reporting_private::GetCertificate::Params>
+      params(api::enterprise_reporting_private::GetCertificate::Params::Create(
+          *args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  // If AutoSelectCertificateForUrl is not set at the machine level, this
+  // operation is not supported and should return immediately with the
+  // appropriate status field value.
+  if (!chrome::enterprise_util::IsMachinePolicyPref(
+          prefs::kManagedAutoSelectCertificateForUrls)) {
+    api::enterprise_reporting_private::Certificate ret;
+    ret.status = extensions::api::enterprise_reporting_private::
+        CERTIFICATE_STATUS_POLICY_UNSET;
+    return RespondNow(
+        OneArgument(base::Value::FromUniquePtrValue(ret.ToValue())));
+  }
+
+  client_cert_fetcher_ =
+      enterprise_signals::ClientCertificateFetcher::Create(browser_context());
+  client_cert_fetcher_->FetchAutoSelectedCertificateForUrl(
+      GURL(params->url),
+      base::BindOnce(&EnterpriseReportingPrivateGetCertificateFunction::
+                         OnClientCertFetched,
+                     this));
+
+  return RespondLater();
+}
+
+void EnterpriseReportingPrivateGetCertificateFunction::OnClientCertFetched(
+    std::unique_ptr<net::ClientCertIdentity> cert) {
+  api::enterprise_reporting_private::Certificate ret;
+
+  // Getting here means the status is always OK, but the |encoded_certificate|
+  // field is only set if there actually was a certificate selected.
+  ret.status =
+      extensions::api::enterprise_reporting_private::CERTIFICATE_STATUS_OK;
+  if (cert) {
+    base::StringPiece der_cert = net::x509_util::CryptoBufferAsStringPiece(
+        cert->certificate()->cert_buffer());
+    ret.encoded_certificate = std::make_unique<std::vector<uint8_t>>(
+        der_cert.begin(), der_cert.end());
+  }
+
+  Respond(OneArgument(base::Value::FromUniquePtrValue(ret.ToValue())));
 }
 
 }  // namespace extensions

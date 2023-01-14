@@ -28,6 +28,12 @@ bool DummyInputMethod::OnUntranslatedIMEMessage(const MSG event,
                                                 NativeEventResult* result) {
   return false;
 }
+
+void DummyInputMethod::OnInputLocaleChanged() {}
+
+bool DummyInputMethod::IsInputLocaleCJK() const {
+  return false;
+}
 #endif
 
 void DummyInputMethod::SetFocusedTextInputClient(TextInputClient* client) {
@@ -54,38 +60,18 @@ void DummyInputMethod::OnCaretBoundsChanged(const TextInputClient* client) {
 void DummyInputMethod::CancelComposition(const TextInputClient* client) {
 }
 
-void DummyInputMethod::OnInputLocaleChanged() {
-}
-
-bool DummyInputMethod::IsInputLocaleCJK() const {
-  return false;
-}
-
 TextInputType DummyInputMethod::GetTextInputType() const {
   return TEXT_INPUT_TYPE_NONE;
-}
-
-TextInputMode DummyInputMethod::GetTextInputMode() const {
-  return TEXT_INPUT_MODE_DEFAULT;
-}
-
-int DummyInputMethod::GetTextInputFlags() const {
-  return 0;
-}
-
-bool DummyInputMethod::CanComposeInline() const {
-  return true;
 }
 
 bool DummyInputMethod::IsCandidatePopupOpen() const {
   return false;
 }
 
-bool DummyInputMethod::GetClientShouldDoLearning() {
-  return false;
-}
-
 void DummyInputMethod::ShowVirtualKeyboardIfEnabled() {}
+
+void DummyInputMethod::SetVirtualKeyboardVisibilityIfEnabled(bool should_show) {
+}
 
 void DummyInputMethod::AddObserver(InputMethodObserver* observer) {
 }

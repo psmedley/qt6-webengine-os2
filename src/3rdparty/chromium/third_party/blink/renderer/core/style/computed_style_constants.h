@@ -65,6 +65,7 @@ enum PseudoId : uint8_t {
   kPseudoIdSelection,
   kPseudoIdScrollbar,
   kPseudoIdTargetText,
+  kPseudoIdHighlight,
   kPseudoIdSpellingError,
   kPseudoIdGrammarError,
   // Internal IDs follow:
@@ -83,7 +84,25 @@ enum PseudoId : uint8_t {
 };
 
 inline bool IsHighlightPseudoElement(PseudoId pseudo_id) {
-  return pseudo_id == kPseudoIdSelection || pseudo_id == kPseudoIdTargetText;
+  switch (pseudo_id) {
+    case kPseudoIdSelection:
+    case kPseudoIdTargetText:
+    case kPseudoIdHighlight:
+    case kPseudoIdSpellingError:
+    case kPseudoIdGrammarError:
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline bool PseudoElementHasArguments(PseudoId pseudo_id) {
+  switch (pseudo_id) {
+    case kPseudoIdHighlight:
+      return true;
+    default:
+      return false;
+  }
 }
 
 enum class OutlineIsAuto : bool { kOff = false, kOn = true };
@@ -175,13 +194,27 @@ enum Containment {
   kContainsBlockSize = 0x8,
   kContainsInlineSize = 0x10,
   kContainsSize = kContainsBlockSize | kContainsInlineSize,
-  kContainsStrict = kContainsLayout | kContainsPaint | kContainsSize,
-  kContainsContent = kContainsLayout | kContainsPaint,
+  kContainsStrict =
+      kContainsStyle | kContainsLayout | kContainsPaint | kContainsSize,
+  kContainsContent = kContainsStyle | kContainsLayout | kContainsPaint,
 };
 inline Containment operator|(Containment a, Containment b) {
   return Containment(int(a) | int(b));
 }
 inline Containment& operator|=(Containment& a, Containment b) {
+  return a = a | b;
+}
+
+static const size_t kContainerTypeBits = 2;
+enum EContainerType {
+  kContainerTypeNone = 0x0,
+  kContainerTypeInlineSize = 0x1,
+  kContainerTypeBlockSize = 0x2,
+};
+inline EContainerType operator|(EContainerType a, EContainerType b) {
+  return EContainerType(int(a) | int(b));
+}
+inline EContainerType& operator|=(EContainerType& a, EContainerType b) {
   return a = a | b;
 }
 
@@ -269,13 +302,11 @@ enum class LineLogicalSide {
   kUnder,
 };
 
-constexpr size_t kScrollbarGutterBits = 4;
+constexpr size_t kScrollbarGutterBits = 2;
 enum ScrollbarGutter {
   kScrollbarGutterAuto = 0x0,
   kScrollbarGutterStable = 0x1,
-  kScrollbarGutterAlways = 0x2,
-  kScrollbarGutterBoth = 0x4,
-  kScrollbarGutterForce = 0x8
+  kScrollbarGutterBothEdges = 0x2,
 };
 inline ScrollbarGutter operator|(ScrollbarGutter a, ScrollbarGutter b) {
   return ScrollbarGutter(int(a) | int(b));
@@ -283,77 +314,6 @@ inline ScrollbarGutter operator|(ScrollbarGutter a, ScrollbarGutter b) {
 inline ScrollbarGutter& operator|=(ScrollbarGutter& a, ScrollbarGutter b) {
   return a = a | b;
 }
-
-// https://drafts.csswg.org/css-counter-styles-3/#predefined-counters
-enum class EListStyleType : unsigned {
-  // https://drafts.csswg.org/css-counter-styles-3/#simple-symbolic
-  kDisc,
-  kCircle,
-  kSquare,
-  kDisclosureOpen,
-  kDisclosureClosed,
-
-  // https://drafts.csswg.org/css-counter-styles-3/#simple-numeric
-  kDecimal,
-  kDecimalLeadingZero,
-  kArabicIndic,
-  kBengali,
-  kCambodian,
-  kKhmer,
-  kDevanagari,
-  kGujarati,
-  kGurmukhi,
-  kKannada,
-  kLao,
-  kMalayalam,
-  kMongolian,
-  kMyanmar,
-  kOriya,
-  kPersian,
-  kUrdu,
-  kTelugu,
-  kTibetan,
-  kThai,
-  kLowerRoman,
-  kUpperRoman,
-
-  // https://drafts.csswg.org/css-counter-styles-3/#simple-alphabetic
-  kLowerGreek,
-  kLowerAlpha,
-  kLowerLatin,
-  kUpperAlpha,
-  kUpperLatin,
-
-  // https://drafts.csswg.org/css-counter-styles-3/#simple-fixed
-  kCjkEarthlyBranch,
-  kCjkHeavenlyStem,
-
-  kEthiopicHalehame,
-  kEthiopicHalehameAm,
-  kEthiopicHalehameTiEr,
-  kEthiopicHalehameTiEt,
-  kHangul,
-  kHangulConsonant,
-  kKoreanHangulFormal,
-  kKoreanHanjaFormal,
-  kKoreanHanjaInformal,
-  kHebrew,
-  kArmenian,
-  kLowerArmenian,
-  kUpperArmenian,
-  kGeorgian,
-  kCjkIdeographic,
-  kSimpChineseFormal,
-  kSimpChineseInformal,
-  kTradChineseFormal,
-  kTradChineseInformal,
-  kHiragana,
-  kKatakana,
-  kHiraganaIroha,
-  kKatakanaIroha,
-  kNone,
-  kString,
-};
 
 enum class EBaselineShiftType : unsigned { kLength, kSub, kSuper };
 

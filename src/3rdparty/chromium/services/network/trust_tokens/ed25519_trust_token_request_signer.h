@@ -19,7 +19,7 @@ class Ed25519TrustTokenRequestSigner
   ~Ed25519TrustTokenRequestSigner() override;
 
   // TrustTokenRequestSigningHelper::Signer implementation:
-  base::Optional<std::vector<uint8_t>> Sign(
+  absl::optional<std::vector<uint8_t>> Sign(
       base::span<const uint8_t> key,
       base::span<const uint8_t> data) override;
 
@@ -27,7 +27,7 @@ class Ed25519TrustTokenRequestSigner
               base::span<const uint8_t> signature,
               base::span<const uint8_t> verification_key) override;
 
-  std::string GetAlgorithmIdentifier() override;
+  std::string GetAlgorithmIdentifier() const override;
 };
 
 }  // namespace network

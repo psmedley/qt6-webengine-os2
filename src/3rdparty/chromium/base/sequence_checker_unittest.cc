@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
 #include "base/callback_helpers.h"
 #include "base/sequence_token.h"
 #include "base/single_thread_task_runner.h"
@@ -110,7 +109,7 @@ TEST(SequenceCheckerTest, CallsDisallowedOnSameThreadDifferentSequenceToken) {
   {
     ScopedSetSequenceTokenForCurrentThread
         scoped_set_sequence_token_for_current_thread(SequenceToken::Create());
-    sequence_checker.reset(new SequenceCheckerImpl);
+    sequence_checker = std::make_unique<SequenceCheckerImpl>();
   }
 
   {
@@ -130,7 +129,7 @@ TEST(SequenceCheckerTest, DetachFromSequence) {
   {
     ScopedSetSequenceTokenForCurrentThread
         scoped_set_sequence_token_for_current_thread(SequenceToken::Create());
-    sequence_checker.reset(new SequenceCheckerImpl);
+    sequence_checker = std::make_unique<SequenceCheckerImpl>();
   }
 
   sequence_checker->DetachFromSequence();

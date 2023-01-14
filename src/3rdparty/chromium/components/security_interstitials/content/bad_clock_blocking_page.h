@@ -42,6 +42,7 @@ class BadClockBlockingPage : public SSLBlockingPageBase {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       const base::Time& time_triggered,
+      bool can_show_enhanced_protection_message,
       ssl_errors::ClockState clock_state,
       std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
       std::unique_ptr<
@@ -57,8 +58,7 @@ class BadClockBlockingPage : public SSLBlockingPageBase {
  protected:
   // SecurityInterstitialPage implementation:
   void CommandReceived(const std::string& command) override;
-  void PopulateInterstitialStrings(
-      base::DictionaryValue* load_time_data) override;
+  void PopulateInterstitialStrings(base::Value* load_time_data) override;
 
  private:
   const net::SSLInfo ssl_info_;

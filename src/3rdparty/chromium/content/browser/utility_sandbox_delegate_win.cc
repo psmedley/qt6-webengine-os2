@@ -12,9 +12,11 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "media/mojo/mojom/cdm_service.mojom.h"
+#include "printing/buildflags/buildflags.h"
 #include "sandbox/policy/features.h"
 #include "sandbox/policy/sandbox_type.h"
 #include "sandbox/policy/win/sandbox_win.h"
+#include "sandbox/win/src/app_container.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #include "sandbox/win/src/sandbox_types.h"
 #include "services/network/public/mojom/network_service.mojom.h"
@@ -62,6 +64,30 @@ bool AudioPreSpawnTarget(sandbox::TargetPolicy* policy) {
 
 // Sets the sandbox policy for the network service process.
 bool NetworkPreSpawnTarget(sandbox::TargetPolicy* policy) {
+  if (sandbox::policy::features::IsNetworkServiceSandboxLPACEnabled()) {
+    // LPAC sandbox is enabled, so do not use a restricted token.
+    if (sandbox::SBOX_ALL_OK !=
+        policy->SetTokenLevel(sandbox::USER_UNPROTECTED,
+                              sandbox::USER_UNPROTECTED)) {
+      return false;
+    }
+
+    // Network Sandbox in LPAC sandbox needs access to its data files. These
+    // files are marked on disk with an ACE that permits this access.
+    auto lpacCapability =
+        GetContentClient()->browser()->GetLPACCapabilityNameForNetworkService();
+    if (lpacCapability.empty())
+      return false;
+    auto app_container = policy->GetAppContainer();
+    if (!app_container)
+      return false;
+    app_container->AddCapability(lpacCapability.c_str());
+
+    // All other app container policies are set in
+    // SandboxWin::StartSandboxedProcess.
+    return true;
+  }
+
   // USER_LIMITED is as tight as this sandbox can be, because
   // DNS running in-process is blocked by USER_RESTRICTED and
   // below as it can't connect to the service.
@@ -100,10 +126,27 @@ bool NetworkPreSpawnTarget(sandbox::TargetPolicy* policy) {
   }
   return true;
 }
+
+// Sets the sandbox policy for the print backend service process.
+bool PrintBackendPreSpawnTarget(sandbox::TargetPolicy* policy) {
+  // Print Backend policy lockdown level must be at least USER_LIMITED and
+  // delayed integrity level INTEGRITY_LEVEL_LOW, otherwise ::OpenPrinter()
+  // will fail with error code ERROR_ACCESS_DENIED (0x5).
+  policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                        sandbox::USER_LIMITED);
+  policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+  return true;
+}
 }  // namespace
 
 bool UtilitySandboxedProcessLauncherDelegate::GetAppContainerId(
     std::string* appcontainer_id) {
+  if (sandbox_type_ == sandbox::policy::SandboxType::kNetwork) {
+    DCHECK(sandbox::policy::features::IsNetworkServiceSandboxLPACEnabled());
+    *appcontainer_id = base::WideToUTF8(cmd_line_.GetProgram().value());
+    return true;
+  }
+
   if ((sandbox_type_ == sandbox::policy::SandboxType::kXrCompositing &&
        base::FeatureList::IsEnabled(sandbox::policy::features::kXRSandbox)) ||
       sandbox_type_ == sandbox::policy::SandboxType::kMediaFoundationCdm) {
@@ -126,6 +169,10 @@ bool UtilitySandboxedProcessLauncherDelegate::DisableDefaultPolicy() {
       // Default policy is disabled for MF Cdm process to allow the application
       // of specific LPAC sandbox policies.
       return true;
+    case sandbox::policy::SandboxType::kNetwork:
+      // If LPAC is enabled for network sandbox then LPAC-specific policy is set
+      // elsewhere.
+      return sandbox::policy::features::IsNetworkServiceSandboxLPACEnabled();
     default:
       return false;
   }
@@ -217,7 +264,7 @@ bool UtilitySandboxedProcessLauncherDelegate::PreSpawnTarget(
     policy->SetTokenLevel(sandbox::USER_UNPROTECTED, sandbox::USER_UNPROTECTED);
   }
 
-  if (sandbox_type_ == sandbox::policy::SandboxType::kSharingService) {
+  if (sandbox_type_ == sandbox::policy::SandboxType::kService) {
     auto result = sandbox::policy::SandboxWin::AddWin32kLockdownPolicy(policy);
     if (result != sandbox::SBOX_ALL_OK)
       return false;
@@ -228,6 +275,13 @@ bool UtilitySandboxedProcessLauncherDelegate::PreSpawnTarget(
     if (result != sandbox::SBOX_ALL_OK)
       return false;
   }
+
+#if BUILDFLAG(ENABLE_PRINTING)
+  if (sandbox_type_ == sandbox::policy::SandboxType::kPrintBackend) {
+    if (!PrintBackendPreSpawnTarget(policy))
+      return false;
+  }
+#endif
 
   return GetContentClient()->browser()->PreSpawnChild(
       policy, sandbox_type_, ContentBrowserClient::ChildSpawnFlags::NONE);
@@ -244,11 +298,7 @@ bool UtilitySandboxedProcessLauncherDelegate::ShouldUnsandboxedRunInJob() {
 bool UtilitySandboxedProcessLauncherDelegate::CetCompatible() {
   auto utility_sub_type =
       cmd_line_.GetSwitchValueASCII(switches::kUtilitySubType);
-  // TODO(crbug.com/1173700) CDM loads widevinecdm.dll
-  // which is not CET-compliant.
-  if (utility_sub_type == media::mojom::CdmService::Name_)
-    return false;
-  return true;
+  return GetContentClient()->browser()->IsUtilityCetCompatible(
+      utility_sub_type);
 }
-
 }  // namespace content

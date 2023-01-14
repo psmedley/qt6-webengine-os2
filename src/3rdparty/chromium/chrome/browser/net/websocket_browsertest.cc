@@ -14,6 +14,7 @@
 #include "base/check_op.h"
 #include "base/macros.h"
 #include "base/notreached.h"
+#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +35,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -81,12 +83,24 @@ class WebSocketBrowserTest : public InProcessBrowserTest {
         browser(), wss_server_.GetURL(path).ReplaceComponents(replacements));
   }
 
+  void NavigateToPath(const std::string& relative) {
+    base::FilePath path;
+    EXPECT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &path));
+    path =
+        path.Append(net::GetWebSocketTestDataDirectory()).AppendASCII(relative);
+    GURL url(std::string("file://") + path.MaybeAsASCII());
+    ui_test_utils::NavigateToURL(browser(), url);
+  }
+
   // Prepare the title watcher.
   void SetUpOnMainThread() override {
-    watcher_.reset(new content::TitleWatcher(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        base::ASCIIToUTF16("PASS")));
-    watcher_->AlsoWaitForTitle(base::ASCIIToUTF16("FAIL"));
+    watcher_ = std::make_unique<content::TitleWatcher>(
+        browser()->tab_strip_model()->GetActiveWebContents(), u"PASS");
+    watcher_->AlsoWaitForTitle(u"FAIL");
+  }
+
+  void AlsoWaitForTitle(const std::u16string& title) {
+    watcher_->AlsoWaitForTitle(title);
   }
 
   void TearDownOnMainThread() override { watcher_.reset(); }
@@ -120,10 +134,11 @@ class WebSocketBrowserTest : public InProcessBrowserTest {
         network::mojom::kWebSocketOptionNone,
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS),
         std::move(handshake_client),
-        process->GetStoragePartition()->CreateAuthAndCertObserverForFrame(
+        process->GetStoragePartition()->CreateURLLoaderNetworkObserverForFrame(
             process->GetID(), frame->GetRoutingID()),
         /*auth_handler=*/mojo::NullRemote(),
-        /*header_client=*/mojo::NullRemote());
+        /*header_client=*/mojo::NullRemote(),
+        /*throttling_profile_id=*/absl::nullopt);
   }
 
   net::SpawnedTestServer ws_server_;
@@ -134,6 +149,16 @@ class WebSocketBrowserTest : public InProcessBrowserTest {
   std::unique_ptr<content::TitleWatcher> watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketBrowserTest);
+};
+
+class WebSocketBrowserTestWithAllowFileAccessFromFiles
+    : public WebSocketBrowserTest {
+ private:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
+
+    WebSocketBrowserTest::SetUpCommandLine(command_line);
+  }
 };
 
 // Framework for tests using the connect_to.html page served by a separate HTTP
@@ -198,8 +223,8 @@ class AutoLogin : public content::NotificationObserver {
   bool logged_in() const { return logged_in_; }
 
  private:
-  const base::string16 username_;
-  const base::string16 password_;
+  const std::u16string username_;
+  const std::u16string password_;
   bool logged_in_;
 
   content::NotificationRegistrar registrar_;
@@ -250,11 +275,10 @@ IN_PROC_BROWSER_TEST_F(WebSocketBrowserTest, SendCloseFrameWhenTabIsClosed) {
     browser()->tab_strip_model()->AppendWebContents(std::move(new_tab), true);
     ASSERT_EQ(raw_new_tab, browser()->tab_strip_model()->GetWebContentsAt(1));
 
-    content::TitleWatcher connected_title_watcher(
-        raw_new_tab, base::ASCIIToUTF16("CONNECTED"));
-    connected_title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("CLOSED"));
+    content::TitleWatcher connected_title_watcher(raw_new_tab, u"CONNECTED");
+    connected_title_watcher.AlsoWaitForTitle(u"CLOSED");
     NavigateToHTTP("connect_and_be_observed.html");
-    const base::string16 result = connected_title_watcher.WaitAndGetTitle();
+    const std::u16string result = connected_title_watcher.WaitAndGetTitle();
     EXPECT_TRUE(base::EqualsASCII(result, "CONNECTED"));
 
     content::WebContentsDestroyedWatcher destroyed_watcher(raw_new_tab);
@@ -409,11 +433,10 @@ IN_PROC_BROWSER_TEST_F(WebSocketBrowserTest, MAYBE_WebSocketAppliesHSTS) {
 
   // Set HSTS on localhost.
   content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      base::ASCIIToUTF16("SET"));
+      browser()->tab_strip_model()->GetActiveWebContents(), u"SET");
   ui_test_utils::NavigateToURL(browser(),
                                https_server.GetURL("/websocket/set-hsts.html"));
-  const base::string16 result = title_watcher.WaitAndGetTitle();
+  const std::u16string result = title_watcher.WaitAndGetTitle();
   EXPECT_TRUE(base::EqualsASCII(result, "SET"));
 
   // Verify that it applies to WebSockets.
@@ -661,6 +684,31 @@ IN_PROC_BROWSER_TEST_F(WebSocketBrowserTest, FailuresReported) {
     EXPECT_TRUE(handshake_client->result().failure_reported);
     EXPECT_EQ(404, handshake_client->result().response_code);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(WebSocketBrowserTest, CheckFileOrigin) {
+  ASSERT_TRUE(ws_server_.Start());
+  int port = ws_server_.host_port_pair().port();
+
+  AlsoWaitForTitle(u"NULL");
+  AlsoWaitForTitle(u"FILE");
+
+  base::RunLoop run_loop;
+  NavigateToPath(base::StringPrintf("check-origin.html?port=%d", port));
+  EXPECT_EQ("NULL", WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(WebSocketBrowserTestWithAllowFileAccessFromFiles,
+                       CheckFileOrigin) {
+  ASSERT_TRUE(ws_server_.Start());
+  int port = ws_server_.host_port_pair().port();
+
+  AlsoWaitForTitle(u"NULL");
+  AlsoWaitForTitle(u"FILE");
+
+  base::RunLoop run_loop;
+  NavigateToPath(base::StringPrintf("check-origin.html?port=%d", port));
+  EXPECT_EQ("FILE", WaitAndGetTitle());
 }
 
 }  // namespace

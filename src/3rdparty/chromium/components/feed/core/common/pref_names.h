@@ -14,9 +14,6 @@ namespace feed {
 
 namespace prefs {
 
-// The pref name for the last time when a background fetch was attempted.
-extern const char kLastFetchAttemptTime[];
-
 // The pref name for the feed host override.
 extern const char kHostOverrideHost[];
 // The pref name for the feed host override auth token.
@@ -56,8 +53,9 @@ extern const char kThrottlerRequestCountListPrefName[];
 extern const char kThrottlerLastRequestTime[];
 // The pref name for storing |DebugStreamData|.
 extern const char kDebugStreamData[];
-// The pref name for storing the request schedule.
+// The pref names for storing the request schedules.
 extern const char kRequestSchedule[];
+extern const char kWebFeedsRequestSchedule[];
 // The pref name for storing the persistent metrics data.
 extern const char kMetricsData[];
 // The pref name for storing client instance id.
@@ -66,11 +64,24 @@ extern const char kClientInstanceId[];
 extern const char kDiscoverAPIEndpointOverride[];
 // The pref name for storing the server experiments the client is in.
 extern const char kExperiments[];
+// If set to true, the WebFeed follow intro bypasses some gates and only checks
+// for recommended and scroll status.
+extern const char kEnableWebFeedFollowIntroDebug[];
+// Random bytes used in generating reliability logging ID.
+extern const char kReliabilityLoggingIdSalt[];
+// Whether the Feed may have data stored, which should be deleted if the Feed
+// is ever turned off.
+extern const char kHasStoredData[];
+// `feed::ContentOrder` of the Web feed.
+extern const char kWebFeedContentOrder[];
+// The last feed type that the user was viewing.
+extern const char kLastSeenFeedType[];
 
 }  // namespace prefs
 
 void RegisterProfilePrefs(PrefRegistrySimple* registry);
 void MigrateObsoleteProfilePrefsFeb_2021(PrefService* prefs);
+void MigrateObsoleteProfilePrefsJune_2021(PrefService* prefs);
 
 }  // namespace feed
 

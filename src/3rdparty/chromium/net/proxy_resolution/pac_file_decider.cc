@@ -18,8 +18,8 @@
 #include "base/values.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/isolation_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_isolation_key.h"
 #include "net/base/request_priority.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
@@ -32,15 +32,14 @@ namespace net {
 
 namespace {
 
-bool LooksLikePacScript(const base::string16& script) {
+bool LooksLikePacScript(const std::u16string& script) {
   // Note: this is only an approximation! It may not always work correctly,
   // however it is very likely that legitimate scripts have this exact string,
   // since they must minimally define a function of this name. Conversely, a
   // file not containing the string is not likely to be a PAC script.
   //
   // An exact test would have to load the script in a javascript evaluator.
-  return script.find(base::ASCIIToUTF16("FindProxyForURL")) !=
-         base::string16::npos;
+  return script.find(u"FindProxyForURL") != std::u16string::npos;
 }
 
 // This is the hard-coded location used by the DNS portion of web proxy
@@ -287,12 +286,10 @@ int PacFileDecider::DoQuickCheck() {
 
   HostResolver* host_resolver =
       pac_file_fetcher_->GetRequestContext()->host_resolver();
-  // It's safe to use an empty NetworkIsolationKey() here, since this is only
-  // for fetching the PAC script, so can't usefully leak data to web-initiated
-  // requests (Which can't use an empty NIK for resolving IPs other than that of
-  // the proxy).
   resolve_request_ = host_resolver->CreateRequest(
-      HostPortPair(host, 80), NetworkIsolationKey(), net_log_, parameters);
+      HostPortPair(host, 80),
+      pac_file_fetcher_->isolation_info().network_isolation_key(), net_log_,
+      parameters);
 
   CompletionRepeatingCallback callback = base::BindRepeating(
       &PacFileDecider::OnIOCompletion, base::Unretained(this));

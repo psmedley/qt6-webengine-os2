@@ -46,15 +46,21 @@
 #include "base/task/current_thread.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
 #include "base/task/sequence_manager/thread_controller_with_message_pump_impl.h"
+#include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/tab_contents/form_interaction_tab_helper.h"
+#include "components/device_event_log/device_event_log.h"
 #include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "components/performance_manager/embedder/performance_manager_registry.h"
 #include "components/performance_manager/public/graph/graph.h"
 #include "components/performance_manager/public/performance_manager.h"
 #include "content/public/browser/browser_main_parts.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/common/content_features.h"
+#include "content/public/common/result_codes.h"
 #include "extensions/buildflags/buildflags.h"
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "content/public/browser/plugin_service.h"
@@ -71,6 +77,7 @@
 #include "ui/display/screen.h"
 
 #include "web_engine_context.h"
+#include "web_usb_detector_qt.h"
 
 #include <QtGui/qtgui-config.h>
 
@@ -81,7 +88,7 @@
 
 #if defined(OS_MAC)
 #include "base/message_loop/message_pump_mac.h"
-#include "services/device/public/cpp/geolocation/geolocation_system_permission_mac.h"
+#include "services/device/public/cpp/geolocation/geolocation_manager.h"
 #include "ui/base/idle/idle.h"
 #endif
 
@@ -221,14 +228,16 @@ private:
 };
 
 #if defined(OS_MAC)
-class FakeSystemGeolocationPermissionManager : public device::GeolocationSystemPermissionManager
+class FakeGeolocationManager : public device::GeolocationManager
 {
 public:
-    FakeSystemGeolocationPermissionManager() = default;
-    ~FakeSystemGeolocationPermissionManager() override = default;
+    FakeGeolocationManager() = default;
+    ~FakeGeolocationManager() override = default;
 
-    // GeolocationSystemPermissionManager implementation:
-    device::LocationSystemPermissionStatus GetSystemPermission() override
+    // GeolocationManager implementation:
+    void StartWatchingPosition(bool) override {}
+    void StopWatchingPosition() override {}
+    device::LocationSystemPermissionStatus GetSystemPermission() const override
     {
         return device::LocationSystemPermissionStatus::kDenied;
     }
@@ -254,17 +263,23 @@ int BrowserMainPartsQt::PreEarlyInitialization()
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     content::ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(extensions::kExtensionScheme);
 #endif //ENABLE_EXTENSIONS
-    return 0;
+    return content::RESULT_CODE_NORMAL_EXIT;
 }
 
-void BrowserMainPartsQt::PreMainMessageLoopStart()
+void BrowserMainPartsQt::PreCreateMainMessageLoop()
 {
 #if defined(OS_MAC)
-    m_locationPermissionManager = std::make_unique<FakeSystemGeolocationPermissionManager>();
+    m_geolocationManager = std::make_unique<FakeGeolocationManager>();
 #endif
 }
 
-void BrowserMainPartsQt::PreMainMessageLoopRun()
+void BrowserMainPartsQt::PostCreateMainMessageLoop()
+{
+    if (!device_event_log::IsInitialized())
+        device_event_log::Initialize(0 /* default max entries */);
+}
+
+int BrowserMainPartsQt::PreMainMessageLoopRun()
 {
     ui::SelectFileDialog::SetFactory(new SelectFileDialogFactoryQt());
 
@@ -276,6 +291,15 @@ void BrowserMainPartsQt::PreMainMessageLoopRun()
     content::PluginService *plugin_service = content::PluginService::GetInstance();
     plugin_service->SetFilter(extensions::PluginServiceFilterQt::GetInstance());
 #endif //ENABLE_EXTENSIONS
+
+    if (base::FeatureList::IsEnabled(features::kWebUsb)) {
+        m_webUsbDetector.reset(new WebUsbDetectorQt());
+        content::GetUIThreadTaskRunner({ base::TaskPriority::BEST_EFFORT })
+                ->PostTask(FROM_HERE,
+                           base::BindOnce(&WebUsbDetectorQt::Initialize,
+                                          base::Unretained(m_webUsbDetector.get())));
+    }
+    return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 void BrowserMainPartsQt::PostMainMessageLoopRun()
@@ -283,6 +307,8 @@ void BrowserMainPartsQt::PostMainMessageLoopRun()
     performance_manager_registry_->TearDown();
     performance_manager_registry_.reset();
     performance_manager::DestroyPerformanceManager(std::move(performance_manager_));
+
+    m_webUsbDetector.reset();
 
     // The ProfileQt's destructor uses the MessageLoop so it should be deleted
     // right before the RenderProcessHostImpl's destructor destroys it.
@@ -303,7 +329,7 @@ int BrowserMainPartsQt::PreCreateThreads()
 #else
     display::Screen::SetScreenInstance(new DesktopScreenQt);
 #endif
-    return 0;
+    return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 static void CreatePoliciesAndDecorators(performance_manager::Graph *graph)
@@ -320,9 +346,9 @@ void BrowserMainPartsQt::PostCreateThreads()
 }
 
 #if defined(OS_MAC)
-device::GeolocationSystemPermissionManager *BrowserMainPartsQt::GetLocationPermissionManager()
+device::GeolocationManager *BrowserMainPartsQt::GetGeolocationManager()
 {
-    return m_locationPermissionManager.get();
+    return m_geolocationManager.get();
 }
 #endif
 

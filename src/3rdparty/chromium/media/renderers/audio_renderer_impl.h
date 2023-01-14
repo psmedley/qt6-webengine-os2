@@ -25,7 +25,6 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/power_monitor/power_observer.h"
 #include "base/synchronization/lock.h"
 #include "media/base/audio_decoder.h"
@@ -38,6 +37,7 @@
 #include "media/filters/audio_renderer_algorithm.h"
 #include "media/filters/decoder_stream.h"
 #include "media/renderers/default_renderer_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -55,7 +55,7 @@ class SpeechRecognitionClient;
 class MEDIA_EXPORT AudioRendererImpl
     : public AudioRenderer,
       public TimeSource,
-      public base::PowerObserver,
+      public base::PowerSuspendObserver,
       public AudioRendererSink::RenderCallback {
  public:
   using PlayDelayCBForTesting = base::RepeatingCallback<void(base::TimeDelta)>;
@@ -99,15 +99,16 @@ class MEDIA_EXPORT AudioRendererImpl
   void Flush(base::OnceClosure callback) override;
   void StartPlaying() override;
   void SetVolume(float volume) override;
-  void SetLatencyHint(base::Optional<base::TimeDelta> latency_hint) override;
+  void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) override;
   void SetPreservesPitch(bool preserves_pitch) override;
   void SetAutoplayInitiated(bool autoplay_initiated) override;
 
-  // base::PowerObserver implementation.
+  // base::PowerSuspendObserver implementation.
   void OnSuspend() override;
   void OnResume() override;
 
   void SetPlayDelayCBForTesting(PlayDelayCBForTesting cb);
+  bool was_unmuted_for_testing() const { return was_unmuted_; }
 
  private:
   friend class AudioRendererImplTest;
@@ -310,7 +311,7 @@ class MEDIA_EXPORT AudioRendererImpl
 
   // Stored value from last call to SetLatencyHint(). Passed to |algorithm_|
   // during Initialize().
-  base::Optional<base::TimeDelta> latency_hint_;
+  absl::optional<base::TimeDelta> latency_hint_;
 
   // Passed to |algorithm_|. Indicates whether |algorithm_| should or should not
   // make pitch adjustments at playbacks other than 1.0.

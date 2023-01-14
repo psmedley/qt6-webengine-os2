@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/fuchsia/process_context.h"
 #include "base/macros.h"
@@ -111,7 +112,7 @@ class GLOzoneEGLScenic : public GLOzoneEGL {
   scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
       const gfx::Size& size) override {
     return gl::InitializeGLSurface(
-        base::MakeRefCounted<gl::PbufferGLSurfaceEGL>(size));
+        base::MakeRefCounted<gl::SurfacelessEGL>(size));
   }
 
   gl::EGLDisplayPlatform GetNativeDisplay() override {
@@ -119,7 +120,8 @@ class GLOzoneEGLScenic : public GLOzoneEGL {
   }
 
  protected:
-  bool LoadGLES2Bindings(gl::GLImplementation implementation) override {
+  bool LoadGLES2Bindings(
+      const gl::GLImplementationParts& implementation) override {
     return LoadDefaultEGLGLES2Bindings(implementation);
   }
 
@@ -173,18 +175,19 @@ void ScenicSurfaceFactory::Shutdown() {
   scenic_ = nullptr;
 }
 
-std::vector<gl::GLImplementation>
+std::vector<gl::GLImplementationParts>
 ScenicSurfaceFactory::GetAllowedGLImplementations() {
-  return std::vector<gl::GLImplementation>{
-      gl::kGLImplementationEGLANGLE,
-      gl::kGLImplementationSwiftShaderGL,
-      gl::kGLImplementationEGLGLES2,
-      gl::kGLImplementationStubGL,
+  return std::vector<gl::GLImplementationParts>{
+      gl::GLImplementationParts(gl::kGLImplementationEGLANGLE),
+      gl::GLImplementationParts(gl::kGLImplementationSwiftShaderGL),
+      gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
+      gl::GLImplementationParts(gl::kGLImplementationStubGL),
   };
 }
 
-GLOzone* ScenicSurfaceFactory::GetGLOzone(gl::GLImplementation implementation) {
-  switch (implementation) {
+GLOzone* ScenicSurfaceFactory::GetGLOzone(
+    const gl::GLImplementationParts& implementation) {
+  switch (implementation.gl) {
     case gl::kGLImplementationSwiftShaderGL:
     case gl::kGLImplementationEGLGLES2:
     case gl::kGLImplementationEGLANGLE:
@@ -219,7 +222,7 @@ scoped_refptr<gfx::NativePixmap> ScenicSurfaceFactory::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    base::Optional<gfx::Size> framebuffer_size) {
+    absl::optional<gfx::Size> framebuffer_size) {
   DCHECK(!framebuffer_size || framebuffer_size == size);
   auto collection = sysmem_buffer_manager_.CreateCollection(vk_device, size,
                                                             format, usage, 1);
@@ -242,13 +245,10 @@ void ScenicSurfaceFactory::CreateNativePixmapAsync(
 
 #if BUILDFLAG(ENABLE_VULKAN)
 std::unique_ptr<gpu::VulkanImplementation>
-ScenicSurfaceFactory::CreateVulkanImplementation(
-    bool use_swiftshader,
-    bool allow_protected_memory,
-    bool enforce_protected_memory) {
+ScenicSurfaceFactory::CreateVulkanImplementation(bool use_swiftshader,
+                                                 bool allow_protected_memory) {
   return std::make_unique<ui::VulkanImplementationScenic>(
-      this, &sysmem_buffer_manager_, allow_protected_memory,
-      enforce_protected_memory);
+      this, &sysmem_buffer_manager_, allow_protected_memory);
 }
 #endif
 

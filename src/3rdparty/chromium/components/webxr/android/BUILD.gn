@@ -40,6 +40,7 @@ source_set("android") {
   deps = [
     ":android_utils",
     "//base",
+    "//components/infobars/android",
     "//components/infobars/core",
     "//components/resources:android_resources",
     "//components/strings",
@@ -52,6 +53,7 @@ source_set("android") {
     deps += [
       ":ar_jni_headers",
       "//device/vr/android/arcore:arcore",
+      "//ui/android",
     ]
   }
 
@@ -77,12 +79,11 @@ android_library("ar_java_base") {
     ":ar_java_interfaces",
     ":webxr_android_enums_java",
     "//base:base_java",
-    "//base:jni_java",
     "//content/public/android:content_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_appcompat_appcompat_java",
     "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
-    "//ui/android:ui_java",
+    "//ui/android:ui_no_recycler_view_java",
   ]
 
   sources = [

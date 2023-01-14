@@ -118,10 +118,12 @@ void StorageController::ClearAreasIfNeeded() {
 }
 
 scoped_refptr<CachedStorageArea> StorageController::GetLocalStorageArea(
-    const SecurityOrigin* origin) {
+    const SecurityOrigin* origin,
+    mojo::PendingRemote<mojom::blink::StorageArea> local_storage_area) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   EnsureLocalStorageNamespaceCreated();
-  return local_storage_namespace_->GetCachedArea(origin);
+  return local_storage_namespace_->GetCachedArea(origin,
+                                                 std::move(local_storage_area));
 }
 
 void StorageController::AddLocalStorageInspectorStorageAgent(
@@ -136,17 +138,6 @@ void StorageController::RemoveLocalStorageInspectorStorageAgent(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   EnsureLocalStorageNamespaceCreated();
   local_storage_namespace_->RemoveInspectorStorageAgent(agent);
-}
-
-void StorageController::DidDispatchLocalStorageEvent(
-    const SecurityOrigin* origin,
-    const String& key,
-    const String& old_value,
-    const String& new_value) {
-  if (local_storage_namespace_) {
-    local_storage_namespace_->DidDispatchStorageEvent(origin, key, old_value,
-                                                      new_value);
-  }
 }
 
 void StorageController::EnsureLocalStorageNamespaceCreated() {

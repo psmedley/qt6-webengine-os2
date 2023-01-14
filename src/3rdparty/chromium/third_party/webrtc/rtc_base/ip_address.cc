@@ -169,10 +169,6 @@ std::string IPAddress::ToString() const {
 }
 
 std::string IPAddress::ToSensitiveString() const {
-#if !defined(NDEBUG)
-  // Return non-stripped in debug.
-  return ToString();
-#else
   switch (family_) {
     case AF_INET: {
       std::string address = ToString();
@@ -198,7 +194,6 @@ std::string IPAddress::ToSensitiveString() const {
 #endif
   }
   return std::string();
-#endif
 }
 
 IPAddress IPAddress::Normalized() const {

@@ -11,6 +11,7 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
+#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/single_thread_task_runner.h"
@@ -25,15 +26,23 @@ class NativeDisplayDelegate;
 }
 
 namespace ui {
+enum class DomCode;
+enum class PlatformKeyboardHookTypes;
+
 class CursorFactory;
 class GpuPlatformSupportHost;
 class InputController;
+class KeyEvent;
 class OverlayManagerOzone;
 class PlatformClipboard;
 class PlatformGLEGLUtility;
+class PlatformGlobalShortcutListener;
+class PlatformGlobalShortcutListenerDelegate;
+class PlatformKeyboardHook;
 class PlatformMenuUtils;
 class PlatformScreen;
 class PlatformUserInputMonitor;
+class PlatformUtils;
 class SurfaceFactoryOzone;
 class SystemInputInjector;
 
@@ -99,10 +108,6 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
     // frame based on the currently-running window manager.
     bool custom_frame_pref_default = false;
 
-    // Determines whether switching between system and custom frames is
-    // supported.
-    bool use_system_title_bar = false;
-
     // Determines the type of message pump that should be used for GPU main
     // thread.
     base::MessagePumpType message_pump_type_for_gpu =
@@ -131,6 +136,10 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
     // be stacked below an AcceleratedWidget to make a widget opaque.
     bool needs_background_image = false;
 
+    // Wayland only: determines whether windows which are not top level ones
+    // should be given parents explicitly.
+    bool set_parent_for_non_top_level_windows = false;
+
     // If true, the platform shows and updates the drag image.
     bool platform_shows_drag_image = true;
 
@@ -147,6 +156,12 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
     bool fetch_buffer_formats_for_gmb_on_gpu = false;
   };
 
+  // Groups platform properties that can only be known at run time.
+  struct PlatformRuntimeProperties {
+    // Indicates whether the platform supports server-side window decorations.
+    bool supports_server_side_window_decorations = true;
+  };
+
   // Properties available in the host process after initialization.
   struct InitializedHostProperties {
     // Whether the underlying platform supports deferring compositing of buffers
@@ -158,7 +173,7 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
   // Corresponds to chrome_browser_main_extra_parts.h.
   //
   // The browser process' initialization involves several steps -
-  // PreEarlyInitialization, PostMainMessageLoopStart, PostMainMessageLoopRun,
+  // PreEarlyInitialization, PostCreateMainMessageLoop, PostMainMessageLoopRun,
   // etc. In order to be consistent with that and allow platform specific
   // initialization steps, the OzonePlatform has three methods - one static
   // PreEarlyInitialization that is expected to do some early non-ui
@@ -175,7 +190,8 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
   // Sets error handlers if supported for the browser process after the message
   // loop started. It's required to call this so that we can exit cleanly if the
   // server can exit before we do.
-  virtual void PostMainMessageLoopStart(base::OnceCallback<void()> shutdown_cb);
+  virtual void PostCreateMainMessageLoop(
+      base::OnceCallback<void()> shutdown_cb);
   // Resets the error handlers if set.
   virtual void PostMainMessageLoopRun();
 
@@ -209,22 +225,52 @@ class COMPONENT_EXPORT(OZONE) OzonePlatform {
       PlatformWindowInitProperties properties) = 0;
   virtual std::unique_ptr<display::NativeDisplayDelegate>
   CreateNativeDisplayDelegate() = 0;
+  // Creates a new PlatformScreen subclass from the factory subclass.
   virtual std::unique_ptr<PlatformScreen> CreateScreen() = 0;
+  // This function must be called immediately after CreateScreen with the
+  // `screen` that was returned from CreateScreen.  They are separated to avoid
+  // observer recursion into display::Screen from inside CreateScreen.
+  virtual void InitScreen(PlatformScreen* screen) = 0;
   virtual PlatformClipboard* GetPlatformClipboard();
   virtual std::unique_ptr<InputMethod> CreateInputMethod(
       internal::InputMethodDelegate* delegate,
       gfx::AcceleratedWidget widget) = 0;
   virtual PlatformGLEGLUtility* GetPlatformGLEGLUtility();
   virtual PlatformMenuUtils* GetPlatformMenuUtils();
+  virtual PlatformUtils* GetPlatformUtils();
+  virtual PlatformGlobalShortcutListener* GetPlatformGlobalShortcutListener(
+      PlatformGlobalShortcutListenerDelegate* delegate);
+  // Returns the keyboard hook that captures the specified keys.  See more in
+  // ui::KeyboardHook.  However, unlike that interface, Ozone tries to register
+  // the hook that it has created, and returns the one only if it was registered
+  // successfully.
+  // Handles creating both modifier and media keyboard hooks.  |dom_codes| and
+  // |accelerated_widget| are only used if |type| is
+  // PlatformKeyboardHookTypes::kModifier.
+  virtual std::unique_ptr<PlatformKeyboardHook> CreateKeyboardHook(
+      PlatformKeyboardHookTypes type,
+      base::RepeatingCallback<void(KeyEvent* event)> callback,
+      absl::optional<base::flat_set<DomCode>> dom_codes,
+      gfx::AcceleratedWidget accelerated_widget);
 
   // Returns true if the specified buffer format is supported.
   virtual bool IsNativePixmapConfigSupported(gfx::BufferFormat format,
                                              gfx::BufferUsage usage) const;
 
+  // Returns whether a custom frame should be used for windows.
+  // The default behaviour is returning what is suggested by the
+  // custom_frame_pref_default property of the platform: if the platform
+  // suggests using the custom frame, likely it lacks native decorations.
+  // See https://crbug.com/1212555
+  virtual bool ShouldUseCustomFrame();
+
   // Returns a struct that contains configuration and requirements for the
   // current platform implementation. This can be called from either host or GPU
   // process at any time.
   virtual const PlatformProperties& GetPlatformProperties();
+
+  // Returns runtime properties of the current platform implementation.
+  virtual const PlatformRuntimeProperties& GetPlatformRuntimeProperties();
 
   // Returns a struct that contains properties available in the host process
   // after InitializeForUI() runs.

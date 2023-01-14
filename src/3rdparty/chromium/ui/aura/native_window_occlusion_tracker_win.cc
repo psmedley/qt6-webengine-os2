@@ -11,6 +11,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_util_win.h"
 #include "base/strings/utf_string_conversions.h"
@@ -22,7 +24,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/windows_version.h"
+#include "ui/aura/window_occlusion_tracker.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/win/hwnd_util.h"
 
 namespace aura {
@@ -58,7 +62,7 @@ void NativeWindowOcclusionTrackerWin::DeleteInstanceForTesting() {
 void NativeWindowOcclusionTrackerWin::Enable(Window* window) {
   DCHECK(window->IsRootWindow());
   if (window->HasObserver(this)) {
-    DCHECK(FALSE) << "window shouldn't already be observing occlusion tracker";
+    NOTREACHED() << "window shouldn't already be observing occlusion tracker";
     return;
   }
   // Add this as an observer so that we can be notified
@@ -177,9 +181,12 @@ bool NativeWindowOcclusionTrackerWin::IsWindowVisibleAndFullyOpaque(
   // Filter out "tool windows", which are floating windows that do not appear on
   // the taskbar or ALT-TAB. Floating windows can have larger window rectangles
   // than what is visible to the user, so by filtering them out we will avoid
-  // incorrectly marking native windows as occluded.
-  if (ex_styles & WS_EX_TOOLWINDOW)
-    return false;
+  // incorrectly marking native windows as occluded. We do not filter out the
+  // Windows Taskbar.
+  if (ex_styles & WS_EX_TOOLWINDOW) {
+    if (gfx::GetClassName(hwnd) != L"Shell_TrayWnd")
+      return false;
+  }
 
   // Filter out layered windows that are not opaque or that set a transparency
   // colorkey.
@@ -227,14 +234,35 @@ bool NativeWindowOcclusionTrackerWin::IsWindowVisibleAndFullyOpaque(
     return false;
 
   // Ignore popup windows since they're transient unless it is a Chrome Widget
-  // Window.
+  // Window or the Windows Taskbar
   if (::GetWindowLong(hwnd, GWL_STYLE) & WS_POPUP) {
-    if (!base::StartsWith(gfx::GetClassName(hwnd), L"Chrome_WidgetWin_")) {
+    std::wstring hwnd_class_name = gfx::GetClassName(hwnd);
+    if (!base::StartsWith(hwnd_class_name, L"Chrome_WidgetWin_") &&
+        hwnd_class_name != L"Shell_TrayWnd") {
       return false;
     }
   }
 
   *window_rect = gfx::Rect(win_rect);
+
+  WINDOWPLACEMENT window_placement = {0};
+  window_placement.length = sizeof(WINDOWPLACEMENT);
+  ::GetWindowPlacement(hwnd, &window_placement);
+  if (window_placement.showCmd == SW_MAXIMIZE) {
+    // If the window is maximized the window border extends beyond the visible
+    // region of the screen.  Adjust the maximized window rect to fit the
+    // screen dimensions to ensure that fullscreen windows, which do not extend
+    // beyond the screen boundaries since they typically have no borders, will
+    // occlude maximized windows underneath them.
+    HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if (hmon) {
+      MONITORINFO mi;
+      mi.cbSize = sizeof(mi);
+      if (GetMonitorInfo(hmon, &mi)) {
+        (*window_rect).AdjustToFit(gfx::Rect(mi.rcWork));
+      }
+    }
+  }
 
   return true;
 }
@@ -243,6 +271,9 @@ void NativeWindowOcclusionTrackerWin::UpdateOcclusionState(
     const base::flat_map<HWND, Window::OcclusionState>&
         root_window_hwnds_occlusion_state,
     bool show_all_windows) {
+  // Pause occlusion until we've updated all root windows, to avoid O(n^3)
+  // calls to recompute occlusion in WindowOcclusionTracker.
+  WindowOcclusionTracker::ScopedPause pause_occlusion_tracking;
   num_visible_root_windows_ = 0;
   for (const auto& root_window_pair : root_window_hwnds_occlusion_state) {
     auto it = hwnd_root_window_map_.find(root_window_pair.first);
@@ -287,14 +318,28 @@ void NativeWindowOcclusionTrackerWin::OnSessionChange(
 }
 
 void NativeWindowOcclusionTrackerWin::OnDisplayStateChanged(bool display_on) {
+  static bool screen_power_listener_enabled = base::FeatureList::IsEnabled(
+      features::kScreenPowerListenerForNativeWinOcclusion);
+  if (!screen_power_listener_enabled)
+    return;
+
   if (display_on == display_on_)
     return;
 
   display_on_ = display_on;
-  // Display changing to on will cause a foreground window change,
-  // which will trigger an occlusion calculation on its own.
-  if (!display_on_)
+  if (display_on_) {
+    // Notify the window occlusion calculator of the display turning on
+    // which will schedule an occlusion calculation. This must be run
+    // on the WindowOcclusionCalculator thread.
+    update_occlusion_task_runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &WindowOcclusionCalculator::HandleVisibilityChanged,
+            base::Unretained(WindowOcclusionCalculator::GetInstance()),
+            /*visible=*/true));
+  } else {
     MarkNonIconicWindowsOccluded();
+  }
 }
 
 void NativeWindowOcclusionTrackerWin::MarkNonIconicWindowsOccluded() {
@@ -675,12 +720,14 @@ void NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
     return;
 
   // We generally ignore events for popup windows, except for when the taskbar
-  // is hidden or when the popup is a Chrome Widget, in which case we
-  // recalculate occlusion.
+  // is hidden or when the popup is a Chrome Widget or Windows Taskbar, in
+  // which case we recalculate occlusion.
   bool calculate_occlusion = true;
   if (::GetWindowLong(hwnd, GWL_STYLE) & WS_POPUP) {
+    std::wstring hwnd_class_name = gfx::GetClassName(hwnd);
     calculate_occlusion =
-        base::StartsWith(gfx::GetClassName(hwnd), L"Chrome_WidgetWin_");
+        base::StartsWith(hwnd_class_name, L"Chrome_WidgetWin_") ||
+        hwnd_class_name == L"Shell_TrayWnd";
   }
 
   // Detect if either the alt tab view or the task list thumbnail is being
@@ -700,8 +747,8 @@ void NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
           FROM_HERE, base::BindOnce(update_occlusion_state_callback_,
                                     root_window_hwnds_occlusion_state_,
                                     showing_thumbnails_));
-      return;
     }
+    return;
   } else if (event == EVENT_OBJECT_HIDE) {
     // Avoid getting the hwnd's class name, and recomputing occlusion, if not
     // needed.
@@ -714,6 +761,8 @@ void NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
       // Let occlusion calculation fix occlusion state, even though hwnd might
       // be a popup window.
       calculate_occlusion = true;
+    } else {
+      return;
     }
   }
   // Don't continually calculate occlusion while a window is moving (unless it's
@@ -778,7 +827,7 @@ bool NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
          (IsWindowOnCurrentVirtualDesktop(hwnd) == true);
 }
 
-base::Optional<bool> NativeWindowOcclusionTrackerWin::
+absl::optional<bool> NativeWindowOcclusionTrackerWin::
     WindowOcclusionCalculator::IsWindowOnCurrentVirtualDesktop(HWND hwnd) {
   if (!virtual_desktop_manager_)
     return true;
@@ -788,7 +837,7 @@ base::Optional<bool> NativeWindowOcclusionTrackerWin::
           hwnd, &on_current_desktop))) {
     return on_current_desktop;
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 }  // namespace aura

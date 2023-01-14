@@ -57,7 +57,7 @@ net::SiteForCookies WorkerFetchContext::GetSiteForCookies() const {
 
 scoped_refptr<const SecurityOrigin> WorkerFetchContext::GetTopFrameOrigin()
     const {
-  base::Optional<WebSecurityOrigin> top_frame_origin =
+  absl::optional<WebSecurityOrigin> top_frame_origin =
       web_context_->TopFrameOrigin();
 
   // The top frame origin of shared and service workers is null.
@@ -92,11 +92,11 @@ bool WorkerFetchContext::ShouldBlockRequestByInspector(const KURL& url) const {
 
 void WorkerFetchContext::DispatchDidBlockRequest(
     const ResourceRequest& resource_request,
-    const FetchInitiatorInfo& fetch_initiator_info,
+    const ResourceLoaderOptions& options,
     ResourceRequestBlockedReason blocked_reason,
     ResourceType resource_type) const {
-  probe::DidBlockRequest(Probe(), resource_request, nullptr, Url(),
-                         fetch_initiator_info, blocked_reason, resource_type);
+  probe::DidBlockRequest(Probe(), resource_request, nullptr, Url(), options,
+                         blocked_reason, resource_type);
 }
 
 ContentSecurityPolicy* WorkerFetchContext::GetContentSecurityPolicyForWorld(
@@ -138,10 +138,10 @@ WorkerFetchContext::CreateWebSocketHandshakeThrottle() {
 
 bool WorkerFetchContext::ShouldBlockFetchByMixedContentCheck(
     mojom::blink::RequestContextType request_context,
-    const base::Optional<ResourceRequest::RedirectInfo>& redirect_info,
+    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
     const KURL& url,
     ReportingDisposition reporting_disposition,
-    const base::Optional<String>& devtools_id) const {
+    const absl::optional<String>& devtools_id) const {
   RedirectStatus redirect_status = redirect_info
                                        ? RedirectStatus::kFollowedRedirect
                                        : RedirectStatus::kNoRedirect;

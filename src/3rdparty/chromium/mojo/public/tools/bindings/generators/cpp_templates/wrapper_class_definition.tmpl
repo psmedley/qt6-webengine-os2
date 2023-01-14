@@ -32,13 +32,18 @@ size_t {{struct.name}}::Hash(size_t seed) const {
 }
 {%- endif %}
 
-void {{struct.name}}::WriteIntoTracedValue(perfetto::TracedValue context) const {
+void {{struct.name}}::WriteIntoTrace(perfetto::TracedValue context) const {
   auto dict = std::move(context).WriteDictionary();
 {%-  for field in struct.fields %}
   perfetto::WriteIntoTracedValueWithFallback(
     dict.AddItem(
-      "{{field.name}}"), {{'this->'+field.name}}, 
-      "<value of type {{field.kind|cpp_wrapper_param_type}}>");
+      "{{field.name}}"), {{'this->'+field.name}},
+#if BUILDFLAG(MOJO_TRACE_ENABLED)
+      "<value of type {{field.kind|cpp_wrapper_param_type}}>"
+#else
+      "<value>"
+#endif  // BUILDFLAG(MOJO_TRACE_ENABLED)
+    );
 {%-  endfor %}
 }
 

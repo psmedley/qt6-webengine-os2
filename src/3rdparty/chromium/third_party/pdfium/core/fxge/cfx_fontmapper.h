@@ -11,8 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "build/build_config.h"
+#include "core/fxcrt/fx_codepage_forward.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_face.h"
 #include "third_party/base/optional.h"
@@ -38,12 +41,14 @@ class CFX_FontMapper {
     kTimesOblique,
     kSymbol,
     kDingbats,
+    kLast = kDingbats
   };
 
   explicit CFX_FontMapper(CFX_FontMgr* mgr);
   ~CFX_FontMapper();
 
   static Optional<StandardFont> GetStandardFontName(ByteString* name);
+  static bool IsStandardFontName(const ByteString& name);
   static bool IsSymbolicFont(StandardFont font);
   static bool IsFixedFont(StandardFont font);
   static constexpr uint32_t MakeTag(char c1, char c2, char c3, char c4) {
@@ -52,7 +57,7 @@ class CFX_FontMapper {
   }
 
   void SetSystemFontInfo(std::unique_ptr<SystemFontInfoIface> pFontInfo);
-  void AddInstalledFont(const ByteString& name, int charset);
+  void AddInstalledFont(const ByteString& name, FX_Charset charset);
   void LoadInstalledFonts();
 
   RetainPtr<CFX_Face> FindSubstFont(const ByteString& face_name,
@@ -60,21 +65,27 @@ class CFX_FontMapper {
                                     uint32_t flags,
                                     int weight,
                                     int italic_angle,
-                                    int CharsetCP,
+                                    FX_CodePage code_page,
                                     CFX_SubstFont* pSubstFont);
 
   bool IsBuiltinFace(const RetainPtr<CFX_Face>& face) const;
   int GetFaceSize() const;
   ByteString GetFaceName(int index) const { return m_FaceArray[index].name; }
+  bool HasInstalledFont(ByteStringView name) const;
+  bool HasLocalizedFont(ByteStringView name) const;
+
+#if defined(OS_WIN)
+  Optional<ByteString> InstalledFontNameStartingWith(
+      const ByteString& name) const;
+  Optional<ByteString> LocalizedFontNameStartingWith(
+      const ByteString& name) const;
+#endif  // defined(OS_WIN)
 
 #ifdef PDF_ENABLE_XFA
   std::unique_ptr<uint8_t, FxFreeDeleter> RawBytesForIndex(
       uint32_t index,
       size_t* returned_length);
 #endif  // PDF_ENABLE_XFA
-
-  std::vector<ByteString> m_InstalledTTFonts;
-  std::vector<std::pair<ByteString, ByteString>> m_LocalizedTTFonts;
 
  private:
   static constexpr size_t MM_FACE_COUNT = 2;
@@ -107,6 +118,8 @@ class CFX_FontMapper {
   std::vector<FaceData> m_FaceArray;
   std::unique_ptr<SystemFontInfoIface> m_pFontInfo;
   UnownedPtr<CFX_FontMgr> const m_pFontMgr;
+  std::vector<ByteString> m_InstalledTTFonts;
+  std::vector<std::pair<ByteString, ByteString>> m_LocalizedTTFonts;
   RetainPtr<CFX_Face> m_MMFaces[MM_FACE_COUNT];
   RetainPtr<CFX_Face> m_FoxitFaces[FOXIT_FACE_COUNT];
 };

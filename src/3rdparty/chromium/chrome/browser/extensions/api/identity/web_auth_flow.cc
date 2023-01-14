@@ -117,7 +117,7 @@ void WebAuthFlow::Start() {
   auto event =
       std::make_unique<Event>(events::IDENTITY_PRIVATE_ON_WEB_FLOW_REQUEST,
                               identity_private::OnWebFlowRequest::kEventName,
-                              std::move(args), profile_);
+                              std::move(*args).TakeList(), profile_);
   ExtensionSystem* system = ExtensionSystem::Get(profile_);
 
   extensions::ComponentLoader* component_loader =
@@ -138,8 +138,8 @@ void WebAuthFlow::DetachDelegateAndDelete() {
 }
 
 content::StoragePartition* WebAuthFlow::GetGuestPartition() {
-  return content::BrowserContext::GetStoragePartition(
-      profile_, GetWebViewPartitionConfig(partition_, profile_));
+  return profile_->GetStoragePartition(
+      GetWebViewPartitionConfig(partition_, profile_));
 }
 
 const std::string& WebAuthFlow::GetAppWindowKey() const {
@@ -153,7 +153,8 @@ content::StoragePartitionConfig WebAuthFlow::GetWebViewPartitionConfig(
   // This has to mirror the logic in WebViewGuest::CreateWebContents for
   // creating the correct StoragePartitionConfig.
   auto result = content::StoragePartitionConfig::Create(
-      extension_misc::kIdentityApiUiAppId, GetPartitionName(partition),
+      browser_context, extension_misc::kIdentityApiUiAppId,
+      GetPartitionName(partition),
       /*in_memory=*/true);
   result.set_fallback_to_partition_domain_for_blob_urls(
       browser_context->IsOffTheRecord()
@@ -221,7 +222,10 @@ void WebAuthFlow::DidStopLoading() {
 
 void WebAuthFlow::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame())
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (navigation_handle->IsInPrimaryMainFrame())
     BeforeUrlLoaded(navigation_handle->GetURL());
 }
 
@@ -235,7 +239,10 @@ void WebAuthFlow::DidFinishNavigation(
   // Websites may create and remove <iframe> during the auth flow. In
   // particular, to integrate CAPTCHA tests. Chrome shouldn't abort the auth
   // flow if a navigation failed in a sub-frame. https://crbug.com/1049565.
-  if (!navigation_handle->IsInMainFrame())
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (!navigation_handle->IsInPrimaryMainFrame())
     return;
 
   bool failed = false;

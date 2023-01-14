@@ -8,12 +8,15 @@
 #include <memory>
 
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
+#include "base/single_thread_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "gpu/command_buffer/service/ref_counted_lock.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image_backing_android.h"
 #include "gpu/command_buffer/service/stream_texture_shared_image_interface.h"
 #include "gpu/gpu_gles2_export.h"
 #include "gpu/ipc/common/vulkan_ycbcr_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace gpu {
 class SharedImageRepresentationGLTexture;
@@ -28,7 +31,8 @@ class AbstractTexture;
 // TextureOwner or overlay as needed in order to draw them.
 class GPU_GLES2_EXPORT SharedImageVideo
     : public SharedImageBackingAndroid,
-      public SharedContextState::ContextLostObserver {
+      public SharedContextState::ContextLostObserver,
+      public RefCountedLockHelperDrDc {
  public:
   SharedImageVideo(
       const Mailbox& mailbox,
@@ -37,9 +41,9 @@ class GPU_GLES2_EXPORT SharedImageVideo
       GrSurfaceOrigin surface_origin,
       SkAlphaType alpha_type,
       scoped_refptr<StreamTextureSharedImageInterface> stream_texture_sii,
-      std::unique_ptr<gles2::AbstractTexture> abstract_texture,
       scoped_refptr<SharedContextState> shared_context_state,
-      bool is_thread_safe);
+      bool is_thread_safe,
+      scoped_refptr<RefCountedLock> drdc_lock);
 
   ~SharedImageVideo() override;
 
@@ -57,7 +61,7 @@ class GPU_GLES2_EXPORT SharedImageVideo
 
   // Returns ycbcr information. This is only valid in vulkan context and
   // nullopt for other context.
-  static base::Optional<VulkanYCbCrInfo> GetYcbcrInfo(
+  static absl::optional<VulkanYCbCrInfo> GetYcbcrInfo(
       TextureOwner* texture_owner,
       scoped_refptr<SharedContextState> context_state);
 
@@ -89,13 +93,29 @@ class GPU_GLES2_EXPORT SharedImageVideo
   friend class SharedImageRepresentationVideoSkiaVk;
   friend class SharedImageRepresentationOverlayVideo;
 
-  void BeginGLReadAccess();
+  // Helper method to generate an abstract texture.
+  std::unique_ptr<gles2::AbstractTexture> GenAbstractTexture(
+      scoped_refptr<SharedContextState> context_state,
+      const bool passthrough);
+
+  void BeginGLReadAccess(const GLuint service_id);
+
+  // Creating representations on SharedImageVideo is already thread safe
+  // but SharedImageVideo backing can be destroyed on any thread when a
+  // backing is used by multiple threads like dr-dc. Hence backing is not
+  // guaranteed to be destroyed on the same thread on which it was created.
+  // This method ensures that all the member variables of this class are
+  // destroyed on the thread in which it was created.
+  static void CleanupOnCorrectThread(
+      scoped_refptr<StreamTextureSharedImageInterface> stream_texture_sii,
+      scoped_refptr<SharedContextState> context_state,
+      SharedImageVideo* backing,
+      base::WaitableEvent* event,
+      scoped_refptr<RefCountedLock> lock);
 
   scoped_refptr<StreamTextureSharedImageInterface> stream_texture_sii_;
-
-  // |abstract_texture_| is only used for legacy mailbox.
-  std::unique_ptr<gles2::AbstractTexture> abstract_texture_;
   scoped_refptr<SharedContextState> context_state_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(SharedImageVideo);
 };

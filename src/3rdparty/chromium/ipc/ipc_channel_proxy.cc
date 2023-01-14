@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
@@ -601,13 +602,10 @@ void ChannelProxy::AddGenericAssociatedInterfaceForIOThread(
   context()->AddGenericAssociatedInterfaceForIOThread(name, factory);
 }
 
-void ChannelProxy::GetGenericRemoteAssociatedInterface(
-    const std::string& name,
-    mojo::ScopedInterfaceEndpointHandle handle) {
+void ChannelProxy::GetRemoteAssociatedInterface(
+    mojo::GenericPendingAssociatedReceiver receiver) {
   DCHECK(did_init_);
-  context()->thread_safe_channel().GetAssociatedInterface(
-      name, mojo::PendingAssociatedReceiver<mojom::GenericInterface>(
-                std::move(handle)));
+  context()->thread_safe_channel().GetAssociatedInterface(std::move(receiver));
 }
 
 void ChannelProxy::ClearIPCTaskRunner() {

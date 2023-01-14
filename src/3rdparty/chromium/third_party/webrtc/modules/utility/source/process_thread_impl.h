@@ -21,7 +21,6 @@
 #include "api/task_queue/queued_task.h"
 #include "modules/include/module.h"
 #include "modules/utility/include/process_thread.h"
-#include "rtc_base/deprecated/recursive_critical_section.h"
 #include "rtc_base/event.h"
 #include "rtc_base/location.h"
 #include "rtc_base/platform_thread.h"
@@ -45,7 +44,6 @@ class ProcessThreadImpl : public ProcessThread {
   void DeRegisterModule(Module* module) override;
 
  protected:
-  static void Run(void* obj);
   bool Process();
 
  private:
@@ -75,11 +73,11 @@ class ProcessThreadImpl : public ProcessThread {
     }
 
     int64_t run_at_ms;
-    // DelayedTask owns the |task|, but some delayed tasks must be removed from
+    // DelayedTask owns the `task`, but some delayed tasks must be removed from
     // the std::priority_queue, but mustn't be deleted. std::priority_queue does
     // not give non-const access to the values, so storing unique_ptr would
     // delete the task as soon as it is remove from the priority queue.
-    // Thus lifetime of the |task| is managed manually.
+    // Thus lifetime of the `task` is managed manually.
     QueuedTask* task;
   };
   typedef std::list<ModuleCallback> ModuleList;
@@ -87,27 +85,30 @@ class ProcessThreadImpl : public ProcessThread {
   void Delete() override;
   // The part of Stop processing that doesn't need any locking.
   void StopNoLocks();
+  void WakeUpNoLocks(Module* module);
+  void WakeUpInternal(Module* module) RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Members protected by this mutex are accessed on the constructor thread and
   // on the spawned process thread, and locking is needed only while the process
   // thread is running.
-  rtc::RecursiveCriticalSection lock_;
+  Mutex mutex_;
 
   SequenceChecker thread_checker_;
   rtc::Event wake_up_;
-  // TODO(pbos): Remove unique_ptr and stop recreating the thread.
-  std::unique_ptr<rtc::PlatformThread> thread_;
+  rtc::PlatformThread thread_;
 
-  ModuleList modules_ RTC_GUARDED_BY(lock_);
+  ModuleList modules_ RTC_GUARDED_BY(mutex_);
+  // Set to true when calling Process, to allow reentrant calls to WakeUp.
+  bool holds_mutex_ RTC_GUARDED_BY(this) = false;
   std::queue<QueuedTask*> queue_;
-  std::priority_queue<DelayedTask> delayed_tasks_ RTC_GUARDED_BY(lock_);
+  std::priority_queue<DelayedTask> delayed_tasks_ RTC_GUARDED_BY(mutex_);
   // The `stop_` flag is modified only by the construction thread, protected by
   // `thread_checker_`. It is read also by the spawned `thread_`. The latter
-  // thread must take `lock_` before access, and for thread safety, the
-  // constructor thread needs to take `lock_` when it modifies `stop_` and
+  // thread must take `mutex_` before access, and for thread safety, the
+  // constructor thread needs to take `mutex_` when it modifies `stop_` and
   // `thread_` is running. Annotations like RTC_GUARDED_BY doesn't support this
   // usage pattern.
-  bool stop_ RTC_GUARDED_BY(lock_);
+  bool stop_ RTC_GUARDED_BY(mutex_);
   const char* thread_name_;
 };
 

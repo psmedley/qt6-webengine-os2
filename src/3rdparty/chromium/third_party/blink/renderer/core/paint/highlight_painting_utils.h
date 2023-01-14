@@ -6,10 +6,12 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_HIGHLIGHT_PAINTING_UTILS_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_phase.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
 
@@ -24,29 +26,35 @@ class CORE_EXPORT HighlightPaintingUtils {
   STATIC_ONLY(HighlightPaintingUtils);
 
  public:
-  static base::Optional<AppliedTextDecoration> HighlightTextDecoration(
+  static absl::optional<AppliedTextDecoration> HighlightTextDecoration(
       const ComputedStyle& style,
       const ComputedStyle& pseudo_style);
-  static Color HighlightBackgroundColor(const Document&,
-                                        const ComputedStyle&,
-                                        Node*,
-                                        PseudoId);
-  static Color HighlightForegroundColor(const Document&,
-                                        const ComputedStyle&,
-                                        Node*,
-                                        PseudoId,
-                                        const GlobalPaintFlags);
+  static Color HighlightBackgroundColor(
+      const Document&,
+      const ComputedStyle&,
+      Node*,
+      PseudoId,
+      const AtomicString& pseudo_argument = g_null_atom);
+  static Color HighlightForegroundColor(
+      const Document&,
+      const ComputedStyle&,
+      Node*,
+      PseudoId,
+      const GlobalPaintFlags,
+      const AtomicString& pseudo_argument = g_null_atom);
   static Color HighlightEmphasisMarkColor(const Document&,
                                           const ComputedStyle&,
                                           Node*,
                                           PseudoId,
                                           const GlobalPaintFlags);
-  static TextPaintStyle HighlightPaintingStyle(const Document&,
-                                               const ComputedStyle&,
-                                               Node*,
-                                               PseudoId,
-                                               const TextPaintStyle& text_style,
-                                               const PaintInfo&);
+  static TextPaintStyle HighlightPaintingStyle(
+      const Document&,
+      const ComputedStyle&,
+      Node*,
+      PseudoId,
+      const TextPaintStyle& text_style,
+      const PaintInfo&,
+      const AtomicString& pseudo_argument = g_null_atom);
 };
 
 }  // namespace blink

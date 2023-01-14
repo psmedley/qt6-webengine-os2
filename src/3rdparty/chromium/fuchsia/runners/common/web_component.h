@@ -10,7 +10,6 @@
 #include <fuchsia/ui/app/cpp/fidl.h>
 #include <fuchsia/web/cpp/fidl.h>
 #include <lib/fidl/cpp/binding.h>
-#include <lib/fidl/cpp/binding_set.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -65,13 +64,13 @@ class WebComponent : public fuchsia::sys::ComponentController,
 
   WebContentRunner* runner() const { return runner_; }
 
+ protected:
   // Returns the component's startup context (e.g. incoming services, public
   // service directory, etc).
   base::StartupContext* startup_context() const {
     return startup_context_.get();
   }
 
- protected:
   // fuchsia::sys::ComponentController implementation.
   void Kill() override;
   void Detach() override;

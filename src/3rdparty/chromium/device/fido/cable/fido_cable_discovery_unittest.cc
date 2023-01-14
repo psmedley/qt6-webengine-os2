@@ -10,7 +10,6 @@
 
 #include "base/containers/span.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -127,8 +126,7 @@ MATCHER_P2(IsAdvertisementContent,
 
 #elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   const auto service_data = arg->service_data();
-  const auto service_data_with_uuid =
-      service_data->find(kCableAdvertisementUUID128);
+  const auto service_data_with_uuid = service_data->find(kGoogleCableUUID128);
 
   if (service_data_with_uuid == service_data->end())
     return false;
@@ -212,12 +210,11 @@ class CableMockAdapter : public MockBluetoothAdapter {
     std::copy(authenticator_eid.begin(), authenticator_eid.end(),
               service_data.begin() + 2);
     BluetoothDevice::ServiceDataMap service_data_map;
-    service_data_map.emplace(kCableAdvertisementUUID128,
-                             std::move(service_data));
+    service_data_map.emplace(kGoogleCableUUID128, std::move(service_data));
 
     mock_device->UpdateAdvertisementData(
-        1 /* rssi */, base::nullopt /* flags */, BluetoothDevice::UUIDList(),
-        base::nullopt /* tx_power */, std::move(service_data_map),
+        1 /* rssi */, absl::nullopt /* flags */, BluetoothDevice::UUIDList(),
+        absl::nullopt /* tx_power */, std::move(service_data_map),
         BluetoothDevice::ManufacturerDataMap());
 
     auto* mock_device_ptr = mock_device.get();
@@ -325,8 +322,7 @@ class FakeFidoCableDiscovery : public FidoCableDiscovery {
  public:
   explicit FakeFidoCableDiscovery(
       std::vector<CableDiscoveryData> discovery_data)
-      : FidoCableDiscovery(std::move(discovery_data),
-                           /*ble_observer=*/nullptr) {}
+      : FidoCableDiscovery(std::move(discovery_data)) {}
   ~FakeFidoCableDiscovery() override = default;
 
  private:

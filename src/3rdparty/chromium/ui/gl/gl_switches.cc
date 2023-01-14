@@ -4,7 +4,7 @@
 
 #include "ui/gl/gl_switches.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "build/build_config.h"
 
 #if defined(OS_ANDROID)
@@ -35,7 +35,9 @@ const char kANGLEImplementationOpenGLESEGLName[] = "gles-egl";
 const char kANGLEImplementationNullName[] = "null";
 const char kANGLEImplementationVulkanName[] = "vulkan";
 const char kANGLEImplementationSwiftShaderName[] = "swiftshader";
+const char kANGLEImplementationSwiftShaderForWebGLName[] = "swiftshader-webgl";
 const char kANGLEImplementationMetalName[] = "metal";
+const char kANGLEImplementationNoneName[] = "";
 
 // Special switches for "NULL"/stub driver implementations.
 const char kANGLEImplementationD3D11NULLName[] = "d3d11-null";
@@ -131,9 +133,13 @@ const char kEnableSgiVideoSync[] = "enable-sgi-video-sync";
 // the GL output will not be correct but tests will run faster.
 const char kDisableGLDrawingForTests[] = "disable-gl-drawing-for-tests";
 
-// Forces the use of software GL instead of hardware gpu.
+// Forces the use of software GL instead of hardware gpu for tests.
 const char kOverrideUseSoftwareGLForTests[] =
     "override-use-software-gl-for-tests";
+
+// Forces the use of software GL instead of hardware gpu for headless.
+const char kOverrideUseSoftwareGLForHeadless[] =
+    "override-use-software-gl-for-headless";
 
 // Disables specified comma separated GL Extensions if found.
 const char kDisableGLExtensions[] = "disable-gl-extensions";
@@ -220,9 +226,9 @@ const base::Feature kDirectCompositionLowLatencyPresentation{
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Allow overlay swapchain to present on all GPUs even if they only support
-// software overlays.
+// software overlays. GPU deny lists limit it to NVIDIA only at the moment.
 const base::Feature kDirectCompositionSoftwareOverlays{
-    "DirectCompositionSoftwareOverlays", base::FEATURE_DISABLED_BY_DEFAULT};
+    "DirectCompositionSoftwareOverlays", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Default to using ANGLE's OpenGL backend
 const base::Feature kDefaultANGLEOpenGL{"DefaultANGLEOpenGL",

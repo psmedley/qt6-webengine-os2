@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/sys_addrinfo.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/ftp/ftp_request_info.h"
@@ -1324,11 +1325,9 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartUser) {
   };
   StaticSocketDataProvider ctrl_socket2(ctrl_reads, ctrl_writes);
   mock_socket_factory_->AddSocketDataProvider(&ctrl_socket2);
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->RestartWithAuth(
-                AuthCredentials(base::ASCIIToUTF16("foo\nownz0red"),
-                                base::ASCIIToUTF16("innocent")),
-                callback_.callback()));
+  ASSERT_EQ(ERR_IO_PENDING, transaction_->RestartWithAuth(
+                                AuthCredentials(u"foo\nownz0red", u"innocent"),
+                                callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsError(ERR_MALFORMED_IDENTITY));
 }
 
@@ -1359,11 +1358,9 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartPassword) {
   };
   StaticSocketDataProvider ctrl_socket2(ctrl_reads, ctrl_writes);
   mock_socket_factory_->AddSocketDataProvider(&ctrl_socket2);
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->RestartWithAuth(
-                AuthCredentials(base::ASCIIToUTF16("innocent"),
-                                base::ASCIIToUTF16("foo\nownz0red")),
-                callback_.callback()));
+  ASSERT_EQ(ERR_IO_PENDING, transaction_->RestartWithAuth(
+                                AuthCredentials(u"innocent", u"foo\nownz0red"),
+                                callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsError(ERR_MALFORMED_IDENTITY));
 }
 

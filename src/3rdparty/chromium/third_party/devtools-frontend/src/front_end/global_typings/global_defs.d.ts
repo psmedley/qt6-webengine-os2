@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 /// <reference path="./request_idle_callback.d.ts" />
+/// <reference path="./intl_display_names.d.ts" />
 
 interface CSSStyleSheet {
   replaceSync(content: string): void;
@@ -14,4 +15,13 @@ interface ShadowRoot {
 
 interface ImportMeta {
   url: string;
+}
+
+interface Document {
+  adoptedStyleSheets: CSSStyleSheet[]
+}
+
+declare module '*.css.js' {
+  const styles: CSSStyleSheet;
+  export default styles;
 }

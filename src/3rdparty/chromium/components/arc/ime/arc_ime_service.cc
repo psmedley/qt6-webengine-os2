@@ -6,10 +6,8 @@
 
 #include <utility>
 
-#include "ash/constants/ash_features.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
-#include "ash/public/cpp/app_types.h"
-#include "base/feature_list.h"
+#include "ash/public/cpp/app_types_util.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram_functions.h"
@@ -43,7 +41,7 @@ namespace arc {
 
 namespace {
 
-base::Optional<double> g_override_default_device_scale_factor;
+absl::optional<double> g_override_default_device_scale_factor;
 
 // Return true when a rich text editing is available on a text field with the
 // given type.
@@ -54,6 +52,16 @@ bool IsTextInputActive(ui::TextInputType type) {
 // Return true if the given key event generats a visible character.
 bool IsCharacterKeyEvent(const ui::KeyEvent* event) {
   return !IsControlChar(event) && !ui::IsSystemKeyModifier(event->flags());
+}
+
+int CursorBehaviorToCursorPosition(
+    ui::TextInputClient::InsertTextCursorBehavior cursor_behavior) {
+  switch (cursor_behavior) {
+    case ui::TextInputClient::InsertTextCursorBehavior::kMoveCursorAfterText:
+      return 1;
+    case ui::TextInputClient::InsertTextCursorBehavior::kMoveCursorBeforeText:
+      return 0;
+  }
 }
 
 class ArcWindowDelegateImpl : public ArcImeService::ArcWindowDelegate {
@@ -84,7 +92,7 @@ class ArcWindowDelegateImpl : public ArcImeService::ArcWindowDelegate {
       // Specifically, a window of ARC++ Kiosk should have ash::AppType::ARC_APP
       // property. Please see implementation of IsArcAppWindow().
       if (window == active && IsArcKioskMode() &&
-          GetWindowTaskId(window) != kNoTaskId) {
+          GetWindowTaskId(window).has_value()) {
         return true;
       }
     }
@@ -387,27 +395,25 @@ void ArcImeService::ShowVirtualKeyboardIfEnabled() {
 void ArcImeService::OnCursorRectChangedWithSurroundingText(
     const gfx::Rect& rect,
     const gfx::Range& text_range,
-    const base::string16& text_in_range,
+    const std::u16string& text_in_range,
     const gfx::Range& selection_range,
     bool is_screen_coordinates) {
   if (!ShouldSendUpdateToInputMethod())
     return;
 
+  if (!UpdateCursorRect(rect, is_screen_coordinates) &&
+      text_range_ == text_range && text_in_range_ == text_in_range &&
+      selection_range_ == selection_range) {
+    return;
+  }
+
   text_range_ = text_range;
   text_in_range_ = text_in_range;
   selection_range_ = selection_range;
 
-  if (!UpdateCursorRect(rect, is_screen_coordinates))
-    return;
-
   ui::InputMethod* const input_method = GetInputMethod();
   if (input_method)
     input_method->OnCaretBoundsChanged(this);
-}
-
-bool ArcImeService::ShouldEnableKeyEventForwarding() {
-  return base::FeatureList::IsEnabled(
-      chromeos::features::kArcPreImeKeyEventSupport);
 }
 
 void ArcImeService::SendKeyEvent(std::unique_ptr<ui::KeyEvent> key_event,
@@ -455,16 +461,16 @@ void ArcImeService::ClearCompositionText() {
   InvalidateSurroundingTextAndSelectionRange();
   if (has_composition_text_) {
     has_composition_text_ = false;
-    ime_bridge_->SendInsertText(base::string16());
+    ime_bridge_->SendInsertText(std::u16string(), /*new_cursor_position=*/1);
   }
 }
 
-void ArcImeService::InsertText(const base::string16& text,
+void ArcImeService::InsertText(const std::u16string& text,
                                InsertTextCursorBehavior cursor_behavior) {
-  // TODO(crbug.com/1155331): Handle |cursor_behavior| correctly.
   InvalidateSurroundingTextAndSelectionRange();
   has_composition_text_ = false;
-  ime_bridge_->SendInsertText(text);
+  ime_bridge_->SendInsertText(text,
+                              CursorBehaviorToCursorPosition(cursor_behavior));
 }
 
 void ArcImeService::InsertChar(const ui::KeyEvent& event) {
@@ -480,25 +486,10 @@ void ArcImeService::InsertChar(const ui::KeyEvent& event) {
 
   InvalidateSurroundingTextAndSelectionRange();
 
-  // For apps that doesn't handle hardware keyboard events well, keys that are
-  // typically on software keyboard and lack of them are fatal, namely,
-  // unmodified enter and backspace keys are sent through IME.
-  if (!HasModifier(&event) && !ShouldEnableKeyEventForwarding()) {
-    if (event.key_code() ==  ui::VKEY_RETURN) {
-      has_composition_text_ = false;
-      ime_bridge_->SendInsertText(base::ASCIIToUTF16("\n"));
-      return;
-    }
-    if (event.key_code() ==  ui::VKEY_BACK) {
-      has_composition_text_ = false;
-      ime_bridge_->SendInsertText(base::ASCIIToUTF16("\b"));
-      return;
-    }
-  }
-
   if (IsCharacterKeyEvent(&event)) {
     has_composition_text_ = false;
-    ime_bridge_->SendInsertText(base::string16(1, event.GetText()));
+    ime_bridge_->SendInsertText(std::u16string(1, event.GetText()),
+                                /*new_cursor_position=*/1);
   }
 }
 
@@ -510,6 +501,11 @@ ui::TextInputType ArcImeService::GetTextInputType() const {
 
 gfx::Rect ArcImeService::GetCaretBounds() const {
   return cursor_rect_;
+}
+
+gfx::Rect ArcImeService::GetSelectionBoundingBox() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return gfx::Rect();
 }
 
 bool ArcImeService::GetTextRange(gfx::Range* range) const {
@@ -527,7 +523,7 @@ bool ArcImeService::GetEditableSelectionRange(gfx::Range* range) const {
 }
 
 bool ArcImeService::GetTextFromRange(const gfx::Range& range,
-                                     base::string16* text) const {
+                                     std::u16string* text) const {
   // It's supposed that this method is called only from
   // InputMethod::OnCaretBoundsChanged(). In that method, the range obtained
   // from GetTextRange() is used as the argument of this method. To prevent an
@@ -544,7 +540,7 @@ void ArcImeService::EnsureCaretNotInRect(const gfx::Rect& rect_in_screen) {
   aura::Window* top_level_window = focused_arc_window_->GetToplevelWindow();
   // If the window is not a notification, the window move is handled by
   // Android.
-  if (top_level_window->type() != aura::client::WINDOW_TYPE_POPUP)
+  if (top_level_window->GetType() != aura::client::WINDOW_TYPE_POPUP)
     return;
   wm::EnsureWindowNotInRect(top_level_window, rect_in_screen);
 }
@@ -623,7 +619,7 @@ bool ArcImeService::ShouldDoLearning() {
 bool ArcImeService::SetCompositionFromExistingText(
     const gfx::Range& range,
     const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
-  if (!range.IsBoundedBy(text_range_))
+  if (text_range_.IsValid() && !range.IsBoundedBy(text_range_))
     return false;
 
   InvalidateSurroundingTextAndSelectionRange();
@@ -637,7 +633,7 @@ bool ArcImeService::SetCompositionFromExistingText(
 }
 
 gfx::Range ArcImeService::GetAutocorrectRange() const {
-  // TODO(https:://crbug.com/1091088): Implement this method.
+  // TODO(https://crbug.com/1091088): Implement this method.
   return gfx::Range();
 }
 
@@ -664,15 +660,32 @@ bool ArcImeService::SetAutocorrectRange(const gfx::Range& range) {
           TextInputClient::SubClass::kArcImeService);
     }
   }
-  // TODO(https:://crbug.com/1091088): Implement this method.
+  // TODO(https://crbug.com/1091088): Implement this method.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+absl::optional<ui::GrammarFragment> ArcImeService::GetGrammarFragment(
+    const gfx::Range& range) {
+  // TODO(https://crbug.com/1201454): Implement this method.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return absl::nullopt;
+}
+
+bool ArcImeService::ClearGrammarFragments(const gfx::Range& range) {
+  // TODO(https://crbug.com/1201454): Implement this method.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+bool ArcImeService::AddGrammarFragments(
+    const std::vector<ui::GrammarFragment>& fragments) {
+  // TODO(https://crbug.com/1201454): Implement this method.
   NOTIMPLEMENTED_LOG_ONCE();
   return false;
 }
 
 void ArcImeService::OnDispatchingKeyEventPostIME(ui::KeyEvent* event) {
-  if (!ShouldEnableKeyEventForwarding())
-    return;
-
   if (receiver_->HasCallback()) {
     receiver_->DispatchKeyEventPostIME(event);
     event->SetHandled();
@@ -701,13 +714,13 @@ void ArcImeService::OnDispatchingKeyEventPostIME(ui::KeyEvent* event) {
 
 // static
 void ArcImeService::SetOverrideDefaultDeviceScaleFactorForTesting(
-    base::Optional<double> scale_factor) {
+    absl::optional<double> scale_factor) {
   g_override_default_device_scale_factor = scale_factor;
 }
 
 void ArcImeService::InvalidateSurroundingTextAndSelectionRange() {
   text_range_ = gfx::Range::InvalidRange();
-  text_in_range_ = base::string16();
+  text_in_range_ = std::u16string();
   selection_range_ = gfx::Range::InvalidRange();
 }
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -91,8 +92,8 @@ constexpr int kMaxCastPresentationUrlLength = 64 * 1024;
 
 namespace {
 
-// A nonmember version of base::Optional::value_or that works on pointers as
-// well as instance of base::Optional.
+// A nonmember version of absl::optional::value_or that works on pointers as
+// well as instance of absl::optional.
 template <typename T>
 inline auto value_or(const T& optional,
                      const std::decay_t<decltype(*optional)>& default_value)
@@ -159,7 +160,7 @@ base::flat_map<std::string, std::string> MakeQueryMap(const GURL& url) {
 // TODO(jrw): Should this use net::UnescapeURLComponent instead of
 // url::DecodeURLEscapeSequences?
 std::string DecodeURLComponent(const std::string& encoded) {
-  url::RawCanonOutputT<base::char16> unescaped;
+  url::RawCanonOutputT<char16_t> unescaped;
   std::string output;
   url::DecodeURLEscapeSequences(encoded.data(), encoded.size(),
                                 url::DecodeURLMode::kUTF8OrIsomorphic,

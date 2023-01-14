@@ -24,7 +24,7 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
-#include "media/base/video_util.h"
+#include "media/base/video_aspect_ratio.h"
 #include "media/filters/frame_buffer_pool.h"
 #include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
 #include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
@@ -83,7 +83,7 @@ static int32_t GetVP9FrameBuffer(void* user_priv,
   FrameBufferPool* pool = static_cast<FrameBufferPool*>(user_priv);
   fb->data = pool->GetFrameBuffer(min_size, &fb->priv);
   fb->size = min_size;
-  return 0;
+  return fb->data ? 0 : VPX_CODEC_MEM_ERROR;
 }
 
 static int32_t ReleaseVP9FrameBuffer(void* user_priv,
@@ -129,10 +129,6 @@ VpxVideoDecoder::~VpxVideoDecoder() {
 
 VideoDecoderType VpxVideoDecoder::GetDecoderType() const {
   return VideoDecoderType::kVpx;
-}
-
-std::string VpxVideoDecoder::GetDisplayName() const {
-  return "VpxVideoDecoder";
 }
 
 void VpxVideoDecoder::Initialize(const VideoDecoderConfig& config,
@@ -551,7 +547,7 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
   // vpx_video_decoder inconsistent with decoders where changes to
   // pixel aspect ratio are not surfaced (e.g. Android MediaCodec).
   const gfx::Size natural_size =
-      GetNaturalSize(gfx::Rect(visible_size), config_.GetPixelAspectRatio());
+      config_.aspect_ratio().GetNaturalSize(gfx::Rect(visible_size));
 
   if (memory_pool_) {
     DCHECK_EQ(kCodecVP9, config_.codec());
@@ -560,6 +556,8 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
           vpx_image_alpha->stride[VPX_PLANE_Y] * vpx_image_alpha->d_h;
       uint8_t* alpha_plane = memory_pool_->AllocateAlphaPlaneForFrameBuffer(
           alpha_plane_size, vpx_image->fb_priv);
+      if (!alpha_plane)  // In case of OOM, abort copy.
+        return false;
       libyuv::CopyPlane(vpx_image_alpha->planes[VPX_PLANE_Y],
                         vpx_image_alpha->stride[VPX_PLANE_Y], alpha_plane,
                         vpx_image_alpha->stride[VPX_PLANE_Y],

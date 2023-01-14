@@ -5,7 +5,6 @@
 #ifndef UI_DISPLAY_MOJOM_DISPLAY_SNAPSHOT_MOJOM_TRAITS_H_
 #define UI_DISPLAY_MOJOM_DISPLAY_SNAPSHOT_MOJOM_TRAITS_H_
 
-#include "ipc/ipc_message_utils.h"
 #include "ui/display/mojom/display_constants_mojom_traits.h"
 #include "ui/display/mojom/display_mode_mojom_traits.h"
 #include "ui/display/mojom/display_snapshot.mojom.h"
@@ -22,6 +21,21 @@ struct StructTraits<display::mojom::DisplaySnapshotDataView,
   static int64_t display_id(
       const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
     return snapshot->display_id();
+  }
+
+  static int64_t port_display_id(
+      const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
+    return snapshot->port_display_id();
+  }
+
+  static int64_t edid_display_id(
+      const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
+    return snapshot->edid_display_id();
+  }
+
+  static uint16_t connector_index(
+      const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
+    return snapshot->connector_index();
   }
 
   static const gfx::Point& origin(
@@ -87,6 +101,11 @@ struct StructTraits<display::mojom::DisplaySnapshotDataView,
   static uint32_t bits_per_channel(
       const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
     return snapshot->bits_per_channel();
+  }
+
+  static const absl::optional<gfx::HDRStaticMetadata>& hdr_static_metadata(
+      const std::unique_ptr<display::DisplaySnapshot>& snapshot) {
+    return snapshot->hdr_static_metadata();
   }
 
   static std::string display_name(

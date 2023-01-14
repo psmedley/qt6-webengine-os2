@@ -161,12 +161,12 @@ TEST_F(ExternalVkImageFactoryTest, DawnWrite_SkiaVulkanRead) {
   {
     // Create a Dawn representation to clear the texture contents to a green.
     auto dawn_representation =
-        shared_image_representation_factory_->ProduceDawn(mailbox,
-                                                          dawn_device_.Get());
+        shared_image_representation_factory_->ProduceDawn(
+            mailbox, dawn_device_.Get(), WGPUBackendType_Vulkan);
     ASSERT_TRUE(dawn_representation);
 
     auto dawn_scoped_access = dawn_representation->BeginScopedAccess(
-        WGPUTextureUsage_OutputAttachment,
+        WGPUTextureUsage_RenderAttachment,
         SharedImageRepresentation::AllowUnclearedAccess::kYes);
     ASSERT_TRUE(dawn_scoped_access);
 
@@ -188,7 +188,7 @@ TEST_F(ExternalVkImageFactoryTest, DawnWrite_SkiaVulkanRead) {
     pass.EndPass();
     wgpu::CommandBuffer commands = encoder.Finish();
 
-    wgpu::Queue queue = dawn_device_.GetDefaultQueue();
+    wgpu::Queue queue = dawn_device_.GetQueue();
     queue.Submit(1, &commands);
   }
 
@@ -205,7 +205,8 @@ TEST_F(ExternalVkImageFactoryTest, DawnWrite_SkiaVulkanRead) {
         &begin_semaphores, &end_semaphores);
 
     context_state_->gr_context()->wait(begin_semaphores.size(),
-                                       begin_semaphores.data());
+                                       begin_semaphores.data(),
+                                       /*deleteSemaphoresAfterWait=*/false);
 
     EXPECT_TRUE(skia_scoped_access);
 
@@ -291,14 +292,17 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
         gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
 
     SkSurface* dest_surface = skia_scoped_access->surface();
-    dest_surface->wait(begin_semaphores.size(), begin_semaphores.data());
+    dest_surface->wait(begin_semaphores.size(), begin_semaphores.data(),
+                       /*deleteSemaphoresAfterWait=*/false);
     SkCanvas* dest_canvas = dest_surface->getCanvas();
 
     // Color the top half blue, and the bottom half green
-    dest_canvas->drawRect(SkRect{0, 0, size.width(), size.height() / 2},
-                          SkPaint(SkColors::kBlue));
     dest_canvas->drawRect(
-        SkRect{0, size.height() / 2, size.width(), size.height()},
+        SkRect{0, 0, static_cast<SkScalar>(size.width()), size.height() / 2.0f},
+        SkPaint(SkColors::kBlue));
+    dest_canvas->drawRect(
+        SkRect{0, size.height() / 2.0f, static_cast<SkScalar>(size.width()),
+               static_cast<SkScalar>(size.height())},
         SkPaint(SkColors::kGreen));
     skia_representation->SetCleared();
 
@@ -320,8 +324,8 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
   {
     // Create a Dawn representation
     auto dawn_representation =
-        shared_image_representation_factory_->ProduceDawn(mailbox,
-                                                          dawn_device_.Get());
+        shared_image_representation_factory_->ProduceDawn(
+            mailbox, dawn_device_.Get(), WGPUBackendType_Vulkan);
     ASSERT_TRUE(dawn_representation);
 
     // Begin access to copy the data out. Skia should have initialized the
@@ -351,15 +355,15 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
       dst_copy_view.buffer = dst_buffer;
       dst_copy_view.layout.bytesPerRow = 256;
       dst_copy_view.layout.offset = 0;
-      dst_copy_view.layout.rowsPerImage = 0;
 
-      wgpu::Extent3D copy_extent = {size.width(), size.height(), 1};
+      wgpu::Extent3D copy_extent = {static_cast<uint32_t>(size.width()),
+                                    static_cast<uint32_t>(size.height()), 1};
 
       encoder.CopyTextureToBuffer(&src_copy_view, &dst_copy_view, &copy_extent);
     }
 
     wgpu::CommandBuffer commands = encoder.Finish();
-    wgpu::Queue queue = dawn_device_.GetDefaultQueue();
+    wgpu::Queue queue = dawn_device_.GetQueue();
     queue.Submit(1, &commands);
 
     // Map the buffer to read back data

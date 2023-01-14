@@ -6,12 +6,15 @@
 
 #include <stdint.h>
 
+#include <utility>
+
+#include "base/callback.h"
 #include "base/hash/md5.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/gmock_move_support.h"
 #include "base/test/gtest_util.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "pdf/document_attachment_info.h"
 #include "pdf/document_layout.h"
@@ -19,13 +22,17 @@
 #include "pdf/pdf_features.h"
 #include "pdf/pdfium/pdfium_page.h"
 #include "pdf/pdfium/pdfium_test_base.h"
-#include "pdf/ppapi_migration/input_event_conversions.h"
+#include "pdf/ppapi_migration/callback.h"
 #include "pdf/test/test_client.h"
 #include "pdf/test/test_document_loader.h"
-#include "pdf/thumbnail.h"
+#include "pdf/ui/thumbnail.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -63,6 +70,13 @@ class MockTestClient : public TestClient {
               (const DocumentLayout& layout),
               (override));
   MOCK_METHOD(void, ScrollToPage, (int page), (override));
+  MOCK_METHOD(void,
+              ScheduleTaskOnMainThread,
+              (const base::Location& from_here,
+               ResultCallback callback,
+               int32_t result,
+               base::TimeDelta delay),
+              (override));
 };
 
 }  // namespace
@@ -96,6 +110,7 @@ class PDFiumEngineTest : public PDFiumTestBase {
     if (engine.GetNumberOfPages() == 0) {
       // This is not necessarily a test failure; it just indicates incremental
       // loading is not occurring.
+      engine.PluginSizeUpdated({});
       loaded_incrementally = false;
     } else {
       // Note: Plugin size chosen so all pages of the document are visible. The
@@ -108,9 +123,7 @@ class PDFiumEngineTest : public PDFiumTestBase {
     }
 
     // Verify that loading can finish.
-    while (initialize_result.document_loader->SimulateLoadData(UINT32_MAX))
-      continue;
-
+    initialize_result.FinishLoading();
     EXPECT_EQ(engine.GetNumberOfPages(), CountAvailablePages(engine));
 
     return loaded_incrementally;
@@ -159,7 +172,7 @@ TEST_F(PDFiumEngineTest, InitializeWithRectanglesMultiPagesPdfInTwoUpView) {
   ASSERT_TRUE(engine);
 
   DocumentLayout::Options options;
-  options.set_two_up_view_enabled(true);
+  options.set_page_spread(DocumentLayout::PageSpread::kTwoUpOdd);
   EXPECT_CALL(client, ProposeDocumentLayout(LayoutWithOptions(options)))
       .WillOnce(Return());
   engine->SetTwoUpView(true);
@@ -430,6 +443,83 @@ TEST_F(PDFiumEngineTest, GetBadPdfVersion) {
   EXPECT_EQ(PdfVersion::kUnknown, doc_metadata.version);
 }
 
+TEST_F(PDFiumEngineTest, PluginSizeUpdatedBeforeLoad) {
+  NiceMock<MockTestClient> client;
+  InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
+      &client, FILE_PATH_LITERAL("rectangles_multi_pages.pdf"));
+  ASSERT_TRUE(initialize_result.engine);
+  PDFiumEngine& engine = *initialize_result.engine;
+
+  engine.PluginSizeUpdated({});
+  initialize_result.FinishLoading();
+
+  EXPECT_EQ(engine.GetNumberOfPages(), CountAvailablePages(engine));
+}
+
+TEST_F(PDFiumEngineTest, PluginSizeUpdatedDuringLoad) {
+  NiceMock<MockTestClient> client;
+  InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
+      &client, FILE_PATH_LITERAL("rectangles_multi_pages.pdf"));
+  ASSERT_TRUE(initialize_result.engine);
+  PDFiumEngine& engine = *initialize_result.engine;
+
+  EXPECT_TRUE(initialize_result.document_loader->SimulateLoadData(1024));
+  engine.PluginSizeUpdated({});
+  initialize_result.FinishLoading();
+
+  EXPECT_EQ(engine.GetNumberOfPages(), CountAvailablePages(engine));
+}
+
+TEST_F(PDFiumEngineTest, PluginSizeUpdatedAfterLoad) {
+  NiceMock<MockTestClient> client;
+  InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
+      &client, FILE_PATH_LITERAL("rectangles_multi_pages.pdf"));
+  ASSERT_TRUE(initialize_result.engine);
+  PDFiumEngine& engine = *initialize_result.engine;
+
+  ResultCallback callback;
+  EXPECT_CALL(client, ScheduleTaskOnMainThread).WillOnce(MoveArg<1>(&callback));
+
+  initialize_result.FinishLoading();
+  engine.PluginSizeUpdated({});
+
+  ASSERT_TRUE(callback);
+  std::move(callback).Run(0);
+
+  EXPECT_EQ(engine.GetNumberOfPages(), CountAvailablePages(engine));
+}
+
+TEST_F(PDFiumEngineTest, OnLeftMouseDownBeforePluginSizeUpdated) {
+  NiceMock<MockTestClient> client;
+  InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
+      &client, FILE_PATH_LITERAL("rectangles_multi_pages.pdf"));
+  ASSERT_TRUE(initialize_result.engine);
+  initialize_result.FinishLoading();
+  PDFiumEngine& engine = *initialize_result.engine;
+
+  EXPECT_TRUE(engine.HandleInputEvent(blink::WebMouseEvent(
+      blink::WebInputEvent::Type::kMouseDown, {0, 0}, {100, 200},
+      blink::WebPointerProperties::Button::kLeft, /*click_count_param=*/1,
+      blink::WebInputEvent::Modifiers::kLeftButtonDown,
+      blink::WebInputEvent::GetStaticTimeStampForTests())));
+}
+
+TEST_F(PDFiumEngineTest, OnLeftMouseDownAfterPluginSizeUpdated) {
+  NiceMock<MockTestClient> client;
+  InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
+      &client, FILE_PATH_LITERAL("rectangles_multi_pages.pdf"));
+  ASSERT_TRUE(initialize_result.engine);
+  initialize_result.FinishLoading();
+  PDFiumEngine& engine = *initialize_result.engine;
+
+  engine.PluginSizeUpdated({300, 400});
+  EXPECT_TRUE(engine.HandleInputEvent(blink::WebMouseEvent(
+      blink::WebInputEvent::Type::kMouseDown, {0, 0}, {100, 200},
+      blink::WebPointerProperties::Button::kLeft, /*click_count_param=*/1,
+      blink::WebInputEvent::Modifiers::kLeftButtonDown,
+      blink::WebInputEvent::GetStaticTimeStampForTests())));
+}
+
 TEST_F(PDFiumEngineTest, IncrementalLoadingFeatureDefault) {
   EXPECT_FALSE(TryLoadIncrementally());
 }
@@ -504,8 +594,7 @@ TEST_F(PDFiumEngineTest, RequestThumbnailLinearized) {
   // Finish loading the document. `SendThumbnailCallback` should be run for the
   // last page.
   EXPECT_CALL(last_loaded, Run);
-  while (initialize_result.document_loader->SimulateLoadData(UINT32_MAX))
-    continue;
+  initialize_result.FinishLoading();
 }
 
 using PDFiumEngineDeathTest = PDFiumEngineTest;
@@ -542,6 +631,7 @@ class TabbingTestClient : public TestClient {
 
   // Mock PDFEngine::Client methods.
   MOCK_METHOD(void, DocumentFocusChanged, (bool), (override));
+  MOCK_METHOD(void, SetLinkUnderCursor, (const std::string&), (override));
 };
 
 class PDFiumEngineTabbingTest : public PDFiumTestBase {
@@ -551,7 +641,7 @@ class PDFiumEngineTabbingTest : public PDFiumTestBase {
   PDFiumEngineTabbingTest(const PDFiumEngineTabbingTest&) = delete;
   PDFiumEngineTabbingTest& operator=(const PDFiumEngineTabbingTest&) = delete;
 
-  bool HandleTabEvent(PDFiumEngine* engine, uint32_t modifiers) {
+  bool HandleTabEvent(PDFiumEngine* engine, int modifiers) {
     return engine->HandleTabEvent(modifiers);
   }
 
@@ -580,17 +670,9 @@ class PDFiumEngineTabbingTest : public PDFiumTestBase {
     return engine->selection_.size();
   }
 
-  const std::string& GetLinkUnderCursor(PDFiumEngine* engine) {
-    return engine->link_under_cursor_;
-  }
-
   void ScrollFocusedAnnotationIntoView(PDFiumEngine* engine) {
     engine->ScrollFocusedAnnotationIntoView();
   }
-
- protected:
-  base::test::TaskEnvironment task_environment_{
-      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
 };
 
 TEST_F(PDFiumEngineTabbingTest, LinkUnderCursorTest) {
@@ -608,27 +690,34 @@ TEST_F(PDFiumEngineTabbingTest, LinkUnderCursorTest) {
   scoped_feature_list.InitAndEnableFeature(
       chrome_pdf::features::kTabAcrossPDFAnnotations);
 
-  TestClient client;
+  TabbingTestClient client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("annots.pdf"));
   ASSERT_TRUE(engine);
 
-  // Initial value of link under cursor.
-  EXPECT_EQ("", GetLinkUnderCursor(engine.get()));
+  // Tab to right before the first non-link annotation.
+  EXPECT_CALL(client, DocumentFocusChanged(true));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
 
   // Tab through non-link annotations and validate link under cursor.
-  for (int i = 0; i < 4; i++) {
-    ASSERT_TRUE(HandleTabEvent(engine.get(), 0));
-    EXPECT_EQ("", GetLinkUnderCursor(engine.get()));
+  {
+    InSequence sequence;
+    EXPECT_CALL(client, SetLinkUnderCursor(""));
+    EXPECT_CALL(client, DocumentFocusChanged(false));
+    EXPECT_CALL(client, SetLinkUnderCursor("")).Times(2);
   }
 
+  for (int i = 0; i < 3; i++)
+    ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+
   // Tab to Link annotation.
-  ASSERT_TRUE(HandleTabEvent(engine.get(), 0));
-  EXPECT_EQ("https://www.google.com/", GetLinkUnderCursor(engine.get()));
+  EXPECT_CALL(client, SetLinkUnderCursor("https://www.google.com/"));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
 
   // Tab to previous annotation.
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
-  EXPECT_EQ("", GetLinkUnderCursor(engine.get()));
+  EXPECT_CALL(client, SetLinkUnderCursor(""));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
 }
 
 TEST_F(PDFiumEngineTabbingTest, TabbingSupportedAnnots) {
@@ -697,7 +786,7 @@ TEST_F(PDFiumEngineTabbingTest, TabbingForwardTest) {
    * ++ Page 2
    * ++++ Annotation
    */
-  TabbingTestClient client;
+  NiceMock<TabbingTestClient> client;
   std::unique_ptr<PDFiumEngine> engine = InitializeEngine(
       &client, FILE_PATH_LITERAL("annotation_form_fields.pdf"));
   ASSERT_TRUE(engine);
@@ -749,7 +838,7 @@ TEST_F(PDFiumEngineTabbingTest, TabbingBackwardTest) {
    * ++ Page 2
    * ++++ Annotation
    */
-  TabbingTestClient client;
+  NiceMock<TabbingTestClient> client;
   std::unique_ptr<PDFiumEngine> engine = InitializeEngine(
       &client, FILE_PATH_LITERAL("annotation_form_fields.pdf"));
   ASSERT_TRUE(engine);
@@ -767,26 +856,31 @@ TEST_F(PDFiumEngineTabbingTest, TabbingBackwardTest) {
             GetFocusedElementType(engine.get()));
   EXPECT_EQ(-1, GetLastFocusedPage(engine.get()));
 
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kPage,
             GetFocusedElementType(engine.get()));
   EXPECT_EQ(1, GetLastFocusedPage(engine.get()));
 
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kPage,
             GetFocusedElementType(engine.get()));
   EXPECT_EQ(0, GetLastFocusedPage(engine.get()));
 
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kPage,
             GetFocusedElementType(engine.get()));
   EXPECT_EQ(0, GetLastFocusedPage(engine.get()));
 
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kDocument,
             GetFocusedElementType(engine.get()));
 
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_FALSE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kNone,
             GetFocusedElementType(engine.get()));
 }
@@ -813,9 +907,11 @@ TEST_F(PDFiumEngineTabbingTest, TabbingWithModifiers) {
   EXPECT_EQ(-1, GetLastFocusedPage(engine.get()));
 
   // Tabbing with ctrl modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierControlKey));
+  ASSERT_FALSE(HandleTabEvent(engine.get(),
+                              blink::WebInputEvent::Modifiers::kControlKey));
   // Tabbing with alt modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierAltKey));
+  ASSERT_FALSE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kAltKey));
 
   // Tab to bring document into focus.
   ASSERT_TRUE(HandleTabEvent(engine.get(), 0));
@@ -823,9 +919,11 @@ TEST_F(PDFiumEngineTabbingTest, TabbingWithModifiers) {
             GetFocusedElementType(engine.get()));
 
   // Tabbing with ctrl modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierControlKey));
+  ASSERT_FALSE(HandleTabEvent(engine.get(),
+                              blink::WebInputEvent::Modifiers::kControlKey));
   // Tabbing with alt modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierAltKey));
+  ASSERT_FALSE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kAltKey));
 
   // Tab to bring first page into focus.
   ASSERT_TRUE(HandleTabEvent(engine.get(), 0));
@@ -833,9 +931,11 @@ TEST_F(PDFiumEngineTabbingTest, TabbingWithModifiers) {
             GetFocusedElementType(engine.get()));
 
   // Tabbing with ctrl modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierControlKey));
+  ASSERT_FALSE(HandleTabEvent(engine.get(),
+                              blink::WebInputEvent::Modifiers::kControlKey));
   // Tabbing with alt modifier.
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierAltKey));
+  ASSERT_FALSE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kAltKey));
 }
 
 TEST_F(PDFiumEngineTabbingTest, NoFocusableItemTabbingTest) {
@@ -845,7 +945,7 @@ TEST_F(PDFiumEngineTabbingTest, NoFocusableItemTabbingTest) {
    * ++ Page 1
    * ++ Page 2
    */
-  TabbingTestClient client;
+  NiceMock<TabbingTestClient> client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("hello_world2.pdf"));
   ASSERT_TRUE(engine);
@@ -873,11 +973,13 @@ TEST_F(PDFiumEngineTabbingTest, NoFocusableItemTabbingTest) {
             GetFocusedElementType(engine.get()));
 
   // Tabbing backward.
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kDocument,
             GetFocusedElementType(engine.get()));
 
-  ASSERT_FALSE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_FALSE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kNone,
             GetFocusedElementType(engine.get()));
 }
@@ -892,7 +994,7 @@ TEST_F(PDFiumEngineTabbingTest, RestoringDocumentFocusTest) {
    * ++ Page 2
    * ++++ Annotation
    */
-  TabbingTestClient client;
+  NiceMock<TabbingTestClient> client;
   std::unique_ptr<PDFiumEngine> engine = InitializeEngine(
       &client, FILE_PATH_LITERAL("annotation_form_fields.pdf"));
   ASSERT_TRUE(engine);
@@ -937,7 +1039,7 @@ TEST_F(PDFiumEngineTabbingTest, RestoringAnnotFocusTest) {
    * ++ Page 2
    * ++++ Annotation
    */
-  TabbingTestClient client;
+  NiceMock<TabbingTestClient> client;
   std::unique_ptr<PDFiumEngine> engine = InitializeEngine(
       &client, FILE_PATH_LITERAL("annotation_form_fields.pdf"));
   ASSERT_TRUE(engine);
@@ -1055,7 +1157,8 @@ TEST_F(PDFiumEngineTabbingTest, RetainSelectionOnFocusNotInFormTextArea) {
   EXPECT_EQ(1u, GetSelectionSize(engine.get()));
 
   // Tab to bring focus to a non form text area annotation (Button).
-  ASSERT_TRUE(HandleTabEvent(engine.get(), kInputEventModifierShiftKey));
+  ASSERT_TRUE(
+      HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
   EXPECT_EQ(PDFiumEngine::FocusElementType::kPage,
             GetFocusedElementType(engine.get()));
   EXPECT_EQ(0, GetLastFocusedPage(engine.get()));

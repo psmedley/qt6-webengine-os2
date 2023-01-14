@@ -24,6 +24,13 @@
 #define HAS_CPP_ATTRIBUTE(x) 0
 #endif
 
+// A wrapper around `__has_builtin`, similar to HAS_CPP_ATTRIBUTE.
+#if defined(__has_builtin)
+#define HAS_BUILTIN(x) __has_builtin(x)
+#else
+#define HAS_BUILTIN(x) 0
+#endif
+
 // Annotate a variable indicating it's ok if the variable is not used.
 // (Typically used to silence a compiler warning when the assignment
 // is important for some other reason.)
@@ -308,6 +315,31 @@
 #define STACK_UNINITIALIZED
 #endif
 
+// Attribute "no_stack_protector" disables -fstack-protector for the specified
+// function.
+//
+// "stack_protector" is enabled on most POSIX builds. The flag adds a canary
+// to each stack frame, which on function return is checked against a reference
+// canary. If the canaries do not match, it's likely that a stack buffer
+// overflow has occurred, so immediately crashing will prevent exploitation in
+// many cases.
+//
+// In some cases it's desirable to remove this, e.g. on hot functions, or if
+// we have purposely changed the reference canary.
+#if defined(COMPILER_GCC) || defined(__clang__)
+#if defined(__has_attribute)
+#if __has_attribute(__no_stack_protector__)
+#define NO_STACK_PROTECTOR __attribute__((__no_stack_protector__))
+#else  // __has_attribute(__no_stack_protector__)
+#define NO_STACK_PROTECTOR __attribute__((__optimize__("-fno-stack-protector")))
+#endif
+#else  // defined(__has_attribute)
+#define NO_STACK_PROTECTOR __attribute__((__optimize__("-fno-stack-protector")))
+#endif
+#else
+#define NO_STACK_PROTECTOR
+#endif
+
 // The ANALYZER_ASSUME_TRUE(bool arg) macro adds compiler-specific hints
 // to Clang which control what code paths are statically analyzed,
 // and is meant to be used in conjunction with assert & assert-like functions.
@@ -341,13 +373,67 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 
 // Use nomerge attribute to disable optimization of merging multiple same calls.
 #if defined(__clang_major__) && (__clang_major__ >= 13)
-#if __has_attribute(nomerge) && !defined(OS_CHROMEOS)
+#if __has_attribute(nomerge)
 #define NOMERGE [[clang::nomerge]]
 #else
 #define NOMERGE
 #endif
 #else
 #define NOMERGE
+#endif
+
+// Marks a type as being eligible for the "trivial" ABI despite having a
+// non-trivial destructor or copy/move constructor. Such types can be relocated
+// after construction by simply copying their memory, which makes them eligible
+// to be passed in registers. The canonical example is std::unique_ptr.
+//
+// Use with caution; this has some subtle effects on constructor/destructor
+// ordering and will be very incorrect if the type relies on its address
+// remaining constant. When used as a function argument (by value), the value
+// may be constructed in the caller's stack frame, passed in a register, and
+// then used and destructed in the callee's stack frame. A similar thing can
+// occur when values are returned.
+//
+// TRIVIAL_ABI is not needed for types which have a trivial destructor and
+// copy/move constructors, such as base::TimeTicks and other POD.
+//
+// It is also not likely to be effective on types too large to be passed in one
+// or two registers on typical target ABIs.
+//
+// See also:
+//   https://clang.llvm.org/docs/AttributeReference.html#trivial-abi
+//   https://libcxx.llvm.org/docs/DesignDocs/UniquePtrTrivialAbi.html
+#if defined(__has_attribute)
+#if defined(__clang__) && __has_attribute(trivial_abi)
+#define TRIVIAL_ABI [[clang::trivial_abi]]
+#endif
+#endif
+#ifndef TRIVIAL_ABI
+#define TRIVIAL_ABI
+#endif
+
+// Marks a member function as reinitializing a moved-from variable.
+// See also
+// https://clang.llvm.org/extra/clang-tidy/checks/bugprone-use-after-move.html#reinitialization
+#if defined(__has_attribute)
+#if defined(__clang__) && __has_attribute(reinitializes)
+#define REINITIALIZES_AFTER_MOVE [[clang::reinitializes]]
+#endif
+#endif
+#ifndef REINITIALIZES_AFTER_MOVE
+#define REINITIALIZES_AFTER_MOVE
+#endif
+
+// Requires constant initialization. See constinit in C++20. Allows to rely on a
+// variable being initialized before execution, and not requiring a global
+// constructor.
+#if defined(__has_attribute)
+#if __has_attribute(require_constant_initialization)
+#define CONSTINIT __attribute__((require_constant_initialization))
+#endif
+#endif
+#if !defined(CONSTINIT)
+#define CONSTINIT
 #endif
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

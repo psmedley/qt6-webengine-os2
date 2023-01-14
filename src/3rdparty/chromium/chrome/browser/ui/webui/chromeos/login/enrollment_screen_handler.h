@@ -13,7 +13,7 @@
 #include "chrome/browser/ash/login/enrollment/enrollment_screen_view.h"
 #include "chrome/browser/ash/login/enrollment/enterprise_enrollment_helper.h"
 #include "chrome/browser/ash/login/screens/error_screen.h"
-#include "chrome/browser/chromeos/policy/enrollment_config.h"
+#include "chrome/browser/ash/policy/enrollment/enrollment_config.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "net/base/net_errors.h"
@@ -68,14 +68,18 @@ class EnrollmentScreenHandler
   void RegisterMessages() override;
 
   // Implements EnrollmentScreenView:
-  void SetEnrollmentConfig(Controller* controller,
-                           const policy::EnrollmentConfig& config) override;
+  void SetEnrollmentConfig(const policy::EnrollmentConfig& config) override;
+  void SetEnrollmentController(Controller* controller) override;
 
   void SetEnterpriseDomainInfo(const std::string& manager,
-                               const base::string16& device_type) override;
+                               const std::u16string& device_type) override;
+  void SetFlowType(FlowType flow_type) override;
   void Show() override;
   void Hide() override;
   void ShowSigninScreen() override;
+  void ShowUserError(UserErrorType error_type,
+                     const std::string& email) override;
+  void ShowEnrollmentCloudReadyNotAllowedError() override;
   void ShowActiveDirectoryScreen(const std::string& domain_join_config,
                                  const std::string& machine_name,
                                  const std::string& username,
@@ -117,6 +121,7 @@ class EnrollmentScreenHandler
                              const std::string& user_name,
                              const std::string& password);
   void HandleAdUnlockConfiguration(const std::string& password);
+  void HandleIdentifierEntered(const std::string& email);
   void HandleRetry();
   void HandleFrameLoadingCompleted();
   void HandleDeviceAttributesProvided(const std::string& asset_id,
@@ -151,11 +156,11 @@ class EnrollmentScreenHandler
   void DoShowWithPartition(const std::string& partition_name);
 
   // Returns true if current visible screen is the enrollment sign-in page.
-  bool IsOnEnrollmentScreen() const;
+  bool IsOnEnrollmentScreen();
 
   // Returns true if current visible screen is the error screen over
   // enrollment sign-in page.
-  bool IsEnrollmentScreenHiddenByError() const;
+  bool IsEnrollmentScreenHiddenByError();
 
   // Called after configuration seed was unlocked.
   void OnAdConfigurationUnlocked(std::string unlocked_data);
@@ -167,6 +172,9 @@ class EnrollmentScreenHandler
 
   // The enrollment configuration.
   policy::EnrollmentConfig config_;
+
+  // GAIA flow type parameter that is set to authenticator.
+  FlowType flow_type_;
 
   // Active Directory configuration in the form of encrypted binary data.
   std::string active_directory_domain_join_config_;
@@ -207,5 +215,12 @@ class EnrollmentScreenHandler
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::ActiveDirectoryErrorState;
+using ::chromeos::EnrollmentScreenHandler;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_ENROLLMENT_SCREEN_HANDLER_H_

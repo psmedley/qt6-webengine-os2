@@ -5,9 +5,9 @@
  * found in the LICENSE file.
  */
 
+#include "include/private/SkSLString.h"
 #include "src/sksl/SkSLASTNode.h"
 #include "src/sksl/SkSLOperators.h"
-#include "src/sksl/SkSLString.h"
 
 namespace SkSL {
 
@@ -52,26 +52,10 @@ String ASTNode::description() const {
         case Kind::kDo:
             return "do " + this->begin()->description() + " while (" +
                    (this->begin() + 1)->description() + ")";
-        case Kind::kEnum: {
-            String result = "enum ";
-            result += getString();
-            result += " {\n";
-            for (const auto& c : *this) {
-                result += c.description();
-                result += "\n";
-            }
-            result += "};";
-            return result;
-        }
-        case Kind::kEnumCase:
-            if (this->begin() != this->end()) {
-                return String(getString()) + " = " + this->begin()->description();
-            }
-            return getString();
         case Kind::kExtension:
-            return "#extension " + getString();
+            return "#extension " + getStringView();
         case Kind::kField:
-            return this->begin()->description() + "." + getString();
+            return this->begin()->description() + "." + getStringView();
         case Kind::kFile: {
             String result;
             for (const auto& c : *this) {
@@ -87,7 +71,7 @@ String ASTNode::description() const {
                    (this->begin() + 1)->description() + "; " + (this->begin() + 2)->description() +
                    ") " + (this->begin() + 3)->description();
         case Kind::kFunction: {
-            FunctionData fd = getFunctionData();
+            const FunctionData& fd = getFunctionData();
             String result = fd.fModifiers.description();
             if (result.size()) {
                 result += " ";
@@ -111,7 +95,7 @@ String ASTNode::description() const {
             return result;
         }
         case Kind::kIdentifier:
-            return getString();
+            return String(getStringView());
         case Kind::kIndex:
             return this->begin()->description() + "[" + (this->begin() + 1)->description() + "]";
         case Kind::kIf: {
@@ -131,7 +115,7 @@ String ASTNode::description() const {
         case Kind::kInt:
             return to_string(getInt());
         case Kind::kInterfaceBlock: {
-            InterfaceBlockData id = getInterfaceBlockData();
+            const InterfaceBlockData& id = getInterfaceBlockData();
             String result = id.fModifiers.description() + " " + id.fTypeName + " {\n";
             auto iter = this->begin();
             for (size_t i = 0; i < id.fDeclarationCount; ++i) {
@@ -149,7 +133,7 @@ String ASTNode::description() const {
         case Kind::kModifiers:
             return getModifiers().description();
         case Kind::kParameter: {
-            ParameterData pd = getParameterData();
+            const ParameterData& pd = getParameterData();
             auto iter = this->begin();
             String result = (iter++)->description() + " " + pd.fName;
             if (pd.fIsArray) {
@@ -170,10 +154,6 @@ String ASTNode::description() const {
                 return "return " + this->begin()->description() + ";";
             }
             return "return;";
-        case Kind::kScope:
-            return this->begin()->description() + "::" + getString();
-        case Kind::kSection:
-            return "@section { ... }";
         case Kind::kSwitchCase: {
             auto iter = this->begin();
             String result;
@@ -204,10 +184,10 @@ String ASTNode::description() const {
             return "(" + this->begin()->description() + " ? " + (this->begin() + 1)->description() +
                    " : " + (this->begin() + 2)->description() + ")";
         case Kind::kType:
-            return getString();
+            return String(getStringView());
         case Kind::kVarDeclaration: {
-            VarData vd = getVarData();
-            String result = vd.fName;
+            const VarData& vd = getVarData();
+            String result(vd.fName);
             auto iter = this->begin();
             if (vd.fIsArray) {
                 result += "[" + (iter++)->description() + "]";
@@ -238,7 +218,7 @@ String ASTNode::description() const {
 
         }
         default:
-            SkASSERT(false);
+            SkDEBUGFAIL("unrecognized AST node kind");
             return "<error>";
     }
 }

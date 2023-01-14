@@ -14,7 +14,6 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/field_trial.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -65,8 +64,7 @@ class InProcessChildThreadParams;
 
 // The main thread of a child process derives from this class.
 class CONTENT_EXPORT ChildThreadImpl : public IPC::Listener,
-                                       virtual public ChildThread,
-                                       private base::FieldTrialList::Observer {
+                                       virtual public ChildThread {
  public:
   struct CONTENT_EXPORT Options;
 
@@ -100,10 +98,6 @@ class CONTENT_EXPORT ChildThreadImpl : public IPC::Listener,
   void SetFieldTrialGroup(const std::string& trial_name,
                           const std::string& group_name) override;
 
-  // base::FieldTrialList::Observer:
-  void OnFieldTrialGroupFinalized(const std::string& trial_name,
-                                  const std::string& group_name) override;
-
   IPC::SyncChannel* channel() { return channel_.get(); }
 
   IPC::MessageRouter* GetRouter();
@@ -129,6 +123,11 @@ class CONTENT_EXPORT ChildThreadImpl : public IPC::Listener,
       const {
     return child_process_host_;
   }
+
+  // Explicitly closes the ChildProcessHost connection. This will cause the
+  // host-side object to be torn down and clean up resources tied to this
+  // process (or this thread object, in single-process mode).
+  void DisconnectChildProcessHost();
 
   virtual void RunServiceDeprecated(const std::string& service_name,
                                     mojo::ScopedMessagePipeHandle service_pipe);
@@ -223,7 +222,8 @@ class CONTENT_EXPORT ChildThreadImpl : public IPC::Listener,
 
   scoped_refptr<base::SingleThreadTaskRunner> browser_process_io_runner_;
 
-  std::unique_ptr<variations::ChildProcessFieldTrialSyncer> field_trial_syncer_;
+  // Pointer to a global object which is never deleted.
+  variations::ChildProcessFieldTrialSyncer* field_trial_syncer_ = nullptr;
 
   std::unique_ptr<base::WeakPtrFactory<ChildThreadImpl>>
       channel_connected_factory_;
@@ -248,10 +248,11 @@ struct ChildThreadImpl::Options {
 
   class Builder;
 
-  bool connect_to_browser;
+  bool with_legacy_ipc_channel = true;
+  bool connect_to_browser = false;
   scoped_refptr<base::SingleThreadTaskRunner> browser_process_io_runner;
   std::vector<IPC::MessageFilter*> startup_filters;
-  mojo::OutgoingInvitation* mojo_invitation;
+  mojo::OutgoingInvitation* mojo_invitation = nullptr;
   scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner;
 
   // Indicates that this child process exposes one or more Mojo interfaces to
@@ -274,6 +275,7 @@ class ChildThreadImpl::Options::Builder {
 
   Builder& InBrowserProcess(const InProcessChildThreadParams& params);
   Builder& ConnectToBrowser(bool connect_to_browser);
+  Builder& WithLegacyIPCChannel(bool with_legacy_ipc_channel);
   Builder& AddStartupFilter(IPC::MessageFilter* filter);
   Builder& IPCTaskRunner(
       scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner);

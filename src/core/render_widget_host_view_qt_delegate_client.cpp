@@ -235,7 +235,7 @@ void RenderWidgetHostViewQtDelegateClient::visualPropertiesChanged()
         m_rwhv->host()->SendScreenRects();
 
     if (m_viewRectInDips.size() != oldViewRect.size() || screenInfoChanged)
-        m_rwhv->synchronizeVisualProperties(base::nullopt);
+        m_rwhv->synchronizeVisualProperties(absl::nullopt);
 }
 
 bool RenderWidgetHostViewQtDelegateClient::forwardEvent(QEvent *event)
@@ -329,9 +329,13 @@ bool RenderWidgetHostViewQtDelegateClient::forwardEvent(QEvent *event)
         handleHoverEvent(static_cast<QHoverEvent *>(event));
         break;
     case QEvent::FocusIn:
-    case QEvent::FocusOut:
-        handleFocusEvent(static_cast<QFocusEvent *>(event));
-        break;
+    case QEvent::FocusOut: {
+        // Focus in/out events for popup event do not mean 'parent' focus change
+        // and should not be handled by Chromium
+        QFocusEvent *e = static_cast<QFocusEvent *>(event);
+        if (e->reason() != Qt::PopupFocusReason)
+            handleFocusEvent(e);
+    } break;
     case QEvent::InputMethod:
         handleInputMethodEvent(static_cast<QInputMethodEvent *>(event));
         break;
@@ -471,12 +475,6 @@ void RenderWidgetHostViewQtDelegateClient::handleMouseEvent(QMouseEvent *event)
     if (event->type() == QEvent::MouseButtonRelease)
         m_mouseButtonPressed--;
 
-    // Don't forward mouse events synthesized by the system, which are caused by genuine touch
-    // events. Chromium would then process for e.g. a mouse click handler twice, once due to the
-    // system synthesized mouse event, and another time due to a touch-to-gesture-to-mouse
-    // transformation done by Chromium.
-    if (event->source() == Qt::MouseEventSynthesizedBySystem)
-        return;
     handlePointerEvent<QMouseEvent>(event);
 }
 

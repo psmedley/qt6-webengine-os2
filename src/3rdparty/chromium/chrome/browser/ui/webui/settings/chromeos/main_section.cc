@@ -11,11 +11,11 @@
 #include "base/i18n/number_formatting.h"
 #include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
+#include "chrome/browser/ash/policy/handlers/minimum_version_policy_handler.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/minimum_version_policy_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/plural_string_handler.h"
@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/webui/settings/browser_lifetime_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/os_settings_features_util.h"
 #include "chrome/browser/ui/webui/webui_util.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -49,38 +50,29 @@ void AddSearchInSettingsStrings(content::WebUIDataSource* html_source) {
       {"clearSearch", IDS_CLEAR_SEARCH},
   };
   html_source->AddLocalizedStrings(kLocalizedStrings);
-
-  html_source->AddString(
-      "searchNoOsResultsHelp",
-      l10n_util::GetStringFUTF16(
-          IDS_SETTINGS_SEARCH_NO_RESULTS_HELP,
-          base::ASCIIToUTF16(chrome::kOsSettingsSearchHelpURL)));
-
-  // TODO(crbug/1080777): Remove this flag and JS codepaths effected.
-  html_source->AddBoolean("newOsSettingsSearch", true);
 }
 
 void AddUpdateRequiredEolStrings(content::WebUIDataSource* html_source) {
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  policy::BrowserPolicyConnectorAsh* connector =
+      g_browser_process->platform_part()->browser_policy_connector_ash();
   policy::MinimumVersionPolicyHandler* handler =
       connector->GetMinimumVersionPolicyHandler();
-  bool device_managed = connector->IsEnterpriseManaged();
+  bool device_managed = connector->IsDeviceEnterpriseManaged();
 
   // |eol_return_banner_text| contains the update required end of life banner
   // text which is left empty when the banner should not be shown.
-  base::string16 eol_return_banner_text;
+  std::u16string eol_return_banner_text;
   if (device_managed && handler->ShouldShowUpdateRequiredEolBanner()) {
-    base::Optional<int> days = handler->GetTimeRemainingInDays();
+    absl::optional<int> days = handler->GetTimeRemainingInDays();
     // We only need to show the banner if less than equal to one week remains to
     // reach the update required deadline.
     if (days && days.value() <= 7) {
       // |days| could have value equal to zero if we are very close to the
       // deadline.
       int days_remaining = days.value() ? days.value() : 1;
-      base::string16 domain_name =
+      std::u16string domain_name =
           base::UTF8ToUTF16(connector->GetEnterpriseDomainManager());
-      base::string16 link_url =
+      std::u16string link_url =
           base::UTF8ToUTF16(chrome::kChromeUIManagementURL);
       if (days_remaining == 7) {
         eol_return_banner_text = l10n_util::GetStringFUTF16(
@@ -126,10 +118,12 @@ void MainSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       {"deviceOff", IDS_SETTINGS_DEVICE_OFF},
       {"deviceOn", IDS_SETTINGS_DEVICE_ON},
       {"disable", IDS_DISABLE},
+      {"dismiss", IDS_SETTINGS_DISMISS},
       {"done", IDS_DONE},
       {"edit", IDS_SETTINGS_EDIT},
       {"extensionsLinkTooltip", IDS_SETTINGS_MENU_EXTENSIONS_LINK_TOOLTIP},
       {"learnMore", IDS_LEARN_MORE},
+      {"shortcutBannerDismissed", IDS_SETTINGS_SHORTCUT_BANNER_DISMISSED},
       {"menu", IDS_MENU},
       {"menuButtonLabel", IDS_SETTINGS_MENU_BUTTON_LABEL},
       {"moreActions", IDS_SETTINGS_MORE_ACTIONS},
@@ -170,6 +164,10 @@ void MainSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
 
   html_source->AddBoolean("isDeepLinkingEnabled",
                           chromeos::features::IsDeepLinkingEnabled());
+
+  html_source->AddBoolean(
+      "appManagementIntentSettingsEnabled",
+      base::FeatureList::IsEnabled(::features::kAppManagementIntentSettings));
 
   // Add the System Web App resources for Settings.
   html_source->AddResourcePath("icon-192.png", IDR_SETTINGS_LOGO_192);
@@ -228,7 +226,7 @@ void MainSection::AddChromeOSUserStrings(
       ProfileHelper::Get()->GetUserByProfile(profile());
   const user_manager::User* primary_user =
       user_manager::UserManager::Get()->GetPrimaryUser();
-  std::string primary_user_email = primary_user->GetAccountId().GetUserEmail();
+  std::string primary_user_email = primary_user->GetDisplayEmail();
 
   html_source->AddString("primaryUserEmail", primary_user_email);
   html_source->AddBoolean("isActiveDirectoryUser",
@@ -254,6 +252,10 @@ std::unique_ptr<PluralStringHandler> MainSection::CreatePluralStringHandler() {
   plural_string_handler->AddLocalizedString(
       "nearbyShareContactVisibilityNumUnreachable",
       IDS_NEARBY_CONTACT_VISIBILITY_NUM_UNREACHABLE);
+
+  plural_string_handler->AddLocalizedString(
+      "lockScreenNumberFingerprints",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_NUM_FINGERPRINTS);
   return plural_string_handler;
 }
 

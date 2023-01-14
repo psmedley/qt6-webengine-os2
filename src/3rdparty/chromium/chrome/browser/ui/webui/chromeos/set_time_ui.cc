@@ -16,9 +16,9 @@
 #include "base/macros.h"
 #include "base/scoped_observation.h"
 #include "base/values.h"
+#include "chrome/browser/ash/child_accounts/parent_access_code/parent_access_service.h"
 #include "chrome/browser/ash/settings/cros_settings.h"
 #include "chrome/browser/ash/system/timezone_util.h"
-#include "chrome/browser/chromeos/child_accounts/parent_access_code/parent_access_service.h"
 #include "chrome/browser/chromeos/set_time_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/webui_util.h"
@@ -100,12 +100,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
   // new time. Expects the time as the number of seconds since the Unix
   // epoch, treated as a double.
   void OnSetTime(const base::ListValue* args) {
-    double seconds;
-    if (!args->GetDouble(0, &seconds)) {
-      NOTREACHED();
-      return;
-    }
-
+    double seconds = args->GetList()[0].GetDouble();
     SystemClockClient::Get()->SetTime(static_cast<int64_t>(seconds));
   }
 
@@ -131,12 +126,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
       return;
     }
 
-    double seconds;
-    if (!args->GetDouble(0, &seconds)) {
-      NOTREACHED();
-      return;
-    }
-
+    double seconds = args->GetList()[0].GetDouble();
     AccountId account_id;
     bool is_user_logged_in = user_manager::UserManager::Get()->IsUserLoggedIn();
     if (is_user_logged_in) {
@@ -188,14 +178,15 @@ SetTimeUI::SetTimeUI(content::WebUI* web_ui) : WebDialogUI(web_ui) {
 
   base::DictionaryValue values;
   // List of list of strings: [[ID, name], [ID, name], ...]
-  values.Set("timezoneList", chromeos::system::GetTimezoneList());
+  values.SetPath("timezoneList", base::Value::FromUniquePtrValue(
+                                     chromeos::system::GetTimezoneList()));
 
   // If we are not logged in, we need to show the time zone dropdown.
   values.SetBoolean("showTimezone", SetTimeDialog::ShouldShowTimezone());
   std::string current_timezone_id;
   CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
   values.SetString("currentTimezoneId", current_timezone_id);
-  values.SetDouble("buildTime", base::GetBuildTime().ToJsTime());
+  values.SetDoubleKey("buildTime", base::GetBuildTime().ToJsTime());
 
   source->AddLocalizedStrings(values);
 

@@ -6,6 +6,7 @@
 #define COMPONENTS_NAVIGATION_INTERCEPTION_NAVIGATION_PARAMS_H_
 
 #include "content/public/common/referrer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -24,7 +25,7 @@ class NavigationParams {
                    bool is_main_frame,
                    bool is_renderer_initiated,
                    const GURL& base_url_for_data_url,
-                   const base::Optional<url::Origin>& initiator_origin);
+                   const absl::optional<url::Origin>& initiator_origin);
   ~NavigationParams();
   NavigationParams(const NavigationParams&);
   NavigationParams& operator=(const NavigationParams&) = delete;
@@ -44,7 +45,7 @@ class NavigationParams {
   bool is_main_frame() const { return is_main_frame_; }
   bool is_renderer_initiated() const { return is_renderer_initiated_; }
   const GURL& base_url_for_data_url() const { return base_url_for_data_url_; }
-  const base::Optional<url::Origin>& initiator_origin() const {
+  const absl::optional<url::Origin>& initiator_origin() const {
     return initiator_origin_;
   }
 
@@ -61,7 +62,7 @@ class NavigationParams {
   bool is_main_frame_;
   bool is_renderer_initiated_;
   GURL base_url_for_data_url_;
-  base::Optional<url::Origin> initiator_origin_;
+  absl::optional<url::Origin> initiator_origin_;
 };
 
 }  // namespace navigation_interception

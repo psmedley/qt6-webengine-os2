@@ -2,7 +2,9 @@ name: msys2
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   msys2:
@@ -52,7 +54,8 @@ jobs:
             --auto-features=enabled \
             -Ddirectwrite=enabled \
             -Dgdi=enabled \
-            -Dgraphite=enabled
+            -Dgraphite=enabled \
+            -Dchafa=disabled
           ninja -C build
       - name: Test
         run: |

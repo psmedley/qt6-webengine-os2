@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 
 #include "base/trace_event/trace_event.h"
+#include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_node_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
@@ -68,6 +69,8 @@ AudioHandler::AudioHandler(NodeType node_type,
 #endif
   InstanceCounters::IncrementCounter(InstanceCounters::kAudioHandlerCounter);
 
+  SendLogMessage(
+      String::Format("%s({sample_rate=%0.f})", __func__, sample_rate));
 #if DEBUG_AUDIONODE_REFERENCES
   fprintf(
       stderr,
@@ -199,6 +202,7 @@ void AudioHandler::AddInput() {
 
 void AudioHandler::AddOutput(unsigned number_of_channels) {
   DCHECK(IsMainThread());
+
   outputs_.push_back(
       std::make_unique<AudioNodeOutput>(this, number_of_channels));
   GetNode()->DidAddOutput(NumberOfOutputs());
@@ -375,6 +379,12 @@ void AudioHandler::ProcessIfNecessary(uint32_t frames_to_process) {
       last_non_silent_time_ =
           (Context()->CurrentSampleFrame() + frames_to_process) /
           static_cast<double>(Context()->sampleRate());
+    }
+
+    if (!is_processing_) {
+      SendLogMessage(String::Format("%s => (processing is alive [frames=%u])",
+                                    __func__, frames_to_process));
+      is_processing_ = true;
     }
   }
 }
@@ -587,6 +597,15 @@ unsigned AudioHandler::NumberOfOutputChannels() const {
             << GetNodeType();
   return 1;
 }
+
+void AudioHandler::SendLogMessage(const String& message) {
+  WebRtcLogMessage(String::Format("[WA]AH::%s [type=%s, this=0x%" PRIXPTR "]",
+                                  message.Utf8().c_str(),
+                                  NodeTypeName().Utf8().c_str(),
+                                  reinterpret_cast<uintptr_t>(this))
+                       .Utf8());
+}
+
 // ----------------------------------------------------------------
 
 AudioNode::AudioNode(BaseAudioContext& context)
@@ -716,7 +735,7 @@ AudioNode* AudioNode::connect(AudioNode* destination,
   if (context() != destination->context()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
-        "cannot connect to a destination "
+        "cannot connect to an AudioNode "
         "belonging to a different audio context.");
     return nullptr;
   }
@@ -732,6 +751,15 @@ AudioNode* AudioNode::connect(AudioNode* destination,
                                       "destination node.");
     return nullptr;
   }
+
+  SendLogMessage(String::Format(
+      "%s({output=[index:%u, type:%s, handler:0x%" PRIXPTR
+      "]} --> "
+      "{input=[index:%u, type:%s, handler:0x%" PRIXPTR "]})",
+      __func__, output_index, Handler().NodeTypeName().Utf8().c_str(),
+      reinterpret_cast<uintptr_t>(&Handler()), input_index,
+      destination->Handler().NodeTypeName().Utf8().c_str(),
+      reinterpret_cast<uintptr_t>(&destination->Handler())));
 
   AudioNodeWiring::Connect(Handler().Output(output_index),
                            destination->Handler().Input(input_index));
@@ -773,7 +801,7 @@ void AudioNode::connect(AudioParam* param,
 
   if (context() != param->Context()) {
     exception_state.ThrowDOMException(
-        DOMExceptionCode::kSyntaxError,
+        DOMExceptionCode::kInvalidAccessError,
         "cannot connect to an AudioParam "
         "belonging to a different audio context.");
     return;
@@ -860,6 +888,15 @@ void AudioNode::disconnect(unsigned output_index,
 void AudioNode::disconnect(AudioNode* destination,
                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
+
+  if (context() != destination->context()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "cannot disconnect from an AudioNode "
+        "belonging to a different audio context.");
+    return;
+  }
+
   BaseAudioContext::GraphAutoLocker locker(context());
 
   unsigned number_of_disconnections = 0;
@@ -893,6 +930,15 @@ void AudioNode::disconnect(AudioNode* destination,
                            unsigned output_index,
                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
+
+  if (context() != destination->context()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "cannot disconnect from an AudioNode "
+        "belonging to a different audio context.");
+    return;
+  }
+
   BaseAudioContext::GraphAutoLocker locker(context());
 
   if (output_index >= numberOfOutputs()) {
@@ -934,6 +980,15 @@ void AudioNode::disconnect(AudioNode* destination,
                            unsigned input_index,
                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
+
+  if (context() != destination->context()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "cannot disconnect from an AudioNode "
+        "belonging to a different audio context.");
+    return;
+  }
+
   BaseAudioContext::GraphAutoLocker locker(context());
 
   if (output_index >= numberOfOutputs()) {
@@ -976,6 +1031,15 @@ void AudioNode::disconnect(AudioNode* destination,
 void AudioNode::disconnect(AudioParam* destination_param,
                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
+
+  if (context() != destination_param->Context()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "cannot disconnect from an AudioParam "
+        "belonging to a different audio context.");
+    return;
+  }
+
   BaseAudioContext::GraphAutoLocker locker(context());
 
   // The number of disconnection made.
@@ -1080,6 +1144,10 @@ void AudioNode::DidAddOutput(unsigned number_of_outputs) {
   DCHECK_EQ(number_of_outputs, connected_nodes_.size());
   connected_params_.push_back(nullptr);
   DCHECK_EQ(number_of_outputs, connected_params_.size());
+}
+
+void AudioNode::SendLogMessage(const String& message) {
+  WebRtcLogMessage(String::Format("[WA]AN::%s", message.Utf8().c_str()).Utf8());
 }
 
 }  // namespace blink

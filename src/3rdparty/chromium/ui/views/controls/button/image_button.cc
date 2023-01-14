@@ -7,14 +7,15 @@
 #include <utility>
 
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/views/background.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
 
@@ -252,22 +253,22 @@ void ToggleImageButton::SetToggledBackground(std::unique_ptr<Background> b) {
   SchedulePaint();
 }
 
-base::string16 ToggleImageButton::GetToggledTooltipText() const {
+std::u16string ToggleImageButton::GetToggledTooltipText() const {
   return toggled_tooltip_text_;
 }
 
-void ToggleImageButton::SetToggledTooltipText(const base::string16& tooltip) {
+void ToggleImageButton::SetToggledTooltipText(const std::u16string& tooltip) {
   if (tooltip == toggled_tooltip_text_)
     return;
   toggled_tooltip_text_ = tooltip;
   OnPropertyChanged(&toggled_tooltip_text_, kPropertyEffectsNone);
 }
 
-base::string16 ToggleImageButton::GetToggledAccessibleName() const {
+std::u16string ToggleImageButton::GetToggledAccessibleName() const {
   return toggled_accessible_name_;
 }
 
-void ToggleImageButton::SetToggledAccessibleName(const base::string16& name) {
+void ToggleImageButton::SetToggledAccessibleName(const std::u16string& name) {
   if (name == toggled_accessible_name_)
     return;
   toggled_accessible_name_ = name;
@@ -308,7 +309,7 @@ void ToggleImageButton::OnPaintBackground(gfx::Canvas* canvas) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToggleImageButton, View overrides:
 
-base::string16 ToggleImageButton::GetTooltipText(const gfx::Point& p) const {
+std::u16string ToggleImageButton::GetTooltipText(const gfx::Point& p) const {
   return (!toggled_ || toggled_tooltip_text_.empty())
              ? Button::GetTooltipText(p)
              : toggled_tooltip_text_;
@@ -334,21 +335,6 @@ void ToggleImageButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   }
 }
 
-DEFINE_ENUM_CONVERTERS(ImageButton::HorizontalAlignment,
-                       {ImageButton::HorizontalAlignment::ALIGN_LEFT,
-                        base::ASCIIToUTF16("ALIGN_LEFT")},
-                       {ImageButton::HorizontalAlignment::ALIGN_CENTER,
-                        base::ASCIIToUTF16("ALIGN_CENTER")},
-                       {ImageButton::HorizontalAlignment::ALIGN_RIGHT,
-                        base::ASCIIToUTF16("ALIGN_RIGHT")})
-DEFINE_ENUM_CONVERTERS(ImageButton::VerticalAlignment,
-                       {ImageButton::VerticalAlignment::ALIGN_TOP,
-                        base::ASCIIToUTF16("ALIGN_TOP")},
-                       {ImageButton::VerticalAlignment::ALIGN_MIDDLE,
-                        base::ASCIIToUTF16("ALIGN_MIDDLE")},
-                       {ImageButton::VerticalAlignment::ALIGN_BOTTOM,
-                        base::ASCIIToUTF16("ALIGN_BOTTOM")})
-
 BEGIN_METADATA(ImageButton, Button)
 ADD_PROPERTY_METADATA(HorizontalAlignment, ImageHorizontalAlignment)
 ADD_PROPERTY_METADATA(VerticalAlignment, ImageVerticalAlignment)
@@ -358,8 +344,19 @@ END_METADATA
 BEGIN_METADATA(ToggleImageButton, ImageButton)
 ADD_PROPERTY_METADATA(bool, Toggled)
 ADD_PROPERTY_METADATA(std::unique_ptr<Background>, ToggledBackground)
-ADD_PROPERTY_METADATA(base::string16, ToggledTooltipText)
-ADD_PROPERTY_METADATA(base::string16, ToggledAccessibleName)
+ADD_PROPERTY_METADATA(std::u16string, ToggledTooltipText)
+ADD_PROPERTY_METADATA(std::u16string, ToggledAccessibleName)
 END_METADATA
 
 }  // namespace views
+
+DEFINE_ENUM_CONVERTERS(
+    views::ImageButton::HorizontalAlignment,
+    {views::ImageButton::HorizontalAlignment::ALIGN_LEFT, u"ALIGN_LEFT"},
+    {views::ImageButton::HorizontalAlignment::ALIGN_CENTER, u"ALIGN_CENTER"},
+    {views::ImageButton::HorizontalAlignment::ALIGN_RIGHT, u"ALIGN_RIGHT"})
+DEFINE_ENUM_CONVERTERS(
+    views::ImageButton::VerticalAlignment,
+    {views::ImageButton::VerticalAlignment::ALIGN_TOP, u"ALIGN_TOP"},
+    {views::ImageButton::VerticalAlignment::ALIGN_MIDDLE, u"ALIGN_MIDDLE"},
+    {views::ImageButton::VerticalAlignment::ALIGN_BOTTOM, u"ALIGN_BOTTOM"})

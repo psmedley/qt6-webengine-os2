@@ -11,11 +11,11 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/test/task_environment.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
@@ -31,6 +31,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -38,7 +39,9 @@
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
+#include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/public/platform/web_data.h"
+#include "third_party/blink/public/platform/web_loader_freeze_mode.h"
 #include "third_party/blink/public/platform/web_request_peer.h"
 #include "third_party/blink/public/platform/web_resource_request_sender.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -65,12 +68,14 @@ const char kTestData[] = "blah!";
 class MockResourceRequestSender : public WebResourceRequestSender {
  public:
   MockResourceRequestSender() = default;
+  MockResourceRequestSender(const MockResourceRequestSender&) = delete;
+  MockResourceRequestSender& operator=(const MockResourceRequestSender&) =
+      delete;
   ~MockResourceRequestSender() override = default;
 
   // WebResourceRequestSender implementation:
   void SendSync(
       std::unique_ptr<network::ResourceRequest> request,
-      int routing_id,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       uint32_t loader_options,
       SyncLoadResponse* response,
@@ -90,7 +95,6 @@ class MockResourceRequestSender : public WebResourceRequestSender {
 
   int SendAsync(
       std::unique_ptr<network::ResourceRequest> request,
-      int routing_id,
       scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       uint32_t loader_options,
@@ -121,10 +125,8 @@ class MockResourceRequestSender : public WebResourceRequestSender {
 
   bool canceled() { return canceled_; }
 
-  void SetDefersLoading(WebURLLoader::DeferType value) override {
-    defers_loading_ = (value != WebURLLoader::DeferType::kNotDeferred);
-  }
-  bool defers_loading() const { return defers_loading_; }
+  void Freeze(WebLoaderFreezeMode mode) override { freeze_mode_ = mode; }
+  WebLoaderFreezeMode freeze_mode() const { return freeze_mode_; }
 
   void set_sync_load_response(SyncLoadResponse&& sync_load_response) {
     sync_load_response_ = std::move(sync_load_response);
@@ -133,19 +135,18 @@ class MockResourceRequestSender : public WebResourceRequestSender {
  private:
   scoped_refptr<WebRequestPeer> peer_;
   bool canceled_ = false;
-  bool defers_loading_ = false;
+  WebLoaderFreezeMode freeze_mode_ = WebLoaderFreezeMode::kNone;
   SyncLoadResponse sync_load_response_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockResourceRequestSender);
 };
 
 class FakeURLLoaderFactory final : public network::mojom::URLLoaderFactory {
  public:
   FakeURLLoaderFactory() = default;
+  FakeURLLoaderFactory(const FakeURLLoaderFactory&) = delete;
+  FakeURLLoaderFactory& operator=(const FakeURLLoaderFactory&) = delete;
   ~FakeURLLoaderFactory() override = default;
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& url_request,
@@ -159,9 +160,6 @@ class FakeURLLoaderFactory final : public network::mojom::URLLoaderFactory {
       override {
     NOTREACHED();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FakeURLLoaderFactory);
 };
 
 class TestWebURLLoaderClient : public WebURLLoaderClient {
@@ -186,6 +184,9 @@ class TestWebURLLoaderClient : public WebURLLoaderClient {
         did_receive_redirect_(false),
         did_receive_response_(false),
         did_finish_(false) {}
+
+  TestWebURLLoaderClient(const TestWebURLLoaderClient&) = delete;
+  TestWebURLLoaderClient& operator=(const TestWebURLLoaderClient&) = delete;
 
   ~TestWebURLLoaderClient() override {
     // During the deconstruction of the `loader_`, the request context will be
@@ -285,7 +286,7 @@ class TestWebURLLoaderClient : public WebURLLoaderClient {
   bool did_receive_response() const { return did_receive_response_; }
   bool did_receive_response_body() const { return !!response_body_; }
   bool did_finish() const { return did_finish_; }
-  const base::Optional<WebURLError>& error() const { return error_; }
+  const absl::optional<WebURLError>& error() const { return error_; }
   const WebURLResponse& response() const { return response_; }
 
  private:
@@ -302,10 +303,8 @@ class TestWebURLLoaderClient : public WebURLLoaderClient {
   bool did_receive_response_;
   mojo::ScopedDataPipeConsumerHandle response_body_;
   bool did_finish_;
-  base::Optional<WebURLError> error_;
+  absl::optional<WebURLError> error_;
   WebURLResponse response_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWebURLLoaderClient);
 };
 
 class WebURLLoaderTest : public testing::Test {
@@ -325,7 +324,6 @@ class WebURLLoaderTest : public testing::Test {
     request->priority = net::IDLE;
     client()->loader()->LoadAsynchronously(
         std::move(request), /*url_request_extra_data=*/nullptr,
-        /*requestor_id=*/0,
         /*no_mime_sniffing=*/false,
         std::make_unique<ResourceLoadInfoNotifierWrapper>(
             /*resource_load_info_notifier=*/nullptr),
@@ -473,10 +471,10 @@ TEST_F(WebURLLoaderTest, DeleteOnFail) {
 }
 
 TEST_F(WebURLLoaderTest, DefersLoadingBeforeStart) {
-  client()->loader()->SetDefersLoading(WebURLLoader::DeferType::kDeferred);
-  EXPECT_FALSE(sender()->defers_loading());
+  client()->loader()->Freeze(WebLoaderFreezeMode::kStrict);
+  EXPECT_EQ(sender()->freeze_mode(), WebLoaderFreezeMode::kNone);
   DoStartAsyncRequest();
-  EXPECT_TRUE(sender()->defers_loading());
+  EXPECT_EQ(sender()->freeze_mode(), WebLoaderFreezeMode::kStrict);
 }
 
 TEST_F(WebURLLoaderTest, ResponseIPEndpoint) {
@@ -523,7 +521,7 @@ TEST_F(WebURLLoaderTest, ResponseAddressSpace) {
       {"file:///a/path", "", AddressSpace::kLocal},
       {"file:///a/path", "8.8.8.8", AddressSpace::kLocal},
       {"http://router.local", "10.1.0.1", AddressSpace::kPrivate},
-      {"http://router.local", "::ffff:192.0.2.128", AddressSpace::kPrivate},
+      {"http://router.local", "::ffff:192.168.2.128", AddressSpace::kPrivate},
       {"https://bleep.test", "8.8.8.8", AddressSpace::kPublic},
       {"http://a.test", "2001:db8:85a3::8a2e:370:7334", AddressSpace::kPublic},
       {"http://invalid", "", AddressSpace::kUnknown},
@@ -600,7 +598,7 @@ TEST_F(WebURLLoaderTest, ResponseCert) {
   WebURLResponse web_url_response;
   WebURLLoader::PopulateURLResponse(url, head, &web_url_response, true, -1);
 
-  base::Optional<WebURLResponse::WebSecurityDetails> security_details =
+  absl::optional<WebURLResponse::WebSecurityDetails> security_details =
       web_url_response.SecurityDetailsForTesting();
   ASSERT_TRUE(security_details.has_value());
   EXPECT_EQ("TLS 1.2", security_details->protocol);
@@ -638,7 +636,7 @@ TEST_F(WebURLLoaderTest, ResponseCertWithNoSANs) {
   WebURLResponse web_url_response;
   WebURLLoader::PopulateURLResponse(url, head, &web_url_response, true, -1);
 
-  base::Optional<WebURLResponse::WebSecurityDetails> security_details =
+  absl::optional<WebURLResponse::WebSecurityDetails> security_details =
       web_url_response.SecurityDetailsForTesting();
   ASSERT_TRUE(security_details.has_value());
   EXPECT_EQ("TLS 1.2", security_details->protocol);
@@ -676,7 +674,7 @@ TEST_F(WebURLLoaderTest, SyncLengths) {
   sender()->set_sync_load_response(std::move(sync_load_response));
 
   WebURLResponse response;
-  base::Optional<WebURLError> error;
+  absl::optional<WebURLError> error;
   WebData data;
   int64_t encoded_data_length = 0;
   int64_t encoded_body_length = 0;
@@ -684,7 +682,6 @@ TEST_F(WebURLLoaderTest, SyncLengths) {
 
   client()->loader()->LoadSynchronously(
       std::move(request), /*url_request_extra_data=*/nullptr,
-      /*requestor_id=*/0,
       /*pass_response_pipe_to_client=*/false, /*no_mime_sniffing=*/false,
       base::TimeDelta(), nullptr, response, error, data, encoded_data_length,
       encoded_body_length, downloaded_blob,

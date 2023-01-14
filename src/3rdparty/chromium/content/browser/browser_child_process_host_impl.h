@@ -94,7 +94,7 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   ChildProcessTerminationInfo GetTerminationInfo(bool known_dead) override;
   std::unique_ptr<base::PersistentMemoryAllocator> TakeMetricsAllocator()
       override;
-  void SetName(const base::string16& name) override;
+  void SetName(const std::u16string& name) override;
   void SetMetricsName(const std::string& metrics_name) override;
   void SetProcess(base::Process process) override;
 
@@ -141,8 +141,6 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
     return &child_process_host_->GetMojoInvitation().value();
   }
 
-  IPC::Channel* child_channel() const { return channel_; }
-
   mojom::ChildProcess* child_process() const {
     return static_cast<ChildProcessHostImpl*>(child_process_host_.get())
         ->child_process();
@@ -152,6 +150,8 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
  private:
   friend class BrowserChildProcessHostIterator;
   friend class BrowserChildProcessObserver;
+
+  void OnProcessConnected();
 
   static BrowserChildProcessList* GetIterator();
 
@@ -220,9 +220,8 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // transferred to the child process.
   base::WritableSharedMemoryRegion metrics_shared_region_;
 
-  IPC::Channel* channel_ = nullptr;
-  bool is_channel_connected_;
-  bool notify_child_disconnected_;
+  bool has_legacy_ipc_channel_ = false;
+  bool notify_child_connection_status_ = true;
 
 #if defined(OS_ANDROID)
   // whether the child process can use pre-warmed up connection for better

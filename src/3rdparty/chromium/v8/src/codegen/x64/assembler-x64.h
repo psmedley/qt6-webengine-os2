@@ -124,6 +124,9 @@ class Immediate {
     DCHECK(SmiValuesAre31Bits());  // Only available for 31-bit SMI.
   }
 
+  int32_t value() const { return value_; }
+  RelocInfo::Mode rmode() const { return rmode_; }
+
  private:
   const int32_t value_;
   const RelocInfo::Mode rmode_ = RelocInfo::NONE;
@@ -418,6 +421,15 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     GetCode(isolate, desc, kNoSafepointTable, kNoHandlerTable);
   }
 
+  // This function is called when on-heap-compilation invariants are
+  // invalidated. For instance, when the assembler buffer grows or a GC happens
+  // between Code object allocation and Code object finalization.
+  void FixOnHeapReferences(bool update_embedded_objects = true);
+
+  // This function is called when we fallback from on-heap to off-heap
+  // compilation and patch on-heap references to handles.
+  void FixOnHeapReferencesToHandles();
+
   void FinalizeJumpOptimizationInfo();
 
   // Unused on this architecture.
@@ -435,6 +447,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   static inline void set_target_address_at(
       Address pc, Address constant_pool, Address target,
       ICacheFlushMode icache_flush_mode = FLUSH_ICACHE_IF_NEEDED);
+  static inline int32_t relative_target_offset(Address target, Address pc);
 
   // This sets the branch destination (which is in the instruction on x64).
   // This is for calls and branches within generated code.
@@ -547,6 +560,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void Nop(int bytes = 1);
   // Aligns code to something that's optimal for a jump target for the platform.
   void CodeTargetAlign();
+  void LoopHeaderAlign();
 
   // Stack
   void pushfq();
@@ -786,7 +800,6 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void ret(int imm16);
   void ud2();
   void setcc(Condition cc, Register reg);
-  void prefetch(Operand src, int level);
 
   void pblendw(XMMRegister dst, Operand src, uint8_t mask);
   void pblendw(XMMRegister dst, XMMRegister src, uint8_t mask);
@@ -833,6 +846,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   // Unconditional jump to L
   void jmp(Label* L, Label::Distance distance = Label::kFar);
   void jmp(Handle<Code> target, RelocInfo::Mode rmode);
+  void jmp(Address entry, RelocInfo::Mode rmode);
 
   // Jump near absolute indirect (r64)
   void jmp(Register adr);
@@ -1274,6 +1288,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   SSE_CMP_P(cmpeq, 0x0)
   SSE_CMP_P(cmplt, 0x1)
   SSE_CMP_P(cmple, 0x2)
+  SSE_CMP_P(cmpunord, 0x3)
   SSE_CMP_P(cmpneq, 0x4)
   SSE_CMP_P(cmpnlt, 0x5)
   SSE_CMP_P(cmpnle, 0x6)
@@ -1571,6 +1586,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_CMP_P(vcmpeq, 0x0)
   AVX_CMP_P(vcmplt, 0x1)
   AVX_CMP_P(vcmple, 0x2)
+  AVX_CMP_P(vcmpunord, 0x3)
   AVX_CMP_P(vcmpneq, 0x4)
   AVX_CMP_P(vcmpnlt, 0x5)
   AVX_CMP_P(vcmpnle, 0x6)
@@ -1848,8 +1864,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   // Record a deoptimization reason that can be used by a log or cpu profiler.
   // Use --trace-deopt to enable.
-  void RecordDeoptReason(DeoptimizeReason reason, SourcePosition position,
-                         int id);
+  void RecordDeoptReason(DeoptimizeReason reason, uint32_t node_id,
+                         SourcePosition position, int id);
 
   // Writes a single word of data in the code stream.
   // Used for inline tables, e.g., jump-tables.
@@ -1860,6 +1876,13 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     dq(data, rmode);
   }
   void dq(Label* label);
+
+#ifdef DEBUG
+  bool EmbeddedObjectMatches(int pc_offset, Handle<Object> object) {
+    return *reinterpret_cast<uint64_t*>(buffer_->start() + pc_offset) ==
+           (IsOnHeap() ? object->ptr() : object.address());
+  }
+#endif
 
   // Patch entries for partial constant pool.
   void PatchConstPool();
@@ -2374,8 +2397,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 // checks that we did not generate too much.
 class EnsureSpace {
  public:
-  explicit EnsureSpace(Assembler* assembler) : assembler_(assembler) {
-    if (assembler_->buffer_overflow()) assembler_->GrowBuffer();
+  explicit V8_INLINE EnsureSpace(Assembler* assembler) : assembler_(assembler) {
+    if (V8_UNLIKELY(assembler_->buffer_overflow())) assembler_->GrowBuffer();
 #ifdef DEBUG
     space_before_ = assembler_->available_space();
 #endif
@@ -2389,7 +2412,7 @@ class EnsureSpace {
 #endif
 
  private:
-  Assembler* assembler_;
+  Assembler* const assembler_;
 #ifdef DEBUG
   int space_before_;
 #endif

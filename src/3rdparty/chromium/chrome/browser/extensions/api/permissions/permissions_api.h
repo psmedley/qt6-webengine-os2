@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PERMISSIONS_PERMISSIONS_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PERMISSIONS_PERMISSIONS_API_H_
 
-#include <string>
-
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
@@ -73,7 +71,7 @@ class PermissionsRequestFunction : public ExtensionFunction {
   ResponseAction Run() override;
 
  private:
-  void OnInstallPromptDone(ExtensionInstallPrompt::Result result);
+  void OnInstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload payload);
   void OnRuntimePermissionsGranted();
   void OnOptionalPermissionsGranted();
   void RespondIfRequestsFinished();

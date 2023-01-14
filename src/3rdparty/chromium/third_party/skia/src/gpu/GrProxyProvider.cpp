@@ -25,7 +25,6 @@
 #include "src/gpu/GrImageContextPriv.h"
 #include "src/gpu/GrRenderTarget.h"
 #include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/GrSurfaceProxy.h"
 #include "src/gpu/GrSurfaceProxyPriv.h"
 #include "src/gpu/GrTexture.h"
@@ -243,14 +242,15 @@ GrSurfaceProxyView GrProxyProvider::findCachedProxyWithColorTypeFallback(const G
     if (!proxy) {
         return {};
     }
+    const GrCaps* caps = fImageContext->priv().caps();
+
     // Assume that we used a fallback color type if and only if the proxy is renderable.
     if (proxy->asRenderTargetProxy()) {
         GrBackendFormat expectedFormat;
-        std::tie(ct, expectedFormat) =
-                GrSurfaceFillContext::GetFallbackColorTypeAndFormat(fImageContext, ct, sampleCnt);
+        std::tie(ct, expectedFormat) = caps->getFallbackColorTypeAndFormat(ct, sampleCnt);
         SkASSERT(expectedFormat == proxy->backendFormat());
     }
-    GrSwizzle swizzle = fImageContext->priv().caps()->getReadSwizzle(proxy->backendFormat(), ct);
+    GrSwizzle swizzle = caps->getReadSwizzle(proxy->backendFormat(), ct);
     return {std::move(proxy), origin, swizzle};
 }
 
@@ -324,7 +324,7 @@ sk_sp<GrTextureProxy> GrProxyProvider::createNonMippedProxyFromBitmap(const SkBi
     sk_sp<GrTextureProxy> proxy = this->createLazyProxy(
             [bitmap](GrResourceProvider* resourceProvider, const LazySurfaceDesc& desc) {
                 SkASSERT(desc.fMipmapped == GrMipmapped::kNo);
-                GrMipLevel mipLevel = { bitmap.getPixels(), bitmap.rowBytes() };
+                GrMipLevel mipLevel = {bitmap.getPixels(), bitmap.rowBytes(), nullptr};
                 auto colorType = SkColorTypeToGrColorType(bitmap.colorType());
                 return LazyCallbackResult(resourceProvider->createTexture(
                         desc.fDimensions, desc.fFormat, colorType, desc.fRenderable,
@@ -658,8 +658,8 @@ sk_sp<GrRenderTargetProxy> GrProxyProvider::wrapVulkanSecondaryCBAsRenderTarget(
 
     GrColorType colorType = SkColorTypeToGrColorType(imageInfo.colorType());
 
-    if (!this->caps()->isFormatAsColorTypeRenderable(colorType, rt->backendFormat(),
-                                                     rt->numSamples())) {
+    if (!this->caps()->isFormatAsColorTypeRenderable(
+            colorType, GrBackendFormat::MakeVk(vkInfo.fFormat), /*sampleCount=*/1)) {
         return nullptr;
     }
 
@@ -689,17 +689,19 @@ sk_sp<GrTextureProxy> GrProxyProvider::CreatePromiseProxy(GrContextThreadSafePro
 
     // We pass kReadOnly here since we should treat content of the client's texture as immutable.
     // The promise API provides no way for the client to indicate that the texture is protected.
-    return sk_sp<GrTextureProxy>(new GrTextureProxy(std::move(callback),
-                                                    format,
-                                                    dimensions,
-                                                    mipMapped,
-                                                    mipmapStatus,
-                                                    SkBackingFit::kExact,
-                                                    SkBudgeted::kNo,
-                                                    GrProtected::kNo,
-                                                    GrInternalSurfaceFlags::kReadOnly,
-                                                    GrSurfaceProxy::UseAllocator::kYes,
-                                                    GrDDLProvider::kYes));
+    auto proxy = sk_sp<GrTextureProxy>(new GrTextureProxy(std::move(callback),
+                                                          format,
+                                                          dimensions,
+                                                          mipMapped,
+                                                          mipmapStatus,
+                                                          SkBackingFit::kExact,
+                                                          SkBudgeted::kNo,
+                                                          GrProtected::kNo,
+                                                          GrInternalSurfaceFlags::kReadOnly,
+                                                          GrSurfaceProxy::UseAllocator::kYes,
+                                                          GrDDLProvider::kYes));
+    proxy->priv().setIsPromiseProxy();
+    return proxy;
 }
 
 sk_sp<GrTextureProxy> GrProxyProvider::createLazyProxy(LazyInstantiateCallback&& callback,

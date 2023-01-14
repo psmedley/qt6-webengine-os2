@@ -75,16 +75,11 @@ protected:
     }
     void focusInEvent(QFocusEvent *event) override
     {
-        Q_ASSERT(event->reason() != Qt::PopupFocusReason);
         m_client->forwardEvent(event);
     }
     void focusOutEvent(QFocusEvent *event) override
     {
-        // The keyboard events are supposed to go to the parent RenderHostView and WebUI
-        // popups should never have focus, therefore ignore focusOutEvent as losing focus
-        // will trigger pop close request from blink
-        if (event->reason() != Qt::PopupFocusReason)
-            m_client->forwardEvent(event);
+        m_client->forwardEvent(event);
     }
     void inputMethodEvent(QInputMethodEvent *event) override
     {
@@ -439,6 +434,26 @@ bool RenderWidgetHostViewQtDelegateWidget::event(QEvent *event)
         return false;
     default:
         break;
+    }
+
+    switch (event->type()) {
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonRelease:
+        case QEvent::MouseButtonDblClick:
+        case QEvent::MouseMove:
+            // Don't forward mouse events synthesized by the system, which are caused by genuine touch
+            // events. Chromium would then process for e.g. a mouse click handler twice, once due to the
+            // system synthesized mouse event, and another time due to a touch-to-gesture-to-mouse
+            // transformation done by Chromium.
+            // Only allow them for popup type, since QWidgetWindow will ignore them for Qt::Popup flag,
+            // which is expected to get input through synthesized mouse events (either by system or Qt)
+            if (!m_isPopup && static_cast<QMouseEvent *>(event)->source() == Qt::MouseEventSynthesizedBySystem) {
+                Q_ASSERT(!windowFlags().testFlag(Qt::Popup));
+                return true;
+            }
+            break;
+        default:
+            break;
     }
 
     if (event->type() == QEvent::MouseButtonDblClick) {

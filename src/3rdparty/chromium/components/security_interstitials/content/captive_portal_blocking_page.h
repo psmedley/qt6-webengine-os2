@@ -47,6 +47,7 @@ class CaptivePortalBlockingPage : public SSLBlockingPageBase {
       const GURL& request_url,
       const GURL& login_url,
       std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
+      bool can_show_enhanced_protection_message,
       const net::SSLInfo& ssl_info,
       std::unique_ptr<
           security_interstitials::SecurityInterstitialControllerClient>
@@ -67,8 +68,7 @@ class CaptivePortalBlockingPage : public SSLBlockingPageBase {
   std::string GetWiFiSSID() const;
 
   // SecurityInterstitialPage methods:
-  void PopulateInterstitialStrings(
-      base::DictionaryValue* load_time_data) override;
+  void PopulateInterstitialStrings(base::Value* load_time_data) override;
 
   // SecurityInterstitialPage method:
   void CommandReceived(const std::string& command) override;

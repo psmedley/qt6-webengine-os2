@@ -359,6 +359,10 @@ bool ArgumentParser::ParseArgument(const ArgumentSpec& spec,
 bool ArgumentParser::ParseCallback(const ArgumentSpec& spec,
                                    v8::Local<v8::Value> value) {
   if (value.IsEmpty()) {
+    // Note: The null callback isn't exactly correct. See
+    // https://crbug.com/1220910 for details.
+    AddNullCallback();
+
     if (promises_allowed_ == PromisesAllowed::kAllowed) {
       // If the callback is omitted and promises are supported, assume the
       // async response type is a promise.
@@ -367,7 +371,6 @@ bool ArgumentParser::ParseCallback(const ArgumentSpec& spec,
       // Otherwise, we should only get to this point if the callback argument is
       // optional.
       DCHECK(spec.optional());
-      AddNullCallback();
       async_type_ = binding::AsyncResponseType::kNone;
     }
     return true;
@@ -405,7 +408,7 @@ APISignature::JSONParseResult BaseValueArgumentParser::ParseArguments(
   if (!ParseArgumentsImpl(signature_has_callback)) {
     result.error = TakeError();
   } else {
-    result.arguments = std::move(list_value_);
+    result.arguments_list = std::move(list_value_);
     result.callback = callback_;
     result.async_type = async_type();
   }
@@ -530,7 +533,7 @@ APISignature::JSONParseResult APISignature::ConvertArgumentsIgnoringSchema(
   }
 
   JSONParseResult result;
-  result.arguments = std::make_unique<base::ListValue>(std::move(json));
+  result.arguments_list = std::make_unique<base::ListValue>(std::move(json));
   result.callback = callback;
   result.async_type = callback.IsEmpty()
                           ? binding::AsyncResponseType::kNone

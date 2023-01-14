@@ -17,6 +17,8 @@
 #include "content/common/content_export.h"
 #include "content/renderer/stream_texture_host_android.h"
 #include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/ipc/common/gpu_channel.mojom.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -39,7 +41,7 @@ class CONTENT_EXPORT StreamTextureProxy : public StreamTextureHost::Listener {
       const gpu::Mailbox& mailbox,
       const gfx::Size& coded_size,
       const gfx::Rect& visible_rect,
-      const base::Optional<gpu::VulkanYCbCrInfo>&)>;
+      const absl::optional<gpu::VulkanYCbCrInfo>&)>;
 
   ~StreamTextureProxy() override;
 
@@ -57,7 +59,7 @@ class CONTENT_EXPORT StreamTextureProxy : public StreamTextureHost::Listener {
       const gpu::Mailbox& mailbox,
       const gfx::Size& coded_size,
       const gfx::Rect& visible_rect,
-      const base::Optional<gpu::VulkanYCbCrInfo>& ycbcr_info) override;
+      const absl::optional<gpu::VulkanYCbCrInfo>& ycbcr_info) override;
 
   // Sends an IPC to the GPU process.
   // Asks the StreamTexture to forward its SurfaceTexture to the
@@ -122,8 +124,6 @@ class CONTENT_EXPORT StreamTextureFactory
   friend class base::RefCountedThreadSafe<StreamTextureFactory>;
   StreamTextureFactory(scoped_refptr<gpu::GpuChannelHost> channel);
   ~StreamTextureFactory();
-  // Creates a gpu::StreamTexture and returns its id.
-  unsigned CreateStreamTexture();
 
   scoped_refptr<gpu::GpuChannelHost> channel_;
   std::unique_ptr<gpu::ClientSharedImageInterface> shared_image_interface_;

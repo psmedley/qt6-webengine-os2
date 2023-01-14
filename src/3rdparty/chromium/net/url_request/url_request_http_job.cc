@@ -5,6 +5,7 @@
 #include "net/url_request/url_request_http_job.h"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -21,7 +22,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -30,6 +30,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "net/base/features.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/http_user_agent_settings.h"
@@ -45,9 +46,11 @@
 #include "net/cert/known_roots.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_access_delegate.h"
+#include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_util.h"
+#include "net/cookies/same_party_context.h"
 #include "net/filter/brotli_source_stream.h"
 #include "net/filter/filter_source_stream.h"
 #include "net/filter/gzip_source_stream.h"
@@ -71,6 +74,7 @@
 #include "net/proxy_resolution/proxy_retry_info.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
@@ -78,6 +82,7 @@
 #include "net/url_request/url_request_redirect_job.h"
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/url_request/websocket_handshake_userdata_key.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
 #if defined(OS_ANDROID)
@@ -156,14 +161,14 @@ void RecordCTHistograms(const net::SSLInfo& ssl_info) {
 
 net::CookieOptions CreateCookieOptions(
     net::CookieOptions::SameSiteCookieContext same_site_context,
-    net::CookieOptions::SamePartyCookieContextType same_party_context,
+    const net::SamePartyContext& same_party_context,
     const net::IsolationInfo& isolation_info,
     bool is_in_nontrivial_first_party_set) {
   net::CookieOptions options;
   options.set_return_excluded_cookies();
   options.set_include_httponly();
   options.set_same_site_cookie_context(same_site_context);
-  options.set_same_party_cookie_context_type(same_party_context);
+  options.set_same_party_context(same_party_context);
   if (isolation_info.party_context().has_value()) {
     // Count the top-frame site since it's not in the party_context.
     options.set_full_party_context_size(isolation_info.party_context()->size() +
@@ -172,6 +177,14 @@ net::CookieOptions CreateCookieOptions(
   options.set_is_in_nontrivial_first_party_set(
       is_in_nontrivial_first_party_set);
   return options;
+}
+
+bool IsTLS13OverTCP(const net::HttpResponseInfo& response_info) {
+  // Although IETF QUIC also uses TLS 1.3, our QUIC connections report
+  // SSL_CONNECTION_VERSION_QUIC.
+  return net::SSLConnectionStatusToVersion(
+             response_info.ssl_info.connection_status) ==
+         net::SSL_CONNECTION_VERSION_TLS1_3;
 }
 
 }  // namespace
@@ -269,7 +282,7 @@ void URLRequestHttpJob::Start() {
       request_->isolation_info().request_type() ==
       net::IsolationInfo::RequestType::kSubFrame;
   request_info_.load_flags = request_->load_flags();
-  request_info_.disable_secure_dns = request_->disable_secure_dns();
+  request_info_.secure_dns_policy = request_->secure_dns_policy();
   request_info_.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(request_->traffic_annotation());
   request_info_.socket_tag = request_->socket_tag();
@@ -323,8 +336,10 @@ void URLRequestHttpJob::CloseConnectionOnDestruction() {
   transaction_->CloseConnectionOnDestruction();
 }
 
-int URLRequestHttpJob::NotifyConnectedCallback(const TransportInfo& info) {
-  return URLRequestJob::NotifyConnected(info);
+int URLRequestHttpJob::NotifyConnectedCallback(
+    const TransportInfo& info,
+    CompletionOnceCallback callback) {
+  return URLRequestJob::NotifyConnected(info, std::move(callback));
 }
 
 void URLRequestHttpJob::NotifyHeadersComplete() {
@@ -380,15 +395,10 @@ void URLRequestHttpJob::StartTransaction() {
   if (network_delegate) {
     OnCallToDelegate(
         NetLogEventType::NETWORK_DELEGATE_BEFORE_START_TRANSACTION);
-    // The NetworkDelegate must watch for OnRequestDestroyed and not modify
-    // |extra_headers| after it's called.
-    // TODO(mattm): change the API to remove the out-params and take the
-    // results as params of the callback.
     int rv = network_delegate->NotifyBeforeStartTransaction(
-        request_,
+        request_, request_info_.extra_headers,
         base::BindOnce(&URLRequestHttpJob::NotifyBeforeStartTransactionCallback,
-                       weak_factory_.GetWeakPtr()),
-        &request_info_.extra_headers);
+                       weak_factory_.GetWeakPtr()));
     // If an extension blocks the request, we rely on the callback to
     // MaybeStartTransactionInternal().
     if (rv == ERR_IO_PENDING)
@@ -399,10 +409,14 @@ void URLRequestHttpJob::StartTransaction() {
   StartTransactionInternal();
 }
 
-void URLRequestHttpJob::NotifyBeforeStartTransactionCallback(int result) {
+void URLRequestHttpJob::NotifyBeforeStartTransactionCallback(
+    int result,
+    const absl::optional<HttpRequestHeaders>& headers) {
   // The request should not have been cancelled or have already completed.
   DCHECK(!is_done());
 
+  if (headers)
+    request_info_.extra_headers = headers.value();
   MaybeStartTransactionInternal(result);
 }
 
@@ -462,6 +476,8 @@ void URLRequestHttpJob::StartTransactionInternal() {
       transaction_->SetConnectedCallback(base::BindRepeating(
           &URLRequestHttpJob::NotifyConnectedCallback, base::Unretained(this)));
       transaction_->SetRequestHeadersCallback(request_headers_callback_);
+      transaction_->SetEarlyResponseHeadersCallback(
+          early_response_headers_callback_);
       transaction_->SetResponseHeadersCallback(response_headers_callback_);
 
       if (!throttling_entry_.get() ||
@@ -498,26 +514,32 @@ void URLRequestHttpJob::AddExtraHeaders() {
       request_info_.extra_headers.SetHeader(HttpRequestHeaders::kAcceptEncoding,
                                             "identity");
     } else {
-      // Advertise "br" encoding only if transferred data is opaque to proxy.
-      bool advertise_brotli = false;
-      if (request()->context()->enable_brotli()) {
-        if (request()->url().SchemeIsCryptographic() ||
-            IsLocalhost(request()->url())) {
-          advertise_brotli = true;
-        }
-      }
-
       // Supply Accept-Encoding headers first so that it is more likely that
       // they will be in the first transmitted packet. This can sometimes make
       // it easier to filter and analyze the streams to assure that a proxy has
       // not damaged these headers. Some proxies deliberately corrupt
       // Accept-Encoding headers.
-      std::string advertised_encodings = "gzip, deflate";
-      if (advertise_brotli)
-        advertised_encodings += ", br";
-      // Tell the server what compression formats are supported.
-      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kAcceptEncoding,
-                                            advertised_encodings);
+      std::vector<std::string> advertised_encoding_names;
+      if (request_->Supports(SourceStream::SourceType::TYPE_GZIP)) {
+        advertised_encoding_names.push_back("gzip");
+      }
+      if (request_->Supports(SourceStream::SourceType::TYPE_DEFLATE)) {
+        advertised_encoding_names.push_back("deflate");
+      }
+      // Advertise "br" encoding only if transferred data is opaque to proxy.
+      if (request()->context()->enable_brotli() &&
+          request_->Supports(SourceStream::SourceType::TYPE_BROTLI)) {
+        if (request()->url().SchemeIsCryptographic() ||
+            IsLocalhost(request()->url())) {
+          advertised_encoding_names.push_back("br");
+        }
+      }
+      if (!advertised_encoding_names.empty()) {
+        // Tell the server what compression formats are supported.
+        request_info_.extra_headers.SetHeader(
+            HttpRequestHeaders::kAcceptEncoding,
+            base::JoinString(base::make_span(advertised_encoding_names), ", "));
+      }
     }
   }
 
@@ -555,23 +577,25 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
         request_->force_main_frame_for_same_site_cookies();
     CookieOptions::SameSiteCookieContext same_site_context =
         net::cookie_util::ComputeSameSiteContextForRequest(
-            request_->method(), request_->url(), request_->site_for_cookies(),
-            request_->initiator(), is_main_frame_navigation,
-            force_ignore_site_for_cookies);
+            request_->method(), request_->url_chain(),
+            request_->site_for_cookies(), request_->initiator(),
+            is_main_frame_navigation, force_ignore_site_for_cookies);
 
     net::SchemefulSite request_site(request_->url());
-
     const CookieAccessDelegate* delegate =
         cookie_store->cookie_access_delegate();
 
-    CookieOptions::SamePartyCookieContextType same_party_context =
-        net::cookie_util::ComputeSamePartyContext(
-            request_site, request_->isolation_info(), delegate);
     bool is_in_nontrivial_first_party_set =
         delegate && delegate->IsInNontrivialFirstPartySet(request_site);
     CookieOptions options = CreateCookieOptions(
-        same_site_context, same_party_context, request_->isolation_info(),
-        is_in_nontrivial_first_party_set);
+        same_site_context, request_->same_party_context(),
+        request_->isolation_info(), is_in_nontrivial_first_party_set);
+
+    UMA_HISTOGRAM_ENUMERATION(
+        "Cookie.FirstPartySetsContextType.HTTP.Read",
+        net::cookie_util::ComputeFirstPartySetsContextType(
+            request_site, request_->isolation_info(), delegate,
+            request_->force_ignore_top_frame_party_for_cookies()));
 
     static_cast<CookieMonster*>(cookie_store)->GetCookieListWithOptionsAsyncAndFiltered(
         request_->url(), request_->site_for_cookies(), options,
@@ -588,81 +612,71 @@ void URLRequestHttpJob::SetCookieHeaderAndStart(
     const CookieAccessResultList& excluded_list) {
   DCHECK(request_->maybe_sent_cookies().empty());
 
-  bool can_get_cookies =
-      (request_info_.privacy_mode == PRIVACY_MODE_DISABLED && CanGetCookies());
-  if (!cookies_with_access_result_list.empty() && can_get_cookies) {
-    std::string cookie_line =
-        CanonicalCookie::BuildCookieLine(cookies_with_access_result_list);
-    UMA_HISTOGRAM_COUNTS_10000("Cookie.HeaderLength", cookie_line.length());
-    request_info_.extra_headers.SetHeader(HttpRequestHeaders::kCookie,
-                                          cookie_line);
+  CookieAccessResultList maybe_included_cookies =
+      cookies_with_access_result_list;
+  CookieAccessResultList excluded_cookies = excluded_list;
 
-    // TODO(crbug.com/1031664): Reduce the number of times the cookie list is
-    // iterated over. Get metrics for every cookie which is included.
-    for (const auto& c : cookies_with_access_result_list) {
-      bool request_is_secure = request_->url().SchemeIsCryptographic();
-      net::CookieSourceScheme cookie_scheme = c.cookie.SourceScheme();
-      CookieRequestScheme cookie_request_schemes;
+  if (request_info_.privacy_mode != PRIVACY_MODE_DISABLED) {
+    // If cookies are blocked (without our needing to consult the delegate), we
+    // move them to `excluded_cookies` and ensure that they have the correct
+    // exclusion reason.
+    excluded_cookies.insert(
+        excluded_cookies.end(),
+        std::make_move_iterator(maybe_included_cookies.begin()),
+        std::make_move_iterator(maybe_included_cookies.end()));
+    maybe_included_cookies.clear();
+    for (auto& cookie : excluded_cookies) {
+      cookie.access_result.status.AddExclusionReason(
+          CookieInclusionStatus::EXCLUDE_USER_PREFERENCES);
+    }
+  } else {
+    AnnotateAndMoveUserBlockedCookies(maybe_included_cookies, excluded_cookies);
+    if (!maybe_included_cookies.empty()) {
+      std::string cookie_line =
+          CanonicalCookie::BuildCookieLine(maybe_included_cookies);
+      UMA_HISTOGRAM_COUNTS_10000("Cookie.HeaderLength", cookie_line.length());
+      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kCookie,
+                                            cookie_line);
 
-      switch (cookie_scheme) {
-        case net::CookieSourceScheme::kSecure:
-          cookie_request_schemes =
-              request_is_secure
-                  ? CookieRequestScheme::kSecureSetSecureRequest
-                  : CookieRequestScheme::kSecureSetNonsecureRequest;
-          break;
+      // TODO(crbug.com/1031664): Reduce the number of times the cookie list
+      // is iterated over. Get metrics for every cookie which is included.
+      for (const auto& c : maybe_included_cookies) {
+        bool request_is_secure = request_->url().SchemeIsCryptographic();
+        net::CookieSourceScheme cookie_scheme = c.cookie.SourceScheme();
+        CookieRequestScheme cookie_request_schemes;
 
-        case net::CookieSourceScheme::kNonSecure:
-          cookie_request_schemes =
-              request_is_secure
-                  ? CookieRequestScheme::kNonsecureSetSecureRequest
-                  : CookieRequestScheme::kNonsecureSetNonsecureRequest;
-          break;
+        switch (cookie_scheme) {
+          case net::CookieSourceScheme::kSecure:
+            cookie_request_schemes =
+                request_is_secure
+                    ? CookieRequestScheme::kSecureSetSecureRequest
+                    : CookieRequestScheme::kSecureSetNonsecureRequest;
+            break;
 
-        case net::CookieSourceScheme::kUnset:
-          cookie_request_schemes = CookieRequestScheme::kUnsetCookieScheme;
-          break;
+          case net::CookieSourceScheme::kNonSecure:
+            cookie_request_schemes =
+                request_is_secure
+                    ? CookieRequestScheme::kNonsecureSetSecureRequest
+                    : CookieRequestScheme::kNonsecureSetNonsecureRequest;
+            break;
+
+          case net::CookieSourceScheme::kUnset:
+            cookie_request_schemes = CookieRequestScheme::kUnsetCookieScheme;
+            break;
+        }
+
+        UMA_HISTOGRAM_ENUMERATION("Cookie.CookieSchemeRequestScheme",
+                                  cookie_request_schemes);
       }
-
-      UMA_HISTOGRAM_ENUMERATION("Cookie.CookieSchemeRequestScheme",
-                                cookie_request_schemes);
     }
   }
 
-  // Report status for things in |excluded_list| and
-  // |cookies_with_access_result_list|
-  // after the delegate got a chance to block them.
-  CookieAccessResultList maybe_sent_cookies = excluded_list;
-
-  // If the cookie was excluded due to the fix for crbug.com/1166211, this
-  // applies a warning to the status that will show up in the netlog.
-  // TODO(crbug.com/1166211): Remove once no longer needed.
-  if (options.same_site_cookie_context().AffectedByBugfix1166211()) {
-    for (auto& cookie_with_access_result : maybe_sent_cookies) {
-      options.same_site_cookie_context()
-          .MaybeApplyBugfix1166211WarningToStatusAndLogHistogram(
-              cookie_with_access_result.access_result.status);
-    }
-  }
-
-  if (!can_get_cookies) {
-    for (CookieAccessResultList::iterator it = maybe_sent_cookies.begin();
-         it != maybe_sent_cookies.end(); ++it) {
-      it->access_result.status.AddExclusionReason(
-          CookieInclusionStatus::EXCLUDE_USER_PREFERENCES);
-    }
-  }
-
-  for (const auto& cookie_with_access_result :
-       cookies_with_access_result_list) {
-    CookieAccessResult access_result = cookie_with_access_result.access_result;
-    if (!can_get_cookies) {
-      access_result.status.AddExclusionReason(
-          CookieInclusionStatus::EXCLUDE_USER_PREFERENCES);
-    }
-    maybe_sent_cookies.push_back(
-        {cookie_with_access_result.cookie, access_result});
-  }
+  CookieAccessResultList maybe_sent_cookies = std::move(excluded_cookies);
+  maybe_sent_cookies.insert(
+      maybe_sent_cookies.end(),
+      std::make_move_iterator(maybe_included_cookies.begin()),
+      std::make_move_iterator(maybe_included_cookies.end()));
+  maybe_included_cookies.clear();
 
   if (request_->net_log().IsCapturing()) {
     for (const auto& cookie_with_access_result : maybe_sent_cookies) {
@@ -685,7 +699,9 @@ void URLRequestHttpJob::SetCookieHeaderAndStart(
 
 void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
   DCHECK(set_cookie_access_result_list_.empty());
-  DCHECK_EQ(0, num_cookie_lines_left_);
+  // TODO(crbug.com/1186863): Turn this CHECK into DCHECK once the investigation
+  // is done.
+  CHECK_EQ(0, num_cookie_lines_left_);
 
   // End of the call started in OnStartCompleted.
   OnCallToDelegateComplete();
@@ -705,9 +721,9 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
   }
 
   base::Time response_date;
-  base::Optional<base::Time> server_time = base::nullopt;
+  absl::optional<base::Time> server_time = absl::nullopt;
   if (GetResponseHeaders()->GetDateValue(&response_date))
-    server_time = base::make_optional(response_date);
+    server_time = absl::make_optional(response_date);
 
   bool force_ignore_site_for_cookies =
       request_->force_ignore_site_for_cookies();
@@ -720,20 +736,24 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
                                   request_->isolation_info().request_type();
   CookieOptions::SameSiteCookieContext same_site_context =
       net::cookie_util::ComputeSameSiteContextForResponse(
-          request_->url(), request_->site_for_cookies(), request_->initiator(),
-          is_main_frame_navigation, force_ignore_site_for_cookies);
+          request_->url_chain(), request_->site_for_cookies(),
+          request_->initiator(), is_main_frame_navigation,
+          force_ignore_site_for_cookies);
 
   const CookieAccessDelegate* delegate = cookie_store->cookie_access_delegate();
   net::SchemefulSite request_site(request_->url());
 
-  CookieOptions::SamePartyCookieContextType same_party_context =
-      net::cookie_util::ComputeSamePartyContext(
-          request_site, request_->isolation_info(), delegate);
   bool is_in_nontrivial_first_party_set =
       delegate && delegate->IsInNontrivialFirstPartySet(request_site);
   CookieOptions options = CreateCookieOptions(
-      same_site_context, same_party_context, request_->isolation_info(),
-      is_in_nontrivial_first_party_set);
+      same_site_context, request_->same_party_context(),
+      request_->isolation_info(), is_in_nontrivial_first_party_set);
+
+  UMA_HISTOGRAM_ENUMERATION(
+      "Cookie.FirstPartySetsContextType.HTTP.Write",
+      net::cookie_util::ComputeFirstPartySetsContextType(
+          request_site, request_->isolation_info(), delegate,
+          request_->force_ignore_top_frame_party_for_cookies()));
 
   // Set all cookies, without waiting for them to be set. Any subsequent
   // read will see the combined result of all cookie operation.
@@ -758,9 +778,11 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
 
     std::unique_ptr<CanonicalCookie> cookie = net::CanonicalCookie::Create(
         request_->url(), cookie_string, base::Time::Now(), server_time,
+        net::CookiePartitionKey::FromNetworkIsolationKey(
+            request_->isolation_info().network_isolation_key()),
         &returned_status);
 
-    base::Optional<CanonicalCookie> cookie_to_return = base::nullopt;
+    absl::optional<CanonicalCookie> cookie_to_return = absl::nullopt;
     if (returned_status.IsInclude()) {
       DCHECK(cookie);
       // Make a copy of the cookie if we successfully made one.
@@ -793,7 +815,7 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
 
 void URLRequestHttpJob::OnSetCookieResult(
     const CookieOptions& options,
-    base::Optional<CanonicalCookie> cookie,
+    absl::optional<CanonicalCookie> cookie,
     std::string cookie_string,
     CookieAccessResult access_result) {
   if (request_->net_log().IsCapturing()) {
@@ -808,14 +830,6 @@ void URLRequestHttpJob::OnSetCookieResult(
                                  });
   }
 
-  // If the cookie was excluded due to the fix for crbug.com/1166211, this
-  // applies a warning to the status that will show up in the netlog.
-  // TODO(crbug.com/1166211): Remove once no longer needed.
-  if (options.same_site_cookie_context().AffectedByBugfix1166211()) {
-    options.same_site_cookie_context()
-        .MaybeApplyBugfix1166211WarningToStatusAndLogHistogram(
-            access_result.status);
-  }
   set_cookie_access_result_list_.emplace_back(
       std::move(cookie), std::move(cookie_string), access_result);
 
@@ -871,7 +885,10 @@ void URLRequestHttpJob::ProcessExpectCTHeader() {
 
   HttpResponseHeaders* headers = GetResponseHeaders();
   std::string value;
-  if (headers->GetNormalizedHeader("Expect-CT", &value)) {
+  bool has_expect_ct_header = headers->GetNormalizedHeader("Expect-CT", &value);
+  base::UmaHistogramBoolean("Net.ExpectCT.HeaderPresentOnResponse",
+                            has_expect_ct_header);
+  if (has_expect_ct_header) {
     security_state->ProcessExpectCTHeader(
         value, HostPortPair::FromURL(request_info_.url), ssl_info,
         request_->isolation_info().network_isolation_key());
@@ -913,7 +930,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
       // |URLRequestHttpJob::OnHeadersReceivedCallback()| or
       // |NetworkDelegate::URLRequestDestroyed()| has been called.
       OnCallToDelegate(NetLogEventType::NETWORK_DELEGATE_HEADERS_RECEIVED);
-      preserve_fragment_on_redirect_url_ = base::nullopt;
+      preserve_fragment_on_redirect_url_ = absl::nullopt;
       IPEndPoint endpoint;
       if (transaction_)
         transaction_->GetRemoteEndpoint(&endpoint);
@@ -1109,6 +1126,12 @@ std::unique_ptr<SourceStream> URLRequestHttpJob::SetUpSourceStream() {
       case SourceStream::TYPE_BROTLI:
       case SourceStream::TYPE_DEFLATE:
       case SourceStream::TYPE_GZIP:
+        if (request_->accepted_stream_types() &&
+            !request_->accepted_stream_types()->contains(source_type)) {
+          // If the source type is disabled, we treat it
+          // in the same way as SourceStream::TYPE_UNKNOWN.
+          return upstream;
+        }
         types.push_back(source_type);
         break;
       case SourceStream::TYPE_NONE:
@@ -1388,6 +1411,27 @@ void URLRequestHttpJob::RecordTimer() {
   request_creation_time_ = base::Time();
 
   UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpTimeToFirstByte", to_start);
+
+  // Record additional metrics for TLS 1.3 servers. This is to help measure the
+  // impact of enabling 0-RTT. The effects of 0-RTT will be muted because not
+  // all TLS 1.3 servers enable 0-RTT, and only the first round-trip on a
+  // connection makes use of 0-RTT. However, 0-RTT can affect how requests are
+  // bound to connections and which connections offer resumption. We look at all
+  // TLS 1.3 responses for an apples-to-apples comparison.
+  //
+  // Additionally record metrics for Google hosts. Most Google hosts are known
+  // to implement 0-RTT, so this gives more targeted metrics as we initially
+  // roll out client support.
+  //
+  // TODO(https://crbug.com/641225): Remove these metrics after launching 0-RTT.
+  if (transaction_ && transaction_->GetResponseInfo() &&
+      IsTLS13OverTCP(*transaction_->GetResponseInfo())) {
+    base::UmaHistogramMediumTimes("Net.HttpTimeToFirstByte.TLS13", to_start);
+    if (HasGoogleHost(request()->url())) {
+      base::UmaHistogramMediumTimes("Net.HttpTimeToFirstByte.TLS13.Google",
+                                    to_start);
+    }
+  }
 }
 
 void URLRequestHttpJob::ResetTimer() {
@@ -1406,6 +1450,13 @@ void URLRequestHttpJob::SetRequestHeadersCallback(
   request_headers_callback_ = std::move(callback);
 }
 
+void URLRequestHttpJob::SetEarlyResponseHeadersCallback(
+    ResponseHeadersCallback callback) {
+  DCHECK(!transaction_);
+  DCHECK(!early_response_headers_callback_);
+  early_response_headers_callback_ = std::move(callback);
+}
+
 void URLRequestHttpJob::SetResponseHeadersCallback(
     ResponseHeadersCallback callback) {
   DCHECK(!transaction_);
@@ -1413,7 +1464,7 @@ void URLRequestHttpJob::SetResponseHeadersCallback(
   response_headers_callback_ = std::move(callback);
 }
 
-void URLRequestHttpJob::RecordPerfHistograms(CompletionCause reason) {
+void URLRequestHttpJob::RecordCompletionHistograms(CompletionCause reason) {
   if (start_time_.is_null())
     return;
 
@@ -1440,6 +1491,19 @@ void URLRequestHttpJob::RecordPerfHistograms(CompletionCause reason) {
       if (used_quic) {
         UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTime.Secure.Quic",
                                    total_time);
+      }
+    }
+
+    // Record metrics for TLS 1.3 to measure the impact of 0-RTT. See comment in
+    // RecordTimer().
+    //
+    // TODO(https://crbug.com/641225): Remove these metrics after launching
+    // 0-RTT.
+    if (IsTLS13OverTCP(*response_info_)) {
+      base::UmaHistogramTimes("Net.HttpJob.TotalTime.TLS13", total_time);
+      if (is_https_google) {
+        base::UmaHistogramTimes("Net.HttpJob.TotalTime.TLS13.Google",
+                                total_time);
       }
     }
 
@@ -1489,7 +1553,7 @@ void URLRequestHttpJob::DoneWithRequest(CompletionCause reason) {
     network_quality_estimator->NotifyRequestCompleted(*request());
   }
 
-  RecordPerfHistograms(reason);
+  RecordCompletionHistograms(reason);
   request()->set_received_response_content_length(prefilter_bytes_read());
 }
 

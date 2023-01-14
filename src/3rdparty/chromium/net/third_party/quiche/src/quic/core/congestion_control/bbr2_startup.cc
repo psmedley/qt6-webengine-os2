@@ -23,16 +23,14 @@ Bbr2StartupMode::Bbr2StartupMode(const Bbr2Sender* sender,
   sender_->connection_stats_->slowstart_count = 1;
   sender_->connection_stats_->slowstart_duration = QuicTimeAccumulator();
   sender_->connection_stats_->slowstart_duration.Start(now);
-  if (sender->Params().bw_startup) {
-    // Enter() is never called for Startup, so the gains needs to be set here.
-    model_->set_pacing_gain(Params().startup_pacing_gain);
-    model_->set_cwnd_gain(Params().startup_cwnd_gain);
-  }
+  // Enter() is never called for Startup, so the gains needs to be set here.
+  model_->set_pacing_gain(Params().startup_pacing_gain);
+  model_->set_cwnd_gain(Params().startup_cwnd_gain);
 }
 
 void Bbr2StartupMode::Enter(QuicTime /*now*/,
                             const Bbr2CongestionEvent* /*congestion_event*/) {
-  QUIC_BUG << "Bbr2StartupMode::Enter should not be called";
+  QUIC_BUG(quic_bug_10463_1) << "Bbr2StartupMode::Enter should not be called";
 }
 
 void Bbr2StartupMode::Leave(QuicTime now,
@@ -63,7 +61,6 @@ Bbr2Mode Bbr2StartupMode::OnCongestionEvent(
 
   if (Params().decrease_startup_pacing_at_end_of_round) {
     QUICHE_DCHECK_GT(model_->pacing_gain(), 0);
-    QUICHE_DCHECK(Params().bw_startup);
     if (congestion_event.end_of_round_trip &&
         !congestion_event.last_sample_is_app_limited) {
       // Multiply by startup_pacing_gain, so if the bandwidth doubles,
@@ -92,10 +89,6 @@ Bbr2Mode Bbr2StartupMode::OnCongestionEvent(
       }
       max_bw_at_round_beginning_ = model_->MaxBandwidth();
     }
-  } else if (!Params().bw_startup) {
-    // When the flag is enabled, set these in the constructor.
-    model_->set_pacing_gain(Params().startup_pacing_gain);
-    model_->set_cwnd_gain(Params().startup_cwnd_gain);
   }
 
   // TODO(wub): Maybe implement STARTUP => PROBE_RTT.
@@ -119,8 +112,9 @@ void Bbr2StartupMode::CheckExcessiveLosses(
         new_inflight_hi = model_->max_bytes_delivered_in_round();
       }
     }
-    QUIC_DVLOG(3) << sender_ << " Exiting STARTUP due to loss. inflight_hi:"
-                  << new_inflight_hi;
+    QUIC_DVLOG(3) << sender_ << " Exiting STARTUP due to loss at round "
+                  << model_->RoundTripCount()
+                  << ". inflight_hi:" << new_inflight_hi;
     // TODO(ianswett): Add a shared method to set inflight_hi in the model.
     model_->set_inflight_hi(new_inflight_hi);
     model_->set_full_bandwidth_reached();

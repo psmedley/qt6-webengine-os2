@@ -38,9 +38,12 @@
 #include "storage/browser/blob/blob_impl.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_event_status.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
+#include "url/origin.h"
 
 namespace content {
 namespace service_worker_main_resource_loader_unittest {
@@ -388,7 +391,6 @@ class FetchEventServiceWorker : public FakeServiceWorker {
 network::mojom::URLResponseHeadPtr CreateResponseInfoFromServiceWorker() {
   auto head = network::mojom::URLResponseHead::New();
   head->was_fetched_via_service_worker = true;
-  head->was_fallback_required_by_service_worker = false;
   head->url_list_via_service_worker = std::vector<GURL>();
   head->response_type = network::mojom::FetchResponseType::kDefault;
   head->cache_storage_cache_name = std::string();
@@ -419,7 +421,8 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
     blink::mojom::ServiceWorkerRegistrationOptions options;
     options.scope = GURL("https://example.com/");
     registration_ = CreateNewServiceWorkerRegistration(
-        helper_->context()->registry(), options);
+        helper_->context()->registry(), options,
+        blink::StorageKey(url::Origin::Create(options.scope)));
     version_ = CreateNewServiceWorkerVersion(
         helper_->context()->registry(), registration_.get(),
         GURL("https://example.com/service_worker.js"),
@@ -436,7 +439,7 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
 
     // Make the registration findable via storage functions.
     registration_->set_last_update_check(base::Time::Now());
-    base::Optional<blink::ServiceWorkerStatusCode> status;
+    absl::optional<blink::ServiceWorkerStatusCode> status;
     base::RunLoop run_loop;
     registry()->StoreRegistration(
         registration_.get(), version_.get(),
@@ -458,7 +461,7 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
     // create a response. The main script response is set when the first
     // TransferInstalledScript().
     {
-      base::Optional<blink::ServiceWorkerStatusCode> status;
+      absl::optional<blink::ServiceWorkerStatusCode> status;
       base::RunLoop loop;
       version_->StartWorker(
           ServiceWorkerMetrics::EventType::UNKNOWN,
@@ -498,9 +501,7 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
     loader_ = std::make_unique<ServiceWorkerMainResourceLoader>(
         base::BindOnce(&ServiceWorkerMainResourceLoaderTest::Fallback,
                        base::Unretained(this)),
-        container_host_,
-        base::WrapRefCounted<URLLoaderFactoryGetter>(
-            helper_->context()->loader_factory_getter()));
+        container_host_);
 
     // Load |request.url|.
     loader_->StartRequest(*request, loader_remote_.BindNewPipeAndPassReceiver(),
@@ -532,8 +533,6 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
       const network::mojom::URLResponseHead& expected_info) {
     EXPECT_EQ(expected_info.was_fetched_via_service_worker,
               info.was_fetched_via_service_worker);
-    EXPECT_EQ(expected_info.was_fallback_required_by_service_worker,
-              info.was_fallback_required_by_service_worker);
     EXPECT_EQ(expected_info.url_list_via_service_worker,
               info.url_list_via_service_worker);
     EXPECT_EQ(expected_info.response_type, info.response_type);

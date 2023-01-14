@@ -15,7 +15,6 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -110,8 +109,8 @@ BluetoothDevice::ConnectionInfo::ConnectionInfo(int rssi,
 
 BluetoothDevice::ConnectionInfo::~ConnectionInfo() = default;
 
-base::string16 BluetoothDevice::GetNameForDisplay() const {
-  base::Optional<std::string> name = GetName();
+std::u16string BluetoothDevice::GetNameForDisplay() const {
+  absl::optional<std::string> name = GetName();
   if (name && HasGraphicCharacter(name.value())) {
     return base::UTF8ToUTF16(name.value());
   } else {
@@ -119,8 +118,8 @@ base::string16 BluetoothDevice::GetNameForDisplay() const {
   }
 }
 
-base::string16 BluetoothDevice::GetAddressWithLocalizedDeviceTypeName() const {
-  base::string16 address_utf16 = base::UTF8ToUTF16(GetAddress());
+std::u16string BluetoothDevice::GetAddressWithLocalizedDeviceTypeName() const {
+  std::u16string address_utf16 = base::UTF8ToUTF16(GetAddress());
   BluetoothDeviceType device_type = GetDeviceType();
   switch (device_type) {
     case BluetoothDeviceType::COMPUTER:
@@ -203,7 +202,6 @@ BluetoothDeviceType BluetoothDevice::GetDeviceType() const {
         default:
           return BluetoothDeviceType::AUDIO;
       }
-      break;
     case 0x05:
       // Peripheral major device class.
       switch ((bluetooth_class & 0xc0) >> 6) {
@@ -219,7 +217,6 @@ BluetoothDeviceType BluetoothDevice::GetDeviceType() const {
             default:
               return BluetoothDeviceType::PERIPHERAL;
           }
-          break;
         case 0x01:
           // Keyboard.
           return BluetoothDeviceType::KEYBOARD;
@@ -233,7 +230,6 @@ BluetoothDeviceType BluetoothDevice::GetDeviceType() const {
               // Mouse.
               return BluetoothDeviceType::MOUSE;
           }
-          break;
         case 0x03:
           // Combo device.
           return BluetoothDeviceType::KEYBOARD_MOUSE_COMBO;
@@ -343,30 +339,28 @@ const std::vector<uint8_t>* BluetoothDevice::GetManufacturerDataForID(
   return nullptr;
 }
 
-base::Optional<int8_t> BluetoothDevice::GetInquiryRSSI() const {
+absl::optional<int8_t> BluetoothDevice::GetInquiryRSSI() const {
   return inquiry_rssi_;
 }
 
-base::Optional<uint8_t> BluetoothDevice::GetAdvertisingDataFlags() const {
+absl::optional<uint8_t> BluetoothDevice::GetAdvertisingDataFlags() const {
   return advertising_data_flags_;
 }
 
-base::Optional<int8_t> BluetoothDevice::GetInquiryTxPower() const {
+absl::optional<int8_t> BluetoothDevice::GetInquiryTxPower() const {
   return inquiry_tx_power_;
 }
 
 void BluetoothDevice::CreateGattConnection(
     GattConnectionCallback callback,
-    ConnectErrorCallback error_callback,
-    base::Optional<BluetoothUUID> service_uuid) {
+    absl::optional<BluetoothUUID> service_uuid) {
   if (!supports_service_specific_discovery_)
     service_uuid.reset();
 
   const bool connection_already_pending =
-      !create_gatt_connection_success_callbacks_.empty();
+      !create_gatt_connection_callbacks_.empty();
 
-  create_gatt_connection_success_callbacks_.push_back(std::move(callback));
-  create_gatt_connection_error_callbacks_.push_back(std::move(error_callback));
+  create_gatt_connection_callbacks_.push_back(std::move(callback));
 
   // If a service-specific discovery was originally requested, but this request
   // is for a different or non-specific discovery, then the previous discovery
@@ -379,7 +373,7 @@ void BluetoothDevice::CreateGattConnection(
 
   if (IsGattConnected()) {
     DCHECK(!connection_already_pending);
-    return DidConnectGatt();
+    return DidConnectGatt(/*error_code=*/absl::nullopt);
   }
 
   if (connection_already_pending) {
@@ -422,9 +416,9 @@ std::string BluetoothDevice::GetIdentifier() const {
 
 void BluetoothDevice::UpdateAdvertisementData(
     int8_t rssi,
-    base::Optional<uint8_t> flags,
+    absl::optional<uint8_t> flags,
     UUIDList advertised_uuids,
-    base::Optional<int8_t> tx_power,
+    absl::optional<int8_t> tx_power,
     ServiceDataMap service_data,
     ManufacturerDataMap manufacturer_data) {
   UpdateTimestamp();
@@ -474,7 +468,7 @@ BluetoothDevice::GetPrimaryServicesByUUID(const BluetoothUUID& service_uuid) {
 
 #if defined(OS_CHROMEOS) || defined(OS_LINUX)
 void BluetoothDevice::SetBatteryPercentage(
-    base::Optional<uint8_t> battery_percentage) {
+    absl::optional<uint8_t> battery_percentage) {
   if (battery_percentage)
     DCHECK_LE(battery_percentage.value(), 100);
 
@@ -501,32 +495,33 @@ BluetoothDevice::CreateBluetoothGattConnectionObject() {
   return std::make_unique<BluetoothGattConnection>(adapter_, GetAddress());
 }
 
-void BluetoothDevice::DidConnectGatt() {
-  for (auto& callback : create_gatt_connection_success_callbacks_)
-    std::move(callback).Run(CreateBluetoothGattConnectionObject());
+void BluetoothDevice::DidConnectGatt(absl::optional<ConnectErrorCode> error) {
+  if (error.has_value()) {
+    // Connection request should only be made if there are no active
+    // connections.
+    DCHECK(gatt_connections_.empty());
 
-  create_gatt_connection_success_callbacks_.clear();
-  create_gatt_connection_error_callbacks_.clear();
+    target_service_.reset();
+
+    for (auto& callback : create_gatt_connection_callbacks_)
+      std::move(callback).Run(/*connection=*/nullptr, error.value());
+    create_gatt_connection_callbacks_.clear();
+    return;
+  }
+
+  for (auto& callback : create_gatt_connection_callbacks_) {
+    std::move(callback).Run(CreateBluetoothGattConnectionObject(),
+                            /*error_code=*/absl::nullopt);
+  }
+
+  create_gatt_connection_callbacks_.clear();
   GetAdapter()->NotifyDeviceChanged(this);
-}
-
-void BluetoothDevice::DidFailToConnectGatt(ConnectErrorCode error) {
-  // Connection request should only be made if there are no active
-  // connections.
-  DCHECK(gatt_connections_.empty());
-
-  target_service_.reset();
-
-  for (auto& error_callback : create_gatt_connection_error_callbacks_)
-    std::move(error_callback).Run(error);
-  create_gatt_connection_success_callbacks_.clear();
-  create_gatt_connection_error_callbacks_.clear();
 }
 
 void BluetoothDevice::DidDisconnectGatt() {
   // Pending calls to connect GATT are not expected, if they were then
-  // DidFailToConnectGatt should have been called.
-  DCHECK(create_gatt_connection_error_callbacks_.empty());
+  // DidConnectGatt should have been called.
+  DCHECK(create_gatt_connection_callbacks_.empty());
 
   target_service_.reset();
 
@@ -558,8 +553,7 @@ void BluetoothDevice::SetAsExpiredForTesting() {
 }
 
 void BluetoothDevice::Pair(PairingDelegate* pairing_delegate,
-                           base::OnceClosure callback,
-                           ConnectErrorCallback error_callback) {
+                           ConnectCallback callback) {
   NOTREACHED();
 }
 

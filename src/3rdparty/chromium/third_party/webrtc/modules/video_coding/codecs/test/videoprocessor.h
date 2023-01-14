@@ -121,7 +121,6 @@ class VideoProcessor {
           : video_processor_(video_processor),
             encoded_image_(encoded_image),
             codec_specific_info_(*codec_specific_info) {
-        encoded_image_.Retain();
       }
 
       bool Run() override {
@@ -220,7 +219,7 @@ class VideoProcessor {
   std::vector<std::unique_ptr<VideoProcessorDecodeCompleteCallback>>
       decode_callback_;
 
-  // Each call to ProcessFrame() will read one frame from |input_frame_reader_|.
+  // Each call to ProcessFrame() will read one frame from `input_frame_reader_`.
   FrameReader* const input_frame_reader_;
 
   // Input frames are used as reference for frame quality evaluations.

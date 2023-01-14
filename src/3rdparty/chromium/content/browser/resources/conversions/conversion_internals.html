@@ -10,82 +10,92 @@
 
   <link rel="stylesheet" href="conversion_internals.css">
   <script type="module" src="conversion_internals.js"></script>
-  <title>Conversion Internals</title>
+  <title>Attribution Reporting API Internals</title>
 </head>
 <body>
 
 <div id="page-heading">
-  Conversion Internals
+  Attribution Reporting API Internals
 </div>
+<div id="info">
+  <p>Learn more:
+    <a href="https://web.dev/using-conversion-measurement/" target="_blank">
+      Attribution Reporting API
+    </a>
+  <p>Attribution reporting is currently <span id="feature-status-content"></span>.
+</div>
+<hr>
 <div id="page-content">
-  <h2> General Info </h2>
-  <div class="content">
-    <div>
-      Conversion measurement is currently <span id="feature-status-content"></span>.
-      For a detailed explanation of the API and it's behavior, see
-      <a href="https://github.com/WICG/conversion-measurement-api/blob/master/README.md" target="_blank">
-        the explainer
-      </a>.
-    </div>
-    <div>
-      <button id="refresh">Refresh all page data</button>
-      <button id="clear-data">Clear all conversions data</button>
-    </div>
+  <div>
+    <button id="refresh">Refresh all page data</button>
+    <button id="clear-data">Clear all attribution data</button>
   </div>
-  <h2> Active Impressions </h2>
+  <h2> Active Sources </h2>
   <div class="content">
     <div class="table-wrapper">
-      <table id="impression-table">
+      <table id="source-table">
         <thead>
           <tr class="header-row">
             <th>
-            Impression Data
+              Source Event ID
             </th>
             <th>
-              Impression origin
+              Source Origin
             </th>
             <th>
-              Conversion Destination
+              Destination
             </th>
             <th>
-              Reporting Origin
+              Report To
             </th>
             <th>
-              Impression Time
+              Source Registration Time
             </th>
             <th>
               Expiry Time
             </th>
+            <th>
+              Source Type
+            </th>
+            <th>
+              Priority
+            </th>
+            <th>
+              Dedup Keys
+            </th>
           </tr>
         </thead>
-        <tbody id="impression-table-body">
+        <tbody id="source-table-body">
         </tbody>
       </table>
     </div>
   </div>
   <h2> Pending Reports </h2>
   <div class="content">
+    <div>
+      <span id="debug-mode-content"></span>
+    </div>
     <div class="table-wrapper">
       <table id="report-table">
         <thead>
           <tr class="header-row">
             <th>
-              Impression Data
+              Source Event ID
             </th>
             <th>
-              Conversion Data
+              Trigger Data
             </th>
             <th>
-              Conversion Origin
+              Destination
             </th>
             <th>
-              Reporting Origin
+              Report To
             </th>
             <th>
               Report Time
             </th>
             <th>
-              Attribution Credit
+              Source Type
             </th>
           </tr>
         </thead>
@@ -97,27 +107,60 @@
       <button id="send-reports">Send All Reports</button>
     </div>
   </div>
+  <h2> Sent Reports </h2>
+  <div class="content">
+    <div class="table-wrapper">
+      <table id="sent-report-table">
+        <thead>
+          <tr class="header-row">
+            <th>
+              Report URL
+            </th>
+            <th>
+              Report Body
+            </th>
+            <th>
+              HTTP Response Code
+            </th>
+          </tr>
+        </thead>
+        <tbody id="sent-report-table-body">
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
-<template id="impressionrow">
+<template id="source-row">
   <tr>
-    <td class="impression-data-cell"></td>
-    <td class="impression-origin-cell"></td>
-    <td class="conversion-destination-cell"></td>
-    <td class="reporting-origin-cell"></td>
-    <td class="impression-time-cell"></td>
+    <td class="source-event-id-cell"></td>
+    <td class="source-origin-cell"></td>
+    <td class="destination-cell"></td>
+    <td class="report-to-cell"></td>
+    <td class="source-registration-time-cell"></td>
     <td class="expiry-time-cell"></td>
+    <td class="source-type-cell"></td>
+    <td class="priority-cell"></td>
+    <td class="dedup-keys-cell"></td>
   </tr>
 </template>
 
-<template id="reportrow">
+<template id="report-row">
   <tr>
-    <td class="impression-data-cell"></td>
-    <td class="conversion-data-cell"></td>
-    <td class="conversion-origin-cell"></td>
-    <td class="reporting-origin-cell"></td>
+    <td class="source-event-id-cell"></td>
+    <td class="trigger-data-cell"></td>
+    <td class="destination-cell"></td>
+    <td class="report-to-cell"></td>
     <td class="report-time-cell"></td>
-    <td class="attibution-credit-cell"></td>
+    <td class="source-type-cell"></td>
+  </tr>
+</template>
+
+<template id="sent-report-row">
+  <tr>
+    <td class="report-url-cell"></td>
+    <td class="report-body-cell"></td>
+    <td class="http-response-code-cell"></td>
   </tr>
 </template>
 </body>

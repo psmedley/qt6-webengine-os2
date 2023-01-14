@@ -8,7 +8,6 @@
 
 #include <utility>
 
-#include "build/chromeos_buildflags.h"
 #include "pdf/pdf_engine.h"
 #include "pdf/pdf_init.h"
 #include "ui/gfx/geometry/rect.h"
@@ -22,7 +21,7 @@ class ScopedSdkInitializer {
  public:
   explicit ScopedSdkInitializer(bool enable_v8) {
     if (!IsSDKInitializedViaPlugin())
-      InitializeSDK(enable_v8);
+      InitializeSDK(enable_v8, FontMappingMode::kNoMapping);
   }
 
   ScopedSdkInitializer(const ScopedSdkInitializer&) = delete;
@@ -36,13 +35,13 @@ class ScopedSdkInitializer {
 
 }  // namespace
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
 std::vector<uint8_t> CreateFlattenedPdf(
     base::span<const uint8_t> input_buffer) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/false);
   return PDFEngineExports::Get()->CreateFlattenedPdf(input_buffer);
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
 bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
@@ -93,7 +92,7 @@ bool GetPDFDocInfo(base::span<const uint8_t> pdf_buffer,
   return engine_exports->GetPDFDocInfo(pdf_buffer, page_count, max_page_width);
 }
 
-base::Optional<bool> IsPDFDocTagged(base::span<const uint8_t> pdf_buffer) {
+absl::optional<bool> IsPDFDocTagged(base::span<const uint8_t> pdf_buffer) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   return engine_exports->IsPDFDocTagged(pdf_buffer);
@@ -106,7 +105,7 @@ base::Value GetPDFStructTreeForPage(base::span<const uint8_t> pdf_buffer,
   return engine_exports->GetPDFStructTreeForPage(pdf_buffer, page_index);
 }
 
-base::Optional<gfx::SizeF> GetPDFPageSizeByIndex(
+absl::optional<gfx::SizeF> GetPDFPageSizeByIndex(
     base::span<const uint8_t> pdf_buffer,
     int page_number) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);

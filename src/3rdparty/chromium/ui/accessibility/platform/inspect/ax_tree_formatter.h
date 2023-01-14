@@ -19,6 +19,7 @@ class Value;
 namespace ui {
 
 class AXNode;
+class AXScriptInstruction;
 class AXTreeID;
 class AXPlatformNodeDelegate;
 
@@ -49,6 +50,13 @@ class AX_EXPORT AXTreeFormatter {
   // Formats a given web content accessible tree.
   // |root| must be non-null and must be in web content.
   virtual std::string Format(AXPlatformNodeDelegate* root) const = 0;
+
+  // Formats a given web node (i.e. without children).
+  virtual std::string FormatNode(AXPlatformNodeDelegate* node) const = 0;
+
+  // Similar to BuildTree, but generates a dictionary just for the current
+  // web node (i.e. without children).
+  virtual base::Value BuildNode(AXPlatformNodeDelegate* node) const = 0;
 
   // Build an accessibility tree for any window.
   //
@@ -90,7 +98,14 @@ class AX_EXPORT AXTreeFormatter {
   // Dumps accessibility tree.
   virtual std::string FormatTree(const base::Value& tree_node) const = 0;
 
-  // Propery filter predefined sets.
+  // Evaluates script instructions between the given indices.
+  virtual std::string EvaluateScript(
+      AXPlatformNodeDelegate* root,
+      const std::vector<AXScriptInstruction>& instructions,
+      size_t start_index,
+      size_t end_index) const = 0;
+
+  // Property filter predefined sets.
   enum PropertyFilterSet {
     // Empty set.
     kFiltersEmptySet,

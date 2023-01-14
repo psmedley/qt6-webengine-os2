@@ -12,6 +12,8 @@
 
 namespace blink {
 
+class LayoutSVGInlineText;
+class NGFragmentItem;
 struct NGTextFragmentPaintInfo;
 
 // Text painter for LayoutNG, logic shared between legacy layout and LayoutNG
@@ -23,6 +25,29 @@ class CORE_EXPORT NGTextPainter : public TextPainterBase {
   STACK_ALLOCATED();
 
  public:
+  class SvgTextPaintState final {
+   public:
+    SvgTextPaintState(const LayoutSVGInlineText&,
+                      const ComputedStyle&,
+                      bool is_rendering_clip_path_as_mask_image);
+
+    const LayoutSVGInlineText& InlineText() const;
+    const ComputedStyle& Style() const;
+    bool IsPaintingSelection() const;
+    bool IsRenderingClipPathAsMaskImage() const;
+
+    AffineTransform& EnsureShaderTransform();
+    const AffineTransform* GetShaderTransform() const;
+
+   private:
+    const LayoutSVGInlineText& layout_svg_inline_text_;
+    const ComputedStyle& style_;
+    absl::optional<AffineTransform> shader_transform_;
+    bool is_painting_selection_ = false;
+    bool is_rendering_clip_path_as_mask_image_ = false;
+    friend class NGTextPainter;
+  };
+
   NGTextPainter(GraphicsContext& context,
                 const Font& font,
                 const NGTextFragmentPaintInfo& fragment_paint_info,
@@ -57,6 +82,28 @@ class CORE_EXPORT NGTextPainter : public TextPainterBase {
                          const PhysicalRect& selection_rect,
                          DOMNodeId node_id);
 
+  void PaintDecorationsExceptLineThrough(
+      const NGFragmentItem& text_item,
+      const PaintInfo& paint_info,
+      const ComputedStyle& style,
+      const TextPaintStyle& text_style,
+      const PhysicalRect& decoration_rect,
+      const absl::optional<AppliedTextDecoration>& selection_decoration,
+      bool* has_line_through_decoration);
+
+  void PaintDecorationsOnlyLineThrough(
+      const NGFragmentItem& text_item,
+      const PaintInfo& paint_info,
+      const ComputedStyle& style,
+      const TextPaintStyle& text_style,
+      const PhysicalRect& decoration_rect,
+      const absl::optional<AppliedTextDecoration>& selection_decoration);
+
+  SvgTextPaintState& SetSvgState(const LayoutSVGInlineText&,
+                                 const ComputedStyle&,
+                                 bool is_rendering_clip_path_as_mask_image);
+  SvgTextPaintState* GetSvgState();
+
  private:
   template <PaintInternalStep step>
   void PaintInternalFragment(unsigned from, unsigned to, DOMNodeId node_id);
@@ -67,10 +114,11 @@ class CORE_EXPORT NGTextPainter : public TextPainterBase {
                      unsigned truncation_point,
                      DOMNodeId node_id);
 
-  void PaintEmphasisMarkForCombinedText();
+  void PaintSvgTextFragment(DOMNodeId node_id);
 
   NGTextFragmentPaintInfo fragment_paint_info_;
   const IntRect& visual_rect_;
+  absl::optional<SvgTextPaintState> svg_text_paint_state_;
 };
 
 }  // namespace blink

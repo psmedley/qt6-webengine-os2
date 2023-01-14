@@ -19,18 +19,19 @@
 #include <functional>
 #include <memory>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/time/time.h"
 #include "platform/api/platform.h"
 #include "platform/api/scheduled_executor.h"
 #include "platform/base/runnable.h"
 #include "platform/public/cancelable.h"
 #include "platform/public/cancellable_task.h"
 #include "platform/public/lockable.h"
+#include "platform/public/monitored_runnable.h"
 #include "platform/public/mutex.h"
 #include "platform/public/mutex_lock.h"
 #include "platform/public/thread_check_callable.h"
 #include "platform/public/thread_check_runnable.h"
-#include "absl/base/thread_annotations.h"
-#include "absl/time/time.h"
 
 namespace location {
 namespace nearby {
@@ -59,6 +60,14 @@ class ABSL_LOCKABLE ScheduledExecutor final : public Lockable {
     }
     return *this;
   }
+  void Execute(const std::string& name, Runnable&& runnable)
+      ABSL_LOCKS_EXCLUDED(mutex_) {
+    MutexLock lock(&mutex_);
+    if (impl_)
+      impl_->Execute(MonitoredRunnable(
+          name, ThreadCheckRunnable(this, std::move(runnable))));
+  }
+
   void Execute(Runnable&& runnable) ABSL_LOCKS_EXCLUDED(mutex_) {
     MutexLock lock(&mutex_);
     if (impl_) impl_->Execute(ThreadCheckRunnable(this, std::move(runnable)));

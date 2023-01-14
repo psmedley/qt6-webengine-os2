@@ -18,68 +18,105 @@ namespace blink {
 
 namespace {
 
+using mojom::blink::LogoutStatus;
+using mojom::blink::ProvideIdTokenStatus;
+using mojom::blink::RequestIdTokenStatus;
+using mojom::blink::RequestMode;
+
+RequestMode ToRequestMode(const String& mode) {
+  if (mode == "mediated") {
+    return RequestMode::kMediated;
+  } else {
+    return RequestMode::kPermission;
+  }
+}
+
 void OnRequestIdToken(ScriptPromiseResolver* resolver,
-                      mojom::blink::RequestIdTokenStatus status,
+                      RequestIdTokenStatus status,
                       const WTF::String& id_token) {
   switch (status) {
-    case mojom::blink::RequestIdTokenStatus::kApprovalDeclined: {
+    case RequestIdTokenStatus::kApprovalDeclined: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kAbortError, "User declined the sign-in attempt."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kErrorTooManyRequests: {
+    case RequestIdTokenStatus::kErrorTooManyRequests: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kAbortError,
           "Only one navigator.id.get request may be outstanding at one time."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::
-        kErrorWebIdNotSupportedByProvider: {
+    case RequestIdTokenStatus::kErrorWebIdNotSupportedByProvider: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError,
           "The indicated provider does not support WebID."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kErrorFetchingWellKnown: {
+    case RequestIdTokenStatus::kErrorFetchingWellKnown: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError,
           "Error fetching the provider's .well-known configuration."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kErrorInvalidWellKnown: {
+    case RequestIdTokenStatus::kErrorInvalidWellKnown: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError,
           "Provider's .well-known configuration is invalid."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kErrorFetchingSignin: {
+    case RequestIdTokenStatus::kErrorFetchingSignin: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError,
           "Error attempting to reach the provider's sign-in endpoint."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kErrorInvalidSigninResponse: {
+    case RequestIdTokenStatus::kErrorInvalidSigninResponse: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError,
           "Provider's sign-in response is invalid"));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kError: {
+    case RequestIdTokenStatus::kErrorInvalidAccountsResponse: {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNetworkError,
+          "Provider's accounts response is invalid"));
+      return;
+    }
+    case RequestIdTokenStatus::kErrorInvalidTokenResponse: {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNetworkError,
+          "Provider's token response is invalid"));
+      return;
+    }
+    case RequestIdTokenStatus::kError: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNetworkError, "Error retrieving an id token."));
       return;
     }
-    case mojom::blink::RequestIdTokenStatus::kSuccess: {
+    case RequestIdTokenStatus::kSuccess: {
       resolver->Resolve(id_token);
       return;
     }
   }
 }
 
+void OnLogout(ScriptPromiseResolver* resolver, LogoutStatus status) {
+  // TODO(kenrb); There should be more thought put into how this API works.
+  // Returning success or failure doesn't have a lot of meaning. If some
+  // logout attempts fail and others succeed, and even different attempts
+  // fail for different reasons, how does that get conveyed to the caller?
+  if (status != LogoutStatus::kSuccess) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNetworkError, "Error logging out endpoints."));
+    return;
+  }
+  resolver->Resolve();
+}
+
 void OnProvideIdToken(ScriptPromiseResolver* resolver,
-                      mojom::blink::ProvideIdTokenStatus status) {
+                      ProvideIdTokenStatus status) {
   // TODO(kenrb): Provide better messages for different error codes.
-  if (status != mojom::blink::ProvideIdTokenStatus::kSuccess) {
+  if (status != ProvideIdTokenStatus::kSuccess) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNetworkError, "Error providing the id token."));
     return;
@@ -97,23 +134,15 @@ WebId::WebId(ExecutionContext& context)
 ScriptPromise WebId::get(ScriptState* script_state,
                          const WebIdRequestOptions* options,
                          ExceptionState& exception_state) {
-  if (!options->hasProvider()) {
-    exception_state.ThrowTypeError("Invalid parameters: provider required.");
-    return ScriptPromise();
-  }
-
-  if (!options->hasRequest()) {
-    exception_state.ThrowTypeError("Invalid parameters: request required.");
-    return ScriptPromise();
-  }
+  DCHECK(options->hasMode());
 
   // TODO(kenrb): Add some renderer-side validation here, such as validating
   // |provider|, and making sure the calling context is legal. Some of this
   // has not been spec'd yet.
   KURL provider = KURL(NullURL(), options->provider());
   if (!provider.IsValid()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
-                                      "Invalid provider URL");
+    exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                      "Invalid provider URL.");
     return ScriptPromise();
   }
 
@@ -122,8 +151,11 @@ ScriptPromise WebId::get(ScriptState* script_state,
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
+  String client_id = options->hasClientId() ? options->clientId() : "";
+  String nonce = options->hasNonce() ? options->nonce() : "";
+
   auth_request_->RequestIdToken(
-      provider, options->request(),
+      provider, client_id, nonce, ToRequestMode(options->mode()),
       WTF::Bind(&OnRequestIdToken, WrapPersistent(resolver)));
 
   return promise;
@@ -137,6 +169,23 @@ ScriptPromise WebId::provide(ScriptState* script_state, String id_token) {
 
   auth_response_->ProvideIdToken(
       id_token, WTF::Bind(&OnProvideIdToken, WrapPersistent(resolver)));
+
+  return promise;
+}
+
+ScriptPromise WebId::logout(ScriptState* script_state,
+                            const Vector<String>& logout_endpoints) {
+  if (logout_endpoints.IsEmpty()) {
+    return ScriptPromise();
+  }
+
+  BindRemote(auth_request_);
+
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  auth_request_->Logout(logout_endpoints,
+                        WTF::Bind(&OnLogout, WrapPersistent(resolver)));
 
   return promise;
 }

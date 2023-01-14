@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <utility>
@@ -51,9 +52,10 @@ struct Win32X64Traits {
   using Address = uint64_t;
 };
 
-template <class Traits>
+template <class TRAITS>
 class DisassemblerWin32 : public Disassembler {
  public:
+  using Traits = TRAITS;
   enum ReferenceType : uint8_t { kReloc, kAbs32, kRel32, kTypeCount };
 
   // Applies quick checks to determine whether |image| *may* point to the start
@@ -108,7 +110,8 @@ class DisassemblerWin32 : public Disassembler {
   std::vector<offset_t> reloc_block_offsets_;
   offset_t reloc_end_ = 0;
   std::vector<offset_t> abs32_locations_;
-  std::vector<offset_t> rel32_locations_;
+  // Using std::deque to reduce peak memory footprint.
+  std::deque<offset_t> rel32_locations_;
 
   // Initialization states of reference storage, used for lazy initialization.
   // TODO(huangs): Investigate whether lazy initialization is useful for memory

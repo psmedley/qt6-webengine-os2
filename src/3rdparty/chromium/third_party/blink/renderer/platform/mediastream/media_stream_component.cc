@@ -85,6 +85,12 @@ void MediaStreamComponent::GetSettings(
   platform_track_->GetSettings(settings);
 }
 
+MediaStreamTrackPlatform::CaptureHandle
+MediaStreamComponent::GetCaptureHandle() {
+  DCHECK(platform_track_);
+  return platform_track_->GetCaptureHandle();
+}
+
 void MediaStreamComponent::SetContentHint(
     WebMediaStreamTrack::ContentHintType hint) {
   switch (hint) {
@@ -111,7 +117,7 @@ void MediaStreamComponent::SetContentHint(
 
 void MediaStreamComponent::AudioSourceProviderImpl::ProvideInput(
     AudioBus* bus,
-    uint32_t frames_to_process) {
+    int frames_to_process) {
   DCHECK(bus);
   if (!bus)
     return;
@@ -131,6 +137,12 @@ void MediaStreamComponent::AudioSourceProviderImpl::ProvideInput(
     web_audio_data_[i] = bus->Channel(i)->MutableData();
 
   web_audio_source_provider_->ProvideInput(web_audio_data_, frames_to_process);
+}
+
+String MediaStreamComponent::ToString() const {
+  return String::Format(
+      "[id: %s, unique_id: %d, enabled: %s, muted=%s]", Id().Utf8().c_str(),
+      UniqueId(), Enabled() ? "true" : "false", Muted() ? "true" : "false");
 }
 
 void MediaStreamComponent::Trace(Visitor* visitor) const {

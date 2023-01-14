@@ -52,7 +52,7 @@ class Receiver {
   using ImplPointerType = typename ImplRefTraits::PointerType;
 
   // Constructs an unbound Receiver linked to |impl| for the duration of the
-  // Receive's lifetime. The Receiver can be bound later by calling |Bind()| or
+  // Receiver's lifetime. The Receiver can be bound later by calling |Bind()| or
   // |BindNewPipeAndPassRemote()|. An unbound Receiver does not schedule any
   // asynchronous tasks.
   explicit Receiver(ImplPointerType impl) : internal_state_(std::move(impl)) {}
@@ -136,6 +136,15 @@ class Receiver {
     DCHECK(!is_bound()) << "Receiver is already bound";
     PendingRemote<Interface> remote;
     Bind(remote.InitWithNewPipeAndPassReceiver(), std::move(task_runner));
+    return remote;
+  }
+
+  // Like above, but the returned PendingRemote has the version annotated.
+  PendingRemote<Interface> BindNewPipeAndPassRemoteWithVersion(
+      scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr)
+      WARN_UNUSED_RESULT {
+    auto remote = BindNewPipeAndPassRemote(task_runner);
+    remote.internal_state()->version = Interface::Version_;
     return remote;
   }
 
@@ -262,7 +271,7 @@ class Receiver {
 
   // Allows test code to swap the interface implementation.
   ImplPointerType SwapImplForTesting(ImplPointerType new_impl) {
-    return internal_state_.SwapImplForTesting(new_impl);
+    return internal_state_.SwapImplForTesting(std::move(new_impl));
   }
 
   // Reports the currently dispatching message as bad and resets this receiver.

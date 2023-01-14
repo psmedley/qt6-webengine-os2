@@ -10,6 +10,7 @@
 
 #include "base/auto_reset.h"
 #include "base/check_op.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/i18n/rtl.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -86,6 +87,10 @@ bool FocusManager::OnKeyEvent(const ui::KeyEvent& event) {
       View::Views views;
       focused_view_->parent()->GetViewsInGroup(focused_view_->GetGroup(),
                                                &views);
+      // Remove any views except current, which are disabled or hidden.
+      base::EraseIf(views, [this](View* v) {
+        return v != focused_view_ && !v->IsAccessibilityFocusable();
+      });
       View::Views::const_iterator i(
           std::find(views.begin(), views.end(), focused_view_));
       DCHECK(i != views.end());
@@ -165,7 +170,7 @@ bool FocusManager::RotatePaneFocus(Direction direction,
   // is initially focused.
   if (panes.empty())
     return false;
-  int count = int{panes.size()};
+  int count = static_cast<int>(panes.size());
 
   // Initialize |index| to an appropriate starting index if nothing is
   // focused initially.
@@ -330,6 +335,10 @@ void FocusManager::SetKeyboardAccessible(bool keyboard_accessible) {
   AdvanceFocusIfNecessary();
 }
 
+bool FocusManager::IsSettingFocusedView() const {
+  return setting_focused_view_entrance_count > 0;
+}
+
 void FocusManager::SetFocusedViewWithReason(View* view,
                                             FocusChangeReason reason) {
   if (focused_view_ == view)
@@ -339,9 +348,9 @@ void FocusManager::SetFocusedViewWithReason(View* view,
   // Change this to DCHECK once it's resolved.
   CHECK(!view || ContainsView(view));
 
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
   // TODO(warx): There are some AccessiblePaneViewTest failed on macosx.
-  // crbug.com/650859. Remove !defined(OS_APPLE) once that is fixed.
+  // crbug.com/650859. Remove !defined(OS_MAC) once that is fixed.
   //
   // If the widget isn't active store the focused view and then attempt to
   // activate the widget. If activation succeeds |view| will be focused.
@@ -362,6 +371,10 @@ void FocusManager::SetFocusedViewWithReason(View* view,
 
   View* old_focused_view = focused_view_;
   focused_view_ = view;
+  base::AutoReset<int> entrance_count_resetter(
+      &setting_focused_view_entrance_count,
+      setting_focused_view_entrance_count + 1);
+
   if (old_focused_view) {
     old_focused_view->RemoveObserver(this);
     old_focused_view->Blur();
@@ -528,7 +541,7 @@ bool FocusManager::ProcessAccelerator(const ui::Accelerator& accelerator) {
   if (delegate_ && delegate_->ProcessAccelerator(accelerator))
     return true;
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // On MacOS accelerators are processed when a bubble is opened without
   // manual redirection to bubble anchor widget. Including redirect on MacOS
   // breaks processing accelerators by the bubble itself.
@@ -593,7 +606,7 @@ bool FocusManager::IsFocusable(View* view) const {
   DCHECK(view);
 
 // |keyboard_accessible_| is only used on Mac.
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   return keyboard_accessible_ ? view->IsAccessibilityFocusable()
                               : view->IsFocusable();
 #else

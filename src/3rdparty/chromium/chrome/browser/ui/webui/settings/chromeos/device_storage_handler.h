@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/scoped_observation.h"
-#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
-#include "chrome/browser/chromeos/arc/session/arc_session_manager_observer.h"
+#include "chrome/browser/ash/arc/session/arc_session_manager.h"
+#include "chrome/browser/ash/arc/session/arc_session_manager_observer.h"
 #include "chrome/browser/ui/webui/settings/chromeos/calculator/size_calculator.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "chromeos/disks/disk_mount_manager.h"
@@ -68,7 +68,7 @@ class StorageHandler : public ::settings::SettingsPageUIHandler,
   void OnSizeCalculated(
       const calculator::SizeCalculator::CalculationType& calculation_type,
       int64_t total_bytes,
-      const base::Optional<int64_t>& available_bytes = base::nullopt) override;
+      const absl::optional<int64_t>& available_bytes = absl::nullopt) override;
 
   // Remove the handler from the list of observers of every observed instances.
   void StopObservingEvents();

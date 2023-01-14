@@ -51,13 +51,13 @@ const download::ServiceConfig& TestDownloadService::GetConfig() {
 }
 
 void TestDownloadService::StartDownload(
-    const download::DownloadParams& download_params) {
+    download::DownloadParams download_params) {
   if (!download_dir_.IsValid())
     CHECK(download_dir_.CreateUniqueTempDir());
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::BindRepeating(download_params.callback, download_params.guid,
-                          download::DownloadParams::ACCEPTED));
+      base::BindOnce(std::move(download_params.callback), download_params.guid,
+                     download::DownloadParams::ACCEPTED));
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&TestDownloadService::FinishDownload,
                                 base::Unretained(this), download_params.guid));
@@ -87,9 +87,10 @@ bool TestDownloadService::OnStopScheduledTask(
   NOTIMPLEMENTED();
   return false;
 }
-download::DownloadService::ServiceStatus TestDownloadService::GetStatus() {
+download::BackgroundDownloadService::ServiceStatus
+TestDownloadService::GetStatus() {
   NOTIMPLEMENTED();
-  return DownloadService::ServiceStatus();
+  return BackgroundDownloadService::ServiceStatus();
 }
 void TestDownloadService::PauseDownload(const std::string& guid) {
   NOTIMPLEMENTED();

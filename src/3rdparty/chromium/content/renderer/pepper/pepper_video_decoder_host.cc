@@ -7,14 +7,15 @@
 #include <stddef.h>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "build/build_config.h"
 #include "content/common/pepper_file_util.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/renderer/ppapi_gfx_conversion.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
-#include "content/renderer/pepper/gfx_conversion.h"
 #include "content/renderer/pepper/ppb_graphics_3d_impl.h"
 #include "content/renderer/pepper/video_decoder_shim.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
@@ -160,7 +161,8 @@ int32_t PepperVideoDecoderHost::OnHostMsgInitialize(
     // This is not synchronous, but subsequent IPC messages will be buffered, so
     // it is okay to immediately send IPC messages.
     if (command_buffer->channel()) {
-      decoder_.reset(new media::GpuVideoDecodeAcceleratorHost(command_buffer));
+      decoder_ = base::WrapUnique<media::VideoDecodeAccelerator>(
+          new media::GpuVideoDecodeAcceleratorHost(command_buffer));
       media::VideoDecodeAccelerator::Config vda_config(profile_);
       vda_config.supported_output_formats.assign(
           {media::PIXEL_FORMAT_XRGB, media::PIXEL_FORMAT_ARGB});

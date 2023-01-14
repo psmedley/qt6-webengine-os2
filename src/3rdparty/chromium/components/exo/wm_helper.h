@@ -11,7 +11,6 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "base/time/time.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
@@ -50,6 +49,8 @@ class VSyncTimingManager;
 // Helper interface for accessing WindowManager related features.
 class WMHelper : public aura::client::DragDropDelegate {
  public:
+  using DropCallback = aura::client::DragDropDelegate::DropCallback;
+
   class DragDropObserver {
    public:
     virtual void OnDragEntered(const ui::DropTargetEvent& event) = 0;
@@ -58,6 +59,7 @@ class WMHelper : public aura::client::DragDropDelegate {
     virtual void OnDragExited() = 0;
     virtual ui::mojom::DragOperation OnPerformDrop(
         const ui::DropTargetEvent& event) = 0;
+    virtual DropCallback GetDropCallback(const ui::DropTargetEvent& event) = 0;
 
    protected:
     virtual ~DragDropObserver() {}
@@ -91,11 +93,15 @@ class WMHelper : public aura::client::DragDropDelegate {
   // based on the |app_id| and |startup_id|.
   class AppPropertyResolver {
    public:
+    struct Params {
+      std::string app_id;
+      std::string startup_id;
+      int32_t window_session_id = -1;
+      bool for_creation = false;
+    };
     virtual ~AppPropertyResolver() = default;
     virtual void PopulateProperties(
-        const std::string& app_id,
-        const std::string& startup_id,
-        bool for_creation,
+        const Params& params,
         ui::PropertyHandler& out_properties_container) = 0;
   };
 
@@ -156,6 +162,7 @@ class WMHelper : public aura::client::DragDropDelegate {
   ui::mojom::DragOperation OnPerformDrop(
       const ui::DropTargetEvent& event,
       std::unique_ptr<ui::OSExchangeData> data) override = 0;
+  DropCallback GetDropCallback(const ui::DropTargetEvent& event) override = 0;
 
   // Registers an AppPropertyResolver. Multiple resolver can be registered and
   // all resolvers are called in the registration order by the method below.
@@ -166,9 +173,7 @@ class WMHelper : public aura::client::DragDropDelegate {
   // |for_creation| == true means this is called before a widget gets
   // created, and false means this is called when the application id is set
   // after the widget is created.
-  void PopulateAppProperties(const std::string& app_id,
-                             const std::string& startup_id,
-                             bool for_creation,
+  void PopulateAppProperties(const AppPropertyResolver::Params& params,
                              ui::PropertyHandler& out_properties_container);
 
  protected:

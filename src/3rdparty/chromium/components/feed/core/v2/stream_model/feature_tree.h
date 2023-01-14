@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/util/type_safety/id_type.h"
+#include "base/types/id_type.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/v2/proto_util.h"
 #include "components/feed/core/v2/types.h"
@@ -19,14 +19,14 @@ namespace feed {
 namespace stream_model {
 
 // Uniquely identifies a feedwire::ContentId. Provided by |ContentMap|.
-using ContentTag = util::IdTypeU32<class ContentTagClass>;
+using ContentTag = base::IdTypeU32<class ContentTagClass>;
 using ContentRevision = feed::ContentRevision;
 
 // Owns instances of feedstore::Content pointed to by the feature tree, and
 // maps ContentId into ContentTag.
 class ContentMap {
  public:
-  ContentMap();
+  explicit ContentMap(ContentRevision::Generator* revision_generator);
   ~ContentMap();
   ContentMap(const ContentMap&) = delete;
   ContentMap& operator=(const ContentMap&) = delete;
@@ -41,7 +41,7 @@ class ContentMap {
 
  private:
   ContentTag::Generator tag_generator_;
-  ContentRevision::Generator revision_generator_;
+  ContentRevision::Generator* revision_generator_;
   std::map<feedwire::ContentId, ContentTag, ContentIdCompareFunctor> mapping_;
 
   // These two containers work together to store and index content.
@@ -58,8 +58,6 @@ struct StreamNode {
   StreamNode& operator=(const StreamNode&);
   // If true, this nodes has been removed and should be ignored.
   bool tombstoned = false;
-  // Whether this is a STREAM node.
-  bool is_stream = false;
   // Whether this node has a parent.
   bool has_parent = false;
   // If this node has content, this identifies it.

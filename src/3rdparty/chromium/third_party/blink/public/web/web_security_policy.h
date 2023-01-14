@@ -72,6 +72,11 @@ class WebSecurityPolicy {
   BLINK_EXPORT static void
   RegisterURLSchemeAsFirstPartyWhenTopLevelEmbeddingSecure(const WebString&);
 
+  // Registers a URL scheme as always allowing access to SharedArrayBuffers.
+  // TODO(crbug.com/1184892): Remove once fixed.
+  BLINK_EXPORT static void RegisterURLSchemeAsAllowingSharedArrayBuffers(
+      const WebString&);
+
   // Support for managing allow/block access lists to origins beyond the
   // same-origin policy. The block list takes priority over the allow list.
   // When an origin matches an entry on both the allow list and block list
@@ -125,10 +130,22 @@ class WebSecurityPolicy {
   // Registers an URL scheme as an error page.
   BLINK_EXPORT static void RegisterURLSchemeAsError(const WebString&);
 
+  // Registers an URL scheme as a browser extension.
+  BLINK_EXPORT static void RegisterURLSchemeAsExtension(const WebString&);
+
+  // Registers an URL scheme as trusted browser UI.
+  BLINK_EXPORT static void RegisterURLSchemeAsWebUI(const WebString&);
+
+  // Registers an URL scheme which can use code caching but must check in the
+  // renderer whether the script content has changed rather than relying on a
+  // response time match from the network cache.
+  BLINK_EXPORT static void RegisterURLSchemeAsCodeCacheWithHashing(
+      const WebString&);
+
  private:
   WebSecurityPolicy() = delete;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_SECURITY_POLICY_H_

@@ -6,6 +6,7 @@
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_ink_overflow.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_builder_test.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
@@ -17,7 +18,13 @@ namespace blink {
 // Tests covering incremental updates of paint property trees.
 class PaintPropertyTreeUpdateTest : public PaintPropertyTreeBuilderTest {};
 
-INSTANTIATE_PAINT_TEST_SUITE_P(PaintPropertyTreeUpdateTest);
+INSTANTIATE_TEST_SUITE_P(All,
+                         PaintPropertyTreeUpdateTest,
+                         ::testing::Values(0,
+                                           kCompositeAfterPaint,
+                                           kUnderInvalidationChecking,
+                                           kCompositeAfterPaint |
+                                               kUnderInvalidationChecking));
 
 TEST_P(PaintPropertyTreeUpdateTest,
        ThreadedScrollingDisabledMainThreadScrollReason) {
@@ -825,7 +832,7 @@ TEST_P(PaintPropertyTreeUpdateTest,
   SetBodyInnerHTML(R"HTML(
     <style>
       ::-webkit-scrollbar {width: 20px; height: 20px}
-      body {height: 10000px; width: 10000px; margin: 0;}
+      body {height: 2000px; width: 2000px; margin: 0;}
     </style>
   )HTML");
 
@@ -839,7 +846,7 @@ TEST_P(PaintPropertyTreeUpdateTest,
 
 TEST_P(PaintPropertyTreeUpdateTest, ViewportAddRemoveDeviceEmulationNode) {
   SetBodyInnerHTML(
-      "<style>body {height: 10000px; width: 10000px; margin: 0;}</style>");
+      "<style>body {height: 2000px; width: 2000px; margin: 0;}</style>");
 
   auto& visual_viewport = GetDocument().GetPage()->GetVisualViewport();
   EXPECT_FALSE(visual_viewport.GetDeviceEmulationTransformNode());
@@ -857,8 +864,10 @@ TEST_P(PaintPropertyTreeUpdateTest, ViewportAddRemoveDeviceEmulationNode) {
     EXPECT_EQ(&TransformPaintPropertyNode::Root(),
               &scrollbar_layer->GetPropertyTreeState().Transform());
   } else {
-    // TODO(wangxianzhu): Test for CompositeAfterPaint.
-    EXPECT_FALSE(scrollbar_layer);
+    auto& chunk = *(ContentPaintChunks().begin() + 1);
+    EXPECT_EQ(DisplayItem::kScrollbarHorizontal, chunk.id.type);
+    EXPECT_EQ(&TransformPaintPropertyNode::Root(),
+              &chunk.properties.Transform());
   }
 
   // These emulate WebViewImpl::SetDeviceEmulationTransform().
@@ -873,8 +882,10 @@ TEST_P(PaintPropertyTreeUpdateTest, ViewportAddRemoveDeviceEmulationNode) {
     EXPECT_EQ(visual_viewport.GetDeviceEmulationTransformNode(),
               &scrollbar_layer->GetPropertyTreeState().Transform());
   } else {
-    // TODO(wangxianzhu): Test for CompositeAfterPaint.
-    EXPECT_FALSE(scrollbar_layer);
+    auto& chunk = *(ContentPaintChunks().begin() + 1);
+    EXPECT_EQ(DisplayItem::kScrollbarHorizontal, chunk.id.type);
+    EXPECT_EQ(visual_viewport.GetDeviceEmulationTransformNode(),
+              &chunk.properties.Transform());
   }
 
   // These emulate WebViewImpl::SetDeviceEmulationTransform().
@@ -888,8 +899,10 @@ TEST_P(PaintPropertyTreeUpdateTest, ViewportAddRemoveDeviceEmulationNode) {
     EXPECT_EQ(&TransformPaintPropertyNode::Root(),
               &scrollbar_layer->GetPropertyTreeState().Transform());
   } else {
-    // TODO(wangxianzhu): Test for CompositeAfterPaint.
-    EXPECT_FALSE(scrollbar_layer);
+    auto& chunk = *(ContentPaintChunks().begin() + 1);
+    EXPECT_EQ(DisplayItem::kScrollbarHorizontal, chunk.id.type);
+    EXPECT_EQ(&TransformPaintPropertyNode::Root(),
+              &chunk.properties.Transform());
   }
 }
 
@@ -1701,7 +1714,14 @@ TEST_P(PaintPropertyTreeUpdateTest, ChangeDuringAnimation) {
   target->SetStyle(std::move(style));
   EXPECT_TRUE(target->NeedsPaintPropertyUpdate());
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kStyleClean);
-  UpdateAllLifecyclePhasesExceptPaint();
+  {
+#if DCHECK_IS_ON()
+    // TODO(crbug.com/1201670): This should not be needed, but DCHECK hits.
+    // Needs more investigations.
+    NGInkOverflow::ReadUnsetAsNoneScope read_unset_as_none;
+#endif
+    UpdateAllLifecyclePhasesExceptPaint();
+  }
 
   ASSERT_EQ(transform_node,
             target->FirstFragment().PaintProperties()->Transform());
@@ -1809,6 +1829,63 @@ TEST_P(PaintPropertyTreeUpdateTest, StartSVGAnimation) {
   EXPECT_TRUE(properties->Transform()->HasDirectCompositingReasons());
 }
 
+TEST_P(PaintPropertyTreeUpdateTest, ScrollNonStackingContextContainingStacked) {
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
+    return;
+
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #scroller { width: 200px; height: 200px; overflow: scroll;
+                  background: white; }
+      #content { height: 1000px; background: blue; }
+    </style>
+    <div id="scroller">
+      <div id="content" style="position: relative"></div>
+    </div>
+  )HTML");
+
+  auto* scroller = GetDocument().getElementById("scroller");
+  auto* content = GetDocument().getElementById("content");
+  auto* paint_artifact_compositor =
+      GetDocument().View()->GetPaintArtifactCompositor();
+  ASSERT_TRUE(paint_artifact_compositor);
+  ASSERT_FALSE(paint_artifact_compositor->NeedsUpdate());
+
+  // We need PaintArtifactCompositor update on scroll because the scroller is
+  // not a stacking context but contains stacked descendants.
+  scroller->setScrollTop(100);
+  UpdateAllLifecyclePhasesExceptPaint();
+  EXPECT_TRUE(paint_artifact_compositor->NeedsUpdate());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(paint_artifact_compositor->NeedsUpdate());
+
+  // Remove "position:relative" from |content|.
+  content->setAttribute(html_names::kStyleAttr, "");
+  UpdateAllLifecyclePhasesForTest();
+
+  // No need of PaintArtifactCompositor update because the scroller no longer
+  // has stacked descendants.
+  scroller->setScrollTop(110);
+  UpdateAllLifecyclePhasesExceptPaint();
+  EXPECT_FALSE(paint_artifact_compositor->NeedsUpdate());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(paint_artifact_compositor->NeedsUpdate());
+
+  // Make scroller a stacking context with stacked contents.
+  scroller->setAttribute(html_names::kStyleAttr,
+                         "position: absolute; will-change: transform");
+  content->setAttribute(html_names::kStyleAttr, "position: absolute");
+  UpdateAllLifecyclePhasesForTest();
+
+  // No need of PaintArtifactCompositor update because the scroller is a
+  // stacking context.
+  scroller->setScrollTop(120);
+  UpdateAllLifecyclePhasesExceptPaint();
+  EXPECT_FALSE(paint_artifact_compositor->NeedsUpdate());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(paint_artifact_compositor->NeedsUpdate());
+}
+
 TEST_P(PaintPropertyTreeUpdateTest, ScrollOriginChange) {
   SetBodyInnerHTML(R"HTML(
     <style>
@@ -1837,6 +1914,32 @@ TEST_P(PaintPropertyTreeUpdateTest, ScrollOriginChange) {
             container_properties->ScrollTranslation()->Translation2D());
   EXPECT_EQ(PhysicalOffset(100, 0), child1->FirstFragment().PaintOffset());
   EXPECT_EQ(PhysicalOffset(), child2->FirstFragment().PaintOffset());
+}
+
+// A test case for http://crbug.com/1187815.
+TEST_P(PaintPropertyTreeUpdateTest, IFrameContainStrictChangeBorderTopWidth) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      iframe { border-radius: 10px; contain: strict; border: 2px solid black; }
+    </style>
+    <img style="width: 100px; height: 100px">
+    <iframe id="iframe"></iframe>
+  )HTML");
+  SetChildFrameHTML("ABC");
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* child_view_properties =
+      ChildDocument().GetLayoutView()->FirstFragment().PaintProperties();
+  ASSERT_TRUE(child_view_properties);
+  ASSERT_TRUE(child_view_properties->PaintOffsetTranslation());
+  EXPECT_EQ(FloatSize(2, 2),
+            child_view_properties->PaintOffsetTranslation()->Translation2D());
+
+  GetDocument().getElementById("iframe")->setAttribute(
+      html_names::kStyleAttr, "border-top-width: 10px");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(FloatSize(2, 10),
+            child_view_properties->PaintOffsetTranslation()->Translation2D());
 }
 
 }  // namespace blink

@@ -29,23 +29,23 @@ void FakeVideoCaptureStack::Reset() {
   last_frame_timestamp_ = base::TimeDelta::Min();
 }
 
-class FakeVideoCaptureStack::Receiver : public media::VideoFrameReceiver {
+class FakeVideoCaptureStack::Receiver final : public media::VideoFrameReceiver {
  public:
   explicit Receiver(FakeVideoCaptureStack* capture_stack)
       : capture_stack_(capture_stack) {}
-  ~Receiver() final = default;
+  ~Receiver() override = default;
 
  private:
   using Buffer = media::VideoCaptureDevice::Client::Buffer;
 
   void OnNewBuffer(int buffer_id,
-                   media::mojom::VideoBufferHandlePtr buffer_handle) final {
+                   media::mojom::VideoBufferHandlePtr buffer_handle) override {
     buffers_[buffer_id] = std::move(buffer_handle);
   }
 
   void OnFrameReadyInBuffer(
       media::ReadyFrameInBuffer frame,
-      std::vector<media::ReadyFrameInBuffer> scaled_frames) final {
+      std::vector<media::ReadyFrameInBuffer> scaled_frames) override {
     const auto it = buffers_.find(frame.buffer_id);
     CHECK(it != buffers_.end());
 
@@ -53,9 +53,11 @@ class FakeVideoCaptureStack::Receiver : public media::VideoFrameReceiver {
     base::ReadOnlySharedMemoryMapping mapping =
         it->second->get_read_only_shmem_region().Map();
     CHECK(mapping.IsValid());
-    CHECK_LE(media::VideoCaptureFormat(frame.frame_info->coded_size, 0.0f,
-                                       frame.frame_info->pixel_format)
-                 .ImageAllocationSize(),
+
+    const auto& frame_format = media::VideoCaptureFormat(
+        frame.frame_info->coded_size, 0.0f, frame.frame_info->pixel_format);
+    CHECK_LE(media::VideoFrame::AllocationSize(frame_format.pixel_format,
+                                               frame_format.frame_size),
              mapping.size());
 
     auto video_frame = media::VideoFrame::WrapExternalData(
@@ -82,27 +84,27 @@ class FakeVideoCaptureStack::Receiver : public media::VideoFrameReceiver {
     capture_stack_->OnReceivedFrame(std::move(video_frame));
   }
 
-  void OnBufferRetired(int buffer_id) final {
+  void OnBufferRetired(int buffer_id) override {
     const auto it = buffers_.find(buffer_id);
     CHECK(it != buffers_.end());
     buffers_.erase(it);
   }
 
-  void OnError(media::VideoCaptureError) final {
+  void OnError(media::VideoCaptureError) override {
     capture_stack_->error_occurred_ = true;
   }
 
-  void OnFrameDropped(media::VideoCaptureFrameDropReason) final {}
+  void OnFrameDropped(media::VideoCaptureFrameDropReason) override {}
 
-  void OnLog(const std::string& message) final {
+  void OnLog(const std::string& message) override {
     capture_stack_->log_messages_.push_back(message);
   }
 
-  void OnStarted() final { capture_stack_->started_ = true; }
+  void OnStarted() override { capture_stack_->started_ = true; }
 
-  void OnStartedUsingGpuDecode() final { NOTREACHED(); }
+  void OnStartedUsingGpuDecode() override { NOTREACHED(); }
 
-  void OnStopped() final {}
+  void OnStopped() override {}
 
   FakeVideoCaptureStack* const capture_stack_;
   base::flat_map<int, media::mojom::VideoBufferHandlePtr> buffers_;

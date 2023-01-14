@@ -7,8 +7,11 @@
 #include "base/check.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/optional.h"
 #include "base/rand_util.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
+#include "components/crash/content/browser/process_exit_reason_from_system_android.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace crash_reporter {
 namespace {
@@ -79,6 +82,29 @@ void ReportLegacyCrashUma(const ChildExitObserver::TerminationInfo& info,
           "GPU.GPUProcessDetailedExitStatus", exit_status,
           CrashMetricsReporter::ExitStatus::MINIDUMP_STATUS_COUNT);
     }
+  }
+}
+
+void RecordSystemExitReason(
+    base::ProcessHandle pid,
+    const CrashMetricsReporter::ReportedCrashTypeSet& reported_counts) {
+  base::StringPiece suffix;
+  if (reported_counts.count(CrashMetricsReporter::ProcessedCrashCounts::
+                                kRendererForegroundVisibleSubframeOom) > 0) {
+    suffix = "VisibleSubframeOom";
+  } else if (reported_counts.count(CrashMetricsReporter::ProcessedCrashCounts::
+                                       kRendererForegroundVisibleOom) > 0) {
+    suffix = "VisibleMainFrameOom";
+  } else if (reported_counts.count(CrashMetricsReporter::ProcessedCrashCounts::
+                                       kGpuForegroundOom) > 0) {
+    suffix = "GpuForegroundOom";
+  } else if (reported_counts.count(CrashMetricsReporter::ProcessedCrashCounts::
+                                       kUtilityForegroundOom) > 0) {
+    suffix = "UtilityForegroundOom";
+  }
+  if (!suffix.empty()) {
+    ProcessExitReasonFromSystem::RecordExitReasonToUma(
+        pid, base::StrCat({"Stability.Android.SystemExitReason.", suffix}));
   }
 }
 
@@ -268,32 +294,6 @@ void CrashMetricsReporter::ChildProcessExited(
                      &reported_counts);
   }
 
-  if (app_foreground && android_oom_kill &&
-      info.binding_state == base::android::ChildBindingState::STRONG) {
-    const bool has_waived = info.remaining_process_with_waived_binding > 0;
-    const bool has_moderate = info.remaining_process_with_moderate_binding > 0;
-    const bool has_strong = info.remaining_process_with_strong_binding > 0;
-    BindingStateCombo combo;
-    if (has_waived && has_moderate) {
-      combo = has_strong ? BindingStateCombo::kHasWaivedHasModerateHasStrong
-                         : BindingStateCombo::kHasWaivedHasModerateNoStrong;
-    } else if (has_waived) {
-      combo = has_strong ? BindingStateCombo::kHasWaivedNoModerateHasStrong
-                         : BindingStateCombo::kHasWaivedNoModerateNoStrong;
-    } else if (has_moderate) {
-      combo = has_strong ? BindingStateCombo::kNoWaivedHasModerateHasStrong
-                         : BindingStateCombo::kNoWaivedHasModerateNoStrong;
-    } else {
-      combo = has_strong ? BindingStateCombo::kNoWaivedNoModerateHasStrong
-                         : BindingStateCombo::kNoWaivedNoModerateNoStrong;
-    }
-    UMA_HISTOGRAM_ENUMERATION(
-        "Stability.Android.StrongBindingOomRemainingBindingState", combo);
-    UMA_HISTOGRAM_EXACT_LINEAR(
-        "Stability.Android.StrongBindingOomRemainingStrongBindingCount",
-        info.remaining_process_with_strong_binding, 20);
-  }
-
   if (android_oom_kill) {
     if (info.best_effort_reverse_rank >= 0) {
       UMA_HISTOGRAM_EXACT_LINEAR("Stability.Android.OomKillReverseRank",
@@ -306,6 +306,7 @@ void CrashMetricsReporter::ChildProcessExited(
   }
 
   ReportLegacyCrashUma(info, crashed);
+  RecordSystemExitReason(info.pid, reported_counts);
   NotifyObservers(info.process_host_id, reported_counts);
 }
 

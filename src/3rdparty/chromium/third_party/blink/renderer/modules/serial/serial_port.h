@@ -7,6 +7,7 @@
 
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/device/public/mojom/serial.mojom-blink-forward.h"
+#include "services/device/public/mojom/serial.mojom-blink.h"
 #include "third_party/blink/public/mojom/serial/serial.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -102,9 +103,7 @@ class SerialPort final : public EventTargetWithInlineData,
 
   uint32_t buffer_size_ = 0;
   HeapMojoRemote<device::mojom::blink::SerialPort> port_;
-  HeapMojoReceiver<device::mojom::blink::SerialPortClient,
-                   SerialPort,
-                   HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoReceiver<device::mojom::blink::SerialPortClient, SerialPort>
       client_receiver_;
 
   Member<ReadableStream> readable_;

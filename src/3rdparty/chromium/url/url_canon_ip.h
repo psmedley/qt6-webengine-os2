@@ -6,7 +6,6 @@
 #define URL_URL_CANON_IP_H_
 
 #include "base/component_export.h"
-#include "base/strings/string16.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon.h"
 
@@ -43,7 +42,7 @@ bool FindIPv4Components(const char* spec,
                         const Component& host,
                         Component components[4]);
 COMPONENT_EXPORT(URL)
-bool FindIPv4Components(const base::char16* spec,
+bool FindIPv4Components(const char16_t* spec,
                         const Component& host,
                         Component components[4]);
 
@@ -64,7 +63,7 @@ CanonHostInfo::Family IPv4AddressToNumber(const char* spec,
                                           unsigned char address[4],
                                           int* num_ipv4_components);
 COMPONENT_EXPORT(URL)
-CanonHostInfo::Family IPv4AddressToNumber(const base::char16* spec,
+CanonHostInfo::Family IPv4AddressToNumber(const char16_t* spec,
                                           const Component& host,
                                           unsigned char address[4],
                                           int* num_ipv4_components);
@@ -79,7 +78,7 @@ bool IPv6AddressToNumber(const char* spec,
                          const Component& host,
                          unsigned char address[16]);
 COMPONENT_EXPORT(URL)
-bool IPv6AddressToNumber(const base::char16* spec,
+bool IPv6AddressToNumber(const char16_t* spec,
                          const Component& host,
                          unsigned char address[16]);
 

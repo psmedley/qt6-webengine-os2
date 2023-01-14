@@ -27,6 +27,7 @@
 #include "device/bluetooth/bluetooth_gatt_service.h"
 #include "device/bluetooth/bluez/bluetooth_service_record_bluez.h"
 #include "device/bluetooth/dbus/bluetooth_adapter_client.h"
+#include "device/bluetooth/dbus/bluetooth_admin_policy_client.h"
 #include "device/bluetooth/dbus/bluetooth_agent_manager_client.h"
 #include "device/bluetooth/dbus/bluetooth_agent_service_provider.h"
 #include "device/bluetooth/dbus/bluetooth_battery_client.h"
@@ -36,8 +37,11 @@
 #include "device/bluetooth/dbus/bluetooth_profile_service_provider.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "device/bluetooth/bluetooth_low_energy_scan_filter.h"
+#include "device/bluetooth/bluetooth_low_energy_scan_session.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/data_decoder/public/mojom/ble_scan_parser.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace base {
@@ -55,6 +59,10 @@ namespace bluez {
 class BluetoothBlueZTest;
 class BluetoothAdapterProfileBlueZ;
 class BluetoothAdvertisementBlueZ;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+class BluetoothAdvertisementMonitorApplicationServiceProvider;
+class BluetoothAdvertisementMonitorServiceProvider;
+#endif
 class BluetoothDeviceBlueZ;
 class BluetoothLocalGattCharacteristicBlueZ;
 class BluetoothLocalGattServiceBlueZ;
@@ -79,6 +87,7 @@ class BluetoothPairingBlueZ;
 class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
     : public device::BluetoothAdapter,
       public bluez::BluetoothAdapterClient::Observer,
+      public bluez::BluetoothAdminPolicyClient::Observer,
       public bluez::BluetoothBatteryClient::Observer,
       public bluez::BluetoothDeviceClient::Observer,
       public bluez::BluetoothInputClient::Observer,
@@ -151,12 +160,27 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
 
   void ConnectDevice(
       const std::string& address,
-      const base::Optional<device::BluetoothDevice::AddressType>& address_type,
+      const absl::optional<device::BluetoothDevice::AddressType>& address_type,
       ConnectDeviceCallback callback,
       ErrorCallback error_callback) override;
 
   device::BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void SetServiceAllowList(const UUIDList& uuids,
+                           base::OnceClosure callback,
+                           ErrorCallback error_callback) override;
+
+  LowEnergyScanSessionHardwareOffloadingStatus
+  GetLowEnergyScanSessionHardwareOffloadingStatus() override;
+
+  std::unique_ptr<device::BluetoothLowEnergyScanSession>
+  StartLowEnergyScanSession(
+      std::unique_ptr<device::BluetoothLowEnergyScanFilter> filter,
+      base::WeakPtr<device::BluetoothLowEnergyScanSession::Delegate> delegate)
+      override;
+#endif
 
   // These functions are specifically for use with ARC. They have no need to
   // exist for other platforms, hence we're putting them directly in the BlueZ
@@ -200,6 +224,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
                                uint16_t device_appearance,
                                const dbus::ObjectPath& device_path,
                                ScanRecordPtr scan_record);
+
+  // Set the adapter name to one chosen from the system information.
+  void SetStandardChromeOSAdapterName();
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Announce to observers that |device| has changed its connected state.
@@ -297,6 +324,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   void AdapterPropertyChanged(const dbus::ObjectPath& object_path,
                               const std::string& property_name) override;
 
+  // bluez::BluetoothAdminPolicyClient::Observer override.
+  void AdminPolicyAdded(const dbus::ObjectPath& object_path) override;
+  void AdminPolicyRemoved(const dbus::ObjectPath& object_path) override;
+  void AdminPolicyPropertyChanged(const dbus::ObjectPath& object_path,
+                                  const std::string& property_name) override;
+
   // bluez::BluetoothBatteryClient::Observer override.
   void BatteryAdded(const dbus::ObjectPath& object_path) override;
   void BatteryRemoved(const dbus::ObjectPath& object_path) override;
@@ -361,11 +394,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   // subsequently operate on that adapter until it is removed.
   void SetAdapter(const dbus::ObjectPath& object_path);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Set the adapter name to one chosen from the system information.
-  void SetStandardChromeOSAdapterName();
-#endif
-
   // Remove the currently tracked adapter. IsPresent() will return false after
   // this is called.
   void RemoveAdapter();
@@ -401,10 +429,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
       DiscoverySessionErrorCallback error_callback);
 
   // Called by dbus:: on completion of the D-Bus method call to start discovery.
-  void OnStartDiscovery(base::OnceClosure callback,
-                        DiscoverySessionErrorCallback error_callback);
-  void OnStartDiscoveryError(base::OnceClosure callback,
-                             DiscoverySessionErrorCallback error_callback,
+  void OnStartDiscovery(DiscoverySessionResultCallback callback);
+  void OnStartDiscoveryError(DiscoverySessionResultCallback callback,
                              const std::string& error_name,
                              const std::string& error_message);
 
@@ -414,16 +440,13 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
                             const std::string& error_name,
                             const std::string& error_message);
 
-  void OnPreSetDiscoveryFilter(base::OnceClosure callback,
-                               DiscoverySessionErrorCallback error_callback);
+  void OnPreSetDiscoveryFilter(DiscoverySessionResultCallback callback);
   void OnPreSetDiscoveryFilterError(
-      base::OnceClosure callback,
       DiscoverySessionErrorCallback error_callback,
       device::UMABluetoothDiscoverySessionOutcome outcome);
   void OnSetDiscoveryFilter(base::OnceClosure callback,
                             DiscoverySessionErrorCallback error_callback);
-  void OnSetDiscoveryFilterError(base::OnceClosure callback,
-                                 DiscoverySessionErrorCallback error_callback,
+  void OnSetDiscoveryFilterError(DiscoverySessionErrorCallback error_callback,
                                  const std::string& error_name,
                                  const std::string& error_message);
 
@@ -485,6 +508,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   // battery object addition, change, or removal.
   void UpdateDeviceBatteryLevelFromBatteryClient(
       const dbus::ObjectPath& object_path);
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void RegisterAdvertisementMonitorApplicationServiceProvider();
+  void OnRegisterAdvertisementMonitorApplicationServiceProvider();
+
+  // Unregister the underlying advertisement monitor through
+  // |advertisement_monitor_application_provider_|.
+  void OnLowEnergyScanSessionDestroyed(const std::string& session_id);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   base::OnceClosure init_callback_;
 
@@ -555,6 +587,23 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
 
   // Pointer for parsing BLE advertising packets out of process.
   mojo::Remote<data_decoder::mojom::BleScanParser> ble_scan_parser_;
+
+  std::unique_ptr<BluetoothAdvertisementMonitorApplicationServiceProvider>
+      advertisement_monitor_application_provider_;
+
+  bool is_advertisement_monitor_application_provider_registered_ = false;
+
+  // Used to queue up low energy scan sessions that need to be started as soon
+  // as the advertisement monitor application has been registered. The
+  // application can only be registered once the adapter has been set, so it is
+  // possible for clients to start scan sessions before the monitor application
+  // is registered.
+  base::queue<std::unique_ptr<BluetoothAdvertisementMonitorServiceProvider>>
+      pending_advertisement_monitors_;
+
+  LowEnergyScanSessionHardwareOffloadingStatus
+      low_energy_scan_session_hardware_offloading_status_ =
+          LowEnergyScanSessionHardwareOffloadingStatus::kUndetermined;
 #endif
 
   // Note: This should remain the last member so it'll be destroyed and

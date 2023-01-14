@@ -69,12 +69,14 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_FloorFloat:
     case kS390_CeilFloat:
     case kS390_TruncateFloat:
+    case kS390_FloatNearestInt:
     case kS390_AbsFloat:
     case kS390_SqrtDouble:
     case kS390_FloorDouble:
     case kS390_CeilDouble:
     case kS390_TruncateDouble:
     case kS390_RoundDouble:
+    case kS390_DoubleNearestInt:
     case kS390_MaxFloat:
     case kS390_MaxDouble:
     case kS390_MinFloat:
@@ -129,7 +131,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_LoadReverse32RR:
     case kS390_LoadReverse64RR:
     case kS390_LoadReverseSimd128RR:
-    case kS390_LoadReverseSimd128:
     case kS390_LoadAndTestWord32:
     case kS390_LoadAndTestWord64:
     case kS390_LoadAndTestFloat32:
@@ -168,7 +169,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_F32x4ExtractLane:
     case kS390_F32x4ReplaceLane:
     case kS390_F32x4Add:
-    case kS390_F32x4AddHoriz:
     case kS390_F32x4Sub:
     case kS390_F32x4Mul:
     case kS390_F32x4Eq:
@@ -214,7 +214,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I64x2SConvertI32x4High:
     case kS390_I64x2UConvertI32x4Low:
     case kS390_I64x2UConvertI32x4High:
-    case kS390_I64x2SignSelect:
     case kS390_I64x2Ne:
     case kS390_I64x2GtS:
     case kS390_I64x2GeS:
@@ -223,7 +222,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I32x4ExtractLane:
     case kS390_I32x4ReplaceLane:
     case kS390_I32x4Add:
-    case kS390_I32x4AddHoriz:
     case kS390_I32x4Sub:
     case kS390_I32x4Mul:
     case kS390_I32x4MinS:
@@ -255,7 +253,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I32x4ExtMulHighI16x8U:
     case kS390_I32x4ExtAddPairwiseI16x8S:
     case kS390_I32x4ExtAddPairwiseI16x8U:
-    case kS390_I32x4SignSelect:
     case kS390_I32x4TruncSatF64x2SZero:
     case kS390_I32x4TruncSatF64x2UZero:
     case kS390_I16x8Splat:
@@ -263,7 +260,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I16x8ExtractLaneS:
     case kS390_I16x8ReplaceLane:
     case kS390_I16x8Add:
-    case kS390_I16x8AddHoriz:
     case kS390_I16x8Sub:
     case kS390_I16x8Mul:
     case kS390_I16x8MinS:
@@ -300,14 +296,12 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I16x8ExtAddPairwiseI8x16S:
     case kS390_I16x8ExtAddPairwiseI8x16U:
     case kS390_I16x8Q15MulRSatS:
-    case kS390_I16x8SignSelect:
     case kS390_I8x16Splat:
     case kS390_I8x16ExtractLaneU:
     case kS390_I8x16ExtractLaneS:
     case kS390_I8x16ReplaceLane:
     case kS390_I8x16Add:
     case kS390_I8x16Sub:
-    case kS390_I8x16Mul:
     case kS390_I8x16MinS:
     case kS390_I8x16MinU:
     case kS390_I8x16MaxS:
@@ -333,12 +327,11 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_I8x16BitMask:
     case kS390_I8x16Shuffle:
     case kS390_I8x16Swizzle:
-    case kS390_I8x16SignSelect:
     case kS390_I8x16Popcnt:
-    case kS390_V64x2AllTrue:
-    case kS390_V32x4AllTrue:
-    case kS390_V16x8AllTrue:
-    case kS390_V8x16AllTrue:
+    case kS390_I64x2AllTrue:
+    case kS390_I32x4AllTrue:
+    case kS390_I16x8AllTrue:
+    case kS390_I8x16AllTrue:
     case kS390_V128AnyTrue:
     case kS390_S128And:
     case kS390_S128Or:
@@ -364,6 +357,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kS390_LoadReverse16:
     case kS390_LoadReverse32:
     case kS390_LoadReverse64:
+    case kS390_LoadReverseSimd128:
     case kS390_Peek:
     case kS390_LoadDecompressTaggedSigned:
     case kS390_LoadDecompressTaggedPointer:

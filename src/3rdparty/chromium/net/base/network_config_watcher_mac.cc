@@ -164,7 +164,6 @@ NetworkConfigWatcherMacThread::~NetworkConfigWatcherMacThread() {
 }
 
 void NetworkConfigWatcherMacThread::Init() {
-  base::ThreadRestrictions::SetIOAllowed(true);
   delegate_->Init();
 
   // TODO(willchan): Look to see if there's a better signal for when it's ok to
@@ -268,7 +267,7 @@ NetworkConfigWatcherMac::NetworkConfigWatcherMac(Delegate* delegate)
   // needs a thread with a CFRunLoop, and there's no guarantee that
   // CurrentThread::Get() meets that criterion.
   base::Thread::Options thread_options(base::MessagePumpType::DEFAULT, 0);
-  notifier_thread_->StartWithOptions(thread_options);
+  notifier_thread_->StartWithOptions(std::move(thread_options));
 }
 
 NetworkConfigWatcherMac::~NetworkConfigWatcherMac() {}

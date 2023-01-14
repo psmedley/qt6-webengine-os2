@@ -15,7 +15,6 @@ import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import '../print_preview_utils.js';
 import './destination_dialog_css.js';
 import './destination_list.js';
-import './invitation_promo.js';
 import './print_preview_search_box.js';
 import './print_preview_shared_css.js';
 import './print_preview_vars_css.js';
@@ -25,149 +24,145 @@ import './throbber_css.js';
 
 import {assert} from 'chrome://resources/js/assert.m.js';
 import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
-import {ListPropertyUpdateBehavior} from 'chrome://resources/js/list_property_update_behavior.m.js';
+import {ListPropertyUpdateBehavior, ListPropertyUpdateBehaviorInterface} from 'chrome://resources/js/list_property_update_behavior.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
-import {beforeNextRender, html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {WebUIListenerBehavior, WebUIListenerBehaviorInterface} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {beforeNextRender, html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {Destination} from '../data/destination.js';
 import {DestinationStore} from '../data/destination_store.js';
-import {InvitationStore} from '../data/invitation_store.js';
 import {PrintServerStore} from '../data/print_server_store.js';
 import {Metrics, MetricsContext} from '../metrics.js';
 import {NativeLayerImpl} from '../native_layer.js';
 import {PrintServer, PrintServersConfig} from '../native_layer_cros.js';
 
-Polymer({
-  is: 'print-preview-destination-dialog-cros',
+import {PrintPreviewDestinationListItemElement} from './destination_list_item.js';
 
-  _template: html`{__html_template__}`,
 
-  behaviors: [
-    ListPropertyUpdateBehavior,
-    WebUIListenerBehavior,
-  ],
+/**
+ * @constructor
+ * @extends {PolymerElement}
+ * @implements {ListPropertyUpdateBehaviorInterface}
+ * @implements {WebUIListenerBehaviorInterface}
+ */
+const PrintPreviewDestinationDialogCrosElementBase = mixinBehaviors(
+    [ListPropertyUpdateBehavior, WebUIListenerBehavior], PolymerElement);
 
-  properties: {
-    /** @type {?DestinationStore} */
-    destinationStore: {
-      type: Object,
-      observer: 'onDestinationStoreSet_',
-    },
+/** @polymer */
+export class PrintPreviewDestinationDialogCrosElement extends
+    PrintPreviewDestinationDialogCrosElementBase {
+  static get is() {
+    return 'print-preview-destination-dialog-cros';
+  }
 
-    /** @type {?InvitationStore} */
-    invitationStore: Object,
+  static get template() {
+    return html`{__html_template__}`;
+  }
 
-    activeUser: {
-      type: String,
-      observer: 'onActiveUserChange_',
-    },
-
-    currentDestinationAccount: String,
-
-    /** @type {!Array<string>} */
-    users: Array,
-
-    /** @private */
-    printServerSelected_: {
-      type: String,
-      value: '',
-      observer: 'onPrintServerSelected_',
-    },
-
-    /** @private {!Array<!Destination>} */
-    destinations_: {
-      type: Array,
-      value: [],
-    },
-
-    /** @private {boolean} */
-    loadingDestinations_: {
-      type: Boolean,
-      value: false,
-    },
-
-    /** @private {!MetricsContext} */
-    metrics_: Object,
-
-    /** @private {?RegExp} */
-    searchQuery_: {
-      type: Object,
-      value: null,
-    },
-
-    /** @private */
-    saveToDriveFlagEnabled_: {
-      type: Boolean,
-      value() {
-        return loadTimeData.getBoolean('printSaveToDrive');
+  static get properties() {
+    return {
+      /** @type {?DestinationStore} */
+      destinationStore: {
+        type: Object,
+        observer: 'onDestinationStoreSet_',
       },
-      readOnly: true,
-    },
 
-    /** @private {boolean} */
-    isSingleServerFetchingMode_: {
-      type: Boolean,
-      value: false,
-    },
-
-    /** @private {!Array<string>} */
-    printServerNames_: {
-      type: Array,
-      value() {
-        return [''];
+      activeUser: {
+        type: String,
+        observer: 'onActiveUserChange_',
       },
-    },
 
-    /** @private */
-    printServerScalingFlagEnabled_: {
-      type: Boolean,
-      value() {
-        return loadTimeData.getBoolean('printServerScaling');
+      currentDestinationAccount: String,
+
+      /** @type {!Array<string>} */
+      users: Array,
+
+      /** @private */
+      printServerSelected_: {
+        type: String,
+        value: '',
+        observer: 'onPrintServerSelected_',
       },
-      readOnly: true,
-    },
+
+      /** @private {!Array<!Destination>} */
+      destinations_: {
+        type: Array,
+        value: [],
+      },
+
+      /** @private {boolean} */
+      loadingDestinations_: {
+        type: Boolean,
+        value: false,
+      },
+
+      /** @private {!MetricsContext} */
+      metrics_: Object,
+
+      /** @private {?RegExp} */
+      searchQuery_: {
+        type: Object,
+        value: null,
+      },
+
+      /** @private {boolean} */
+      isSingleServerFetchingMode_: {
+        type: Boolean,
+        value: false,
+      },
+
+      /** @private {!Array<string>} */
+      printServerNames_: {
+        type: Array,
+        value() {
+          return [''];
+        },
+      },
+
+      /** @private {boolean} */
+      loadingServerPrinters_: {
+        type: Boolean,
+        value: false,
+      },
+
+      /** @private {boolean} */
+      loadingAnyDestinations_: {
+        type: Boolean,
+        computed: 'computeLoadingDestinations_(' +
+            'loadingDestinations_, loadingServerPrinters_)'
+      },
+    };
+  }
+
+  constructor() {
+    super();
+
+    /** @private {!EventTracker} */
+    this.tracker_ = new EventTracker();
+
+    /** @private {?Destination} */
+    this.destinationInConfiguring_ = null;
 
     /** @private {boolean} */
-    loadingServerPrinters_: {
-      type: Boolean,
-      value: false,
-    },
+    this.initialized_ = false;
 
-    /** @private {boolean} */
-    loadingAnyDestinations_: {
-      type: Boolean,
-      computed:
-          'computeLoadingDestinations_(loadingDestinations_, loadingServerPrinters_)'
-    },
-  },
-
-  listeners: {
-    'keydown': 'onKeydown_',
-  },
-
-  /** @private {!EventTracker} */
-  tracker_: new EventTracker(),
-
-  /** @private {?Destination} */
-  destinationInConfiguring_: null,
-
-  /** @private {boolean} */
-  initialized_: false,
-
-  /** @private {?PrintServerStore} */
-  printServerStore_: null,
+    /** @private {?PrintServerStore} */
+    this.printServerStore_ = null;
+  }
 
   /** @override */
-  detached() {
+  disconnectedCallback() {
+    super.disconnectedCallback();
+
     this.tracker_.removeAll();
-  },
+  }
 
   /** @override */
   ready() {
-    if (!this.printServerScalingFlagEnabled_) {
-      return;
-    }
+    super.ready();
+
+    this.addEventListener(
+        'keydown', e => this.onKeydown_(/** @type {!KeyboardEvent} */ (e)));
     this.printServerStore_ = new PrintServerStore(
         (/** string */ eventName, /** !Function */ callback) =>
             void this.addWebUIListener(eventName, callback));
@@ -187,7 +182,16 @@ Polymer({
     if (this.destinationStore) {
       this.printServerStore_.setDestinationStore(this.destinationStore);
     }
-  },
+  }
+
+  /**
+   * @param {string} account
+   * @private
+   */
+  fireAccountChange_(account) {
+    this.dispatchEvent(new CustomEvent(
+        'account-change', {bubbles: true, composed: true, detail: account}));
+  }
 
   /**
    * @param {!KeyboardEvent} e Event containing the key
@@ -201,7 +205,7 @@ Polymer({
       this.$.dialog.cancel();
       e.preventDefault();
     }
-  },
+  }
 
   /** @private */
   onDestinationStoreSet_() {
@@ -217,16 +221,16 @@ Polymer({
     if (this.printServerStore_) {
       this.printServerStore_.setDestinationStore(this.destinationStore);
     }
-  },
+  }
 
   /** @private */
   onActiveUserChange_() {
     if (this.activeUser) {
-      this.$$('select').value = this.activeUser;
+      this.shadowRoot.querySelector('select').value = this.activeUser;
     }
 
     this.updateDestinations_();
-  },
+  }
 
   /** @private */
   updateDestinations_() {
@@ -240,25 +244,22 @@ Polymer({
 
     this.loadingDestinations_ =
         this.destinationStore.isPrintDestinationSearchInProgress;
-  },
+  }
 
   /**
    * @return {!Array<!Destination>}
    * @private
    */
   getDestinationList_() {
-    const destinations = this.destinationStore.destinations(this.activeUser);
-    // When |saveToDriveFlagEnabled_| is true, we don't want to show a
-    // 'Save to Drive' option in the destination dialog.
-    if (this.saveToDriveFlagEnabled_) {
-      return destinations.filter(
-          destination => destination.id !== Destination.GooglePromotedId.DOCS &&
-              destination.id !==
-                  Destination.GooglePromotedId.SAVE_TO_DRIVE_CROS);
-    }
-
-    return destinations;
-  },
+    // Filter out the 'Save to Drive' option so it is not shown in the
+    // list of available options.
+    return this.destinationStore.destinations(this.activeUser)
+        .filter(
+            destination =>
+                destination.id !== Destination.GooglePromotedId.DOCS &&
+                destination.id !==
+                    Destination.GooglePromotedId.SAVE_TO_DRIVE_CROS);
+  }
 
   /** @private */
   onCloseOrCancel_() {
@@ -272,14 +273,14 @@ Polymer({
             Metrics.DestinationSearchBucket.DESTINATION_CLOSED_CHANGED);
     if (this.currentDestinationAccount &&
         this.currentDestinationAccount !== this.activeUser) {
-      this.fire('account-change', this.currentDestinationAccount);
+      this.fireAccountChange_(this.currentDestinationAccount);
     }
-  },
+  }
 
   /** @private */
   onCancelButtonClick_() {
     this.$.dialog.cancel();
-  },
+  }
 
   /**
    * @param {!CustomEvent<!PrintPreviewDestinationListItemElement>} e Event
@@ -327,23 +328,18 @@ Polymer({
         .then(
             response => {
               this.destinationInConfiguring_ = null;
-              listItem.onConfigureComplete(response.success);
-              if (response.success) {
-                destination.capabilities = response.capabilities;
-                if (response.policies) {
-                  destination.policies = response.policies;
-                }
-                this.selectDestination_(destination);
-                // After destination is selected, start fetching for the EULA
-                // URL.
-                this.destinationStore.fetchEulaUrl(destination.id);
-              }
+              listItem.onConfigureComplete(true);
+              destination.capabilities = response.capabilities;
+              this.selectDestination_(destination);
+              // After destination is selected, start fetching for the EULA
+              // URL.
+              this.destinationStore.fetchEulaUrl(destination.id);
             },
             () => {
               this.destinationInConfiguring_ = null;
               listItem.onConfigureComplete(false);
             });
-  },
+  }
 
   /**
    * @param {!Destination} destination The destination to select.
@@ -352,7 +348,7 @@ Polymer({
   selectDestination_(destination) {
     this.destinationStore.selectDestination(destination);
     this.$.dialog.close();
-  },
+  }
 
   show() {
     if (!this.metrics_) {
@@ -363,27 +359,27 @@ Polymer({
         this.destinationStore.isPrintDestinationSearchInProgress;
     this.metrics_.record(Metrics.DestinationSearchBucket.DESTINATION_SHOWN);
     if (this.activeUser) {
-      beforeNextRender(assert(this.$$('select')), () => {
-        this.$$('select').value = this.activeUser;
+      beforeNextRender(assert(this.shadowRoot.querySelector('select')), () => {
+        this.shadowRoot.querySelector('select').value = this.activeUser;
       });
     }
-  },
+  }
 
   /** @return {boolean} Whether the dialog is open. */
   isOpen() {
     return this.$.dialog.hasAttribute('open');
-  },
+  }
 
   /**
    * @param {string} printServerName The name of the print server.
    * @private
    */
   onPrintServerSelected_(printServerName) {
-    if (!this.printServerScalingFlagEnabled_ || !this.printServerStore_) {
+    if (!this.printServerStore_) {
       return;
     }
     this.printServerStore_.choosePrintServers(printServerName);
-  },
+  }
 
   /**
    * @param {!CustomEvent<!{printServerNames: !Array<string>,
@@ -394,7 +390,7 @@ Polymer({
   onPrintServersChanged_(e) {
     this.isSingleServerFetchingMode_ = e.detail.isSingleServerFetchingMode;
     this.printServerNames_ = e.detail.printServerNames;
-  },
+  }
 
   /**
    * @param {!CustomEvent<boolean>} e Event containing whether server printers
@@ -403,7 +399,7 @@ Polymer({
    */
   onServerPrintersLoading_(e) {
     this.loadingServerPrinters_ = e.detail;
-  },
+  }
 
   /**
    * @return {boolean} Whether the destinations are loading.
@@ -411,15 +407,15 @@ Polymer({
    */
   computeLoadingDestinations_() {
     return this.loadingDestinations_ || this.loadingServerPrinters_;
-  },
+  }
 
   /** @private */
   onUserChange_() {
-    const select = this.$$('select');
+    const select = this.shadowRoot.querySelector('select');
     const account = select.value;
     if (account) {
       this.loadingDestinations_ = true;
-      this.fire('account-change', account);
+      this.fireAccountChange_(account);
       this.metrics_.record(Metrics.DestinationSearchBucket.ACCOUNT_CHANGED);
     } else {
       select.value = this.activeUser;
@@ -427,11 +423,15 @@ Polymer({
       this.metrics_.record(
           Metrics.DestinationSearchBucket.ADD_ACCOUNT_SELECTED);
     }
-  },
+  }
 
   /** @private */
   onManageButtonClick_() {
     this.metrics_.record(Metrics.DestinationSearchBucket.MANAGE_BUTTON_CLICKED);
     NativeLayerImpl.getInstance().managePrinters();
-  },
-});
+  }
+}
+
+customElements.define(
+    PrintPreviewDestinationDialogCrosElement.is,
+    PrintPreviewDestinationDialogCrosElement);

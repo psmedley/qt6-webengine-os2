@@ -117,6 +117,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void SetInsets(const gfx::Insets& insets) override;
   TouchSelectionControllerClientManager*
   GetTouchSelectionControllerClientManager() override;
+  bool ShouldVirtualKeyboardOverlayContent() override;
+  void NotifyVirtualKeyboardOverlayRect(
+      const gfx::Rect& keyboard_rect) override;
 
   // Overridden from RenderWidgetHostViewBase:
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -129,8 +132,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void RenderProcessGone() override;
   void ShowWithVisibility(Visibility web_contents_visibility) override;
   void Destroy() override;
-  void SetTooltipText(const base::string16& tooltip_text) override;
-  void DisplayTooltipText(const base::string16& tooltip_text) override;
+  void UpdateTooltipUnderCursor(const std::u16string& tooltip_text) override;
+  void UpdateTooltip(const std::u16string& tooltip_text) override;
+  void UpdateTooltipFromKeyboard(const std::u16string& tooltip_text,
+                                 const gfx::Rect& bounds) override;
   uint32_t GetCaptureSequenceNumber() const override;
   bool IsSurfaceAvailableForCopy() override;
   void CopyFromSurface(
@@ -161,7 +166,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       bool request_unadjusted_movement) override;
   void UnlockMouse() override;
   bool GetIsMouseLockedUnadjustedMovementForTesting() override;
-  bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes) override;
+  bool LockKeyboard(absl::optional<base::flat_set<ui::DomCode>> codes) override;
   void UnlockKeyboard() override;
   bool IsKeyboardLocked() override;
   base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
@@ -197,7 +202,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void SetCompositionText(const ui::CompositionText& composition) override;
   uint32_t ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
-  void InsertText(const base::string16& text,
+  void InsertText(const std::u16string& text,
                   InsertTextCursorBehavior cursor_behavior) override;
   void InsertChar(const ui::KeyEvent& event) override;
   ui::TextInputType GetTextInputType() const override;
@@ -206,6 +211,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   int GetTextInputFlags() const override;
   bool CanComposeInline() const override;
   gfx::Rect GetCaretBounds() const override;
+  gfx::Rect GetSelectionBoundingBox() const override;
   bool GetCompositionCharacterBounds(uint32_t index,
                                      gfx::Rect* rect) const override;
   bool HasCompositionText() const override;
@@ -216,7 +222,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   bool SetEditableSelectionRange(const gfx::Range& range) override;
   bool DeleteRange(const gfx::Range& range) override;
   bool GetTextFromRange(const gfx::Range& range,
-                        base::string16* text) const override;
+                        std::u16string* text) const override;
   void OnInputMethodChanged() override;
   bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) override;
@@ -237,6 +243,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   gfx::Range GetAutocorrectRange() const override;
   gfx::Rect GetAutocorrectCharacterBounds() const override;
   bool SetAutocorrectRange(const gfx::Range& range) override;
+  absl::optional<ui::GrammarFragment> GetGrammarFragment(
+      const gfx::Range& range) override;
+  bool ClearGrammarFragments(const gfx::Range& range) override;
+  bool AddGrammarFragments(
+      const std::vector<ui::GrammarFragment>& fragments) override;
 #endif
 
 #if defined(OS_WIN)
@@ -244,15 +255,15 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // bounds of the active editable element. This is used to report the layout
   // bounds of the text input control to TSF on Windows.
   void GetActiveTextInputControlLayoutBounds(
-      base::Optional<gfx::Rect>* control_bounds,
-      base::Optional<gfx::Rect>* selection_bounds) override;
+      absl::optional<gfx::Rect>* control_bounds,
+      absl::optional<gfx::Rect>* selection_bounds) override;
   // API to notify accessibility whether there is an active composition
   // from TSF or not.
   // It notifies the composition range, composition text and whether the
   // composition has been committed or not.
   void SetActiveCompositionForAccessibility(
       const gfx::Range& range,
-      const base::string16& active_composition_text,
+      const std::u16string& active_composition_text,
       bool is_composition_committed) override;
 #endif
 
@@ -351,8 +362,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void SetTooltipsEnabled(bool enable) override;
   void Shutdown() override;
 
-  bool ShouldVirtualKeyboardOverlayContent() const;
-  void NotifyVirtualKeyboardOverlayRect(const gfx::Rect& keyboard_rect);
   bool FocusedFrameHasStickyActivation() const;
 
   RenderWidgetHostViewEventHandler* event_handler() {
@@ -364,6 +373,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   ui::EventPointerType GetLastPointerType() const { return last_pointer_type_; }
 
   MouseWheelPhaseHandler* GetMouseWheelPhaseHandler() override;
+
+  ui::Compositor* GetCompositor() override;
 
  protected:
   ~RenderWidgetHostViewAura() override;
@@ -378,7 +389,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // RenderWidgetHostViewBase:
   void UpdateBackgroundColor() override;
   bool HasFallbackSurface() const override;
-  base::Optional<DisplayFeature> GetDisplayFeature() override;
+  absl::optional<DisplayFeature> GetDisplayFeature() override;
   void SetDisplayFeatureForTesting(
       const DisplayFeature* display_feature) override;
 
@@ -475,6 +486,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
                            WebContentsViewReparent);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, TakeFallbackContent);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
+                           TakeFallbackContentForPrerender);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            DiscardDelegatedFrames);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessHitTestBrowserTest,
                            ScrollOOPIFEditableElement);
@@ -502,7 +515,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   bool SynchronizeVisualProperties(
       const cc::DeadlinePolicy& deadline_policy,
-      const base::Optional<viz::LocalSurfaceId>& child_local_surface_id);
+      const absl::optional<viz::LocalSurfaceId>& child_local_surface_id);
 
   void OnDidUpdateVisualPropertiesComplete(
       const cc::RenderFrameMetadata& metadata);
@@ -524,7 +537,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   ui::InputMethod* GetInputMethod() const;
 
   // Get the focused view that should be used for retrieving the text selection.
-  RenderWidgetHostViewBase* GetFocusedViewForTextSelection();
+  RenderWidgetHostViewBase* GetFocusedViewForTextSelection() const;
 
   // Returns whether the widget needs an input grab to work properly.
   bool NeedsInputGrab();
@@ -592,6 +605,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   blink::mojom::FrameWidgetInputHandler*
   GetFrameWidgetInputHandlerForFocusedWidget();
 
+  void SetTooltipText(const std::u16string& tooltip_text);
+
   aura::Window* window_;
 
   std::unique_ptr<DelegatedFrameHostClient> delegated_frame_host_client_;
@@ -629,7 +644,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   bool has_composition_text_;
 
   // Current tooltip text.
-  base::string16 tooltip_;
+  std::u16string tooltip_;
 
   // Whether or not a frame observer has been added.
   bool added_frame_observer_;
@@ -718,7 +733,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Represents a feature of the physical display whose offset and mask_length
   // are expressed in DIPs relative to the view. See display_feature.h for more
   // details.
-  base::Optional<DisplayFeature> display_feature_;
+  absl::optional<DisplayFeature> display_feature_;
+
+  absl::optional<display::ScopedDisplayObserver> display_observer_;
 
   base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_{this};
 };

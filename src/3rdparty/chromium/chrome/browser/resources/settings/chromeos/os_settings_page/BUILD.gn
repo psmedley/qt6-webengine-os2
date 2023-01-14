@@ -8,6 +8,7 @@ import("//ui/webui/resources/tools/js_modulizer.gni")
 import("../os_settings.gni")
 
 js_type_check("closure_compile_module") {
+  closure_flags = os_settings_closure_flags
   is_polymer3 = true
   deps = [
     ":main_page_behavior.m",
@@ -23,23 +24,23 @@ js_library("os_settings_page.m") {
     ":settings_idle_load.m",
     "..:os_page_visibility.m",
     "..:os_route.m",
-    "../..:router.m",
-    "../..:search_settings.m",
-    "../../settings_page:settings_section.m",
-    "../bluetooth_page:bluetooth_page.m",
+    "../..:router",
+    "../../settings_page:settings_section",
+    "../bluetooth_page:bluetooth_page",
     "../crostini_page:crostini_page.m",
     "../device_page:device_page.m",
     "../kerberos_page:kerberos_page.m",
     "../multidevice_page:multidevice_page.m",
-    "../on_startup_page:on_startup_page.m",
     "../os_a11y_page:os_a11y_page.m",
     "../os_apps_page:android_apps_browser_proxy.m",
     "../os_apps_page:android_apps_browser_proxy.m",
     "../os_apps_page:os_apps_page.m",
+    "../os_apps_page/app_notifications_page:app_notifications_subpage",
+    "../os_bluetooth_page:os_bluetooth_page",
     "../os_people_page:os_people_page.m",
-    "../os_printing_page:os_printing_page.m",
-    "../os_privacy_page:os_privacy_page.m",
-    "../os_search_page:os_search_page.m",
+    "../os_printing_page:os_printing_page",
+    "../os_privacy_page:os_privacy_page",
+    "../os_search_page:os_search_page",
     "../personalization_page:personalization_page.m",
     "//ui/webui/resources/cr_elements/cr_button:cr_button.m",
     "//ui/webui/resources/js:assert.m",
@@ -52,8 +53,8 @@ js_library("os_settings_page.m") {
 js_library("main_page_behavior.m") {
   sources = [ "$root_gen_dir/chrome/browser/resources/settings/chromeos/os_settings_page/main_page_behavior.m.js" ]
   deps = [
-    "../..:router.m",
-    "../../settings_page:settings_section.m",
+    "../..:router",
+    "../../settings_page:settings_section",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/js:assert.m",
     "//ui/webui/resources/js:util.m",
@@ -88,6 +89,7 @@ polymer_modulizer("os_settings_page") {
         "ui/webui/resources/html/assert.html|assert",
       ]
   namespace_rewrites = os_settings_namespace_rewrites
+  migrated_imports = os_settings_migrated_imports
 }
 
 polymer_modulizer("settings_idle_load") {

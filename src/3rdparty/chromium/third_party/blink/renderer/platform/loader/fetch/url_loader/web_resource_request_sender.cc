@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
@@ -18,6 +19,7 @@
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -28,11 +30,11 @@
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/cpp/url_util.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/loader/inter_process_time_ticks_converter.h"
-#include "third_party/blink/public/common/loader/network_utils.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/common/loader/resource_type_util.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
@@ -136,8 +138,8 @@ int GetInitialRequestID() {
 bool RedirectRequiresLoaderRestart(const GURL& original_url,
                                    const GURL& redirect_url) {
   // Restart is needed if the URL is no longer handled by network service.
-  if (network_utils::IsURLHandledByNetworkService(original_url))
-    return !network_utils::IsURLHandledByNetworkService(redirect_url);
+  if (network::IsURLHandledByNetworkService(original_url))
+    return !network::IsURLHandledByNetworkService(redirect_url);
 
   // If URL wasn't originally handled by network service, restart is needed if
   // schemes are different.
@@ -160,7 +162,6 @@ WebResourceRequestSender::~WebResourceRequestSender() = default;
 
 void WebResourceRequestSender::SendSync(
     std::unique_ptr<network::ResourceRequest> request,
-    int routing_id,
     const net::NetworkTrafficAnnotationTag& traffic_annotation,
     uint32_t loader_options,
     SyncLoadResponse* response,
@@ -212,7 +213,7 @@ void WebResourceRequestSender::SendSync(
       *task_runner, FROM_HERE,
       WTF::CrossThreadBindOnce(
           &SyncLoadContext::StartAsyncWithWaitableEvent, std::move(request),
-          routing_id, task_runner, traffic_annotation, loader_options,
+          task_runner, traffic_annotation, loader_options,
           std::move(pending_factory), std::move(throttles),
           CrossThreadUnretained(response),
           CrossThreadUnretained(&context_for_redirect),
@@ -246,7 +247,6 @@ void WebResourceRequestSender::SendSync(
 
 int WebResourceRequestSender::SendAsync(
     std::unique_ptr<network::ResourceRequest> request,
-    int routing_id,
     scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner,
     const net::NetworkTrafficAnnotationTag& traffic_annotation,
     uint32_t loader_options,
@@ -257,8 +257,6 @@ int WebResourceRequestSender::SendAsync(
     std::unique_ptr<ResourceLoadInfoNotifierWrapper>
         resource_load_info_notifier_wrapper,
     WebBackForwardCacheLoaderHelper back_forward_cache_loader_helper) {
-  auto weak_this = weak_factory_.GetWeakPtr();
-
   CheckSchemeForReferrerPolicy(*request);
 
 #if defined(OS_ANDROID)
@@ -273,8 +271,8 @@ int WebResourceRequestSender::SendAsync(
   // Compute a unique request_id for this renderer process.
   int request_id = MakeRequestID();
   request_info_ = std::make_unique<PendingRequestInfo>(
-      std::move(peer), request->destination, request->render_frame_id,
-      request->url, std::move(resource_load_info_notifier_wrapper));
+      std::move(peer), request->destination, request->url,
+      std::move(resource_load_info_notifier_wrapper));
 
   request_info_->resource_load_info_notifier_wrapper
       ->NotifyResourceLoadInitiated(
@@ -294,13 +292,16 @@ int WebResourceRequestSender::SendAsync(
                  [](const WebString& h) { return h.Latin1(); });
   std::unique_ptr<ThrottlingURLLoader> url_loader =
       ThrottlingURLLoader::CreateLoaderAndStart(
-          std::move(url_loader_factory), throttles.ReleaseVector(), routing_id,
-          request_id, loader_options, request.get(), client.get(),
-          traffic_annotation, std::move(loading_task_runner),
-          base::make_optional(std_cors_exempt_header_list));
-  // TODO(https://crbug.com/1175286): Remove this mitigation when we understand
-  // why `this` or `request_info_` is being destroyed.
-  if (!weak_this || !request_info_)
+          std::move(url_loader_factory), throttles.ReleaseVector(), request_id,
+          loader_options, request.get(), client.get(), traffic_annotation,
+          std::move(loading_task_runner),
+          absl::make_optional(std_cors_exempt_header_list));
+
+  // The request may be canceled by `ThrottlingURLLoader::CreateAndStart()`, in
+  // which case `DeletePendingRequest()` has reset the `request_info_` to
+  // nullptr and `this` will be destroyed by `DeleteSoon()`. If so, just return
+  // the `request_id`.
+  if (!request_info_)
     return request_id;
 
   request_info_->url_loader = std::move(url_loader);
@@ -316,19 +317,17 @@ void WebResourceRequestSender::Cancel(
   DeletePendingRequest(std::move(task_runner));
 }
 
-void WebResourceRequestSender::SetDefersLoading(WebURLLoader::DeferType value) {
+void WebResourceRequestSender::Freeze(WebLoaderFreezeMode mode) {
   if (!request_info_) {
     DLOG(ERROR) << "unknown request";
     return;
   }
-  if (value != WebURLLoader::DeferType::kNotDeferred) {
-    request_info_->is_deferred = value;
-    request_info_->url_loader_client->SetDefersLoading(value);
-  } else if (request_info_->is_deferred !=
-             WebURLLoader::DeferType::kNotDeferred) {
-    request_info_->is_deferred = WebURLLoader::DeferType::kNotDeferred;
-    request_info_->url_loader_client->SetDefersLoading(
-        WebURLLoader::DeferType::kNotDeferred);
+  if (mode != WebLoaderFreezeMode::kNone) {
+    request_info_->freeze_mode = mode;
+    request_info_->url_loader_client->Freeze(mode);
+  } else if (request_info_->freeze_mode != WebLoaderFreezeMode::kNone) {
+    request_info_->freeze_mode = WebLoaderFreezeMode::kNone;
+    request_info_->url_loader_client->Freeze(WebLoaderFreezeMode::kNone);
 
     FollowPendingRedirect(request_info_.get());
   }
@@ -372,13 +371,11 @@ void WebResourceRequestSender::DeletePendingRequest(
 WebResourceRequestSender::PendingRequestInfo::PendingRequestInfo(
     scoped_refptr<WebRequestPeer> peer,
     network::mojom::RequestDestination request_destination,
-    int render_frame_id,
     const GURL& request_url,
     std::unique_ptr<ResourceLoadInfoNotifierWrapper>
         resource_load_info_notifier_wrapper)
     : peer(std::move(peer)),
       request_destination(request_destination),
-      render_frame_id(render_frame_id),
       url(request_url),
       response_url(request_url),
       local_request_start(base::TimeTicks::Now()),
@@ -445,7 +442,13 @@ void WebResourceRequestSender::OnReceivedResponse(
       response_head->load_timing.request_start;
   // Now that response_start has been set, we can properly set the TimeTicks in
   // the URLResponseHead.
-  ToLocalURLResponseHead(*request_info_, *response_head);
+  base::TimeTicks remote_response_start =
+      ToLocalURLResponseHead(*request_info_, *response_head);
+  if (!remote_response_start.is_null()) {
+    UMA_HISTOGRAM_TIMES(
+        "Blink.ResourceRequest.ResponseDelay",
+        request_info_->local_response_start - remote_response_start);
+  }
   request_info_->load_timing_info = response_head->load_timing;
   if (delegate_) {
     scoped_refptr<WebRequestPeer> new_peer = delegate_->OnReceivedResponse(
@@ -501,7 +504,13 @@ void WebResourceRequestSender::OnReceivedRedirect(
       RedirectRequiresLoaderRestart(request_info_->response_url,
                                     redirect_info.new_url);
 
-  ToLocalURLResponseHead(*request_info_, *response_head);
+  base::TimeTicks remote_response_start =
+      ToLocalURLResponseHead(*request_info_, *response_head);
+  if (!remote_response_start.is_null()) {
+    UMA_HISTOGRAM_TIMES(
+        "Blink.ResourceRequest.RedirectDelay",
+        request_info_->local_response_start - remote_response_start);
+  }
   std::vector<std::string> removed_headers;
   if (request_info_->peer->OnReceivedRedirect(
           redirect_info, response_head.Clone(), &removed_headers)) {
@@ -522,7 +531,7 @@ void WebResourceRequestSender::OnReceivedRedirect(
         ->NotifyResourceRedirectReceived(redirect_info,
                                          std::move(response_head));
 
-    if (request_info_->is_deferred == WebURLLoader::DeferType::kNotDeferred)
+    if (request_info_->freeze_mode == WebLoaderFreezeMode::kNone)
       FollowPendingRedirect(request_info_.get());
   } else {
     Cancel(std::move(task_runner));
@@ -578,6 +587,18 @@ void WebResourceRequestSender::OnRequestComplete(
                      request_info_->load_timing_info.request_start,
                  base::TimeTicks::Now());
   }
+
+  const net::LoadTimingInfo& timing_info = request_info_->load_timing_info;
+  if (!timing_info.request_start.is_null()) {
+    UMA_HISTOGRAM_TIMES(
+        "Blink.ResourceRequest.StartDelay",
+        timing_info.request_start - request_info_->local_request_start);
+  }
+  if (!renderer_status.completion_time.is_null()) {
+    UMA_HISTOGRAM_TIMES(
+        "Blink.ResourceRequest.CompletionDelay",
+        base::TimeTicks::Now() - renderer_status.completion_time);
+  }
   // The request ID will be removed from our pending list in the destructor.
   // Normally, dispatching this message causes the reference-counted request to
   // die immediately.
@@ -587,22 +608,23 @@ void WebResourceRequestSender::OnRequestComplete(
   peer->OnCompletedRequest(renderer_status);
 }
 
-void WebResourceRequestSender::ToLocalURLResponseHead(
+base::TimeTicks WebResourceRequestSender::ToLocalURLResponseHead(
     const PendingRequestInfo& request_info,
     network::mojom::URLResponseHead& response_head) const {
+  base::TimeTicks remote_response_start = response_head.response_start;
   if (base::TimeTicks::IsConsistentAcrossProcesses() ||
       request_info.local_request_start.is_null() ||
       request_info.local_response_start.is_null() ||
       response_head.request_start.is_null() ||
-      response_head.response_start.is_null() ||
+      remote_response_start.is_null() ||
       response_head.load_timing.request_start.is_null()) {
-    return;
+    return remote_response_start;
   }
   InterProcessTimeTicksConverter converter(
       LocalTimeTicks::FromTimeTicks(request_info.local_request_start),
       LocalTimeTicks::FromTimeTicks(request_info.local_response_start),
       RemoteTimeTicks::FromTimeTicks(response_head.request_start),
-      RemoteTimeTicks::FromTimeTicks(response_head.response_start));
+      RemoteTimeTicks::FromTimeTicks(remote_response_start));
 
   net::LoadTimingInfo* load_timing = &response_head.load_timing;
   RemoteToLocalTimeTicks(converter, &load_timing->request_start);
@@ -625,6 +647,8 @@ void WebResourceRequestSender::ToLocalURLResponseHead(
   RemoteToLocalTimeTicks(converter, &load_timing->service_worker_fetch_start);
   RemoteToLocalTimeTicks(converter,
                          &load_timing->service_worker_respond_with_settled);
+  RemoteToLocalTimeTicks(converter, &remote_response_start);
+  return remote_response_start;
 }
 
 }  // namespace blink

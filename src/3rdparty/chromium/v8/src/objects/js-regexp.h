@@ -52,10 +52,9 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
          : c == 'y' ? base::Optional<Flag>(kSticky)
          : c == 'u' ? base::Optional<Flag>(kUnicode)
          : c == 's' ? base::Optional<Flag>(kDotAll)
+         : c == 'd' ? base::Optional<Flag>(kHasIndices)
          : (FLAG_enable_experimental_regexp_engine && c == 'l')
            ? base::Optional<Flag>(kLinear)
-         : (FLAG_harmony_regexp_match_indices &&  c == 'd')
-           ? base::Optional<Flag>(kHasIndices)
          : base::Optional<Flag>();
     // clang-format on
   }
@@ -90,6 +89,9 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   static Flags FlagsFromString(Isolate* isolate, Handle<String> flags,
                                bool* success);
 
+  V8_EXPORT_PRIVATE static Handle<String> StringFromFlags(Isolate* isolate,
+                                                          Flags flags);
+
   bool CanTierUp();
   bool MarkedForTierUp();
   void ResetLastTierUpTick();
@@ -112,6 +114,7 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   inline int MaxRegisterCount() const;
   inline Flags GetFlags();
   inline String Pattern();
+  inline String EscapedPattern();
   inline Object CaptureNameMap();
   inline Object DataAt(int index) const;
   // Set implementation data after the object has been prepared.
@@ -222,11 +225,11 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
 
   // Descriptor array index to important methods in the prototype.
   static const int kExecFunctionDescriptorIndex = 1;
-  static const int kSymbolMatchFunctionDescriptorIndex = 13;
-  static const int kSymbolMatchAllFunctionDescriptorIndex = 14;
-  static const int kSymbolReplaceFunctionDescriptorIndex = 15;
-  static const int kSymbolSearchFunctionDescriptorIndex = 16;
-  static const int kSymbolSplitFunctionDescriptorIndex = 17;
+  static const int kSymbolMatchFunctionDescriptorIndex = 14;
+  static const int kSymbolMatchAllFunctionDescriptorIndex = 15;
+  static const int kSymbolReplaceFunctionDescriptorIndex = 16;
+  static const int kSymbolSearchFunctionDescriptorIndex = 17;
+  static const int kSymbolSplitFunctionDescriptorIndex = 18;
 
   // The uninitialized value for a regexp code object.
   static const int kUninitializedValue = -1;

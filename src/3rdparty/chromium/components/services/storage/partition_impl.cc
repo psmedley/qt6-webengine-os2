@@ -48,7 +48,7 @@ void ShutDown(std::unique_ptr<T> object) {
 }  // namespace
 
 PartitionImpl::PartitionImpl(StorageServiceImpl* service,
-                             const base::Optional<base::FilePath>& path)
+                             const absl::optional<base::FilePath>& path)
     : service_(service), path_(path) {
   receivers_.set_disconnect_handler(base::BindRepeating(
       &PartitionImpl::OnDisconnect, base::Unretained(this)));
@@ -104,9 +104,6 @@ void PartitionImpl::BindLocalStorageControl(
     mojo::PendingReceiver<mojom::LocalStorageControl> receiver) {
   local_storage_ = std::make_unique<LocalStorageImpl>(
       path_.value_or(base::FilePath()), base::SequencedTaskRunnerHandle::Get(),
-      base::ThreadPool::CreateSequencedTaskRunner(
-          {base::MayBlock(), base::WithBaseSyncPrimitives(),
-           base::TaskShutdownBehavior::BLOCK_SHUTDOWN}),
       std::move(receiver));
 }
 

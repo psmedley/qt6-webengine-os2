@@ -37,13 +37,13 @@ void JSONFeatureProviderSource::LoadJSON(int resource_id) {
   } else {
     // There was some error loading the features file.
     // http://crbug.com/176381
-    value_as_dict.reset(new base::DictionaryValue());
+    value_as_dict = std::make_unique<base::DictionaryValue>();
   }
 
   // Ensure there are no key collisions.
   for (base::DictionaryValue::Iterator iter(*value_as_dict); !iter.IsAtEnd();
        iter.Advance()) {
-    if (dictionary_.GetWithoutPathExpansion(iter.key(), NULL))
+    if (dictionary_.FindKey(iter.key()))
       LOG(FATAL) << "Key " << iter.key() << " is defined in " << name_
                  << " JSON feature files more than once.";
   }

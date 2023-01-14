@@ -9,11 +9,13 @@
 
 #include <set>
 #include <string>
+#include <unordered_map>
 
-#include "base/optional.h"
 #include "content/common/content_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "ui/accessibility/ax_common.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_tree_data.h"
@@ -56,8 +58,11 @@ class CONTENT_EXPORT BlinkAXTreeSource
   // WebDocument if accessibility isn't enabled globally.
   void SetRoot(blink::WebAXObject root);
 
+#if defined(AX_FAIL_FAST_BUILD)
   // Walks up the ancestor chain to see if this is a descendant of the root.
+  // TODO(accessibility) Remove once it's clear this never triggers.
   bool IsInTree(blink::WebAXObject node) const;
+#endif
 
   ui::AXMode accessibility_mode() { return accessibility_mode_; }
   void SetAccessibilityMode(ui::AXMode new_mode);
@@ -84,7 +89,7 @@ class CONTENT_EXPORT BlinkAXTreeSource
   }
   void RemoveImageAnnotator() {
     image_annotator_ = nullptr;
-    first_unlabeled_image_id_ = base::nullopt;
+    first_unlabeled_image_id_ = absl::nullopt;
   }
 
   // Query or update a set of IDs for which we should load inline text boxes.
@@ -121,6 +126,10 @@ class CONTENT_EXPORT BlinkAXTreeSource
   void SerializerClearedNode(int32_t node_id) override;
 
   blink::WebDocument GetMainDocument() const;
+
+  // Ignore code that limits based on the protocol (like https, file, etc.)
+  // to enable tests to run.
+  static void IgnoreProtocolChecksForTesting();
 
  private:
   const blink::WebDocument& document() const {
@@ -192,7 +201,7 @@ class CONTENT_EXPORT BlinkAXTreeSource
   //
   // Used to ensure that the tutor message that explains to screen reader users
   // how to turn on automatic image labels is provided only once.
-  mutable base::Optional<int32_t> first_unlabeled_image_id_ = base::nullopt;
+  mutable absl::optional<int32_t> first_unlabeled_image_id_ = absl::nullopt;
 
   // Current bounding box of every object, so we can detect when it moves.
   mutable std::unordered_map<int, ui::AXRelativeBounds> cached_bounding_boxes_;

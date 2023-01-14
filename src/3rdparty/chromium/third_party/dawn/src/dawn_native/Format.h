@@ -20,6 +20,7 @@
 #include "common/ityp_bitset.h"
 #include "dawn_native/EnumClassBitmasks.h"
 #include "dawn_native/Error.h"
+#include "dawn_native/Subresource.h"
 
 #include <array>
 
@@ -44,19 +45,20 @@ namespace dawn_native {
     enum class Aspect : uint8_t;
     class DeviceBase;
 
-    // This mirrors wgpu::TextureComponentType as a bitmask instead.
-    enum class ComponentTypeBit : uint8_t {
+    // This mirrors wgpu::TextureSampleType as a bitmask instead.
+    enum class SampleTypeBit : uint8_t {
         None = 0x0,
         Float = 0x1,
-        Sint = 0x2,
-        Uint = 0x4,
-        DepthComparison = 0x8,
+        UnfilterableFloat = 0x2,
+        Depth = 0x4,
+        Sint = 0x8,
+        Uint = 0x10,
     };
 
     // Converts an wgpu::TextureComponentType to its bitmask representation.
-    ComponentTypeBit ToComponentTypeBit(wgpu::TextureComponentType type);
+    SampleTypeBit ToSampleTypeBit(wgpu::TextureComponentType type);
     // Converts an wgpu::TextureSampleType to its bitmask representation.
-    ComponentTypeBit SampleTypeToComponentTypeBit(wgpu::TextureSampleType sampleType);
+    SampleTypeBit SampleTypeToSampleTypeBit(wgpu::TextureSampleType sampleType);
 
     struct TexelBlockInfo {
         uint32_t byteSize;
@@ -66,18 +68,16 @@ namespace dawn_native {
 
     struct AspectInfo {
         TexelBlockInfo block;
+        // TODO(crbug.com/dawn/367): Replace TextureComponentType with TextureSampleType, or make it
+        // an internal Dawn enum.
         wgpu::TextureComponentType baseType;
-        ComponentTypeBit supportedComponentTypes;
+        SampleTypeBit supportedSampleTypes;
         wgpu::TextureFormat format;
     };
 
     // The number of formats Dawn knows about. Asserts in BuildFormatTable ensure that this is the
     // exact number of known format.
     static constexpr size_t kKnownFormatCount = 55;
-
-    // The maximum number of planes per format Dawn knows about. Asserts in BuildFormatTable that
-    // the per plane index does not exceed the known maximum plane count
-    static constexpr uint32_t kMaxPlanesPerFormat = 2;
 
     struct Format;
     using FormatTable = std::array<Format, kKnownFormatCount>;
@@ -91,6 +91,8 @@ namespace dawn_native {
         bool isSupported;
         bool supportsStorageUsage;
         Aspect aspects;
+        // Only used for renderable color formats, number of color channels.
+        uint8_t componentCount;
 
         bool IsColor() const;
         bool HasDepth() const;
@@ -130,7 +132,7 @@ namespace dawn_native {
 namespace wgpu {
 
     template <>
-    struct IsDawnBitmask<dawn_native::ComponentTypeBit> {
+    struct IsDawnBitmask<dawn_native::SampleTypeBit> {
         static constexpr bool enable = true;
     };
 

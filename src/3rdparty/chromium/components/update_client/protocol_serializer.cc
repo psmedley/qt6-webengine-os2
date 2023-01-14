@@ -39,7 +39,7 @@ int GetPhysicalMemoryGB() {
 std::string GetOSVersion() {
 #if defined(OS_WIN)
   const auto ver = base::win::OSInfo::GetInstance()->version_number();
-  return base::StringPrintf("%d.%d.%d.%d", ver.major, ver.minor, ver.build,
+  return base::StringPrintf("%u.%u.%u.%u", ver.major, ver.minor, ver.build,
                             ver.patch);
 #else
   return base::SysInfo().OperatingSystemVersion();
@@ -130,7 +130,7 @@ protocol_request::Request MakeProtocolRequest(
   request.os.arch = base::SysInfo().OperatingSystemArchitecture();
 
   if (updater_state_attributes) {
-    request.updater = base::make_optional<protocol_request::Updater>();
+    request.updater = absl::make_optional<protocol_request::Updater>();
     auto it = updater_state_attributes->find("name");
     if (it != updater_state_attributes->end())
       request.updater->name = it->second;
@@ -174,7 +174,7 @@ protocol_request::Request MakeProtocolRequest(
 protocol_request::App MakeProtocolApp(
     const std::string& app_id,
     const base::Version& version,
-    base::Optional<std::vector<base::Value>> events) {
+    absl::optional<std::vector<base::Value>> events) {
   protocol_request::App app;
   app.app_id = app_id;
   app.version = version.GetString();
@@ -195,9 +195,9 @@ protocol_request::App MakeProtocolApp(
     const std::string& cohort_name,
     const std::string& release_channel,
     const std::vector<int>& disabled_reasons,
-    base::Optional<protocol_request::UpdateCheck> update_check,
-    base::Optional<protocol_request::Ping> ping) {
-  auto app = MakeProtocolApp(app_id, version, base::nullopt);
+    absl::optional<protocol_request::UpdateCheck> update_check,
+    absl::optional<protocol_request::Ping> ping) {
+  auto app = MakeProtocolApp(app_id, version, absl::nullopt);
   app.brand_code = brand_code;
   app.install_source = install_source;
   app.install_location = install_location;
@@ -214,9 +214,14 @@ protocol_request::App MakeProtocolApp(
   return app;
 }
 
-protocol_request::UpdateCheck MakeProtocolUpdateCheck(bool is_update_disabled) {
+protocol_request::UpdateCheck MakeProtocolUpdateCheck(
+    bool is_update_disabled,
+    const std::string& target_version_prefix,
+    bool rollback_allowed) {
   protocol_request::UpdateCheck update_check;
   update_check.is_update_disabled = is_update_disabled;
+  update_check.target_version_prefix = target_version_prefix;
+  update_check.rollback_allowed = rollback_allowed;
   return update_check;
 }
 

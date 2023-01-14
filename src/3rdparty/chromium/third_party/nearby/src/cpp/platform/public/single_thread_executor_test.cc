@@ -16,11 +16,12 @@
 
 #include <atomic>
 #include <functional>
+#include <string>
 
-#include "platform/base/exception.h"
 #include "gtest/gtest.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
+#include "platform/base/exception.h"
 
 namespace location {
 namespace nearby {
@@ -34,6 +35,24 @@ TEST(SingleThreadExecutorTest, CanExecute) {
   std::atomic_bool done = false;
   SingleThreadExecutor executor;
   executor.Execute([&done, &cond]() {
+    done = true;
+    cond.SignalAll();
+  });
+  absl::Mutex mutex;
+  {
+    absl::MutexLock lock(&mutex);
+    if (!done) {
+      cond.WaitWithTimeout(&mutex, absl::Seconds(1));
+    }
+  }
+  EXPECT_TRUE(done);
+}
+
+TEST(SingleThreadExecutorTest, CanExecuteNamedTask) {
+  absl::CondVar cond;
+  std::atomic_bool done = false;
+  SingleThreadExecutor executor;
+  executor.Execute("my task", [&done, &cond]() {
     done = true;
     cond.SignalAll();
   });

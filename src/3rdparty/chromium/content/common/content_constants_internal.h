@@ -38,9 +38,6 @@ CONTENT_EXPORT extern const int kTraceEventGpuProcessSortIndex;
 // Constants used to organize content threads in about:tracing.
 CONTENT_EXPORT extern const int kTraceEventRendererMainThreadSortIndex;
 
-// HTTP header set in requests to indicate they should be marked DoNotTrack.
-extern const char kDoNotTrackHeader[];
-
 // Accept header used for frame requests.
 CONTENT_EXPORT extern const char kFrameAcceptHeaderValue[];
 
@@ -48,6 +45,7 @@ CONTENT_EXPORT extern const char kFrameAcceptHeaderValue[];
 // initialize child processes.
 extern const int kChildProcessReceiverAttachmentName;
 extern const int kChildProcessHostRemoteAttachmentName;
+extern const int kLegacyIpcBootstrapAttachmentName;
 
 } // namespace content
 

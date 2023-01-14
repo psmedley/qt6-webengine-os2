@@ -5,17 +5,12 @@
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_TREE_FORMATTER_MAC_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_TREE_FORMATTER_MAC_H_
 
-#include "content/browser/accessibility/browser_accessibility_cocoa.h"
+#include "content/browser/accessibility/accessibility_tree_formatter_utils_mac.h"
 #include "ui/accessibility/platform/inspect/ax_tree_formatter_base.h"
 
 @class BrowserAccessibilityCocoa;
 
 namespace content {
-
-namespace a11y {
-class LineIndexer;
-class OptionalNSObject;
-}
 
 class CONTENT_EXPORT AccessibilityTreeFormatterMac
     : public ui::AXTreeFormatterBase {
@@ -28,6 +23,14 @@ class CONTENT_EXPORT AccessibilityTreeFormatterMac
   base::Value BuildTreeForSelector(
       const AXTreeSelector& selector) const override;
 
+  base::Value BuildNode(ui::AXPlatformNodeDelegate* node) const override;
+
+  std::string EvaluateScript(
+      ui::AXPlatformNodeDelegate* root,
+      const std::vector<ui::AXScriptInstruction>& instructions,
+      size_t start_index,
+      size_t end_index) const override;
+
  protected:
   void AddDefaultFilters(
       std::vector<ui::AXPropertyFilter>* property_filters) override;
@@ -36,9 +39,7 @@ class CONTENT_EXPORT AccessibilityTreeFormatterMac
   base::Value BuildTree(const id root) const;
   base::Value BuildTreeForAXUIElement(AXUIElementRef node) const;
 
-  // Runs all scripts defined by given property filters.
-  void EvaluateScripts(const a11y::LineIndexer* line_indexer,
-                       base::Value* dict) const;
+  base::Value BuildNode(const id node) const;
 
   void RecursiveBuildTree(const id node,
                           const NSRect& root_rect,
@@ -76,8 +77,6 @@ class CONTENT_EXPORT AccessibilityTreeFormatterMac
 
   std::string ProcessTreeForOutput(
       const base::DictionaryValue& node) const override;
-
-  std::string FormatAttributeValue(const base::Value& value) const;
 };
 
 }  // namespace content

@@ -30,7 +30,8 @@ ALIGNMENT_ORDER = [
     'RotateTransformOperation',
     'TranslateTransformOperation',
     'GridTrackList',
-    'base::Optional<IntSize>',
+    'Vector<GridTrackSize, 1>',
+    'absl::optional<IntSize>',
     'double',
     # Aligns like a pointer (can be 32 or 64 bits)
     'NamedGridLinesMap',
@@ -38,7 +39,6 @@ ALIGNMENT_ORDER = [
     'NamedGridAreaMap',
     'TransformOperations',
     'Vector<CSSPropertyID>',
-    'Vector<GridTrackSize>',
     'Vector<AtomicString>',
     'GridPosition',
     'AtomicString',
@@ -54,7 +54,7 @@ ALIGNMENT_ORDER = [
     'TextDecorationThickness',
     'StyleAspectRatio',
     # Aligns like float
-    'base::Optional<Length>',
+    'absl::optional<Length>',
     'StyleOffsetRotation',
     'TransformOrigin',
     'ScrollPadding',
@@ -80,6 +80,7 @@ ALIGNMENT_ORDER = [
     'OutlineValue',
     'unsigned',
     'size_t',
+    'wtf_size_t',
     'int',
     # Aligns like short
     'unsigned short',

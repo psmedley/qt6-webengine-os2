@@ -33,10 +33,10 @@ class GLSurfaceEGLTest : public testing::Test {
   void SetUp() override {
 #if defined(OS_WIN)
     GLSurfaceTestSupport::InitializeOneOffImplementation(
-        GLImplementation::kGLImplementationEGLANGLE, true);
+        GLImplementationParts(kGLImplementationEGLANGLE), true);
 #else
     GLSurfaceTestSupport::InitializeOneOffImplementation(
-        GLImplementation::kGLImplementationEGLGLES2, true);
+        GLImplementationParts(kGLImplementationEGLGLES2), true);
 #endif
   }
 
@@ -72,12 +72,13 @@ TEST_F(GLSurfaceEGLTest, MAYBE_SurfaceFormatTest) {
 class TestPlatformDelegate : public ui::PlatformWindowDelegate {
  public:
   // ui::PlatformWindowDelegate implementation.
-  void OnBoundsChanged(const gfx::Rect& new_bounds) override {}
+  void OnBoundsChanged(const BoundsChange& change) override {}
   void OnDamageRect(const gfx::Rect& damaged_region) override {}
   void DispatchEvent(ui::Event* event) override {}
   void OnCloseRequest() override {}
   void OnClosed() override {}
-  void OnWindowStateChanged(ui::PlatformWindowState new_state) override {}
+  void OnWindowStateChanged(ui::PlatformWindowState old_state,
+                            ui::PlatformWindowState new_state) override {}
   void OnLostCapture() override {}
   void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget) override {}
   void OnWillDestroyAcceleratedWidget() override {}

@@ -35,8 +35,6 @@
 #include <xdg-shell-client-protocol.h>
 #include <xdg-shell-unstable-v6-client-protocol.h>
 
-#include <memory>
-
 #include "base/scoped_generic.h"
 
 #if defined(USE_GBM)
@@ -108,6 +106,10 @@ DEFAULT_DELETER_FDECL(zwp_pointer_constraints_v1)
 DEFAULT_DELETER_FDECL(zwp_relative_pointer_manager_v1)
 DEFAULT_DELETER_FDECL(zxdg_decoration_manager_v1)
 DEFAULT_DELETER_FDECL(zcr_extended_drag_v1)
+DEFAULT_DELETER_FDECL(xdg_surface)
+DEFAULT_DELETER_FDECL(xdg_toplevel)
+DEFAULT_DELETER_FDECL(zxdg_surface_v6)
+DEFAULT_DELETER_FDECL(zxdg_toplevel_v6)
 
 #if defined(USE_GBM)
 DEFAULT_DELETER_FDECL(gbm_bo)

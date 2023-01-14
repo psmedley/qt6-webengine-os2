@@ -55,6 +55,7 @@
 #include <private/qquickwebenginenewwindowrequest_p.h>
 #include <private/qquickwebenginesettings_p.h>
 #include <private/qquickwebenginesingleton_p.h>
+#include <private/qquickwebenginetouchselectionmenurequest_p.h>
 
 class tst_publicapi : public QObject {
     Q_OBJECT
@@ -91,6 +92,7 @@ static const QList<const QMetaObject *> typesToCheck = QList<const QMetaObject *
     << &QWebEngineNotification::staticMetaObject
     << &QWebEngineQuotaRequest::staticMetaObject
     << &QWebEngineRegisterProtocolHandlerRequest::staticMetaObject
+    << &QQuickWebEngineTouchSelectionMenuRequest::staticMetaObject
     ;
 
 static QList<QMetaEnum> knownEnumNames = QList<QMetaEnum>();
@@ -447,6 +449,12 @@ static const QStringList expectedAPI = QStringList()
     << "QQuickWebEngineSingleton.defaultProfile --> QQuickWebEngineProfile*"
     << "QQuickWebEngineSingleton.settings --> QQuickWebEngineSettings*"
     << "QQuickWebEngineSingleton.script() --> QWebEngineScript"
+    << "QQuickWebEngineTouchSelectionMenuRequest.accepted --> bool"
+    << "QQuickWebEngineTouchSelectionMenuRequest.Cut --> TouchSelectionCommandFlags"
+    << "QQuickWebEngineTouchSelectionMenuRequest.Copy --> TouchSelectionCommandFlags"
+    << "QQuickWebEngineTouchSelectionMenuRequest.Paste --> TouchSelectionCommandFlags"
+    << "QQuickWebEngineTouchSelectionMenuRequest.selectionBounds --> QRect"
+    << "QQuickWebEngineTouchSelectionMenuRequest.touchSelectionCommandFlags --> QFlags<QQuickWebEngineTouchSelectionMenuRequest::TouchSelectionCommandFlag>"
     << "QWebEngineScript.ApplicationWorld --> ScriptWorldId"
     << "QWebEngineScript.Deferred --> InjectionPoint"
     << "QWebEngineScript.DocumentCreation --> InjectionPoint"
@@ -764,6 +772,7 @@ static const QStringList expectedAPI = QStringList()
     << "QQuickWebEngineView.title --> QString"
     << "QQuickWebEngineView.titleChanged() --> void"
     << "QQuickWebEngineView.tooltipRequested(QQuickWebEngineTooltipRequest*) --> void"
+    << "QQuickWebEngineView.touchSelectionMenuRequested(QQuickWebEngineTouchSelectionMenuRequest*) --> void"
     << "QQuickWebEngineView.triggerWebAction(WebAction) --> void"
     << "QQuickWebEngineView.url --> QUrl"
     << "QQuickWebEngineView.urlChanged() --> void"
@@ -896,7 +905,7 @@ void tst_publicapi::publicAPI()
     // Make sure that nothing slips in the public API unintentionally.
     for (const QString &actual : qAsConst(actualAPI)) {
         if (!expectedAPI.contains(actual)) {
-            QWARN(qPrintable("Expected list is not up-to-date: " + actual));
+            qWarning("Expected list is not up-to-date: %ls", qUtf16Printable(actual));
             apiMatch = false;
         }
     }
@@ -904,7 +913,7 @@ void tst_publicapi::publicAPI()
     for (const QString &expected : expectedAPI) {
         if (!actualAPI.contains(expected)) {
             apiMatch = false;
-            QWARN(qPrintable("Not implemented: " + expected));
+            qWarning("Not implemented: %ls", qUtf16Printable(expected));
         }
     }
 

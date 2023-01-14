@@ -19,7 +19,6 @@
 
 namespace ash {
 class NonClientFrameViewAsh;
-class RoundedCornerDecorator;
 class WideFrameView;
 
 namespace mojom {
@@ -99,9 +98,6 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   // Called when the client changed the fullscreen state.
   void SetFullscreen(bool fullscreen);
 
-  // Called when the client was set to PIP.
-  void SetPip();
-
   // Returns true if this shell surface is currently being dragged.
   bool IsDragging();
 
@@ -172,7 +168,7 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
                        uint32_t frame_enabled_button_mask);
 
   // Set the extra title for the surface.
-  void SetExtraTitle(const base::string16& extra_title);
+  void SetExtraTitle(const std::u16string& extra_title);
 
   // Set specific orientation lock for this surface. When this surface is in
   // foreground and the display can be rotated (e.g. tablet mode), apply the
@@ -184,6 +180,12 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   // |accessibility_id| is negative value, it will unset the ID.
   void SetClientAccessibilityId(int32_t accessibility_id);
 
+  // Rebind a surface as the root surface of the shell surface.
+  void RebindRootSurface(Surface* root_surface,
+                         bool can_minimize,
+                         int container,
+                         bool default_scale_cancellation);
+
   // Overridden from SurfaceTreeHost:
   void DidReceiveCompositorFrameAck() override;
 
@@ -193,6 +195,8 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   void OnSetFrameColors(SkColor active_color, SkColor inactive_color) override;
   void SetSnappedToLeft() override;
   void SetSnappedToRight() override;
+  void SetPip() override;
+  void UnsetPip() override;
 
   // Overridden from views::WidgetDelegate:
   bool CanMaximize() const override;
@@ -235,11 +239,19 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   // Used to scale incoming coordinates from the client to DP.
   float GetClientToDpScale() const;
 
+  // Sets the resize lock state to the surface.
+  void SetResizeLock(bool resize_lock);
+
+  // Update the resizability based on the resize lock state.
+  void UpdateResizability() override;
+
  protected:
   // Overridden from ShellSurfaceBase:
   float GetScale() const override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ClientControlledShellSurfaceTest,
+                           OverlayShadowBounds);
   class ScopedSetBoundsLocally;
   class ScopedLockedToRoot;
 
@@ -247,7 +259,7 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   void SetWidgetBounds(const gfx::Rect& bounds) override;
   gfx::Rect GetShadowBounds() const override;
   void InitializeWindowState(ash::WindowState* window_state) override;
-  base::Optional<gfx::Rect> GetWidgetBounds() const override;
+  absl::optional<gfx::Rect> GetWidgetBounds() const override;
   gfx::Point GetSurfaceOrigin() const override;
   bool OnPreWidgetCommit() override;
   void OnPostWidgetCommit() override;
@@ -322,8 +334,6 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
 
   std::unique_ptr<ash::WideFrameView> wide_frame_;
 
-  std::unique_ptr<ash::RoundedCornerDecorator> decorator_;
-
   std::unique_ptr<ui::CompositorLock> orientation_compositor_lock_;
 
   // The orientation to be applied when widget is being created. Only set when
@@ -331,7 +341,7 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   ash::OrientationLockType initial_orientation_lock_ =
       ash::OrientationLockType::kAny;
   // The extra title to be applied when widget is being created.
-  base::string16 initial_extra_title_ = base::string16();
+  std::u16string initial_extra_title_ = std::u16string();
 
   bool preserve_widget_bounds_ = false;
 
@@ -362,7 +372,9 @@ class ClientControlledShellSurface : public ShellSurfaceBase,
   std::unique_ptr<ClientControlledAcceleratorTarget> accelerator_target_;
 
   // Accessibility ID provided by client.
-  base::Optional<int32_t> client_accessibility_id_;
+  absl::optional<int32_t> client_accessibility_id_;
+
+  bool pending_resize_lock_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ClientControlledShellSurface);
 };

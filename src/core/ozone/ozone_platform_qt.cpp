@@ -92,6 +92,8 @@ private:
     void InitializeUI(const ui::OzonePlatform::InitParams &) override;
     void InitializeGPU(const ui::OzonePlatform::InitParams &) override;
 
+    void InitScreen(ui::PlatformScreen *) override {}
+
     std::unique_ptr<QtWebEngineCore::SurfaceFactoryQt> surface_factory_ozone_;
     std::unique_ptr<CursorFactory> cursor_factory_ozone_;
 
@@ -184,40 +186,22 @@ static std::string getCurrentKeyboardLayout()
     if (XkbRF_GetNamesProp(dpy, nullptr, &vdr) == 0)
         return std::string();
 
-    char *layout = strtok(vdr.layout, ",");
-    for (int i = 0; i < state.group; i++) {
-        layout = strtok(nullptr, ",");
-        if (layout == nullptr)
-            return std::string();
-    }
+    if (!vdr.layout)
+        return std::string();
 
     if (!vdr.variant)
-        return layout;
+        return std::string(vdr.layout);
 
-    char *variant = strtok(vdr.variant, ",");
-    if (!variant)
-        return layout;
-
-    for (int i = 0; i < state.group; i++) {
-        variant = strtok(nullptr, ",");
-        if (variant == nullptr)
-            return layout;
-    }
-
-    std::string layoutWithVariant = layout;
+    std::string layoutWithVariant = vdr.layout;
     layoutWithVariant = layoutWithVariant.append("-");
-    layoutWithVariant = layoutWithVariant.append(variant);
+    layoutWithVariant = layoutWithVariant.append(vdr.variant);
+
     return layoutWithVariant;
 }
 #endif // BUILDFLAG(USE_XKBCOMMON)
 
 void OzonePlatformQt::InitializeUI(const ui::OzonePlatform::InitParams &)
 {
-    overlay_manager_.reset(new StubOverlayManager());
-    cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone());
-    gpu_platform_support_host_.reset(ui::CreateStubGpuPlatformSupportHost());
-    input_controller_ = CreateStubInputController();
-
 #if BUILDFLAG(USE_XKBCOMMON)
     std::string layout = getCurrentKeyboardLayout();
     if (layout.empty()) {
@@ -231,6 +215,11 @@ void OzonePlatformQt::InitializeUI(const ui::OzonePlatform::InitParams &)
 #endif // BUILDFLAG(USE_XKBCOMMON)
 
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(m_keyboardLayoutEngine.get());
+
+    overlay_manager_.reset(new StubOverlayManager());
+    input_controller_ = CreateStubInputController();
+    cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone());
+    gpu_platform_support_host_.reset(ui::CreateStubGpuPlatformSupportHost());
 }
 
 void OzonePlatformQt::InitializeGPU(const ui::OzonePlatform::InitParams &)

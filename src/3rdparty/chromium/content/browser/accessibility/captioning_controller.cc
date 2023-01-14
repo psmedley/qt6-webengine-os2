@@ -6,7 +6,6 @@
 
 #include "base/android/jni_string.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/frame_messages.h"
 #include "content/public/android/content_jni_headers/CaptioningController_jni.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 
@@ -64,8 +63,7 @@ void CaptioningController::RenderViewHostChanged(RenderViewHost* old_host,
   if (old_host) {
     old_pid = GetRenderProcessIdFromRenderViewHost(old_host);
   }
-  int new_pid =
-      GetRenderProcessIdFromRenderViewHost(web_contents()->GetRenderViewHost());
+  int new_pid = GetRenderProcessIdFromRenderViewHost(new_host);
   if (new_pid != old_pid) {
     JNIEnv* env = AttachCurrentThread();
     ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);

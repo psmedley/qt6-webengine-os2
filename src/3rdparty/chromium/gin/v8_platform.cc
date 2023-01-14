@@ -20,6 +20,7 @@
 #include "base/task/post_job.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/trace_event/trace_event.h"
 #include "base/tracing_buildflags.h"
@@ -52,6 +53,10 @@ class ConvertableToTraceFormatWrapper final
   explicit ConvertableToTraceFormatWrapper(
       std::unique_ptr<v8::ConvertableToTraceFormat> inner)
       : inner_(std::move(inner)) {}
+  ConvertableToTraceFormatWrapper(const ConvertableToTraceFormatWrapper&) =
+      delete;
+  ConvertableToTraceFormatWrapper& operator=(
+      const ConvertableToTraceFormatWrapper&) = delete;
   ~ConvertableToTraceFormatWrapper() override = default;
   void AppendAsTraceFormat(std::string* out) const final {
     inner_->AppendAsTraceFormat(out);
@@ -59,8 +64,6 @@ class ConvertableToTraceFormatWrapper final
 
  private:
   std::unique_ptr<v8::ConvertableToTraceFormat> inner_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConvertableToTraceFormatWrapper);
 };
 
 class EnabledStateObserverImpl final
@@ -69,6 +72,10 @@ class EnabledStateObserverImpl final
   EnabledStateObserverImpl() {
     base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(this);
   }
+
+  EnabledStateObserverImpl(const EnabledStateObserverImpl&) = delete;
+
+  EnabledStateObserverImpl& operator=(const EnabledStateObserverImpl&) = delete;
 
   ~EnabledStateObserverImpl() override {
     base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(
@@ -110,8 +117,6 @@ class EnabledStateObserverImpl final
  private:
   base::Lock mutex_;
   std::unordered_set<v8::TracingController::TraceStateObserver*> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(EnabledStateObserverImpl);
 };
 
 base::LazyInstance<EnabledStateObserverImpl>::Leaky g_trace_state_dispatcher =
@@ -129,6 +134,8 @@ class TimeClamper {
 #endif
 
   TimeClamper() : secret_(base::RandUint64()) {}
+  TimeClamper(const TimeClamper&) = delete;
+  TimeClamper& operator=(const TimeClamper&) = delete;
 
   double ClampTimeResolution(double time_seconds) const {
     bool was_negative = false;
@@ -174,7 +181,6 @@ class TimeClamper {
   }
 
   const uint64_t secret_;
-  DISALLOW_COPY_AND_ASSIGN(TimeClamper);
 };
 
 base::LazyInstance<TimeClamper>::Leaky g_time_clamper =
@@ -365,6 +371,8 @@ namespace gin {
 class V8Platform::TracingControllerImpl : public v8::TracingController {
  public:
   TracingControllerImpl() = default;
+  TracingControllerImpl(const TracingControllerImpl&) = delete;
+  TracingControllerImpl& operator=(const TracingControllerImpl&) = delete;
   ~TracingControllerImpl() override = default;
 
   // TracingController implementation.
@@ -443,9 +451,6 @@ class V8Platform::TracingControllerImpl : public v8::TracingController {
   void RemoveTraceStateObserver(TraceStateObserver* observer) override {
     g_trace_state_dispatcher.Get().RemoveObserver(observer);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TracingControllerImpl);
 };
 
 // static

@@ -15,10 +15,11 @@
 #include "quic/core/quic_types.h"
 #include "quic/platform/api/quic_exported_stats.h"
 #include "quic/platform/api/quic_logging.h"
+#include "quic/platform/api/quic_testvalue.h"
 #include "quic/qbone/platform/icmp_packet.h"
 #include "quic/qbone/qbone_constants.h"
 
-ABSL_FLAG(
+DEFINE_QUIC_COMMAND_LINE_FLAG(
     bool,
     qbone_close_ephemeral_frames,
     true,
@@ -133,21 +134,21 @@ QuicStream* QboneSessionBase::ActivateDataStream(
 
 void QboneSessionBase::SendPacketToPeer(absl::string_view packet) {
   if (crypto_stream_ == nullptr) {
-    QUIC_BUG << "Attempting to send packet before encryption established";
+    QUIC_BUG(quic_bug_10987_1)
+        << "Attempting to send packet before encryption established";
     return;
   }
 
   if (send_packets_as_messages_) {
-    QuicUniqueBufferPtr buffer = MakeUniqueBuffer(
-        connection()->helper()->GetStreamSendBufferAllocator(), packet.size());
-    memcpy(buffer.get(), packet.data(), packet.size());
-    QuicMemSlice slice(std::move(buffer), packet.size());
-    switch (SendMessage(QuicMemSliceSpan(&slice), /*flush=*/true).status) {
+    QuicMemSlice slice(QuicBuffer::Copy(
+        connection()->helper()->GetStreamSendBufferAllocator(), packet));
+    switch (SendMessage(absl::MakeSpan(&slice, 1), /*flush=*/true).status) {
       case MESSAGE_STATUS_SUCCESS:
         break;
       case MESSAGE_STATUS_TOO_LARGE: {
         if (packet.size() < sizeof(ip6_hdr)) {
-          QUIC_BUG << "Dropped malformed packet: IPv6 header too short";
+          QUIC_BUG(quic_bug_10987_2)
+              << "Dropped malformed packet: IPv6 header too short";
           break;
         }
         auto* header = reinterpret_cast<const ip6_hdr*>(packet.begin());
@@ -164,16 +165,17 @@ void QboneSessionBase::SendPacketToPeer(absl::string_view packet) {
         break;
       }
       case MESSAGE_STATUS_ENCRYPTION_NOT_ESTABLISHED:
-        QUIC_BUG << "MESSAGE_STATUS_ENCRYPTION_NOT_ESTABLISHED";
+        QUIC_BUG(quic_bug_10987_3)
+            << "MESSAGE_STATUS_ENCRYPTION_NOT_ESTABLISHED";
         break;
       case MESSAGE_STATUS_UNSUPPORTED:
-        QUIC_BUG << "MESSAGE_STATUS_UNSUPPORTED";
+        QUIC_BUG(quic_bug_10987_4) << "MESSAGE_STATUS_UNSUPPORTED";
         break;
       case MESSAGE_STATUS_BLOCKED:
-        QUIC_BUG << "MESSAGE_STATUS_BLOCKED";
+        QUIC_BUG(quic_bug_10987_5) << "MESSAGE_STATUS_BLOCKED";
         break;
       case MESSAGE_STATUS_INTERNAL_ERROR:
-        QUIC_BUG << "MESSAGE_STATUS_INTERNAL_ERROR";
+        QUIC_BUG(quic_bug_10987_6) << "MESSAGE_STATUS_INTERNAL_ERROR";
         break;
     }
     return;
@@ -182,7 +184,7 @@ void QboneSessionBase::SendPacketToPeer(absl::string_view packet) {
   // QBONE streams are ephemeral.
   QuicStream* stream = CreateOutgoingStream();
   if (!stream) {
-    QUIC_BUG << "Failed to create an outgoing QBONE stream.";
+    QUIC_BUG(quic_bug_10987_7) << "Failed to create an outgoing QBONE stream.";
     return;
   }
 
@@ -209,7 +211,7 @@ uint64_t QboneSessionBase::GetNumFallbackToStream() const {
 
 void QboneSessionBase::set_writer(QbonePacketWriter* writer) {
   writer_ = writer;
-  testing::testvalue::Adjust("quic_QbonePacketWriter", &writer_);
+  quic::AdjustTestValue("quic_QbonePacketWriter", &writer_);
 }
 
 }  // namespace quic

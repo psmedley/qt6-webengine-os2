@@ -5,6 +5,8 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/strcat.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -26,6 +28,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/prerender_test_util.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
@@ -61,9 +64,9 @@ class ViewSourceTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(ViewSourceTest);
 };
 
-class ViewSourceFeaturePolicyTest : public ViewSourceTest {
+class ViewSourcePermissionsPolicyTest : public ViewSourceTest {
  public:
-  ViewSourceFeaturePolicyTest() : ViewSourceTest() {}
+  ViewSourcePermissionsPolicyTest() : ViewSourceTest() {}
 
  protected:
   void SetUpOnMainThread() override {
@@ -77,7 +80,7 @@ class ViewSourceFeaturePolicyTest : public ViewSourceTest {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ViewSourceFeaturePolicyTest);
+  DISALLOW_COPY_AND_ASSIGN(ViewSourcePermissionsPolicyTest);
 };
 
 // This test renders a page in view-source and then checks to see if the title
@@ -94,7 +97,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DoesBrowserRenderInViewSource) {
 
   // Check that the title didn't get set.  It should not be there (because we
   // are in view-source mode).
-  EXPECT_NE(base::ASCIIToUTF16("foo"),
+  EXPECT_NE(u"foo",
             browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
 }
 
@@ -471,7 +474,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
   EXPECT_EQ(view_source_url, view_source_contents->GetLastCommittedURL());
 
   // Verify the request for the view-source tab had the correct IsolationInfo.
-  base::Optional<network::ResourceRequest> request =
+  absl::optional<network::ResourceRequest> request =
       loader_monitor.GetRequestInfo(url);
   ASSERT_TRUE(request);
   ASSERT_TRUE(request->trusted_params);
@@ -736,7 +739,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, JavaScriptURISanitized) {
 
 // This test verifies that 'view-source' documents are not affected by vertical
 // scroll (see https://crbug.com/898688).
-IN_PROC_BROWSER_TEST_F(ViewSourceFeaturePolicyTest,
+IN_PROC_BROWSER_TEST_F(ViewSourcePermissionsPolicyTest,
                        ViewSourceNotAffectedByHeaderPolicy) {
   ASSERT_TRUE(embedded_test_server()->Start());
   const std::string k_verify_feature = R"(
@@ -761,3 +764,59 @@ IN_PROC_BROWSER_TEST_F(ViewSourceFeaturePolicyTest,
       &response));
   EXPECT_EQ("vertical-scroll", response);
 }
+
+namespace {
+
+class ViewSourcePrerenderTest : public ViewSourceTest {
+ protected:
+  content::test::PrerenderTestHelper& prerender_test_helper() {
+    return prerender_test_helper_;
+  }
+
+  content::WebContents* target() const { return target_; }
+  void set_target(content::WebContents* target) { target_ = target; }
+
+  void SetUp() override {
+    prerender_test_helper().SetUp(embedded_test_server());
+    ViewSourceTest::SetUp();
+  }
+
+ private:
+  content::test::PrerenderTestHelper prerender_test_helper_{
+      base::BindRepeating(&ViewSourcePrerenderTest::target,
+                          base::Unretained(this))};
+
+  // The WebContents which is expected to request prerendering.
+  content::WebContents* target_ = nullptr;
+};
+
+// A frame in a prerendered page should be able to have its source viewed, like
+// any other. There is currently no UI for this, but in principle it should
+// work.
+IN_PROC_BROWSER_TEST_F(ViewSourcePrerenderTest, ViewSourceForPrerender) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL referrer_url = embedded_test_server()->GetURL("/title1.html");
+  GURL prerender_url = embedded_test_server()->GetURL("/title2.html");
+  content::RenderFrameHost* referrer_frame =
+      ui_test_utils::NavigateToURL(browser(), referrer_url);
+  set_target(content::WebContents::FromRenderFrameHost(referrer_frame));
+
+  prerender_test_helper().AddPrerender(prerender_url);
+  int host_id = prerender_test_helper().GetHostForUrl(prerender_url);
+  content::RenderFrameHost* prerender_frame =
+      prerender_test_helper().GetPrerenderedMainFrameHost(host_id);
+  EXPECT_TRUE(prerender_frame);
+
+  content::WebContentsAddedObserver view_source_contents_observer;
+  prerender_frame->ViewSource();
+  content::WebContents* view_source_contents =
+      view_source_contents_observer.GetWebContents();
+  EXPECT_TRUE(WaitForLoadStop(view_source_contents));
+  EXPECT_EQ(view_source_contents->GetLastCommittedURL(),
+            GURL(base::StrCat(
+                {content::kViewSourceScheme, ":", prerender_url.spec()})));
+  EXPECT_THAT(base::UTF16ToUTF8(view_source_contents->GetTitle()),
+              HasSubstr(content::kViewSourceScheme));
+}
+
+}  // namespace

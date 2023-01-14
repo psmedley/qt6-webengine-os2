@@ -27,6 +27,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_LOCAL_DOM_WINDOW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_LOCAL_DOM_WINDOW_H_
 
+#include <memory>
+
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -34,20 +36,22 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
+#include "third_party/blink/renderer/core/editing/spellcheck/spell_checker.h"
+#include "third_party/blink/renderer/core/editing/suggestion/text_suggestion_controller.h"
 #include "third_party/blink/renderer/core/events/page_transition_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/use_counter_impl.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/storage/blink_storage_key.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-
-#include <memory>
 
 namespace blink {
 
@@ -65,7 +69,7 @@ class External;
 class FrameConsole;
 class History;
 class IdleRequestOptions;
-class ImpressionParams;
+class LocalFrame;
 class MediaQueryList;
 class MessageEvent;
 class Modulator;
@@ -85,10 +89,6 @@ class V8IdleRequestCallback;
 class V8VoidFunction;
 class WindowAgent;
 
-class InputMethodController;
-class TextSuggestionController;
-class SpellChecker;
-
 enum PageTransitionEventPersistence {
   kPageTransitionEventNotPersisted = 0,
   kPageTransitionEventPersisted = 1
@@ -102,7 +102,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   USING_PRE_FINALIZER(LocalDOMWindow, Dispose);
 
  public:
-  class CORE_EXPORT EventListenerObserver : public GarbageCollectedMixin {
+  class CORE_EXPORT EventListenerObserver : public cppgc::GarbageCollectedMixin {
    public:
     virtual void DidAddEventListener(LocalDOMWindow*, const AtomicString&) = 0;
     virtual void DidRemoveEventListener(LocalDOMWindow*,
@@ -125,7 +125,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
     return token_;
   }
 
-  LocalFrame* GetFrame() const { return To<LocalFrame>(DOMWindow::GetFrame()); }
+  LocalFrame* GetFrame() const;
 
   ScriptController& GetScriptController() const { return *script_controller_; }
 
@@ -156,13 +156,13 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   String UserAgent() const final;
   UserAgentMetadata GetUserAgentMetadata() const final;
   HttpsState GetHttpsState() const final;
-  ResourceFetcher* Fetcher() const final;
+  ResourceFetcher* Fetcher() final;
   bool CanExecuteScripts(ReasonForCallingCanExecuteScripts) final;
   void ExceptionThrown(ErrorEvent*) final;
   void AddInspectorIssue(mojom::blink::InspectorIssueInfoPtr) final;
+  void AddInspectorIssue(AuditsIssue) final;
   EventTarget* ErrorEventTarget() final { return this; }
   String OutgoingReferrer() const final;
-  network::mojom::ReferrerPolicy GetReferrerPolicy() const final;
   CoreProbeSink* GetProbeSink() final;
   const BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() const final;
   FrameOrWorkerScheduler* GetScheduler() final;
@@ -171,10 +171,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
     return GetTrustedTypesForWorld(*GetCurrentWorld());
   }
   ScriptWrappable* ToScriptWrappable() final { return this; }
-  void CountPotentialFeaturePolicyViolation(
-      mojom::blink::FeaturePolicyFeature) const final;
-  void ReportFeaturePolicyViolation(
-      mojom::blink::FeaturePolicyFeature,
+  void ReportPermissionsPolicyViolation(
+      mojom::blink::PermissionsPolicyFeature,
       mojom::blink::PolicyDisposition,
       const String& message = g_empty_string) const final;
   void ReportDocumentPolicyViolation(
@@ -193,6 +191,15 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // Count |feature| only when this window is associated with a cross-origin
   // iframe.
   void CountUseOnlyInCrossOriginIframe(mojom::blink::WebFeature feature);
+
+  // Count |feature| only when this window is associated with a cross-site
+  // iframe. A "site" is a scheme and registrable domain.
+  void CountUseOnlyInCrossSiteIframe(mojom::blink::WebFeature feature) override;
+
+  // Count permissions policy feature usage through use counter.
+  void CountPermissionsPolicyUsage(
+      mojom::blink::PermissionsPolicyFeature feature,
+      UseCounterImpl::PermissionsPolicyUsageType type);
 
   Document* InstallNewDocument(const DocumentInit&);
 
@@ -353,20 +360,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
                   const String& features,
                   ExceptionState&);
 
-  DOMWindow* open(v8::Isolate*,
-                  const String& url_string,
-                  const AtomicString& target,
-                  const String& features,
-                  bool unused,
-                  ExceptionState&);
-
-  DOMWindow* open(v8::Isolate*,
-                  const String& url_string,
-                  const AtomicString& target,
-                  const String& features,
-                  const ImpressionParams* impression_params,
-                  ExceptionState&);
-
   FrameConsole* GetFrameConsole() const;
 
   void PrintErrorMessage(const String&) const;
@@ -418,7 +411,12 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   // Returns true if this window is cross-site to the main frame. Defaults to
   // false in a detached window.
+  // Note: This uses an outdated definition of "site" which only includes the
+  // registrable domain and not the scheme. IsCrossSiteSubframeIncludingScheme()
+  // uses HTML's definition of "site" as a registrable domain and scheme.
   bool IsCrossSiteSubframe() const;
+
+  bool IsCrossSiteSubframeIncludingScheme() const;
 
   void DispatchPersistedPageshowEvent(base::TimeTicks navigation_start);
 
@@ -435,10 +433,14 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void ClearIsolatedWorldCSPForTesting(int32_t world_id);
 
   bool CrossOriginIsolatedCapability() const override;
+  bool DirectSocketCapability() const override;
 
   // These delegate to the document_.
   ukm::UkmRecorder* UkmRecorder() override;
   ukm::SourceId UkmSourceID() const override;
+
+  const BlinkStorageKey& GetStorageKey() const { return storage_key_; }
+  void SetStorageKey(const BlinkStorageKey& storage_key);
 
  protected:
   // EventTarget overrides.
@@ -448,9 +450,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
                             const RegisteredEventListener&) override;
 
   // Protected DOMWindow overrides.
-  void SchedulePostMessage(MessageEvent*,
-                           scoped_refptr<const SecurityOrigin> target,
-                           LocalDOMWindow* source) override;
+  void SchedulePostMessage(PostedMessage*) override;
 
  private:
   class NetworkStateObserver;
@@ -533,7 +533,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   // Tracks which features have already been potentially violated in this
   // document. This helps to count them only once per page load.
-  // We don't use std::bitset to avoid to include feature_policy.mojom-blink.h.
+  // We don't use std::bitset to avoid to include
+  // permissions_policy.mojom-blink.h.
   mutable Vector<bool> potentially_violated_features_;
 
   // Token identifying the LocalFrame that this window was associated with at
@@ -552,6 +553,9 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // this UKM is logged.
   // TODO(crbug.com/1112491): Remove when no longer needed.
   Deque<ukm::SourceId> post_message_ukm_recorded_source_ids_;
+
+  // The storage key for this LocalDomWindow.
+  BlinkStorageKey storage_key_;
 
   // Fire "online" and "offline" events.
   Member<NetworkStateObserver> network_state_observer_;

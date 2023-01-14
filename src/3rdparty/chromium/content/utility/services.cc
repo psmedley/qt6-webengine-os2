@@ -18,6 +18,8 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/utility/content_utility_client.h"
 #include "content/public/utility/utility_thread.h"
+#include "content/services/auction_worklet/auction_worklet_service_impl.h"
+#include "content/services/auction_worklet/public/mojom/auction_worklet_service.mojom.h"
 #include "device/vr/buildflags/buildflags.h"
 #include "media/media_buildflags.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -38,13 +40,17 @@
 #endif
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-#include "media/cdm/cdm_adapter_factory.h"          // nogncheck
-#include "media/mojo/services/cdm_service.h"        // nogncheck
-#include "media/mojo/services/mojo_cdm_helper.h"    // nogncheck
-#include "media/mojo/services/mojo_media_client.h"  // nogncheck
+#include "media/cdm/cdm_adapter_factory.h"                   // nogncheck
+#include "media/mojo/mojom/cdm_service.mojom.h"              // nogncheck
+#include "media/mojo/mojom/frame_interface_factory.mojom.h"  // nogncheck
+#include "media/mojo/services/cdm_service.h"                 // nogncheck
+#include "media/mojo/services/cdm_service_broker.h"          // nogncheck
+#include "media/mojo/services/mojo_cdm_helper.h"             // nogncheck
+#include "media/mojo/services/mojo_media_client.h"           // nogncheck
 #if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
 #include "media/cdm/cdm_host_file.h"
 #endif  // BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 #if BUILDFLAG(ENABLE_VR) && !defined(OS_ANDROID)
 #include "content/services/isolated_xr_device/xr_device_service.h"  // nogncheck
@@ -54,10 +60,8 @@
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
 #include "sandbox/win/src/sandbox.h"
-
 extern sandbox::TargetServices* g_utility_target_services;
 #endif  // defined(OS_WIN)
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "sandbox/linux/services/libc_interceptor.h"
@@ -67,14 +71,26 @@ extern sandbox::TargetServices* g_utility_target_services;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING) && BUILDFLAG(IS_CHROMEOS_ASH)
 #include "services/shape_detection/public/mojom/shape_detection_service.mojom.h"  // nogncheck
 #include "services/shape_detection/shape_detection_service.h"  // nogncheck
-#endif
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if defined(OS_WIN)
+#include "media/mojo/mojom/media_foundation_service.mojom.h"  // nogncheck
+#include "media/mojo/services/media_foundation_service_broker.h"  // nogncheck
+#endif  // defined(OS_WIN)
 
 namespace content {
 
 namespace {
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#if defined(OS_WIN)
+void EnsureSandboxedWin() {
+  // |g_utility_target_services| can be null if --no-sandbox is specified.
+  if (g_utility_target_services)
+    g_utility_target_services->LowerToken();
+}
+#endif  // defined(OS_WIN)
 
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 std::unique_ptr<media::CdmAuxiliaryHelper> CreateCdmHelper(
     media::mojom::FrameInterfaceFactory* interface_provider) {
   return std::make_unique<media::MojoCdmHelper>(interface_provider);
@@ -87,9 +103,7 @@ class ContentCdmServiceClient final : public media::CdmService::Client {
 
   void EnsureSandboxed() override {
 #if defined(OS_WIN)
-    // |g_utility_target_services| can be null if --no-sandbox is specified.
-    if (g_utility_target_services)
-      g_utility_target_services->LowerToken();
+    EnsureSandboxedWin();
 #endif
   }
 
@@ -122,7 +136,7 @@ class UtilityThreadVideoCaptureServiceImpl final
 #if defined(OS_WIN)
   base::win::ScopedCOMInitializer com_initializer_{
       base::win::ScopedCOMInitializer::kMTA};
-#endif
+#endif  // defined(OS_WIN)
 };
 
 auto RunNetworkService(
@@ -132,6 +146,13 @@ auto RunNetworkService(
   return std::make_unique<network::NetworkService>(
       std::move(binders), std::move(receiver),
       /*delay_initialization_until_set_client=*/true);
+}
+
+auto RunAuctionWorkletService(
+    mojo::PendingReceiver<auction_worklet::mojom::AuctionWorkletService>
+        receiver) {
+  return std::make_unique<auction_worklet::AuctionWorkletServiceImpl>(
+      std::move(receiver));
 }
 
 auto RunAudio(mojo::PendingReceiver<audio::mojom::AudioService> receiver) {
@@ -195,8 +216,9 @@ auto RunShapeDetectionService(
 #endif
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-auto RunCdmService(mojo::PendingReceiver<media::mojom::CdmService> receiver) {
-  return std::make_unique<media::CdmService>(
+auto RunCdmServiceBroker(
+    mojo::PendingReceiver<media::mojom::CdmServiceBroker> receiver) {
+  return std::make_unique<media::CdmServiceBroker>(
       std::make_unique<ContentCdmServiceClient>(), std::move(receiver));
 }
 #endif
@@ -207,6 +229,22 @@ auto RunDataDecoder(
   return std::make_unique<data_decoder::DataDecoderService>(
       std::move(receiver));
 }
+
+#if defined(OS_WIN)
+std::unique_ptr<media::MediaFoundationServiceBroker>
+RunMediaFoundationServiceBroker(
+    mojo::PendingReceiver<media::mojom::MediaFoundationServiceBroker>
+        receiver) {
+  base::FilePath user_data;
+  if (!GetContentClient()->utility()->GetDefaultUserDataDirectory(&user_data)) {
+    receiver.ResetWithReason(0, "Cannot get user data directory!");
+    return nullptr;
+  }
+
+  return std::make_unique<media::MediaFoundationServiceBroker>(
+      std::move(receiver), user_data, base::BindOnce(&EnsureSandboxedWin));
+}
+#endif  // defined(OS_WIN)
 
 auto RunStorageService(
     mojo::PendingReceiver<storage::mojom::StorageService> receiver) {
@@ -245,6 +283,7 @@ void RegisterIOThreadServices(mojo::ServiceFactory& services) {
 }
 
 void RegisterMainThreadServices(mojo::ServiceFactory& services) {
+  services.Add(RunAuctionWorkletService);
   services.Add(RunAudio);
 
   services.Add(RunDataDecoder);
@@ -257,8 +296,12 @@ void RegisterMainThreadServices(mojo::ServiceFactory& services) {
 #endif
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-  services.Add(RunCdmService);
+  services.Add(RunCdmServiceBroker);
 #endif
+
+#if defined(OS_WIN)
+  services.Add(RunMediaFoundationServiceBroker);
+#endif  // defined(OS_WIN)
 
 #if BUILDFLAG(ENABLE_VR) && !defined(OS_ANDROID)
   services.Add(RunXrDeviceService);

@@ -38,12 +38,12 @@ class CallbackCookieSettings : public CookieSettingsBase {
       : callback_(std::move(callback)) {}
 
   // CookieSettingsBase:
-  void GetCookieSettingInternal(const GURL& url,
-                                const GURL& first_party_url,
-                                bool is_third_party_request,
-                                content_settings::SettingSource* source,
-                                ContentSetting* cookie_setting) const override {
-    *cookie_setting = callback_.Run(url);
+  ContentSetting GetCookieSettingInternal(
+      const GURL& url,
+      const GURL& first_party_url,
+      bool is_third_party_request,
+      content_settings::SettingSource* source) const override {
+    return callback_.Run(url);
   }
   void GetSettingForLegacyCookieAccess(const std::string& cookie_domain,
                                        ContentSetting* setting) const override {
@@ -139,19 +139,20 @@ TEST(CookieSettingsBaseTest, ShouldNotDeleteNoThirdPartyDomainMatch) {
 TEST(CookieSettingsBaseTest, CookieAccessNotAllowedWithBlockedSetting) {
   CallbackCookieSettings settings(
       base::BindRepeating([](const GURL&) { return CONTENT_SETTING_BLOCK; }));
-  EXPECT_FALSE(settings.IsCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
+  EXPECT_FALSE(
+      settings.IsFullCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
 }
 
 TEST(CookieSettingsBaseTest, CookieAccessAllowedWithAllowSetting) {
   CallbackCookieSettings settings(
       base::BindRepeating([](const GURL&) { return CONTENT_SETTING_ALLOW; }));
-  EXPECT_TRUE(settings.IsCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
+  EXPECT_TRUE(settings.IsFullCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
 }
 
 TEST(CookieSettingsBaseTest, CookieAccessAllowedWithSessionOnlySetting) {
   CallbackCookieSettings settings(base::BindRepeating(
       [](const GURL&) { return CONTENT_SETTING_SESSION_ONLY; }));
-  EXPECT_TRUE(settings.IsCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
+  EXPECT_TRUE(settings.IsFullCookieAccessAllowed(GURL(kDomain), GURL(kDomain)));
 }
 
 TEST(CookieSettingsBaseTest, LegacyCookieAccessSemantics) {

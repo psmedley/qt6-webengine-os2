@@ -142,13 +142,9 @@ PaintLayerType LayoutEmbeddedContent::LayerTypeRequired() const {
 
 bool LayoutEmbeddedContent::ContentDocumentContainsGraphicsLayer() const {
   NOT_DESTROYED();
-  // This method must use the same logic as GraphicsLayerTreeBuilder: if
-  // an iframe is throttled, we look for the existence of a root graphics layer,
-  // even if the compositing state information is stale.
   if (PaintLayerCompositor* inner_compositor =
           PaintLayerCompositor::FrameContentsCompositor(*this)) {
-    DisableCompositingQueryAsserts compositing_disabler;
-    return inner_compositor->RootGraphicsLayer();
+    return inner_compositor->StaleInCompositingMode();
   }
   return false;
 }
@@ -320,14 +316,6 @@ void LayoutEmbeddedContent::PaintReplaced(
   EmbeddedContentPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
-void LayoutEmbeddedContent::InvalidatePaint(
-    const PaintInvalidatorContext& context) const {
-  NOT_DESTROYED();
-  LayoutReplaced::InvalidatePaint(context);
-  if (auto* plugin = Plugin())
-    plugin->InvalidatePaint();
-}
-
 CursorDirective LayoutEmbeddedContent::GetCursor(const PhysicalOffset& point,
                                                  ui::Cursor& cursor) const {
   NOT_DESTROYED();
@@ -429,8 +417,7 @@ void LayoutEmbeddedContent::UpdateGeometry(
     // which is a float-type but frame_rect in a content view is an IntRect. We
     // may want to reevaluate the use of pixel snapping that since scroll
     // offsets/layout can be fractional.
-    frame_rect.Move(
-        FlooredIntSize(layout_view->PixelSnappedScrolledContentOffset()));
+    frame_rect.MoveBy(layout_view->PixelSnappedScrolledContentOffset());
   }
 
   embedded_content_view.SetFrameRect(frame_rect);

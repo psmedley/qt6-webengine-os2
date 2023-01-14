@@ -13,12 +13,16 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_buffer_descriptor.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_callback.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_conversions.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_adapter.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_queue.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -71,7 +75,13 @@ GPUBuffer* GPUBuffer::Create(GPUDevice* device,
   GPUBuffer* buffer = MakeGarbageCollected<GPUBuffer>(
       device, dawn_desc.size,
       device->GetProcs().deviceCreateBuffer(device->GetHandle(), &dawn_desc));
-  buffer->setLabel(webgpu_desc->label());
+  if (webgpu_desc->hasLabel())
+    buffer->setLabel(webgpu_desc->label());
+
+  if (is_mappable) {
+    device->adapter()->gpu()->TrackMappableBuffer(buffer);
+  }
+
   return buffer;
 }
 
@@ -90,7 +100,7 @@ ScriptPromise GPUBuffer::mapAsync(ScriptState* script_state,
                                   uint32_t mode,
                                   uint64_t offset,
                                   ExceptionState& exception_state) {
-  return MapAsyncImpl(script_state, mode, offset, base::nullopt,
+  return MapAsyncImpl(script_state, mode, offset, absl::nullopt,
                       exception_state);
 }
 
@@ -102,31 +112,38 @@ ScriptPromise GPUBuffer::mapAsync(ScriptState* script_state,
   return MapAsyncImpl(script_state, mode, offset, size, exception_state);
 }
 
-DOMArrayBuffer* GPUBuffer::getMappedRange(uint64_t offset,
+DOMArrayBuffer* GPUBuffer::getMappedRange(ExecutionContext* execution_context,
+                                          uint64_t offset,
                                           ExceptionState& exception_state) {
-  return GetMappedRangeImpl(offset, base::nullopt, exception_state);
+  return GetMappedRangeImpl(offset, absl::nullopt, execution_context,
+                            exception_state);
 }
 
-DOMArrayBuffer* GPUBuffer::getMappedRange(uint64_t offset,
+DOMArrayBuffer* GPUBuffer::getMappedRange(ExecutionContext* execution_context,
+                                          uint64_t offset,
                                           uint64_t size,
                                           ExceptionState& exception_state) {
-  return GetMappedRangeImpl(offset, size, exception_state);
+  return GetMappedRangeImpl(offset, size, execution_context, exception_state);
 }
 
 void GPUBuffer::unmap(ScriptState* script_state) {
-  ResetMappingState(script_state);
+  ResetMappingState(script_state->GetIsolate());
   GetProcs().bufferUnmap(GetHandle());
 }
 
 void GPUBuffer::destroy(ScriptState* script_state) {
-  ResetMappingState(script_state);
+  Destroy(script_state->GetIsolate());
+}
+
+void GPUBuffer::Destroy(v8::Isolate* isolate) {
+  ResetMappingState(isolate);
   GetProcs().bufferDestroy(GetHandle());
 }
 
 ScriptPromise GPUBuffer::MapAsyncImpl(ScriptState* script_state,
                                       uint32_t mode,
                                       uint64_t offset,
-                                      base::Optional<uint64_t> size,
+                                      absl::optional<uint64_t> size,
                                       ExceptionState& exception_state) {
   // Compute the defaulted size which is "until the end of the buffer" or 0 if
   // offset is past the end of the buffer.
@@ -152,8 +169,8 @@ ScriptPromise GPUBuffer::MapAsyncImpl(ScriptState* script_state,
 
   // And send the command, leaving remaining validation to Dawn.
   auto* callback =
-      BindDawnCallback(&GPUBuffer::OnMapAsyncCallback, WrapPersistent(this),
-                       WrapPersistent(resolver));
+      BindDawnOnceCallback(&GPUBuffer::OnMapAsyncCallback, WrapPersistent(this),
+                           WrapPersistent(resolver));
 
   GetProcs().bufferMapAsync(GetHandle(), mode, map_offset, map_size,
                             callback->UnboundCallback(),
@@ -165,9 +182,11 @@ ScriptPromise GPUBuffer::MapAsyncImpl(ScriptState* script_state,
   return promise;
 }
 
-DOMArrayBuffer* GPUBuffer::GetMappedRangeImpl(uint64_t offset,
-                                              base::Optional<uint64_t> size,
-                                              ExceptionState& exception_state) {
+DOMArrayBuffer* GPUBuffer::GetMappedRangeImpl(
+    uint64_t offset,
+    absl::optional<uint64_t> size,
+    ExecutionContext* execution_context,
+    ExceptionState& exception_state) {
   // Compute the defaulted size which is "until the end of the buffer" or 0 if
   // offset is past the end of the buffer.
   uint64_t size_defaulted = 0;
@@ -191,7 +210,8 @@ DOMArrayBuffer* GPUBuffer::GetMappedRangeImpl(uint64_t offset,
   // This could eventually be upgrade to the max ArrayBuffer size instead of the
   // max TypedArray size. See crbug.com/951196
   if (range_size > v8::TypedArray::kMaxLength) {
-    exception_state.ThrowRangeError(
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kOperationError,
         "getMappedRange failed, size is too large for the implementation");
     return nullptr;
   }
@@ -241,7 +261,8 @@ DOMArrayBuffer* GPUBuffer::GetMappedRangeImpl(uint64_t offset,
       const_cast<uint8_t*>(static_cast<const uint8_t*>(map_data_const));
 
   mapped_ranges_.push_back(std::make_pair(range_offset, range_end));
-  return CreateArrayBufferForMappedData(map_data, range_size);
+  return CreateArrayBufferForMappedData(map_data, range_size,
+                                        execution_context);
 }
 
 void GPUBuffer::OnMapAsyncCallback(ScriptPromiseResolver* resolver,
@@ -277,24 +298,73 @@ void GPUBuffer::OnMapAsyncCallback(ScriptPromiseResolver* resolver,
   }
 }
 
-DOMArrayBuffer* GPUBuffer::CreateArrayBufferForMappedData(void* data,
-                                                          size_t data_length) {
+DOMArrayBuffer* GPUBuffer::CreateArrayBufferForMappedData(
+    void* data,
+    size_t data_length,
+    ExecutionContext* execution_context) {
   DCHECK(data);
   DCHECK_LE(static_cast<uint64_t>(data_length), v8::TypedArray::kMaxLength);
 
-  ArrayBufferContents contents(data, data_length,
-                               v8::BackingStore::EmptyDeleter);
+  // GPUBuffer::GetMappedRange returns ArrayBuffers that point to memory owned
+  // by handle_, which is a dawn_wire::client::Buffer. It is possible that the
+  // GPUBuffer gets garbage collected before the ArrayBuffer. When that happens
+  // the dawn_wire::client::Buffer must be kept alive, otherwise the ArrayBuffer
+  // will point to freed memory.
+  //
+  // To prevent this issue we make the ArrayBuffer keep a reference to the
+  // WGPUBuffer, by referencing the buffer and then have a custom deleter for
+  // the v8 backing store that releases that reference.
+  //
+  // V8 can call the ArrayBuffer deleter on any thread but dawn_wire and the
+  // rest of the WebGPU implementation expect to be used on a single thread at
+  // the moment. To fix this we keep a reference to the task runner for the
+  // execution context that called getMappedRange and do a deletion on a task
+  // posted to it.
+  struct ArrayBufferStrongRefs {
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner;
+    scoped_refptr<DawnControlClientHolder> dawn_control_client;
+    WGPUBuffer dawn_buffer;
+  };
 
+  GetProcs().bufferReference(GetHandle());
+  ArrayBufferStrongRefs* refs = new ArrayBufferStrongRefs{
+      execution_context->GetTaskRunner(TaskType::kWebGPU),
+      GetDawnControlClient(), GetHandle()};
+
+  v8::BackingStore::DeleterCallback deleter = [](void*, size_t,
+                                                 void* userdata) {
+    ArrayBufferStrongRefs* refs = static_cast<ArrayBufferStrongRefs*>(userdata);
+
+    // Happy case, we happen to be called on the correct thread. Release the
+    // buffer immediately.
+    if (refs->task_runner->BelongsToCurrentThread()) {
+      refs->dawn_control_client->GetProcs().bufferRelease(refs->dawn_buffer);
+      delete refs;
+      return;
+    }
+
+    refs->task_runner->PostTask(
+        FROM_HERE, ConvertToBaseOnceCallback(WTF::CrossThreadBindOnce(
+                       [](ArrayBufferStrongRefs* refs) {
+                         refs->dawn_control_client->GetProcs().bufferRelease(
+                             refs->dawn_buffer);
+                         delete refs;
+                       },
+                       WTF::CrossThreadUnretained(refs))));
+  };
+
+  ArrayBufferContents contents(
+      v8::ArrayBuffer::NewBackingStore(data, data_length, deleter, refs));
   DOMArrayBuffer* array_buffer = DOMArrayBuffer::Create(contents);
+
   mapped_array_buffers_.push_back(array_buffer);
   return array_buffer;
 }
 
-void GPUBuffer::ResetMappingState(ScriptState* script_state) {
+void GPUBuffer::ResetMappingState(v8::Isolate* isolate) {
   mapped_ranges_.clear();
 
   for (Member<DOMArrayBuffer>& mapped_array_buffer : mapped_array_buffers_) {
-    v8::Isolate* isolate = script_state->GetIsolate();
     DOMArrayBuffer* array_buffer = mapped_array_buffer.Release();
     DCHECK(array_buffer->IsDetachable(isolate));
 
@@ -304,7 +374,17 @@ void GPUBuffer::ResetMappingState(ScriptState* script_state) {
     bool did_detach = array_buffer->Transfer(isolate, contents);
 
     // |did_detach| would be false if the buffer were already detached.
-    DCHECK(did_detach);
+    //   Crash if it was, as this indicates that unmapping could alias the
+    //   backing store, or possibly even free it out from under the
+    //   ArrayBuffer. It might be difficult to be 100% certain about this
+    //   invariant, so we CHECK, even in release builds. (Actually, it would be
+    //   fine if the ArrayBuffer was detached without being transferred, but
+    //   this isn't a common case, so it can be revisited if needed.)
+    // TODO(crbug.com/1243842): This CHECK can currently be hit easily by JS
+    //   code. We need to validate against this case by preventing the
+    //   ArrayBuffer from being transferred/detached by outside code.
+    CHECK(did_detach)
+        << "An ArrayBuffer from getMappedRange() was detached before unmap()";
     DCHECK(array_buffer->IsDetached());
   }
   mapped_array_buffers_.clear();

@@ -12,7 +12,9 @@
 #include "base/guid.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/simple_key_map.h"
+#include "components/profile_metrics/browser_profile_type.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -23,6 +25,10 @@
 #include "headless/lib/browser/headless_permission_manager.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(HEADLESS_USE_POLICY)
+#include "components/user_prefs/user_prefs.h"  // nogncheck
+#endif
 
 namespace headless {
 
@@ -43,12 +49,19 @@ HeadlessBrowserContextImpl::HeadlessBrowserContextImpl(
           : path_;
   request_context_manager_ = std::make_unique<HeadlessRequestContextManager>(
       context_options_.get(), user_data_path);
+  profile_metrics::SetBrowserProfileType(
+      this, IsOffTheRecord() ? profile_metrics::BrowserProfileType::kIncognito
+                             : profile_metrics::BrowserProfileType::kRegular);
+#if defined(HEADLESS_USE_POLICY)
+  if (PrefService* pref_service = browser->GetPrefs())
+    user_prefs::UserPrefs::Set(this, pref_service);
+#endif
 }
 
 HeadlessBrowserContextImpl::~HeadlessBrowserContextImpl() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   SimpleKeyMap::GetInstance()->Dissociate(this);
-  NotifyWillBeDestroyed(this);
+  NotifyWillBeDestroyed();
 
   // Destroy all web contents before shutting down storage partitions.
   web_contents_map_.clear();
@@ -59,6 +72,9 @@ HeadlessBrowserContextImpl::~HeadlessBrowserContextImpl() {
   }
 
   ShutdownStoragePartitions();
+
+  BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(
+      this);
 }
 
 // static
@@ -106,7 +122,7 @@ void HeadlessBrowserContextImpl::SetDevToolsFrameToken(
     const base::UnguessableToken& devtools_frame_token,
     int frame_tree_node_id) {
   base::AutoLock lock(devtools_frame_token_map_lock_);
-  devtools_frame_token_map_[content::GlobalFrameRoutingId(
+  devtools_frame_token_map_[content::GlobalRenderFrameHostId(
       render_process_id, render_frame_routing_id)] = devtools_frame_token;
   frame_tree_node_id_to_devtools_frame_token_map_[frame_tree_node_id] =
       devtools_frame_token;
@@ -117,7 +133,7 @@ void HeadlessBrowserContextImpl::RemoveDevToolsFrameToken(
     int render_frame_routing_id,
     int frame_tree_node_id) {
   base::AutoLock lock(devtools_frame_token_map_lock_);
-  devtools_frame_token_map_.erase(content::GlobalFrameRoutingId(
+  devtools_frame_token_map_.erase(content::GlobalRenderFrameHostId(
       render_process_id, render_frame_routing_id));
   frame_tree_node_id_to_devtools_frame_token_map_.erase(frame_tree_node_id);
 }
@@ -127,7 +143,7 @@ const base::UnguessableToken* HeadlessBrowserContextImpl::GetDevToolsFrameToken(
     int render_frame_id) const {
   base::AutoLock lock(devtools_frame_token_map_lock_);
   const auto& find_it = devtools_frame_token_map_.find(
-      content::GlobalFrameRoutingId(render_process_id, render_frame_id));
+      content::GlobalRenderFrameHostId(render_process_id, render_frame_id));
   if (find_it == devtools_frame_token_map_.end())
     return nullptr;
   return &find_it->second;
@@ -165,7 +181,7 @@ void HeadlessBrowserContextImpl::InitWhileIOAllowed() {
 std::unique_ptr<content::ZoomLevelDelegate>
 HeadlessBrowserContextImpl::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
-  return std::unique_ptr<content::ZoomLevelDelegate>();
+  return nullptr;
 }
 
 base::FilePath HeadlessBrowserContextImpl::GetPath() {

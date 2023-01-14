@@ -18,12 +18,12 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/escaping.h"
 #include "core/internal/mediums/ble_v2/ble_advertisement.h"
 #include "core/internal/mediums/utils.h"
 #include "platform/base/prng.h"
 #include "platform/public/logging.h"
 #include "platform/public/mutex_lock.h"
-#include "absl/strings/escaping.h"
 
 namespace location {
 namespace nearby {
@@ -255,16 +255,14 @@ bool Ble::StartAcceptingConnections(const std::string& service_id,
 
   if (IsAcceptingConnectionsLocked(service_id)) {
     NEARBY_LOGS(INFO)
-        << "Refusing to start accepting BLE connections for "
-        << service_id
+        << "Refusing to start accepting BLE connections for " << service_id
         << " because another BLE peripheral socket is already in-progress.";
     return false;
   }
 
   if (!radio_.IsEnabled()) {
     NEARBY_LOGS(INFO) << "Can't start accepting BLE connections for "
-                      << service_id
-                      << " because Bluetooth isn't enabled.";
+                      << service_id << " because Bluetooth isn't enabled.";
     return false;
   }
 
@@ -310,7 +308,6 @@ bool Ble::IsAcceptingConnectionsLocked(const std::string& service_id) {
   return accepting_connections_info_.Existed(service_id);
 }
 
-// TODO(b/169303284): Handles Cancellation and registration.
 BleSocket Ble::Connect(BlePeripheral& peripheral, const std::string& service_id,
                        CancellationFlag* cancellation_flag) {
   MutexLock lock(&mutex_);
@@ -324,8 +321,8 @@ BleSocket Ble::Connect(BlePeripheral& peripheral, const std::string& service_id,
   }
 
   if (!radio_.IsEnabled()) {
-    NEARBY_LOGS(INFO) << "Can't create client BLE socket to "
-                      << &peripheral << " because Bluetooth isn't enabled.";
+    NEARBY_LOGS(INFO) << "Can't create client BLE socket to " << &peripheral
+                      << " because Bluetooth isn't enabled.";
     return socket;
   }
 

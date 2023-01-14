@@ -11,7 +11,7 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_line_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_container_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_container_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_positioned_float.h"
 #include "third_party/blink/renderer/platform/fonts/font_height.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -59,6 +59,14 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
   // Mark this line box is an "empty" line box. See NGLineBoxType.
   void SetIsEmptyLineBox();
 
+  absl::optional<LayoutUnit> LineBoxBfcBlockOffset() const {
+    return line_box_bfc_block_offset_;
+  }
+  void SetLineBoxBfcBlockOffset(LayoutUnit offset) {
+    DCHECK(bfc_block_offset_);
+    line_box_bfc_block_offset_ = offset;
+  }
+
   const FontHeight& Metrics() const { return metrics_; }
   void SetMetrics(const FontHeight& metrics) { metrics_ = metrics; }
 
@@ -72,8 +80,6 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
     break_token_ = std::move(break_token);
   }
 
-  void AddChild(const NGPhysicalContainerFragment&, const LogicalOffset&);
-
   // Propagate data in |ChildList| without adding them to this builder. When
   // adding children as fragment items, they appear in the container, but there
   // are some data that should be propagated through line box fragments.
@@ -83,6 +89,7 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
   scoped_refptr<const NGLayoutResult> ToLineBoxFragment();
 
  private:
+  absl::optional<LayoutUnit> line_box_bfc_block_offset_;
   FontHeight metrics_ = FontHeight::Empty();
   LayoutUnit hang_inline_size_;
   NGPhysicalLineBoxFragment::NGLineBoxType line_box_type_;

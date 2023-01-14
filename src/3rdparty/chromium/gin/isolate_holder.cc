@@ -55,20 +55,23 @@ IsolateHolder::IsolateHolder(
     IsolateType isolate_type,
     IsolateCreationMode isolate_creation_mode)
     : access_mode_(access_mode), isolate_type_(isolate_type) {
+  CHECK(Initialized())
+      << "You need to invoke gin::IsolateHolder::Initialize first";
+
   DCHECK(task_runner);
   DCHECK(task_runner->BelongsToCurrentThread());
 
   v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
-  CHECK(allocator) << "You need to invoke gin::IsolateHolder::Initialize first";
+  DCHECK(allocator);
 
   isolate_ = v8::Isolate::Allocate();
-  isolate_data_.reset(
-      new PerIsolateData(isolate_, allocator, access_mode_, task_runner));
+  isolate_data_ = std::make_unique<PerIsolateData>(isolate_, allocator,
+                                                   access_mode_, task_runner);
   if (isolate_creation_mode == IsolateCreationMode::kCreateSnapshot) {
     // This branch is called when creating a V8 snapshot for Blink.
     // Note SnapshotCreator calls isolate->Enter() in its construction.
-    snapshot_creator_.reset(
-        new v8::SnapshotCreator(isolate_, g_reference_table));
+    snapshot_creator_ =
+        std::make_unique<v8::SnapshotCreator>(isolate_, g_reference_table);
     DCHECK_EQ(isolate_, snapshot_creator_->GetIsolate());
   } else {
     v8::Isolate::CreateParams params;
@@ -91,8 +94,8 @@ IsolateHolder::IsolateHolder(
   // IsolateHolder, but only the first registration will have any effect.
   gin::V8SharedMemoryDumpProvider::Register();
 
-  isolate_memory_dump_provider_.reset(
-      new V8IsolateMemoryDumpProvider(this, task_runner));
+  isolate_memory_dump_provider_ =
+      std::make_unique<V8IsolateMemoryDumpProvider>(this, task_runner);
 }
 
 IsolateHolder::~IsolateHolder() {
@@ -110,6 +113,11 @@ void IsolateHolder::Initialize(ScriptMode mode,
   V8Initializer::Initialize(mode);
   g_array_buffer_allocator = allocator;
   g_reference_table = reference_table;
+}
+
+// static
+bool IsolateHolder::Initialized() {
+  return g_array_buffer_allocator;
 }
 
 void IsolateHolder::EnableIdleTasks(

@@ -54,6 +54,8 @@ std::string GetHistogramSuffixForSafetyTipStatus(
       return "SafetyTip_BadReputationIgnored";
     case security_state::SafetyTipStatus::kLookalikeIgnored:
       return "SafetyTip_LookalikeIgnored";
+    case security_state::SafetyTipStatus::kDigitalAssetLinkMatch:
+      return "SafetyTip_DigitalAssetLinkMatch";
     case security_state::SafetyTipStatus::kBadKeyword:
       return "SafetyTip_BadKeyword";
   }
@@ -79,6 +81,7 @@ bool ShouldSetSecurityLevelFromSafetyTip(security_state::SafetyTipStatus status,
     case security_state::SafetyTipStatus::kBadKeyword:
       // TODO(crbug/1012982): Decide whether to degrade the indicator once the
       // UI lands.
+    case security_state::SafetyTipStatus::kDigitalAssetLinkMatch:
     case security_state::SafetyTipStatus::kUnknown:
     case security_state::SafetyTipStatus::kNone:
       return false;
@@ -97,6 +100,21 @@ SecurityLevel GetSecurityLevel(
   if (visible_security_state.malicious_content_status !=
       MALICIOUS_CONTENT_STATUS_NONE) {
     return DANGEROUS;
+  }
+
+  // If the navigation was upgraded to HTTPS because of HTTPS-Only Mode, but did
+  // not succeed (either currently showing the HTTPS-Only Mode interstitial, or
+  // the navigation fell back to HTTP), set the security level to WARNING. The
+  // HTTPS-Only Mode interstitial warning is considered "less serious" than the
+  // general certificate error interstitials.
+  //
+  // This check must come before the checks for `connection_info_initialized`
+  // (because the HTTPS-Only Mode intersitital can trigger if the HTTPS version
+  // of the page does not commit) and certificate errors (because the HTTPS-Only
+  // Mode interstitial takes precedent if the certificate error occurred due to
+  // an upgraded main-frame navigation).
+  if (visible_security_state.is_https_only_mode_upgraded) {
+    return WARNING;
   }
 
   if (!visible_security_state.connection_info_initialized) {
@@ -161,13 +179,6 @@ SecurityLevel GetSecurityLevel(
       return WARNING;
     }
     return NONE;
-  }
-
-  // Downgrade the security level for pages loaded over legacy TLS versions.
-  if (base::FeatureList::IsEnabled(
-          security_state::features::kLegacyTLSWarnings) &&
-      visible_security_state.connection_used_legacy_tls) {
-    return WARNING;
   }
 
   // Downgrade the security level for pages that trigger a Safety Tip.
@@ -244,8 +255,8 @@ VisibleSecurityState::VisibleSecurityState()
       is_view_source(false),
       is_devtools(false),
       is_reader_mode(false),
-      connection_used_legacy_tls(false),
-      should_treat_displayed_mixed_forms_as_secure(false) {}
+      should_treat_displayed_mixed_forms_as_secure(false),
+      is_https_only_mode_upgraded(false) {}
 
 VisibleSecurityState::VisibleSecurityState(const VisibleSecurityState& other) =
     default;
@@ -276,21 +287,6 @@ std::string GetSecurityLevelHistogramName(
 std::string GetSafetyTipHistogramName(const std::string& prefix,
                                       SafetyTipStatus safety_tip_status) {
   return prefix + "." + GetHistogramSuffixForSafetyTipStatus(safety_tip_status);
-}
-
-bool GetLegacyTLSWarningStatus(
-    const VisibleSecurityState& visible_security_state) {
-  return visible_security_state.connection_used_legacy_tls;
-}
-
-std::string GetLegacyTLSHistogramName(
-    const std::string& prefix,
-    const VisibleSecurityState& visible_security_state) {
-  if (visible_security_state.connection_used_legacy_tls) {
-    return prefix + "." + "LegacyTLS_Triggered";
-  } else {
-    return prefix + "." + "LegacyTLS_NotTriggered";
-  }
 }
 
 bool IsSHA1InChain(const VisibleSecurityState& visible_security_state) {

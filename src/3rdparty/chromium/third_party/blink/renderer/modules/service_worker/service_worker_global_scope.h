@@ -42,7 +42,7 @@
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom-blink.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/request_or_usv_string.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_stream_handle.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/service_worker/cross_origin_resource_policy_checker.h"
@@ -79,8 +79,6 @@ class WorkerClassicScriptLoader;
 struct GlobalScopeCreationParams;
 struct WebServiceWorkerError;
 struct WebServiceWorkerObjectInfo;
-
-typedef RequestOrUSVString RequestInfo;
 
 class MODULES_EXPORT ServiceWorkerGlobalScope final
     : public WorkerGlobalScope,
@@ -154,11 +152,6 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   ServiceWorkerClients* clients();
   ServiceWorkerRegistration* registration();
   ::blink::ServiceWorker* serviceWorker();
-
-  ScriptPromise fetch(ScriptState*,
-                      const RequestInfo&,
-                      const RequestInit*,
-                      ExceptionState&);
 
   ScriptPromise skipWaiting(ScriptState*);
 
@@ -316,6 +309,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   const ServiceWorkerToken& GetServiceWorkerToken() const { return token_; }
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final;
+  bool DirectSocketCapability() const final;
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }
@@ -507,7 +501,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   void StartFetchEvent(
       mojom::blink::DispatchFetchEventParamsPtr params,
       base::WeakPtr<CrossOriginResourcePolicyChecker> corp_checker,
-      base::Optional<base::TimeTicks> created_time,
+      absl::optional<base::TimeTicks> created_time,
       int event_id);
   void StartInstallEvent(int event_id);
   void StartActivateEvent(int event_id);
@@ -604,13 +598,10 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
 
   // Bound by the first Mojo call received on the service worker thread
   // mojom::blink::ServiceWorker::InitializeGlobalScope().
-  HeapMojoAssociatedRemote<mojom::blink::ServiceWorkerHost,
-                           HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoAssociatedRemote<mojom::blink::ServiceWorkerHost>
       service_worker_host_{this};
 
-  HeapMojoReceiver<mojom::blink::ServiceWorker,
-                   ServiceWorkerGlobalScope,
-                   HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoReceiver<mojom::blink::ServiceWorker, ServiceWorkerGlobalScope>
       receiver_{this, this};
 
   // Maps for inflight event callbacks.
@@ -631,8 +622,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       periodic_sync_event_callbacks_;
   HeapHashMap<int,
               Member<DisallowNewWrapper<HeapMojoRemote<
-                  payments::mojom::blink::PaymentHandlerResponseCallback,
-                  HeapMojoWrapperMode::kWithoutContextObserver>>>>
+                  payments::mojom::blink::PaymentHandlerResponseCallback>>>>
       abort_payment_result_callbacks_;
   HashMap<int, DispatchCanMakePaymentEventCallback>
       abort_payment_event_callbacks_;
@@ -658,18 +648,15 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   // passed from the relevant DispatchSomeEvent() method.
   HeapHashMap<int,
               Member<DisallowNewWrapper<HeapMojoRemote<
-                  payments::mojom::blink::PaymentHandlerResponseCallback,
-                  HeapMojoWrapperMode::kWithoutContextObserver>>>>
+                  payments::mojom::blink::PaymentHandlerResponseCallback>>>>
       can_make_payment_result_callbacks_;
   HeapHashMap<int,
               Member<DisallowNewWrapper<HeapMojoRemote<
-                  payments::mojom::blink::PaymentHandlerResponseCallback,
-                  HeapMojoWrapperMode::kWithoutContextObserver>>>>
+                  payments::mojom::blink::PaymentHandlerResponseCallback>>>>
       payment_response_callbacks_;
   HeapHashMap<int,
               Member<DisallowNewWrapper<HeapMojoRemote<
-                  mojom::blink::ServiceWorkerFetchResponseCallback,
-                  HeapMojoWrapperMode::kWithoutContextObserver>>>>
+                  mojom::blink::ServiceWorkerFetchResponseCallback>>>>
       fetch_response_callbacks_;
 
   HeapHashMap<int, Member<FetchEvent>> pending_preload_fetch_events_;
@@ -702,7 +689,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   // response back to the client.
   HeapMojoReceiverSet<mojom::blink::ControllerServiceWorker,
                       ServiceWorkerGlobalScope,
-                      HeapMojoWrapperMode::kWithoutContextObserver,
+                      HeapMojoWrapperMode::kWithContextObserver,
                       std::unique_ptr<CrossOriginResourcePolicyChecker>>
       controller_receivers_{this, this};
 

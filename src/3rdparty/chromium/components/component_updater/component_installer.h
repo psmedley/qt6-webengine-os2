@@ -26,6 +26,8 @@ class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace component_updater {
+using RegisterCallback =
+    base::OnceCallback<bool(const update_client::CrxComponent&)>;
 
 class ComponentUpdateService;
 
@@ -56,8 +58,9 @@ class ComponentInstallerPolicy {
 
   // OnCustomInstall is called during the installation process. Components that
   // require custom installation operations should implement them here.
-  // Returns false if a custom operation failed, and true otherwise.
-  // Called only from a thread belonging to a blocking thread pool.
+  // Returns a failure result if a custom operation failed, and
+  // update_client::InstallError::NONE otherwise. Called only from a thread
+  // belonging to a blocking thread pool.
   virtual update_client::CrxInstaller::Result OnCustomInstall(
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) = 0;
@@ -113,9 +116,15 @@ class ComponentInstaller final : public update_client::CrxInstaller {
       scoped_refptr<update_client::ActionHandler> action_handler = nullptr);
 
   // Registers the component for update checks and installs.
+  // |cus| provides the registration logic.
   // The passed |callback| will be called once the initial check for installed
   // versions is done and the component has been registered.
   void Register(ComponentUpdateService* cus, base::OnceClosure callback);
+
+  // Registers the component for update checks and installs.
+  // |register_callback| is called to do the registration.
+  // |callback| is called when registration finishes.
+  void Register(RegisterCallback register_callback, base::OnceClosure callback);
 
   // Overrides from update_client::CrxInstaller.
   void OnUpdateError(int error) override;
@@ -158,12 +167,12 @@ class ComponentInstaller final : public update_client::CrxInstaller {
                            scoped_refptr<RegistrationInfo> registration_info);
   update_client::CrxInstaller::Result InstallHelper(
       const base::FilePath& unpack_path,
-      std::unique_ptr<base::DictionaryValue>* manifest,
+      base::Value* manifest,
       base::Version* version,
       base::FilePath* install_path);
   void StartRegistration(scoped_refptr<RegistrationInfo> registration_info);
   void FinishRegistration(scoped_refptr<RegistrationInfo> registration_info,
-                          ComponentUpdateService* cus,
+                          RegisterCallback register_callback,
                           base::OnceClosure callback);
   void ComponentReady(std::unique_ptr<base::DictionaryValue> manifest);
   void UninstallOnTaskRunner();

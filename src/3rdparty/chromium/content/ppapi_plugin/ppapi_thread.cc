@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <limits>
+#include <memory>
 
 #include "base/command_line.h"
 #include "base/cpu.h"
@@ -17,7 +18,6 @@
 #include "base/memory/discardable_memory_allocator.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -82,7 +82,7 @@ PpapiThread::PpapiThread(base::RepeatingClosure quit_closure,
       next_plugin_dispatcher_id_(1) {
   plugin_globals_.SetPluginProxyDelegate(this);
 
-  blink_platform_impl_.reset(new PpapiBlinkPlatformImpl);
+  blink_platform_impl_ = std::make_unique<PpapiBlinkPlatformImpl>();
   blink::Platform::CreateMainThreadAndInitialize(blink_platform_impl_.get());
 
   scoped_refptr<ppapi::proxy::PluginMessageFilter> plugin_filter(
@@ -232,7 +232,9 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
                                const ppapi::PpapiPermissions& permissions) {
   // In case of crashes, the crash dump doesn't indicate which plugin
   // it came from.
-  static auto* ppapi_path_key = base::debug::AllocateCrashKeyString(
+  // TODO(dcheng): Would a scoped crash key be sufficient here? It's probably a
+  // moot point, as this code is going to go away.
+  static auto* const ppapi_path_key = base::debug::AllocateCrashKeyString(
       "ppapi_path", base::debug::CrashKeySize::Size64);
   base::debug::SetCrashKeyString(ppapi_path_key, path.MaybeAsASCII());
 

@@ -145,10 +145,9 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(client);
 
-  client_ptr_factory_.reset(new base::WeakPtrFactory<Client>(client));
+  client_ptr_factory_ = std::make_unique<base::WeakPtrFactory<Client>>(client);
 
-  if (!(MediaCodecUtil::SupportsSetParameters() &&
-        config.input_format == PIXEL_FORMAT_I420)) {
+  if (config.input_format != PIXEL_FORMAT_I420) {
     DLOG(ERROR) << "Unexpected combo: " << config.input_format << ", "
                 << GetProfileName(config.output_profile);
     return false;
@@ -176,8 +175,17 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
     return false;
   }
 
+  // Non 16x16 aligned resolutions don't work with MediaCodec unfortunately, see
+  // https://crbug.com/1084702 for details.
+  if (config.input_visible_size.width() % 16 != 0 ||
+      config.input_visible_size.height() % 16 != 0) {
+    DLOG(ERROR) << "MediaCodec is only tested with resolutions "
+                   "that are 16x16 aligned.";
+    return false;
+  }
+
   frame_size_ = config.input_visible_size;
-  last_set_bitrate_ = config.initial_bitrate;
+  last_set_bitrate_ = config.bitrate.target();
 
   // Only consider using MediaCodec if it's likely backed by hardware.
   if (MediaCodecUtil::IsKnownUnaccelerated(codec,
@@ -192,7 +200,7 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
     return false;
   }
   media_codec_ = MediaCodecBridgeImpl::CreateVideoEncoder(
-      codec, config.input_visible_size, config.initial_bitrate,
+      codec, config.input_visible_size, config.bitrate.target(),
       INITIAL_FRAMERATE, i_frame_interval, pixel_format);
 
   if (!media_codec_) {
@@ -263,14 +271,18 @@ void AndroidVideoEncodeAccelerator::UseOutputBitstreamBuffer(
 }
 
 void AndroidVideoEncodeAccelerator::RequestEncodingParametersChange(
-    uint32_t bitrate,
+    const Bitrate& bitrate,
     uint32_t framerate) {
-  DVLOG(3) << __PRETTY_FUNCTION__ << ": bitrate: " << bitrate
+  // If this is changed to use variable bitrate encoding, change the mode check
+  // to check that the mode matches the current mode.
+  RETURN_ON_FAILURE(bitrate.mode() == Bitrate::Mode::kConstant,
+                    "Unexpected bitrate mode", kInvalidArgumentError);
+  DVLOG(3) << __PRETTY_FUNCTION__ << ": bitrate: " << bitrate.ToString()
            << ", framerate: " << framerate;
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (bitrate != last_set_bitrate_) {
-    last_set_bitrate_ = bitrate;
-    media_codec_->SetVideoBitrate(bitrate, framerate);
+  if (bitrate.target() != last_set_bitrate_) {
+    last_set_bitrate_ = bitrate.target();
+    media_codec_->SetVideoBitrate(bitrate.target(), framerate);
   }
   // Note: Android's MediaCodec doesn't allow mid-stream adjustments to
   // framerate, so we ignore that here.  This is OK because Android only uses

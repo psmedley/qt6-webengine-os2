@@ -36,9 +36,6 @@ enum State {
   // Chrome needs to ask the user to confirm password updating.
   PENDING_PASSWORD_UPDATE_STATE,
 
-  // The user was prompted to sign in to Chrome after saving a password.
-  CHROME_SIGN_IN_PROMO_STATE,
-
   // A user opted in to account storage is about to lose some unsynced
   // passwords.
   WILL_DELETE_UNSYNCED_ACCOUNT_PASSWORDS_STATE,
@@ -52,9 +49,6 @@ enum State {
 
   // A compromised password was updated and the user has more to fix.
   PASSWORD_UPDATED_MORE_TO_FIX,
-
-  // Remind the user to fix the compromised passwords.
-  PASSWORD_UPDATED_UNSAFE_STATE,
 };
 
 }  // namespace ui

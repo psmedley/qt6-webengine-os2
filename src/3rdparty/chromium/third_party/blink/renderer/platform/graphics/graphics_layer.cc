@@ -30,13 +30,14 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/paint/display_item_list.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/geometry_as_json.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
@@ -124,8 +125,7 @@ void GraphicsLayer::AppendAdditionalInfoAsJSON(LayerTreeFlags flags,
 
   if ((flags & (kLayerTreeIncludesInvalidations |
                 kLayerTreeIncludesDetailedInvalidations)) &&
-      Client().IsTrackingRasterInvalidations() &&
-      GetRasterInvalidationTracking()) {
+      IsTrackingRasterInvalidations() && GetRasterInvalidationTracking()) {
     GetRasterInvalidationTracking()->AsJSON(
         &json, flags & kLayerTreeIncludesDetailedInvalidations);
   }
@@ -277,6 +277,7 @@ void GraphicsLayer::ClearPaintStateRecursively() {
 bool GraphicsLayer::PaintRecursively(
     GraphicsContext& context,
     Vector<PreCompositedLayerInfo>& pre_composited_layers,
+    PaintController::CycleScope& cycle_scope,
     PaintBenchmarkMode benchmark_mode) {
   bool repainted = false;
   ForAllGraphicsLayers(
@@ -286,7 +287,7 @@ bool GraphicsLayer::PaintRecursively(
           layer.ClearPaintStateRecursively();
           return false;
         }
-        layer.Paint(pre_composited_layers, benchmark_mode);
+        layer.Paint(pre_composited_layers, benchmark_mode, &cycle_scope);
         repainted |= layer.repainted_;
         return true;
       },
@@ -313,11 +314,14 @@ bool GraphicsLayer::PaintRecursively(
 
 void GraphicsLayer::PaintForTesting(const IntRect& interest_rect) {
   Vector<PreCompositedLayerInfo> pre_composited_layers;
-  Paint(pre_composited_layers, PaintBenchmarkMode::kNormal, &interest_rect);
+  PaintController::CycleScope cycle_scope;
+  Paint(pre_composited_layers, PaintBenchmarkMode::kNormal, &cycle_scope,
+        &interest_rect);
 }
 
 void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
                           PaintBenchmarkMode benchmark_mode,
+                          PaintController::CycleScope* cycle_scope,
                           const IntRect* interest_rect) {
   repainted_ = false;
 
@@ -351,6 +355,13 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
   }
 
   auto& paint_controller = GetPaintController();
+  if (cycle_scope)
+    cycle_scope->AddController(paint_controller);
+
+  absl::optional<PaintChunkSubset> previous_chunks;
+  if (ShouldCreateLayersAfterPaint())
+    previous_chunks.emplace(paint_controller.GetPaintArtifactShared());
+
   PaintController::ScopedBenchmarkMode scoped_benchmark_mode(paint_controller,
                                                              benchmark_mode);
   bool cached = !paint_controller.ShouldForcePaintForBenchmark() &&
@@ -360,6 +371,7 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
                 paint_controller.ClientCacheIsValid(*this) &&
                 previous_interest_rect_ == new_interest_rect;
   if (!cached) {
+    paint_controller.MarkClientForValidation(*this);
     GraphicsContext context(paint_controller);
     DCHECK(layer_state_) << "No layer state for GraphicsLayer: " << DebugName();
     paint_controller.UpdateCurrentPaintChunkProperties(
@@ -371,15 +383,23 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
     previous_interest_rect_ = new_interest_rect;
     client_.PaintContents(this, context, painting_phase_, new_interest_rect);
     paint_controller.CommitNewDisplayItems();
-    // TODO(wangxianzhu): Remove this and friend class in DisplayItemClient
-    // when unifying PaintController.
-    Validate();
     DVLOG(2) << "Painted GraphicsLayer: " << DebugName()
              << " paintable region: " << PaintableRegion().ToString();
   }
 
   PaintChunkSubset chunks(paint_controller.GetPaintArtifactShared());
   pre_composited_layers.push_back(PreCompositedLayerInfo{chunks, this});
+
+  if (ShouldCreateLayersAfterPaint()) {
+    if (auto* paint_artifact_compositor =
+            client_.GetPaintArtifactCompositor()) {
+      // This is checked even when |cached| is true because the paint controller
+      // may be fully cached while the PaintChunks within are marked as not
+      // cacheable.
+      paint_artifact_compositor->SetNeedsFullUpdateAfterPaintIfNeeded(
+          *previous_chunks, chunks);
+    }
+  }
 
   if (cached && !needs_check_raster_invalidation_ &&
       paint_controller.GetBenchmarkMode() !=
@@ -389,13 +409,13 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
 
   if (!ShouldCreateLayersAfterPaint()) {
     auto& raster_invalidator = EnsureRasterInvalidator();
-    gfx::Size old_layer_size = raster_invalidator.LayerBounds().size();
-    gfx::Rect layer_bounds(layer_state_->offset, Size());
+    gfx::Size old_layer_size(raster_invalidator.LayerBounds());
     PropertyTreeState property_tree_state = GetPropertyTreeState().Unalias();
-    EnsureRasterInvalidator().Generate(raster_invalidation_function_, chunks,
-                                       layer_bounds, property_tree_state, this);
+    EnsureRasterInvalidator().Generate(
+        raster_invalidation_function_, chunks, FloatPoint(layer_state_->offset),
+        IntSize(Size()), property_tree_state, this);
 
-    base::Optional<RasterUnderInvalidationCheckingParams>
+    absl::optional<RasterUnderInvalidationCheckingParams>
         raster_under_invalidation_params;
     if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
         PaintsContentOrHitTest()) {
@@ -410,8 +430,7 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
     if (raster_invalidated_ || !cc_display_item_list_ ||
         old_layer_size != Size() || raster_under_invalidation_params) {
       cc_display_item_list_ = PaintChunksToCcLayer::Convert(
-          chunks, property_tree_state,
-          gfx::Vector2dF(layer_state_->offset.X(), layer_state_->offset.Y()),
+          chunks, property_tree_state, FloatPoint(layer_state_->offset),
           cc::DisplayItemList::kTopLevelDisplayItemList,
           base::OptionalOrNullptr(raster_under_invalidation_params));
       raster_invalidated_ = false;
@@ -424,7 +443,6 @@ void GraphicsLayer::Paint(Vector<PreCompositedLayerInfo>& pre_composited_layers,
 
 void GraphicsLayer::SetShouldCreateLayersAfterPaint(
     bool should_create_layers_after_paint) {
-  DCHECK(RuntimeEnabledFeatures::CompositeSVGEnabled());
   if (should_create_layers_after_paint != should_create_layers_after_paint_) {
     should_create_layers_after_paint_ = should_create_layers_after_paint;
     // Depending on |should_create_layers_after_paint_|, raster invalidation
@@ -491,14 +509,21 @@ RasterInvalidator& GraphicsLayer::EnsureRasterInvalidator() {
   if (!raster_invalidator_) {
     raster_invalidator_ = std::make_unique<RasterInvalidator>();
     raster_invalidator_->SetTracksRasterInvalidations(
-        client_.IsTrackingRasterInvalidations());
+        IsTrackingRasterInvalidations());
   }
   return *raster_invalidator_;
 }
 
+bool GraphicsLayer::IsTrackingRasterInvalidations() const {
+#if DCHECK_IS_ON()
+  if (VLOG_IS_ON(3))
+    return true;
+#endif
+  return Client().IsTrackingRasterInvalidations();
+}
+
 void GraphicsLayer::UpdateTrackingRasterInvalidations() {
-  bool should_track = client_.IsTrackingRasterInvalidations();
-  if (should_track)
+  if (IsTrackingRasterInvalidations())
     EnsureRasterInvalidator().SetTracksRasterInvalidations(true);
   else if (raster_invalidator_)
     raster_invalidator_->SetTracksRasterInvalidations(false);

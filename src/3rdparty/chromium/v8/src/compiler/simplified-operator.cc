@@ -37,8 +37,8 @@ std::ostream& operator<<(std::ostream& os, BaseTaggedness base_taggedness) {
 std::ostream& operator<<(std::ostream& os,
                          ConstFieldInfo const& const_field_info) {
   if (const_field_info.IsConst()) {
-    return os << "const (field owner: " << const_field_info.owner_map.address()
-              << ")";
+    return os << "const (field owner: "
+              << Brief(*const_field_info.owner_map.ToHandleChecked()) << ")";
   } else {
     return os << "mutable";
   }
@@ -523,7 +523,6 @@ Handle<Map> DoubleMapParameterOf(const Operator* op) {
         .double_map();
   }
   UNREACHABLE();
-  return Handle<Map>::null();
 }
 
 Type ValueTypeParameterOf(const Operator* op) {
@@ -540,7 +539,6 @@ Handle<Map> FastMapParameterOf(const Operator* op) {
         .fast_map();
   }
   UNREACHABLE();
-  return Handle<Map>::null();
 }
 
 std::ostream& operator<<(std::ostream& os, BigIntOperationHint hint) {
@@ -579,6 +577,7 @@ NumberOperationHint NumberOperationHintOf(const Operator* op) {
   DCHECK(op->opcode() == IrOpcode::kSpeculativeNumberAdd ||
          op->opcode() == IrOpcode::kSpeculativeNumberSubtract ||
          op->opcode() == IrOpcode::kSpeculativeNumberMultiply ||
+         op->opcode() == IrOpcode::kSpeculativeNumberPow ||
          op->opcode() == IrOpcode::kSpeculativeNumberDivide ||
          op->opcode() == IrOpcode::kSpeculativeNumberModulus ||
          op->opcode() == IrOpcode::kSpeculativeNumberShiftLeft ||
@@ -613,6 +612,27 @@ NumberOperationParameters const& NumberOperationParametersOf(
     Operator const* op) {
   DCHECK_EQ(IrOpcode::kSpeculativeToNumber, op->opcode());
   return OpParameter<NumberOperationParameters>(op);
+}
+
+bool operator==(SpeculativeBigIntAsUintNParameters const& lhs,
+                SpeculativeBigIntAsUintNParameters const& rhs) {
+  return lhs.bits() == rhs.bits() && lhs.feedback() == rhs.feedback();
+}
+
+size_t hash_value(SpeculativeBigIntAsUintNParameters const& p) {
+  FeedbackSource::Hash feedback_hash;
+  return base::hash_combine(p.bits(), feedback_hash(p.feedback()));
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         SpeculativeBigIntAsUintNParameters const& p) {
+  return os << p.bits() << ", " << p.feedback();
+}
+
+SpeculativeBigIntAsUintNParameters const& SpeculativeBigIntAsUintNParametersOf(
+    Operator const* op) {
+  DCHECK_EQ(IrOpcode::kSpeculativeBigIntAsUintN, op->opcode());
+  return OpParameter<SpeculativeBigIntAsUintNParameters>(op);
 }
 
 size_t hash_value(AllocateParameters info) {
@@ -1296,11 +1316,14 @@ const Operator* SimplifiedOperatorBuilder::RuntimeAbort(AbortReason reason) {
       static_cast<int>(reason));                // parameter
 }
 
-const Operator* SimplifiedOperatorBuilder::BigIntAsUintN(int bits) {
+const Operator* SimplifiedOperatorBuilder::SpeculativeBigIntAsUintN(
+    int bits, const FeedbackSource& feedback) {
   CHECK(0 <= bits && bits <= 64);
 
-  return zone()->New<Operator1<int>>(IrOpcode::kBigIntAsUintN, Operator::kPure,
-                                     "BigIntAsUintN", 1, 0, 0, 1, 0, 0, bits);
+  return zone()->New<Operator1<SpeculativeBigIntAsUintNParameters>>(
+      IrOpcode::kSpeculativeBigIntAsUintN, Operator::kNoProperties,
+      "SpeculativeBigIntAsUintN", 1, 1, 1, 1, 1, 0,
+      SpeculativeBigIntAsUintNParameters(bits, feedback));
 }
 
 const Operator* SimplifiedOperatorBuilder::UpdateInterruptBudget(int delta) {
@@ -1316,10 +1339,16 @@ const Operator* SimplifiedOperatorBuilder::TierUpCheck() {
 }
 
 const Operator* SimplifiedOperatorBuilder::AssertType(Type type) {
-  DCHECK(type.IsRange());
+  DCHECK(type.CanBeAsserted());
   return zone()->New<Operator1<Type>>(IrOpcode::kAssertType,
                                       Operator::kNoThrow | Operator::kNoDeopt,
                                       "AssertType", 1, 0, 0, 1, 0, 0, type);
+}
+
+const Operator* SimplifiedOperatorBuilder::VerifyType() {
+  return zone()->New<Operator>(IrOpcode::kVerifyType,
+                               Operator::kNoThrow | Operator::kNoDeopt,
+                               "VerifyType", 1, 0, 0, 1, 0, 0);
 }
 
 const Operator* SimplifiedOperatorBuilder::CheckIf(
@@ -1516,7 +1545,6 @@ const Operator* SimplifiedOperatorBuilder::ConvertReceiver(
       return &cache_.kConvertReceiverNotNullOrUndefinedOperator;
   }
   UNREACHABLE();
-  return nullptr;
 }
 
 const Operator* SimplifiedOperatorBuilder::CheckFloat64Hole(
@@ -1724,17 +1752,26 @@ FastApiCallParameters const& FastApiCallParametersOf(const Operator* op) {
 }
 
 std::ostream& operator<<(std::ostream& os, FastApiCallParameters const& p) {
-  return os << p.signature() << ", " << p.feedback() << ", " << p.descriptor();
+  const auto& c_functions = p.c_functions();
+  for (size_t i = 0; i < c_functions.size(); i++) {
+    os << c_functions[i].address << ":" << c_functions[i].signature << ", ";
+  }
+  return os << p.feedback() << ", " << p.descriptor();
 }
 
 size_t hash_value(FastApiCallParameters const& p) {
-  return base::hash_combine(p.signature(), FeedbackSource::Hash()(p.feedback()),
+  const auto& c_functions = p.c_functions();
+  size_t hash = 0;
+  for (size_t i = 0; i < c_functions.size(); i++) {
+    hash = base::hash_combine(c_functions[i].address, c_functions[i].signature);
+  }
+  return base::hash_combine(hash, FeedbackSource::Hash()(p.feedback()),
                             p.descriptor());
 }
 
 bool operator==(FastApiCallParameters const& lhs,
                 FastApiCallParameters const& rhs) {
-  return lhs.signature() == rhs.signature() &&
+  return lhs.c_functions() == rhs.c_functions() &&
          lhs.feedback() == rhs.feedback() &&
          lhs.descriptor() == rhs.descriptor();
 }
@@ -1850,7 +1887,6 @@ const Operator* SimplifiedOperatorBuilder::SpeculativeNumberEqual(
       return &cache_.kSpeculativeNumberEqualNumberOrOddballOperator;
   }
   UNREACHABLE();
-  return nullptr;
 }
 
 #define ACCESS_OP_LIST(V)                                                \
@@ -1927,27 +1963,39 @@ const Operator* SimplifiedOperatorBuilder::TransitionAndStoreNonNumberElement(
 }
 
 const Operator* SimplifiedOperatorBuilder::FastApiCall(
-    const CFunctionInfo* signature, FeedbackSource const& feedback,
-    CallDescriptor* descriptor) {
+    const FastApiCallFunctionVector& c_functions,
+    FeedbackSource const& feedback, CallDescriptor* descriptor) {
+  DCHECK(!c_functions.empty());
+
+  // All function overloads have the same number of arguments and options.
+  const CFunctionInfo* signature = c_functions[0].signature;
+  const int argument_count = signature->ArgumentCount();
+  for (size_t i = 1; i < c_functions.size(); i++) {
+    CHECK_NOT_NULL(c_functions[i].signature);
+    DCHECK_EQ(c_functions[i].signature->ArgumentCount(), argument_count);
+    DCHECK_EQ(c_functions[i].signature->HasOptions(),
+              c_functions[0].signature->HasOptions());
+  }
+
   int value_input_count =
-      (signature->ArgumentCount() +
-       FastApiCallNode::kFastTargetInputCount) +        // fast call
+      argument_count +
       static_cast<int>(descriptor->ParameterCount()) +  // slow call
       FastApiCallNode::kEffectAndControlInputCount;
   return zone()->New<Operator1<FastApiCallParameters>>(
       IrOpcode::kFastApiCall, Operator::kNoThrow, "FastApiCall",
       value_input_count, 1, 1, 1, 1, 0,
-      FastApiCallParameters(signature, feedback, descriptor));
+      FastApiCallParameters(c_functions, feedback, descriptor));
 }
 
 int FastApiCallNode::FastCallExtraInputCount() const {
-  return kFastTargetInputCount + kEffectAndControlInputCount +
-         (Parameters().signature()->HasOptions() ? 1 : 0);
+  const CFunctionInfo* signature = Parameters().c_functions()[0].signature;
+  CHECK_NOT_NULL(signature);
+  return kEffectAndControlInputCount + (signature->HasOptions() ? 1 : 0);
 }
 
 int FastApiCallNode::FastCallArgumentCount() const {
   FastApiCallParameters p = FastApiCallParametersOf(node()->op());
-  const CFunctionInfo* signature = p.signature();
+  const CFunctionInfo* signature = p.c_functions()[0].signature;
   CHECK_NOT_NULL(signature);
   return signature->ArgumentCount();
 }

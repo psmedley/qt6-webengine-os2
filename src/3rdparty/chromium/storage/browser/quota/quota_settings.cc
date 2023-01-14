@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/rand_util.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
@@ -53,7 +54,7 @@ QuotaSettings CalculateIncognitoDynamicSettings(
   return settings;
 }
 
-base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
+absl::optional<QuotaSettings> CalculateNominalDynamicSettings(
     const base::FilePath& partition_path,
     bool is_incognito,
     QuotaDeviceInfoHelper* device_info_helper) {
@@ -123,7 +124,7 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
   int64_t total = device_info_helper->AmountOfTotalDiskSpace(partition_path);
   if (total == -1) {
     LOG(ERROR) << "Unable to compute QuotaSettings.";
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Pool size calculated by ratio.

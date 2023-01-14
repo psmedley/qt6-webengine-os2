@@ -5,6 +5,9 @@
 #ifndef GOOGLE_APIS_GAIA_OAUTH2_ACCESS_TOKEN_MANAGER_H_
 #define GOOGLE_APIS_GAIA_OAUTH2_ACCESS_TOKEN_MANAGER_H_
 
+#include <map>
+#include <set>
+
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
@@ -223,6 +226,7 @@ class OAuth2AccessTokenManager {
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const std::string& client_id,
       const std::string& client_secret,
+      const std::string& consumer_name,
       const ScopeSet& scopes);
 
   // Returns a currently valid OAuth2 access token for the given set of scopes,

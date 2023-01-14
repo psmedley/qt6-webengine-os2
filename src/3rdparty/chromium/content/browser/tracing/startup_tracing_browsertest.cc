@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/dcheck_is_on.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
+#include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_run_loop_timeout.h"
@@ -259,6 +261,11 @@ class StartupTracingTest
   }
 
   static void CheckOutput(base::FilePath path, OutputType output_type) {
+#if defined(OS_LINUX) && defined(THREAD_SANITIZER)
+    // Skip checks because the thread sanitizer is often too slow to flush trace
+    // data correctly within the timeouts. We still run the tests on TSAN to
+    // catch general threading issues.
+#else // !(defined(OS_LINUX) && defined(THREAD_SANITIZER))
     std::string trace;
     base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::ReadFileToString(path, &trace))
@@ -272,6 +279,7 @@ class StartupTracingTest
     // as a substring.
     EXPECT_TRUE(trace.find("StartupTracingController::Start") !=
                 std::string::npos);
+#endif // !(defined(OS_LINUX) && defined(THREAD_SANITIZER))
   }
 
   void Wait() {
@@ -320,6 +328,14 @@ IN_PROC_BROWSER_TEST_P(StartupTracingTest, TestEnableTracing) {
   Wait();
 
   CheckOutput(GetExpectedPath(), GetOutputType());
+}
+
+// TODO(ssid): Fix the flaky tests, probably the same reason as
+// crbug.com/1041392.
+IN_PROC_BROWSER_TEST_P(StartupTracingTest, DISABLED_ContinueAtShutdown) {
+  EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl("", "title1.html")));
+  StartupTracingController::GetInstance()
+      .set_continue_on_shutdown_for_testing();
 }
 
 class EmergencyStopTracingTest : public StartupTracingTest {};

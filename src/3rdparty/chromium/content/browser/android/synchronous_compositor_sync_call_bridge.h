@@ -12,6 +12,7 @@
 #include "components/viz/common/quads/compositor_frame.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/input/synchronous_compositor.mojom.h"
 
 namespace content {
@@ -83,9 +84,9 @@ class SynchronousCompositorSyncCallBridge
   bool ReceiveFrameOnIOThread(
       int frame_sink_id,
       uint32_t metadata_version,
-      base::Optional<viz::LocalSurfaceId> local_surface_id,
-      base::Optional<viz::CompositorFrame>,
-      base::Optional<viz::HitTestRegionList> hit_test_region_list);
+      absl::optional<viz::LocalSurfaceId> local_surface_id,
+      absl::optional<viz::CompositorFrame>,
+      absl::optional<viz::HitTestRegionList> hit_test_region_list);
 
   // Receive a BeginFrameResponse. Returns true if handling the response was
   // successful or not.

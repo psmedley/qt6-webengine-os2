@@ -11,7 +11,9 @@
 #include <string>
 #include <type_traits>
 
+#include "absl/numeric/int128.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "quic/core/crypto/quic_random.h"
 #include "quic/core/frames/quic_frame.h"
 #include "quic/core/quic_connection_id.h"
@@ -20,8 +22,8 @@
 #include "quic/core/quic_versions.h"
 #include "quic/platform/api/quic_export.h"
 #include "quic/platform/api/quic_iovec.h"
+#include "quic/platform/api/quic_mem_slice.h"
 #include "quic/platform/api/quic_socket_address.h"
-#include "quic/platform/api/quic_uint128.h"
 
 namespace quic {
 
@@ -35,22 +37,22 @@ class QUIC_EXPORT_PRIVATE QuicUtils {
 
   // Returns the 128 bit FNV1a hash of the data.  See
   // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
-  static QuicUint128 FNV1a_128_Hash(absl::string_view data);
+  static absl::uint128 FNV1a_128_Hash(absl::string_view data);
 
   // Returns the 128 bit FNV1a hash of the two sequences of data.  See
   // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
-  static QuicUint128 FNV1a_128_Hash_Two(absl::string_view data1,
-                                        absl::string_view data2);
+  static absl::uint128 FNV1a_128_Hash_Two(absl::string_view data1,
+                                          absl::string_view data2);
 
   // Returns the 128 bit FNV1a hash of the three sequences of data.  See
   // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
-  static QuicUint128 FNV1a_128_Hash_Three(absl::string_view data1,
-                                          absl::string_view data2,
-                                          absl::string_view data3);
+  static absl::uint128 FNV1a_128_Hash_Three(absl::string_view data1,
+                                            absl::string_view data2,
+                                            absl::string_view data3);
 
   // SerializeUint128 writes the first 96 bits of |v| in little-endian form
   // to |out|.
-  static void SerializeUint128Short(QuicUint128 v, uint8_t* out);
+  static void SerializeUint128Short(absl::uint128 v, uint8_t* out);
 
   // Returns AddressChangeType as a string.
   static std::string AddressChangeTypeToString(AddressChangeType type);
@@ -219,7 +221,7 @@ class QUIC_EXPORT_PRIVATE QuicUtils {
   static QuicConnectionId CreateZeroConnectionId(QuicTransportVersion version);
 
   // Generates a 128bit stateless reset token based on a connection ID.
-  static QuicUint128 GenerateStatelessResetToken(
+  static StatelessResetToken GenerateStatelessResetToken(
       QuicConnectionId connection_id);
 
   // Determines packet number space from |encryption_level|.
@@ -237,7 +239,22 @@ class QUIC_EXPORT_PRIVATE QuicUtils {
 
   // Return true if this frame is an IETF probing frame.
   static bool IsProbingFrame(QuicFrameType type);
+
+  // Return true if the two stateless reset tokens are equal. Performs the
+  // comparison in constant time.
+  static bool AreStatelessResetTokensEqual(const StatelessResetToken& token1,
+                                           const StatelessResetToken& token2);
+
+  // Return ture if this frame is an ack-eliciting frame.
+  static bool IsAckElicitingFrame(QuicFrameType type);
 };
+
+// Returns true if the specific ID is a valid WebTransport session ID that our
+// implementation can process.
+bool IsValidWebTransportSessionId(WebTransportSessionId id,
+                                  ParsedQuicVersion transport_version);
+
+QuicByteCount MemSliceSpanTotalSize(absl::Span<QuicMemSlice> span);
 
 template <typename Mask>
 class QUIC_EXPORT_PRIVATE BitMask {

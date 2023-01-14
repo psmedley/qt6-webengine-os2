@@ -2,7 +2,9 @@ name: msvc
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   msvc:

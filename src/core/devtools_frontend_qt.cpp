@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2017 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtWebEngine module of the Qt Toolkit.
@@ -301,12 +301,12 @@ void DevToolsFrontendQt::ReadyToCommitNavigation(content::NavigationHandle *navi
         else if (!m_frontendHost)
             m_frontendHost = content::DevToolsFrontendHost::Create(
                         frame,
-                        base::Bind(&DevToolsFrontendQt::HandleMessageFromDevToolsFrontend,
-                                   base::Unretained(this)));
+                        base::BindRepeating(&DevToolsFrontendQt::HandleMessageFromDevToolsFrontend,
+                                            base::Unretained(this)));
     }
 }
 
-void DevToolsFrontendQt::DocumentAvailableInMainFrame()
+void DevToolsFrontendQt::DocumentAvailableInMainFrame(content::RenderFrameHost * /*render_frame_host*/)
 {
     if (!m_inspectedContents)
         return;
@@ -374,37 +374,47 @@ void DevToolsFrontendQt::CreateJsonPreferences(bool clear)
     m_prefStore = scoped_refptr<PersistentPrefStore>(jsonPrefStore);
 }
 
-void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(const std::string &message)
+void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(base::Value message)
 {
-    if (!m_agentHost)
+    const std::string *method_ptr = nullptr;
+    base::Value *params_value = nullptr;
+    if (message.is_dict()) {
+        method_ptr = message.FindStringKey("method");
+        params_value = message.FindKey("params");
+    }
+    if (!method_ptr || (params_value && !params_value->is_list())) {
+        LOG(ERROR) << "Invalid message was sent to embedder: " << message;
         return;
-    std::string method;
-    base::ListValue *params = nullptr;
-    base::DictionaryValue *dict = nullptr;
-    std::unique_ptr<base::Value> parsed_message = base::JSONReader::ReadDeprecated(message);
-    if (!parsed_message || !parsed_message->GetAsDictionary(&dict) || !dict->GetString("method", &method))
-        return;
-    int request_id = 0;
-    dict->GetInteger("id", &request_id);
-    dict->GetList("params", &params);
+    }
+    base::Value empty_params(base::Value::Type::LIST);
+    if (!params_value)
+        params_value = &empty_params;
 
-    if (method == "dispatchProtocolMessage" && params && params->GetSize() == 1) {
-        std::string protocol_message;
-        if (!params->GetString(0, &protocol_message))
+    int request_id = message.FindIntKey("id").value_or(0);
+    const std::string &method = *method_ptr;
+    base::Value::ListView params;
+    if (params_value)
+        params = params_value->GetList();
+
+    if (method == "dispatchProtocolMessage" && params.size() == 1) {
+        const std::string *protocol_message = params[0].GetIfString();
+        if (!protocol_message)
             return;
-        m_agentHost->DispatchProtocolMessage(this, base::as_bytes(base::make_span(protocol_message)));
+        if (m_agentHost)
+            m_agentHost->DispatchProtocolMessage(this, base::as_bytes(base::make_span(*protocol_message)));
     } else if (method == "loadCompleted") {
-        web_contents()->GetMainFrame()->ExecuteJavaScript(base::ASCIIToUTF16("DevToolsAPI.setUseSoftMenu(true);"),
+        web_contents()->GetMainFrame()->ExecuteJavaScript(u"DevToolsAPI.setUseSoftMenu(true);",
                                                           base::NullCallback());
-    } else if (method == "loadNetworkResource" && params->GetSize() == 3) {
+    } else if (method == "loadNetworkResource" && params.size() == 3) {
         // TODO(pfeldman): handle some of the embedder messages in content.
-        std::string url;
-        std::string headers;
-        int stream_id;
-        if (!params->GetString(0, &url) || !params->GetString(1, &headers) || !params->GetInteger(2, &stream_id))
+        const std::string *url = params[0].GetIfString();
+        const std::string *headers = params[1].GetIfString();
+        absl::optional<int> stream_id = params[2].GetIfInt();
+        if (!url || !headers || !stream_id.has_value()) {
             return;
+        }
 
-        GURL gurl(url);
+        GURL gurl(*url);
         if (!gurl.is_valid()) {
             base::DictionaryValue response;
             response.SetInteger("statusCode", 404);
@@ -443,7 +453,7 @@ void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(const std::string &me
         // TODO(caseq): this preserves behavior of URLFetcher-based implementation.
         // We really need to pass proper first party origin from the front-end.
         resource_request->site_for_cookies = net::SiteForCookies::FromUrl(gurl);
-        resource_request->headers.AddHeadersFromString(headers);
+        resource_request->headers.AddHeadersFromString(*headers);
 
         mojo::Remote<network::mojom::URLLoaderFactory> file_url_loader_factory;
         scoped_refptr<network::SharedURLLoaderFactory> network_url_loader_factory;
@@ -457,15 +467,14 @@ void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(const std::string &me
             SendMessageAck(request_id, &response);
             return;
         } else {
-            auto *partition = content::BrowserContext::GetStoragePartitionForSite(
-                                  web_contents()->GetBrowserContext(), gurl);
+            auto *partition = web_contents()->GetBrowserContext()->GetStoragePartitionForUrl(gurl);
             network_url_loader_factory = partition->GetURLLoaderFactoryForBrowserProcess();
             url_loader_factory = network_url_loader_factory.get();
         }
         auto simple_url_loader = network::SimpleURLLoader::Create(
                     std::move(resource_request), traffic_annotation);
         auto resource_loader = std::make_unique<NetworkResourceLoader>(
-                    stream_id, request_id, this, std::move(simple_url_loader),
+                    *stream_id, request_id, this, std::move(simple_url_loader),
                     url_loader_factory);
         m_loaders.insert(std::move(resource_loader));
         return;
@@ -477,48 +486,48 @@ void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(const std::string &me
         m_preferences = std::move(*m_prefStore->GetValues());
         SendMessageAck(request_id, &m_preferences);
         return;
-    } else if (method == "setPreference") {
-        std::string name;
-        std::string value;
-        if (!params->GetString(0, &name) || !params->GetString(1, &value))
+    } else if (method == "setPreference" && params.size() >= 2) {
+        const std::string *name = params[0].GetIfString();
+        const std::string *value = params[1].GetIfString();
+        if (!name || !value)
             return;
-        SetPreference(name, value);
-    } else if (method == "removePreference") {
-        std::string name;
-        if (!params->GetString(0, &name))
+        SetPreference(*name, *value);
+    } else if (method == "removePreference" && params.size() >= 1) {
+        const std::string *name = params[0].GetIfString();
+        if (!name)
             return;
-        RemovePreference(name);
+        RemovePreference(*name);
     } else if (method == "clearPreferences") {
         ClearPreferences();
     } else if (method == "requestFileSystems") {
-        web_contents()->GetMainFrame()->ExecuteJavaScript(base::ASCIIToUTF16("DevToolsAPI.fileSystemsLoaded([]);"),
+        web_contents()->GetMainFrame()->ExecuteJavaScript(u"DevToolsAPI.fileSystemsLoaded([]);",
                                                           base::NullCallback());
     } else if (method == "reattach") {
         if (!m_agentHost)
             return;
         m_agentHost->DetachClient(this);
         m_agentHost->AttachClient(this);
-    } else if (method == "inspectedURLChanged" && params && params->GetSize() >= 1) {
-        std::string url;
-        if (!params->GetString(0, &url))
+    } else if (method == "inspectedURLChanged" && params.size() >= 1) {
+        const std::string *url = params[0].GetIfString();
+        if (!url)
             return;
         const std::string kHttpPrefix = "http://";
         const std::string kHttpsPrefix = "https://";
         const std::string simplified_url =
-            base::StartsWith(url, kHttpsPrefix, base::CompareCase::SENSITIVE)
-                ? url.substr(kHttpsPrefix.length())
-                : base::StartsWith(url, kHttpPrefix, base::CompareCase::SENSITIVE)
-                      ? url.substr(kHttpPrefix.length())
-                      : url;
+            base::StartsWith(*url, kHttpsPrefix, base::CompareCase::SENSITIVE)
+                ? url->substr(kHttpsPrefix.length())
+                : base::StartsWith(*url, kHttpPrefix, base::CompareCase::SENSITIVE)
+                      ? url->substr(kHttpPrefix.length())
+                      : *url;
         // DevTools UI is not localized.
         web_contents()->UpdateTitleForEntry(web_contents()->GetController().GetActiveEntry(),
                                             base::UTF8ToUTF16(
                                                 base::StringPrintf("DevTools - %s", simplified_url.c_str())));
-    } else if (method == "openInNewTab") {
-        std::string urlString;
-        if (!params->GetString(0, &urlString))
+    } else if (method == "openInNewTab" && params.size() >= 1) {
+        const std::string *urlString = params[0].GetIfString();
+        if (!urlString)
             return;
-        GURL url(urlString);
+        GURL url(*urlString);
         if (!url.is_valid())
             return;
         content::OpenURLParams openParams(GURL(url),
@@ -540,11 +549,11 @@ void DevToolsFrontendQt::HandleMessageFromDevToolsFrontend(const std::string &me
         Activate();
     } else if (method == "closeWindow") {
         web_contents()->Close();
-    } else if (method == "setEyeDropperActive" && params->GetSize() == 1) {
-        bool active;
-        if (!params->GetBoolean(0, &active))
+    } else if (method == "setEyeDropperActive" && params.size() == 1) {
+        absl::optional<bool> active = params[0].GetIfBool();
+        if (!active)
             return;
-        SetEyeDropperActive(active);
+        SetEyeDropperActive(*active);
     } else {
         VLOG(1) << "Unimplemented devtools method: " << message;
         return;
@@ -561,8 +570,8 @@ void DevToolsFrontendQt::SetEyeDropperActive(bool active)
     if (active) {
         m_eyeDropper.reset(new DevToolsEyeDropper(
                                m_inspectedContents,
-                               base::Bind(&DevToolsFrontendQt::ColorPickedInEyeDropper,
-                                          base::Unretained(this))));
+                               base::BindRepeating(&DevToolsFrontendQt::ColorPickedInEyeDropper,
+                                                   base::Unretained(this))));
     } else {
         m_eyeDropper.reset();
     }
@@ -586,7 +595,7 @@ void DevToolsFrontendQt::DispatchProtocolMessage(content::DevToolsAgentHost *age
         std::string param;
         base::EscapeJSONString(message_sp, true, &param);
         std::string code = "DevToolsAPI.dispatchMessage(" + param + ");";
-        base::string16 javascript = base::UTF8ToUTF16(code);
+        std::u16string javascript = base::UTF8ToUTF16(code);
         web_contents()->GetMainFrame()->ExecuteJavaScript(javascript, base::NullCallback());
         return;
     }
@@ -597,7 +606,7 @@ void DevToolsFrontendQt::DispatchProtocolMessage(content::DevToolsAgentHost *age
         base::EscapeJSONString(message_sp.substr(pos, kMaxMessageChunkSize), true, &param);
         std::string code = "DevToolsAPI.dispatchMessageChunk(" + param + ","
                          + std::to_string(pos ? 0 : total_size) + ");";
-        base::string16 javascript = base::UTF8ToUTF16(code);
+        std::u16string javascript = base::UTF8ToUTF16(code);
         web_contents()->GetMainFrame()->ExecuteJavaScript(javascript, base::NullCallback());
     }
 }

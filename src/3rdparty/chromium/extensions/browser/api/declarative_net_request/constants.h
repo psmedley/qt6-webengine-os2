@@ -13,21 +13,22 @@
 namespace extensions {
 namespace declarative_net_request {
 
-// The result of parsing JSON rules provided by an extension. Can correspond to
-// a single or multiple rules.
+// The result of parsing JSON rules provided by an extension. Corresponds to a
+// single rule.
 enum class ParseResult {
   NONE,
   SUCCESS,
+  ERROR_REQUEST_METHOD_DUPLICATED,
   ERROR_RESOURCE_TYPE_DUPLICATED,
   ERROR_INVALID_RULE_ID,
   ERROR_INVALID_RULE_PRIORITY,
   ERROR_NO_APPLICABLE_RESOURCE_TYPES,
   ERROR_EMPTY_DOMAINS_LIST,
   ERROR_EMPTY_RESOURCE_TYPES_LIST,
+  ERROR_EMPTY_REQUEST_METHODS_LIST,
   ERROR_EMPTY_URL_FILTER,
   ERROR_INVALID_REDIRECT_URL,
   ERROR_DUPLICATE_IDS,
-  ERROR_PERSISTING_RULESET,
 
   // Parse errors related to fields containing non-ascii characters.
   ERROR_NON_ASCII_URL_FILTER,
@@ -59,7 +60,11 @@ enum class ParseResult {
   ERROR_INVALID_HEADER_VALUE,
   ERROR_HEADER_VALUE_NOT_SPECIFIED,
   ERROR_HEADER_VALUE_PRESENT,
-  ERROR_APPEND_REQUEST_HEADER_UNSUPPORTED
+  ERROR_APPEND_REQUEST_HEADER_UNSUPPORTED,
+
+  ERROR_EMPTY_TAB_IDS_LIST,
+  ERROR_TAB_IDS_ON_NON_SESSION_RULE,
+  ERROR_TAB_ID_DUPLICATED,
 };
 
 // Describes the ways in which updating dynamic rules can fail.
@@ -69,23 +74,26 @@ enum class UpdateDynamicRulesStatus {
   kSuccess = 0,
   kErrorReadJSONRules = 1,
   kErrorRuleCountExceeded = 2,
-  kErrorCreateTemporarySource = 3,
-  kErrorWriteTemporaryJSONRuleset = 4,
-  kErrorWriteTemporaryIndexedRuleset = 5,
+  // kErrorCreateTemporarySource_Deprecated = 3,
+  // kErrorWriteTemporaryJSONRuleset_Deprecated = 4,
+  // kErrorWriteTemporaryIndexedRuleset_Deprecated = 5,
   kErrorInvalidRules = 6,
   kErrorCreateDynamicRulesDirectory = 7,
-  kErrorReplaceIndexedFile = 8,
-  kErrorReplaceJSONFile = 9,
+  // kErrorReplaceIndexedFile_Deprecated = 8,
+  // kErrorReplaceJSONFile_Deprecated = 9,
   kErrorCreateMatcher_InvalidPath = 10,
   kErrorCreateMatcher_FileReadError = 11,
   kErrorCreateMatcher_ChecksumMismatch = 12,
   kErrorCreateMatcher_VersionMismatch = 13,
   kErrorRegexTooLarge = 14,
   kErrorRegexRuleCountExceeded = 15,
+  kErrorSerializeToJson = 16,
+  kErrorWriteJson = 17,
+  kErrorWriteFlatbuffer = 18,
 
   // Magic constant used by histograms code. Should be equal to the largest enum
   // value.
-  kMaxValue = kErrorRegexRuleCountExceeded,
+  kMaxValue = kErrorWriteFlatbuffer,
 };
 
 // Describes the result of loading a single JSON Ruleset.
@@ -125,6 +133,7 @@ enum class LoadRulesetResult {
 extern const char* const kAllowedTransformSchemes[4];
 
 // Rule parsing errors.
+extern const char kErrorRequestMethodDuplicated[];
 extern const char kErrorResourceTypeDuplicated[];
 extern const char kErrorInvalidRuleKey[];
 extern const char kErrorNoApplicableResourceTypes[];
@@ -149,6 +158,8 @@ extern const char kErrorInvalidHeaderValue[];
 extern const char kErrorNoHeaderValueSpecified[];
 extern const char kErrorHeaderValuePresent[];
 extern const char kErrorCannotAppendRequestHeader[];
+extern const char kErrorTabIdsOnNonSessionRule[];
+extern const char kErrorTabIdDuplicated[];
 
 extern const char kErrorListNotPassed[];
 
@@ -176,6 +187,7 @@ extern const char kInvalidRulesetIDError[];
 extern const char kEnabledRulesetsRuleCountExceeded[];
 extern const char kEnabledRulesetsRegexRuleCountExceeded[];
 extern const char kInternalErrorUpdatingEnabledRulesets[];
+extern const char kEnabledRulesetCountExceeded[];
 
 // setExtensionActionOptions API errors.
 extern const char kTabNotFoundError[];
@@ -201,6 +213,10 @@ extern const char kErrorGetMatchedRulesMissingPermissions[];
 // The maximum amount of static rules in the global rule pool for a single
 // profile.
 constexpr int kMaxStaticRulesPerProfile = 300000;
+
+// Identifier for a Flatbuffer containing `flat::EmbedderConditions` as the
+// root.
+extern const char kEmbedderConditionsBufferIdentifier[];
 
 }  // namespace declarative_net_request
 }  // namespace extensions

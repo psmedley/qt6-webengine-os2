@@ -141,6 +141,15 @@ _NAMED_TYPE_INFO = {
       'viz::ResourceFormat::ETC1',
     ],
   },
+  'gpu::raster::MsaaMode': {
+    'type': 'gpu::raster::MsaaMode',
+    'is_complete': True,
+    'valid': [
+      'gpu::raster::MsaaMode::kNoMSAA',
+      'gpu::raster::MsaaMode::kMSAA',
+      'gpu::raster::MsaaMode::kDMSAA',
+    ],
+  },
 }
 
 # A function info object specifies the type and other special data for the
@@ -197,11 +206,20 @@ _FUNCTION_INFO = {
     'unit_test': False,
     'trace_level': 2,
   },
-  'ReadbackImagePixelsINTERNAL': {
-    'decoder_func': 'DoReadbackImagePixelsINTERNAL',
+  'ReadbackARGBImagePixelsINTERNAL': {
+    'decoder_func': 'DoReadbackARGBImagePixelsINTERNAL',
     'internal': True,
     'type': 'PUT',
     'count': 16,  # GL_MAILBOX_SIZE_CHROMIUM
+    'unit_test': False,
+    'result': ['uint32_t'],
+    'trace_level': 2,
+  },
+  'ReadbackYUVImagePixelsINTERNAL': {
+    'decoder_func': 'DoReadbackYUVImagePixelsINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 16, # GL_MAILBOX_SIZE_CHROMIUM
     'unit_test': False,
     'result': ['uint32_t'],
     'trace_level': 2,
@@ -218,11 +236,13 @@ _FUNCTION_INFO = {
     'impl_func': False,
     'client_test': False,
     'decoder_func': 'DoFinish',
+    'unit_test': False,
     'trace_level': 1,
   },
   'Flush': {
     'impl_func': False,
     'decoder_func': 'DoFlush',
+    'unit_test': False,
     'trace_level': 1,
   },
   'GetError': {
@@ -280,9 +300,6 @@ _FUNCTION_INFO = {
   'GetQueryObjectui64vEXT': {
     'type': 'NoCommand',
     'gl_test_func': 'glGetQueryObjectui64v',
-  },
-  'ShallowFlushCHROMIUM': {
-    'type': 'NoCommand',
   },
   'OrderingBarrierCHROMIUM': {
     'type': 'NoCommand',

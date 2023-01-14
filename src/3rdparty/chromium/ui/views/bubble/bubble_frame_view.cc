@@ -13,7 +13,9 @@
 #include "ui/base/default_style.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -24,15 +26,16 @@
 #include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/bubble/footnote_container_view.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
+#include "ui/views/image_model_utils.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_provider.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/paint_info.h"
 #include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/view_class_properties.h"
@@ -81,7 +84,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
       content_margins_(content_margins),
       footnote_margins_(content_margins_),
       title_icon_(new views::ImageView()),
-      default_title_(CreateDefaultTitleLabel(base::string16()).release()) {
+      default_title_(CreateDefaultTitleLabel(std::u16string()).release()) {
   AddChildView(title_icon_);
 
   default_title_->SetVisible(false);
@@ -99,7 +102,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
 #if defined(OS_WIN)
   // Windows will automatically create a tooltip for the close button based on
   // the HTCLOSE result from NonClientHitTest().
-  close->SetTooltipText(base::string16());
+  close->SetTooltipText(std::u16string());
   // Specify accessible name instead for screen readers.
   close->SetAccessibleName(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
 #endif
@@ -114,7 +117,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
       this));
   minimize->SetVisible(false);
 #if defined(OS_WIN)
-  minimize->SetTooltipText(base::string16());
+  minimize->SetTooltipText(std::u16string());
   minimize->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
 #endif
@@ -124,6 +127,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
       kProgressIndicatorHeight, /*allow_round_corner=*/false);
   progress_indicator->SetBackgroundColor(SK_ColorTRANSPARENT);
   progress_indicator->SetVisible(false);
+  progress_indicator->GetViewAccessibility().OverrideIsIgnored(true);
   progress_indicator_ = AddChildView(std::move(progress_indicator));
 }
 
@@ -131,7 +135,7 @@ BubbleFrameView::~BubbleFrameView() = default;
 
 // static
 std::unique_ptr<Label> BubbleFrameView::CreateDefaultTitleLabel(
-    const base::string16& title_text) {
+    const std::u16string& title_text) {
   auto title = std::make_unique<Label>(title_text, style::CONTEXT_DIALOG_TITLE);
   title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title->SetCollapseWhenHidden(true);
@@ -286,9 +290,12 @@ void BubbleFrameView::ResetWindowControls() {
 }
 
 void BubbleFrameView::UpdateWindowIcon() {
+  DCHECK(GetWidget());
   gfx::ImageSkia image;
-  if (GetWidget()->widget_delegate()->ShouldShowWindowIcon())
-    image = GetWidget()->widget_delegate()->GetWindowIcon();
+  if (GetWidget()->widget_delegate()->ShouldShowWindowIcon()) {
+    image = GetImageSkiaFromImageModel(
+        GetWidget()->widget_delegate()->GetWindowIcon(), GetNativeTheme());
+  }
   title_icon_->SetImage(&image);
 }
 
@@ -304,6 +311,13 @@ void BubbleFrameView::UpdateWindowTitle() {
 
 void BubbleFrameView::SizeConstraintsChanged() {}
 
+void BubbleFrameView::InsertClientView(ClientView* client_view) {
+  // Place the client view before any footnote view for focus order.
+  footnote_container_
+      ? AddChildViewAt(client_view, GetIndexOf(footnote_container_))
+      : AddChildView(client_view);
+}
+
 void BubbleFrameView::SetTitleView(std::unique_ptr<View> title_view) {
   DCHECK(title_view);
   delete default_title_;
@@ -314,16 +328,18 @@ void BubbleFrameView::SetTitleView(std::unique_ptr<View> title_view) {
   AddChildViewAt(title_view.release(), GetIndexOf(title_icon_) + 1);
 }
 
-void BubbleFrameView::SetProgress(base::Optional<double> progress) {
-  progress_indicator_->SetVisible(progress.has_value());
+void BubbleFrameView::SetProgress(absl::optional<double> progress) {
+  bool visible = progress.has_value();
+  progress_indicator_->SetVisible(visible);
+  progress_indicator_->GetViewAccessibility().OverrideIsIgnored(!visible);
   if (progress)
     progress_indicator_->SetValue(progress.value());
 }
 
-base::Optional<double> BubbleFrameView::GetProgress() const {
+absl::optional<double> BubbleFrameView::GetProgress() const {
   if (progress_indicator_->GetVisible())
     return progress_indicator_->GetValue();
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 gfx::Size BubbleFrameView::CalculatePreferredSize() const {
@@ -348,7 +364,7 @@ gfx::Size BubbleFrameView::GetMaximumSize() const {
   // the OS doesn't give the user controls to resize a bubble.
   return gfx::Size();
 #else
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // Allow BubbleFrameView dialogs to be resizable on Mac.
   if (GetWidget()->widget_delegate()->CanResize()) {
     gfx::Size client_size = GetWidget()->client_view()->GetMaximumSize();
@@ -356,7 +372,7 @@ gfx::Size BubbleFrameView::GetMaximumSize() const {
       return client_size;
     return GetWindowBoundsForClientBounds(gfx::Rect(client_size)).size();
   }
-#endif  // OS_APPLE
+#endif  // OS_MAC
   // Non-dialog bubbles should be non-resizable, so its max size is its
   // preferred size.
   return GetPreferredSize();
@@ -387,8 +403,20 @@ void BubbleFrameView::Layout() {
     header_bottom = header_view_->bounds().bottom();
   }
 
-  if (bounds.IsEmpty())
+  // Only account for footnote_container_'s height if it's visible, because
+  // content_margins_ adds extra padding even if all child views are invisible.
+  if (footnote_container_ && footnote_container_->GetVisible()) {
+    const int width = contents_bounds.width();
+    const int height = footnote_container_->GetHeightForWidth(width);
+    footnote_container_->SetBounds(
+        contents_bounds.x(), contents_bounds.bottom() - height, width, height);
+  }
+
+  NonClientFrameView::Layout();
+
+  if (bounds.IsEmpty()) {
     return;
+  }
 
   // The buttons are positioned somewhat closer to the edge of the bubble.
   const int close_margin =
@@ -419,9 +447,8 @@ void BubbleFrameView::Layout() {
   // TODO(tapted): Layout() should skip more surrounding code when !HasTitle().
   // Currently DCHECKs fail since title_insets is 0 when there is no title.
   if (DCHECK_IS_ON() && HasTitle()) {
-    gfx::Insets title_insets = GetTitleLabelInsetsFromFrame();
-    if (border())
-      title_insets += border()->GetInsets();
+    const gfx::Insets title_insets =
+        GetTitleLabelInsetsFromFrame() + GetInsets();
     DCHECK_EQ(title_insets.left(), title_label_x);
     DCHECK_EQ(title_insets.right(), width() - title_label_right);
   }
@@ -438,15 +465,6 @@ void BubbleFrameView::Layout() {
 
   title_icon_->SetBounds(bounds.x(), bounds.y(), title_icon_pref_size.width(),
                          title_height);
-
-  // Only account for footnote_container_'s height if it's visible, because
-  // content_margins_ adds extra padding even if all child views are invisible.
-  if (footnote_container_ && footnote_container_->GetVisible()) {
-    const int width = contents_bounds.width();
-    const int height = footnote_container_->GetHeightForWidth(width);
-    footnote_container_->SetBounds(
-        contents_bounds.x(), contents_bounds.bottom() - height, width, height);
-  }
 }
 
 void BubbleFrameView::OnThemeChanged() {
@@ -465,10 +483,8 @@ void BubbleFrameView::OnThemeChanged() {
 
 void BubbleFrameView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
-  if (details.is_add && details.child == this) {
-    OnThemeChanged();
+  if (details.is_add && details.child == this)
     UpdateClientLayerCornerRadius();
-  }
 
   // We need to update the client view's corner radius whenever the header or
   // footer are added/removed from the bubble frame so that the client view
@@ -545,13 +561,9 @@ void BubbleFrameView::SetFootnoteView(std::unique_ptr<View> view) {
   delete footnote_container_;
   footnote_container_ = nullptr;
   if (view) {
-    // Insert the footnote container before |close_| so that the footnote is
-    // inserted before caption buttons in the focus cycle.
     int radius = bubble_border_ ? bubble_border_->corner_radius() : 0;
-    footnote_container_ =
-        AddChildViewAt(std::make_unique<FootnoteContainerView>(
-                           footnote_margins_, std::move(view), radius),
-                       GetIndexOf(close_));
+    footnote_container_ = AddChildView(std::make_unique<FootnoteContainerView>(
+        footnote_margins_, std::move(view), radius));
   }
   InvalidateLayout();
 }
@@ -601,6 +613,14 @@ void BubbleFrameView::SetArrow(BubbleBorder::Arrow arrow) {
 
 BubbleBorder::Arrow BubbleFrameView::GetArrow() const {
   return bubble_border_->arrow();
+}
+
+void BubbleFrameView::SetDisplayVisibleArrow(bool display_visible_arrow) {
+  bubble_border_->set_visible_arrow(display_visible_arrow);
+}
+
+bool BubbleFrameView::GetDisplayVisibleArrow() const {
+  return bubble_border_->visible_arrow();
 }
 
 void BubbleFrameView::SetBackgroundColor(SkColor color) {
@@ -923,16 +943,15 @@ void BubbleFrameView::UpdateClientLayerCornerRadius() {
 }
 
 BEGIN_METADATA(BubbleFrameView, NonClientFrameView)
-ADD_PROPERTY_METADATA(base::Optional<double>, Progress)
+ADD_PROPERTY_METADATA(absl::optional<double>, Progress)
 ADD_PROPERTY_METADATA(gfx::Insets, ContentMargins)
 ADD_PROPERTY_METADATA(gfx::Insets, FootnoteMargins)
 ADD_PROPERTY_METADATA(BubbleFrameView::PreferredArrowAdjustment,
                       PreferredArrowAdjustment)
 ADD_PROPERTY_METADATA(int, CornerRadius)
 ADD_PROPERTY_METADATA(BubbleBorder::Arrow, Arrow)
-ADD_PROPERTY_METADATA(SkColor,
-                      BackgroundColor,
-                      views::metadata::SkColorConverter)
+ADD_PROPERTY_METADATA(bool, DisplayVisibleArrow)
+ADD_PROPERTY_METADATA(SkColor, BackgroundColor, ui::metadata::SkColorConverter)
 END_METADATA
 
 }  // namespace views

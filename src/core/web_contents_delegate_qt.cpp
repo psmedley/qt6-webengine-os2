@@ -63,8 +63,6 @@
 #include "web_engine_settings.h"
 #include "certificate_error_controller.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
-#include "components/error_page/common/error.h"
-#include "components/error_page/common/localized_error.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -180,6 +178,10 @@ static bool shouldUseActualURL(content::NavigationEntry *entry)
     if (entry->GetPageType() != content::PAGE_TYPE_NORMAL)
         return false;
 
+    // Show the virtual URL based on custom base, if present
+    if (!entry->GetBaseURLForDataURL().is_empty())
+        return false;
+
     // Show invalid data URL
     std::string mime_type, charset, data;
     if (!net::DataURL::Parse(entry->GetURL(), &mime_type, &charset, &data))
@@ -215,8 +217,8 @@ void WebContentsDelegateQt::NavigationStateChanged(content::WebContents* source,
     }
 }
 
-QUrl WebContentsDelegateQt::url(content::WebContents* source) const {
-
+QUrl WebContentsDelegateQt::url(content::WebContents *source) const
+{
     content::NavigationEntry *entry = source->GetController().GetVisibleEntry();
     QUrl newUrl;
     if (entry) {
@@ -227,7 +229,7 @@ QUrl WebContentsDelegateQt::url(content::WebContents* source) const {
             GURL strippedUrl = net::SimplifyUrlForRequest(url);
             newUrl = QUrl(QString("%1:%2").arg(content::kViewSourceScheme, QString::fromStdString(strippedUrl.spec())));
         }
-        // If there is a visible entry there are special cases when we dont wan't to use the actual URL
+        // If there is a visible entry there are special cases where we dont wan't to use the actual URL
         if (newUrl.isEmpty())
             newUrl = shouldUseActualURL(entry) ? toQt(url) : toQt(entry->GetVirtualURL());
     }
@@ -320,8 +322,10 @@ void WebContentsDelegateQt::RenderFrameHostChanged(content::RenderFrameHost *old
         if (new_host->GetFrameOwnerElementType() == blink::mojom::FrameOwnerElementType::kNone) {
             content::RenderProcessHost *renderProcessHost = new_host->GetProcess();
             const base::Process &process = renderProcessHost->GetProcess();
-            if (process.IsValid())
+            if (process.IsValid()) {
                 m_viewClient->renderProcessPidChanged(process.Pid());
+                m_viewClient->zoomUpdateIsNeeded();
+            }
         }
     }
 }
@@ -332,6 +336,7 @@ void WebContentsDelegateQt::RenderViewHostChanged(content::RenderViewHost *, con
         auto rwhv = static_cast<RenderWidgetHostViewQt *>(newHost->GetWidget()->GetView());
         Q_ASSERT(rwhv->delegate());
         rwhv->delegate()->adapterClientChanged(m_viewClient);
+        m_viewClient->zoomUpdateIsNeeded();
     }
 }
 
@@ -426,9 +431,11 @@ void WebContentsDelegateQt::DidFinishNavigation(content::NavigationHandle *navig
         return;
 
     // WebContentsObserver::DidFailLoad is not called any longer so we have to report the failure here.
-    const net::Error error_code = navigation_handle->GetNetErrorCode();
-    const std::string error_description = net::ErrorToString(error_code);
-    didFailLoad(toQt(navigation_handle->GetURL()), error_code, toQt(error_description));
+    int error_code = navigation_handle->GetNetErrorCode();
+    if (error_code == net::ERR_HTTP_RESPONSE_CODE_FAILURE)
+        if (auto entry = web_contents()->GetController().GetActiveEntry())
+            error_code = entry->GetHttpStatusCode();
+    didFailLoad(toQt(navigation_handle->GetURL()), error_code, WebEngineError::toQtErrorDescription(error_code));
 
     // The load will succede as an error-page load later, and we reported the original error above
     if (navigation_handle->IsErrorPage()) {
@@ -512,12 +519,7 @@ void WebContentsDelegateQt::DidFailLoad(content::RenderFrameHost* render_frame_h
         emitLoadFinished(/* isErrorPage = */true);
         return;
     }
-    // Qt6: Consider getting rid of the error_description (Chromium already has)
-    base::string16 error_description;
-    error_description = error_page::LocalizedError::GetErrorDetails(
-                error_code <= 0 ? error_page::Error::kNetErrorDomain : error_page::Error::kHttpErrorDomain,
-                error_code, false, false);
-    didFailLoad(toQt(validated_url), error_code, toQt(error_description));
+    didFailLoad(toQt(validated_url), error_code, WebEngineError::toQtErrorDescription(error_code));
 }
 
 void WebContentsDelegateQt::DidFinishLoad(content::RenderFrameHost* render_frame_host, const GURL& validated_url)
@@ -546,6 +548,7 @@ void WebContentsDelegateQt::DidFinishLoad(content::RenderFrameHost* render_frame
     m_loadingInfo.success = http_statuscode < 400;
     m_loadingInfo.url = toQt(validated_url);
     m_loadingInfo.errorCode = http_statuscode;
+    m_loadingInfo.errorDescription = WebEngineError::toQtErrorDescription(http_statuscode);
     m_loadingInfo.triggersErrorPage = triggersErrorPage;
 }
 
@@ -558,10 +561,10 @@ void WebContentsDelegateQt::WebContentsCreated(content::WebContents * /*source_c
         static_cast<WebContentsViewQt *>(view)->setFactoryClient(m_viewClient);
 }
 
-content::ColorChooser *WebContentsDelegateQt::OpenColorChooser(content::WebContents *source, SkColor color, const std::vector<blink::mojom::ColorSuggestionPtr> &suggestion)
+std::unique_ptr<content::ColorChooser> WebContentsDelegateQt::OpenColorChooser(content::WebContents *source, SkColor color, const std::vector<blink::mojom::ColorSuggestionPtr> &suggestion)
 {
     Q_UNUSED(suggestion);
-    ColorChooserQt *colorChooser = new ColorChooserQt(source, toQt(color));
+    auto colorChooser = std::make_unique<ColorChooserQt>(source, toQt(color));
     m_viewClient->showColorDialog(colorChooser->controller());
 
     return colorChooser;
@@ -603,7 +606,7 @@ void WebContentsDelegateQt::RunFileChooser(content::RenderFrameHost * /*frameHos
 {
     QStringList acceptedMimeTypes;
     acceptedMimeTypes.reserve(params.accept_types.size());
-    for (std::vector<base::string16>::const_iterator it = params.accept_types.begin(); it < params.accept_types.end(); ++it)
+    for (std::vector<std::u16string>::const_iterator it = params.accept_types.begin(); it < params.accept_types.end(); ++it)
         acceptedMimeTypes.append(toQt(*it));
 
     m_filePickerController.reset(createFilePickerController(static_cast<FilePickerController::FileChooserMode>(params.mode),
@@ -616,7 +619,7 @@ void WebContentsDelegateQt::RunFileChooser(content::RenderFrameHost * /*frameHos
 }
 
 bool WebContentsDelegateQt::DidAddMessageToConsole(content::WebContents *source, blink::mojom::ConsoleMessageLevel log_level,
-                                                   const base::string16 &message, int32_t line_no, const base::string16 &source_id)
+                                                   const std::u16string &message, int32_t line_no, const std::u16string &source_id)
 {
     Q_UNUSED(source);
     m_viewClient->javaScriptConsoleMessage(mapToJavascriptConsoleMessageLevel(log_level), toQt(message), static_cast<int>(line_no), toQt(source_id));
@@ -749,7 +752,7 @@ void WebContentsDelegateQt::launchExternalURL(const QUrl &url, ui::PageTransitio
         if (!navigationAllowedByPolicy)
             errorDescription = QStringLiteral("Launching external protocol forbidden by WebEngineSettings::UnknownUrlSchemePolicy");
         else
-            errorDescription = QStringLiteral("Launching external protocol suppressed by WebContentsAdapterClient::navigationRequested");
+            errorDescription = QStringLiteral("Launching external protocol suppressed by 'navigationRequested' API");
         didFailLoad(url, net::Error::ERR_ABORTED, errorDescription);
     }
 }

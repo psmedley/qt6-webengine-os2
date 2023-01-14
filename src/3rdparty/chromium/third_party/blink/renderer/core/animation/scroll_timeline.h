@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SCROLL_TIMELINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SCROLL_TIMELINE_H_
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_offset.h"
 #include "third_party/blink/renderer/core/animation/timing.h"
@@ -14,8 +15,8 @@
 
 namespace blink {
 
-class DoubleOrScrollTimelineAutoKeyword;
 class ScrollTimelineOptions;
+class V8UnionDoubleOrScrollTimelineAutoKeyword;
 
 // Implements the ScrollTimeline concept from the Scroll-linked Animations spec.
 //
@@ -42,17 +43,23 @@ class CORE_EXPORT ScrollTimeline : public AnimationTimeline {
                                 ExceptionState&);
 
   ScrollTimeline(Document*,
-                 Element*,
+                 absl::optional<Element*> scroll_source,
                  ScrollDirection,
                  HeapVector<Member<ScrollTimelineOffset>>,
-                 base::Optional<double>);
+                 absl::optional<double>);
 
   bool IsScrollTimeline() const override { return true; }
+  // TODO (crbug.com/1216655): Time range should be removed from ScrollTimeline
+  // at which point this function becomes redundant as all scroll timelines will
+  // then be progress based timelines.
+  bool IsProgressBasedTimeline() const override { return !time_range_; }
   // ScrollTimeline is not active if scrollSource is null, does not currently
   // have a CSS layout box, or if its layout box is not a scroll container.
   // https://github.com/WICG/scroll-animations/issues/31
   bool IsActive() const override;
-  base::Optional<base::TimeDelta> InitialStartTimeForAnimations() override;
+  absl::optional<base::TimeDelta> InitialStartTimeForAnimations() override;
+  AnimationTimeDelta CalculateIntrinsicIterationDuration(
+      const Timing&) override;
   AnimationTimeDelta ZeroTime() override { return AnimationTimeDelta(); }
 
   void ServiceAnimations(TimingUpdateReason) override;
@@ -61,16 +68,12 @@ class CORE_EXPORT ScrollTimeline : public AnimationTimeline {
   // IDL API implementation.
   Element* scrollSource() const;
   String orientation();
-  // TODO(crbug.com/1094014): scrollOffsets will replace start and end
-  // offsets once spec decision on multiple scroll offsets is finalized.
-  // https://github.com/w3c/csswg-drafts/issues/4912
-  void startScrollOffset(ScrollTimelineOffsetValue& result) const;
-  void endScrollOffset(ScrollTimelineOffsetValue& result) const;
-  const HeapVector<ScrollTimelineOffsetValue> scrollOffsets() const;
+  const HeapVector<Member<V8ScrollTimelineOffset>> scrollOffsets() const;
 
-  void currentTime(CSSNumberish&) override;
-  void duration(CSSNumberish&) override;
-  void timeRange(DoubleOrScrollTimelineAutoKeyword&);
+  V8CSSNumberish* currentTime() override;
+  V8CSSNumberish* duration() override;
+  V8UnionDoubleOrScrollTimelineAutoKeyword* timeRange() const;
+  V8CSSNumberish* ConvertTimeToProgress(AnimationTimeDelta time) const;
 
   // Returns the Node that should actually have the ScrollableArea (if one
   // exists). This can differ from |scrollSource| when |scroll_source_| is the
@@ -121,15 +124,28 @@ class CORE_EXPORT ScrollTimeline : public AnimationTimeline {
   // overflow, adding and removal of scrollable area.
   static void Invalidate(Node* node);
 
+  // TODO (crbug.com/1216655): Time range should be removed from ScrollTimeline.
+  // Currently still left in for the sake of backwards compatibility with
+  // existing tests.
+  double GetTimeRange() const { return time_range_ ? time_range_.value() : 0; }
+
+  // Duration is the maximum value a timeline may generate for current time.
+  // Used to convert time values to proportional values.
+  absl::optional<AnimationTimeDelta> GetDuration() const override {
+    return time_range_
+               ? absl::nullopt
+               // Any arbitrary value should be able to be used here.
+               : absl::make_optional(AnimationTimeDelta::FromSecondsD(100));
+  }
+
  protected:
   PhaseAndTime CurrentPhaseAndTime() override;
-  double GetTimeRange() const { return time_range_ ? time_range_.value() : 0; }
   bool ScrollOffsetsEqual(
       const HeapVector<Member<ScrollTimelineOffset>>& other) const;
-  size_t AttachedAnimationsCount() const { return scroll_animations_.size(); }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ScrollTimelineTest, MultipleScrollOffsetsClamping);
+  FRIEND_TEST_ALL_PREFIXES(ScrollTimelineTest, ResolveScrollOffsets);
   // https://wicg.github.io/scroll-animations/#avoiding-cycles
   // Snapshots scroll timeline current time and phase.
   // Called once per animation frame.
@@ -146,7 +162,7 @@ class CORE_EXPORT ScrollTimeline : public AnimationTimeline {
 
   struct TimelineState {
     TimelinePhase phase;
-    base::Optional<base::TimeDelta> current_time;
+    absl::optional<base::TimeDelta> current_time;
     // The resolved version of scroll offset. The vector is empty
     // when timeline is inactive (e.g., when source does not overflow).
     WTF::Vector<double> scroll_offsets;
@@ -172,16 +188,13 @@ class CORE_EXPORT ScrollTimeline : public AnimationTimeline {
   ScrollDirection orientation_;
   HeapVector<Member<ScrollTimelineOffset>> scroll_offsets_;
 
-  base::Optional<double> time_range_;
+  // TODO (crbug.com/1216655): Time range should be removed from ScrollTimeline.
+  // Currently still left in for the sake of backwards compatibility with
+  // existing tests.
+  absl::optional<double> time_range_;
 
   // Snapshotted value produced by the last SnapshotState call.
   TimelineState timeline_state_snapshotted_;
-
-  // The only purpose of scroll_animations_ is keeping strong references to
-  // attached animations. This is required to keep attached animations alive
-  // as long as the timeline is alive. Scroll timeline is alive as long as its
-  // scroller is alive.
-  HeapHashSet<Member<Animation>> scroll_animations_;
 };
 
 template <>
@@ -193,4 +206,4 @@ struct DowncastTraits<ScrollTimeline> {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SCROLL_TIMELINE_H_

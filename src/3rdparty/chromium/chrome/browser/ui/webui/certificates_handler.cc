@@ -98,8 +98,8 @@ struct DictionaryIdComparator {
     const base::DictionaryValue* b_dict;
     bool b_is_dictionary = b.GetAsDictionary(&b_dict);
     DCHECK(b_is_dictionary);
-    base::string16 a_str;
-    base::string16 b_str;
+    std::u16string a_str;
+    std::u16string b_str;
     a_dict->GetString(kCertificatesHandlerNameField, &a_str);
     b_dict->GetString(kCertificatesHandlerNameField, &b_str);
     if (collator_ == nullptr)
@@ -507,7 +507,7 @@ void CertificatesHandler::HandleExportPersonal(const base::ListValue* args) {
       this,
       std::make_unique<ChromeSelectFilePolicy>(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
-      ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
+      ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(),
       base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(EXPORT_PERSONAL_FILE_SELECTED));
@@ -601,7 +601,7 @@ void CertificatesHandler::HandleImportPersonal(const base::ListValue* args) {
       this,
       std::make_unique<ChromeSelectFilePolicy>(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
-      ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(),
+      ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
       base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(IMPORT_PERSONAL_FILE_SELECTED));
@@ -1137,7 +1137,7 @@ void CertificatesHandler::RejectCallbackWithImportError(
   RejectCallback(*error_info);
 }
 
-gfx::NativeWindow CertificatesHandler::GetParentWindow() const {
+gfx::NativeWindow CertificatesHandler::GetParentWindow() {
   return web_ui()->GetWebContents()->GetTopLevelNativeWindow();
 }
 
@@ -1161,7 +1161,7 @@ CertificatesHandler::GetCertInfoFromCallbackArgs(const base::Value& args,
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 bool CertificatesHandler::IsClientCertificateManagementAllowedPolicy(
-    Slot slot) const {
+    Slot slot) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
   auto policy_value = static_cast<ClientCertificateManagementPermission>(
@@ -1174,7 +1174,7 @@ bool CertificatesHandler::IsClientCertificateManagementAllowedPolicy(
 }
 
 bool CertificatesHandler::IsCACertificateManagementAllowedPolicy(
-    CertificateSource source) const {
+    CertificateSource source) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
   auto policy_value = static_cast<CACertificateManagementPermission>(
@@ -1190,7 +1190,7 @@ bool CertificatesHandler::IsCACertificateManagementAllowedPolicy(
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 bool CertificatesHandler::CanDeleteCertificate(
-    const CertificateManagerModel::CertInfo* cert_info) const {
+    const CertificateManagerModel::CertInfo* cert_info) {
   if (!cert_info->can_be_deleted() ||
       cert_info->source() ==
           CertificateManagerModel::CertInfo::Source::kPolicy) {
@@ -1213,7 +1213,7 @@ bool CertificatesHandler::CanDeleteCertificate(
 }
 
 bool CertificatesHandler::CanEditCertificate(
-    const CertificateManagerModel::CertInfo* cert_info) const {
+    const CertificateManagerModel::CertInfo* cert_info) {
   if ((cert_info->type() != net::CertType::CA_CERT) ||
       (cert_info->source() ==
        CertificateManagerModel::CertInfo::Source::kPolicy)) {

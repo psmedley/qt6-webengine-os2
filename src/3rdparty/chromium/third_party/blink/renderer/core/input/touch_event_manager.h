@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_TOUCH_EVENT_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_TOUCH_EVENT_MANAGER_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_pointer_event.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
@@ -128,14 +129,14 @@ class CORE_EXPORT TouchEventManager final
   // that only horizontal scrolling is blocked.
   bool should_enforce_vertical_scroll_ = false;
   // When set to a value, the effective touch-action is sent to the browser
-  // after all 'touchstart' handlers have been invoked. This is used by feature
-  // policy to enforce specific directions of scroll in spite of scroll-blocking
-  // events being prevent defaulted. When multiple pointer down events occur
-  // during the same touch sequence, the value of effective touch action which
-  // is sent to the browser after handling each dispatched 'touchstart' is the
-  // intersection of all the previously calculated effective touch action values
-  // during the sequence.
-  base::Optional<TouchAction> delayed_effective_touch_action_;
+  // after all 'touchstart' handlers have been invoked. This is used by
+  // permissions policy to enforce specific directions of scroll in spite of
+  // scroll-blocking events being prevent defaulted. When multiple pointer down
+  // events occur during the same touch sequence, the value of effective touch
+  // action which is sent to the browser after handling each dispatched
+  // 'touchstart' is the intersection of all the previously calculated effective
+  // touch action values during the sequence.
+  absl::optional<TouchAction> delayed_effective_touch_action_;
 };
 
 }  // namespace blink

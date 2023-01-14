@@ -262,11 +262,11 @@ void ViewAXPlatformNodeDelegate::NotifyAccessibilityEvent(
   ax_platform_node_->NotifyAccessibilityEvent(event_type);
 }
 
-#if defined(OS_APPLE)
-void ViewAXPlatformNodeDelegate::AnnounceText(const base::string16& text) {
+#if defined(OS_MAC)
+void ViewAXPlatformNodeDelegate::AnnounceText(const std::u16string& text) {
   ax_platform_node_->AnnounceText(text);
 }
-#endif  // defined(OS_APPLE)
+#endif  // defined(OS_MAC)
 
 const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
   // Clear the data, then populate it.
@@ -349,7 +349,8 @@ int ViewAXPlatformNodeDelegate::GetChildCount() const {
     }
   }
 
-  return view_child_count + int{child_widgets_result.child_widgets.size()};
+  return view_child_count +
+         static_cast<int>(child_widgets_result.child_widgets.size());
 }
 
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::ChildAtIndex(int index) {
@@ -418,7 +419,7 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::ChildAtIndex(int index) {
     DCHECK_GE(index, 0);
   }
 
-  if (index < int{child_widgets_result.child_widgets.size()})
+  if (index < static_cast<int>(child_widgets_result.child_widgets.size()))
     return child_widgets[index]->GetRootView()->GetNativeViewAccessible();
 
   NOTREACHED() << "|index| should be less than the unignored child count.";
@@ -574,7 +575,7 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::HitTestSync(
       return false;
     ui::AXNodeData child_data;
     child->GetViewAccessibility().GetAccessibleNodeData(&child_data);
-    if (child_data.HasState(ax::mojom::State::kInvisible))
+    if (child_data.IsInvisible())
       return false;
     gfx::Point point_in_child_coords = point;
     v->ConvertPointToTarget(v, child, &point_in_child_coords);
@@ -629,15 +630,15 @@ bool ViewAXPlatformNodeDelegate::IsOffscreen() const {
   return false;
 }
 
-base::string16 ViewAXPlatformNodeDelegate::GetAuthorUniqueId() const {
+std::u16string ViewAXPlatformNodeDelegate::GetAuthorUniqueId() const {
   const View* v = view();
   if (v) {
     const int view_id = v->GetID();
     if (view_id)
-      return base::WideToUTF16(L"view_") + base::NumberToString16(view_id);
+      return u"view_" + base::NumberToString16(view_id);
   }
 
-  return base::string16();
+  return std::u16string();
 }
 
 bool ViewAXPlatformNodeDelegate::IsMinimized() const {
@@ -649,7 +650,7 @@ const ui::AXUniqueId& ViewAXPlatformNodeDelegate::GetUniqueId() const {
   return ViewAccessibility::GetUniqueId();
 }
 
-base::Optional<bool>
+absl::optional<bool>
 ViewAXPlatformNodeDelegate::GetTableHasColumnOrRowHeaderNode() const {
   if (!GetAncestorTableView())
     return false;
@@ -673,28 +674,28 @@ std::vector<int32_t> ViewAXPlatformNodeDelegate::GetColHeaderNodeIds() const {
 std::vector<int32_t> ViewAXPlatformNodeDelegate::GetColHeaderNodeIds(
     int col_index) const {
   std::vector<int32_t> columns = GetColHeaderNodeIds();
-  if (columns.size() <= size_t{col_index}) {
+  if (columns.size() <= static_cast<size_t>(col_index)) {
     return {};
   }
   return {columns[col_index]};
 }
 
-base::Optional<int32_t> ViewAXPlatformNodeDelegate::GetCellId(
+absl::optional<int32_t> ViewAXPlatformNodeDelegate::GetCellId(
     int row_index,
     int col_index) const {
   if (virtual_children().empty() || !GetAncestorTableView())
-    return base::nullopt;
+    return absl::nullopt;
 
   AXVirtualView* ax_cell =
       GetAncestorTableView()->GetVirtualAccessibilityCell(row_index, col_index);
   if (!ax_cell)
-    return base::nullopt;
+    return absl::nullopt;
 
   const ui::AXNodeData& cell_data = ax_cell->GetData();
   if (cell_data.role == ax::mojom::Role::kCell)
     return cell_data.id;
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 TableView* ViewAXPlatformNodeDelegate::GetAncestorTableView() const {
@@ -719,7 +720,7 @@ bool ViewAXPlatformNodeDelegate::IsOrderedSet() const {
          GetData().HasIntAttribute(ax::mojom::IntAttribute::kSetSize);
 }
 
-base::Optional<int> ViewAXPlatformNodeDelegate::GetPosInSet() const {
+absl::optional<int> ViewAXPlatformNodeDelegate::GetPosInSet() const {
   // Consider overridable attributes first.
   const ui::AXNodeData& data = GetData();
   if (data.HasIntAttribute(ax::mojom::IntAttribute::kPosInSet))
@@ -728,19 +729,19 @@ base::Optional<int> ViewAXPlatformNodeDelegate::GetPosInSet() const {
   std::vector<View*> views_in_group;
   GetViewsInGroupForSet(&views_in_group);
   if (views_in_group.empty())
-    return base::nullopt;
+    return absl::nullopt;
   // Check this is in views_in_group; it may be removed if it is ignored.
   auto found_view =
       std::find(views_in_group.begin(), views_in_group.end(), view());
   if (found_view == views_in_group.end())
-    return base::nullopt;
+    return absl::nullopt;
 
   int posInSet = std::distance(views_in_group.begin(), found_view);
   // posInSet is zero-based; users expect one-based, so increment.
   return ++posInSet;
 }
 
-base::Optional<int> ViewAXPlatformNodeDelegate::GetSetSize() const {
+absl::optional<int> ViewAXPlatformNodeDelegate::GetSetSize() const {
   // Consider overridable attributes first.
   const ui::AXNodeData& data = GetData();
   if (data.HasIntAttribute(ax::mojom::IntAttribute::kSetSize))
@@ -749,12 +750,12 @@ base::Optional<int> ViewAXPlatformNodeDelegate::GetSetSize() const {
   std::vector<View*> views_in_group;
   GetViewsInGroupForSet(&views_in_group);
   if (views_in_group.empty())
-    return base::nullopt;
+    return absl::nullopt;
   // Check this is in views_in_group; it may be removed if it is ignored.
   auto found_view =
       std::find(views_in_group.begin(), views_in_group.end(), view());
   if (found_view == views_in_group.end())
-    return base::nullopt;
+    return absl::nullopt;
 
   return views_in_group.size();
 }

@@ -6,28 +6,30 @@
 
 #include "xfa/fxfa/cxfa_textlayout.h"
 
+#include <math.h>
+
 #include <algorithm>
 #include <utility>
 
 #include "core/fxcrt/css/cfx_csscomputedstyle.h"
 #include "core/fxcrt/css/cfx_cssstyleselector.h"
+#include "core/fxcrt/stl_util.h"
 #include "core/fxcrt/xml/cfx_xmlelement.h"
 #include "core/fxcrt/xml/cfx_xmlnode.h"
 #include "core/fxcrt/xml/cfx_xmltext.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "core/fxge/cfx_graphstatedata.h"
-#include "core/fxge/cfx_pathdata.h"
+#include "core/fxge/cfx_path.h"
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/text_char_pos.h"
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/check.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/stl_util.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
-#include "xfa/fgas/layout/cfx_linkuserdata.h"
-#include "xfa/fgas/layout/cfx_rtfbreak.h"
-#include "xfa/fgas/layout/cfx_textuserdata.h"
+#include "xfa/fgas/layout/cfgas_linkuserdata.h"
+#include "xfa/fgas/layout/cfgas_rtfbreak.h"
+#include "xfa/fgas/layout/cfgas_textuserdata.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
 #include "xfa/fxfa/cxfa_textparser.h"
 #include "xfa/fxfa/cxfa_textprovider.h"
@@ -107,14 +109,14 @@ void CXFA_TextLayout::Unload() {
   m_pBreak.reset();
 }
 
-const wchar_t* CXFA_TextLayout::GetLinkURLAtPoint(const CFX_PointF& point) {
+WideString CXFA_TextLayout::GetLinkURLAtPoint(const CFX_PointF& point) {
   for (const auto& pPieceLine : m_pieceLines) {
     for (const auto& pPiece : pPieceLine->m_textPieces) {
       if (pPiece->pLinkData && pPiece->rtPiece.Contains(point))
         return pPiece->pLinkData->GetLinkURL();
     }
   }
-  return nullptr;
+  return WideString();
 }
 
 void CXFA_TextLayout::GetTextDataNode() {
@@ -145,12 +147,12 @@ CFX_XMLNode* CXFA_TextLayout::GetXMLContainerNode() {
   return nullptr;
 }
 
-std::unique_ptr<CFX_RTFBreak> CXFA_TextLayout::CreateBreak(bool bDefault) {
+std::unique_ptr<CFGAS_RTFBreak> CXFA_TextLayout::CreateBreak(bool bDefault) {
   uint32_t dwStyle = FX_LAYOUTSTYLE_ExpandTab;
   if (!bDefault)
     dwStyle |= FX_LAYOUTSTYLE_Pagination;
 
-  auto pBreak = std::make_unique<CFX_RTFBreak>(dwStyle);
+  auto pBreak = std::make_unique<CFGAS_RTFBreak>(dwStyle);
   pBreak->SetLineBreakTolerance(1);
   pBreak->SetFont(
       m_pTextParser->GetFont(m_pDoc.Get(), m_pTextProvider, nullptr));
@@ -163,19 +165,19 @@ void CXFA_TextLayout::InitBreak(float fLineWidth) {
   float fStart = 0;
   float fStartPos = 0;
   if (para) {
-    CFX_RTFLineAlignment iAlign = CFX_RTFLineAlignment::Left;
+    CFGAS_RTFBreak::LineAlignment iAlign = CFGAS_RTFBreak::LineAlignment::Left;
     switch (para->GetHorizontalAlign()) {
       case XFA_AttributeValue::Center:
-        iAlign = CFX_RTFLineAlignment::Center;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Center;
         break;
       case XFA_AttributeValue::Right:
-        iAlign = CFX_RTFLineAlignment::Right;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Right;
         break;
       case XFA_AttributeValue::Justify:
-        iAlign = CFX_RTFLineAlignment::Justified;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Justified;
         break;
       case XFA_AttributeValue::JustifyAll:
-        iAlign = CFX_RTFLineAlignment::Distributed;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Distributed;
         break;
       case XFA_AttributeValue::Left:
       case XFA_AttributeValue::Radix:
@@ -188,7 +190,7 @@ void CXFA_TextLayout::InitBreak(float fLineWidth) {
 
     fStart = para->GetMarginLeft();
     if (m_pTextProvider->IsCheckButtonAndAutoWidth()) {
-      if (iAlign != CFX_RTFLineAlignment::Left)
+      if (iAlign != CFGAS_RTFBreak::LineAlignment::Left)
         fLineWidth -= para->GetMarginRight();
     } else {
       fLineWidth -= para->GetMarginRight();
@@ -232,19 +234,19 @@ void CXFA_TextLayout::InitBreak(CFX_CSSComputedStyle* pStyle,
 
   if (eDisplay == CFX_CSSDisplay::Block ||
       eDisplay == CFX_CSSDisplay::ListItem) {
-    CFX_RTFLineAlignment iAlign = CFX_RTFLineAlignment::Left;
+    CFGAS_RTFBreak::LineAlignment iAlign = CFGAS_RTFBreak::LineAlignment::Left;
     switch (pStyle->GetTextAlign()) {
       case CFX_CSSTextAlign::Right:
-        iAlign = CFX_RTFLineAlignment::Right;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Right;
         break;
       case CFX_CSSTextAlign::Center:
-        iAlign = CFX_RTFLineAlignment::Center;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Center;
         break;
       case CFX_CSSTextAlign::Justify:
-        iAlign = CFX_RTFLineAlignment::Justified;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Justified;
         break;
       case CFX_CSSTextAlign::JustifyAll:
-        iAlign = CFX_RTFLineAlignment::Distributed;
+        iAlign = CFGAS_RTFBreak::LineAlignment::Distributed;
         break;
       default:
         break;
@@ -634,7 +636,7 @@ bool CXFA_TextLayout::DrawString(CFX_RenderDevice* pFxDevice,
     for (size_t j = 0; j < pPieceLine->m_textPieces.size(); ++j) {
       const TextPiece* pPiece = pPieceLine->m_textPieces[j].get();
       int32_t iChars = pPiece->iChars;
-      if (pdfium::CollectionSize<int32_t>(char_pos) < iChars)
+      if (fxcrt::CollectionSize<int32_t>(char_pos) < iChars)
         char_pos.resize(iChars);
       RenderString(pFxDevice, pPieceLine, j, &char_pos, mtDoc2Device);
     }
@@ -722,7 +724,7 @@ void CXFA_TextLayout::LoadText(CXFA_Node* pNode,
   if (bRet && m_pLoader)
     m_pLoader->pNode = pNode;
   else
-    EndBreak(CFX_BreakType::kParagraph, pLinePos, bSavePieces);
+    EndBreak(CFGAS_Char::BreakType::kParagraph, pLinePos, bSavePieces);
 }
 
 bool CXFA_TextLayout::LoadRichText(
@@ -731,7 +733,7 @@ bool CXFA_TextLayout::LoadRichText(
     float* pLinePos,
     const RetainPtr<CFX_CSSComputedStyle>& pParentStyle,
     bool bSavePieces,
-    RetainPtr<CFX_LinkUserData> pLinkData,
+    RetainPtr<CFGAS_LinkUserData> pLinkData,
     bool bEndBreak,
     bool bIsOl,
     int32_t iLiCount) {
@@ -787,7 +789,7 @@ bool CXFA_TextLayout::LoadRichText(
       if (wsName.EqualsASCII("a")) {
         WideString wsLinkContent = pElement->GetAttribute(L"href");
         if (!wsLinkContent.IsEmpty())
-          pLinkData = pdfium::MakeRetain<CFX_LinkUserData>(wsLinkContent);
+          pLinkData = pdfium::MakeRetain<CFGAS_LinkUserData>(wsLinkContent);
       }
 
       int32_t iTabCount = m_pTextParser->CountTabs(
@@ -812,8 +814,8 @@ bool CXFA_TextLayout::LoadRichText(
         } else {
           Optional<WideString> obj =
               m_pTextParser->GetEmbeddedObj(m_pTextProvider, pXMLNode);
-          if (obj)
-            wsText = *obj;
+          if (obj.has_value())
+            wsText = obj.value();
         }
       }
 
@@ -839,7 +841,7 @@ bool CXFA_TextLayout::LoadRichText(
 
       if (wsText.GetLength() > 0) {
         if (!m_pLoader || m_pLoader->iChar == 0) {
-          auto pUserData = pdfium::MakeRetain<CFX_TextUserData>(
+          auto pUserData = pdfium::MakeRetain<CFGAS_TextUserData>(
               bContentNode ? pParentStyle : pStyle, pLinkData);
           m_pBreak->SetUserData(pUserData);
         }
@@ -874,7 +876,7 @@ bool CXFA_TextLayout::LoadRichText(
         m_pLoader->bFilterSpace = true;
     }
     if (bCurLi)
-      EndBreak(CFX_BreakType::kLine, pLinePos, bSavePieces);
+      EndBreak(CFGAS_Char::BreakType::kLine, pLinePos, bSavePieces);
   } else {
     if (pContext)
       eDisplay = pContext->GetDisplay();
@@ -883,9 +885,9 @@ bool CXFA_TextLayout::LoadRichText(
   if (!pContext || bContentNode)
     return true;
 
-  CFX_BreakType dwStatus = (eDisplay == CFX_CSSDisplay::Block)
-                               ? CFX_BreakType::kParagraph
-                               : CFX_BreakType::kPiece;
+  CFGAS_Char::BreakType dwStatus = (eDisplay == CFX_CSSDisplay::Block)
+                                       ? CFGAS_Char::BreakType::kParagraph
+                                       : CFGAS_Char::BreakType::kPiece;
   EndBreak(dwStatus, pLinePos, bSavePieces);
   if (eDisplay == CFX_CSSDisplay::Block) {
     *pLinePos += fSpaceBelow;
@@ -906,7 +908,7 @@ bool CXFA_TextLayout::AppendChar(const WideString& wsText,
                                  float* pLinePos,
                                  float fSpaceAbove,
                                  bool bSavePieces) {
-  CFX_BreakType dwStatus = CFX_BreakType::kNone;
+  CFGAS_Char::BreakType dwStatus = CFGAS_Char::BreakType::kNone;
   int32_t iChar = 0;
   if (m_pLoader)
     iChar = m_pLoader->iChar;
@@ -918,14 +920,15 @@ bool CXFA_TextLayout::AppendChar(const WideString& wsText,
       wch = 0x20;
 
     dwStatus = m_pBreak->AppendChar(wch);
-    if (dwStatus != CFX_BreakType::kNone && dwStatus != CFX_BreakType::kPiece) {
+    if (dwStatus != CFGAS_Char::BreakType::kNone &&
+        dwStatus != CFGAS_Char::BreakType::kPiece) {
       AppendTextLine(dwStatus, pLinePos, bSavePieces, false);
       if (IsEnd(bSavePieces)) {
         if (m_pLoader)
           m_pLoader->iChar = i;
         return true;
       }
-      if (dwStatus == CFX_BreakType::kParagraph && m_bRichText)
+      if (dwStatus == CFGAS_Char::BreakType::kParagraph && m_bRichText)
         *pLinePos += fSpaceAbove;
     }
   }
@@ -943,11 +946,12 @@ bool CXFA_TextLayout::IsEnd(bool bSavePieces) {
   return false;
 }
 
-void CXFA_TextLayout::EndBreak(CFX_BreakType dwStatus,
+void CXFA_TextLayout::EndBreak(CFGAS_Char::BreakType dwStatus,
                                float* pLinePos,
                                bool bSavePieces) {
   dwStatus = m_pBreak->EndBreak(dwStatus);
-  if (dwStatus != CFX_BreakType::kNone && dwStatus != CFX_BreakType::kPiece)
+  if (dwStatus != CFGAS_Char::BreakType::kNone &&
+      dwStatus != CFGAS_Char::BreakType::kPiece)
     AppendTextLine(dwStatus, pLinePos, bSavePieces, true);
 }
 
@@ -959,14 +963,14 @@ void CXFA_TextLayout::DoTabstops(CFX_CSSComputedStyle* pStyle,
   if (!m_pTabstopContext || m_pTabstopContext->m_tabstops.empty())
     return;
 
-  int32_t iPieces = pdfium::CollectionSize<int32_t>(pPieceLine->m_textPieces);
+  int32_t iPieces = fxcrt::CollectionSize<int32_t>(pPieceLine->m_textPieces);
   if (iPieces == 0)
     return;
 
   TextPiece* pPiece = pPieceLine->m_textPieces[iPieces - 1].get();
   int32_t& iTabstopsIndex = m_pTabstopContext->m_iTabIndex;
   int32_t iCount = m_pTextParser->CountTabs(pStyle);
-  if (!pdfium::IndexInBounds(m_pTabstopContext->m_tabstops, iTabstopsIndex))
+  if (!fxcrt::IndexInBounds(m_pTabstopContext->m_tabstops, iTabstopsIndex))
     return;
 
   if (iCount > 0) {
@@ -983,12 +987,12 @@ void CXFA_TextLayout::DoTabstops(CFX_CSSComputedStyle* pStyle,
     float fLeft = 0;
     if (m_pTabstopContext->m_bHasTabstops) {
       uint32_t dwAlign = m_pTabstopContext->m_tabstops[iTabstopsIndex].dwAlign;
-      if (dwAlign == FX_HashCode_GetW(L"center", false)) {
+      if (dwAlign == FX_HashCode_GetW(L"center")) {
         fLeft = pPiece->rtPiece.width / 2.0f;
-      } else if (dwAlign == FX_HashCode_GetW(L"right", false) ||
-                 dwAlign == FX_HashCode_GetW(L"before", false)) {
+      } else if (dwAlign == FX_HashCode_GetW(L"right") ||
+                 dwAlign == FX_HashCode_GetW(L"before")) {
         fLeft = pPiece->rtPiece.width;
-      } else if (dwAlign == FX_HashCode_GetW(L"decimal", false)) {
+      } else if (dwAlign == FX_HashCode_GetW(L"decimal")) {
         int32_t iChars = pPiece->iChars;
         for (int32_t i = 0; i < iChars; i++) {
           if (pPiece->szText[i] == L'.')
@@ -1006,7 +1010,7 @@ void CXFA_TextLayout::DoTabstops(CFX_CSSComputedStyle* pStyle,
   }
 }
 
-void CXFA_TextLayout::AppendTextLine(CFX_BreakType dwStatus,
+void CXFA_TextLayout::AppendTextLine(CFGAS_Char::BreakType dwStatus,
                                      float* pLinePos,
                                      bool bSavePieces,
                                      bool bEndBreak) {
@@ -1022,11 +1026,12 @@ void CXFA_TextLayout::AppendTextLine(CFX_BreakType dwStatus,
     if (m_pTabstopContext)
       m_pTabstopContext->Reset();
 
-    float fLineStep = 0, fBaseLine = 0;
+    float fLineStep = 0;
+    float fBaseLine = 0;
     int32_t i = 0;
     for (i = 0; i < iPieces; i++) {
-      const CFX_BreakPiece* pPiece = m_pBreak->GetBreakPieceUnstable(i);
-      CFX_TextUserData* pUserData = pPiece->m_pUserData.Get();
+      const CFGAS_BreakPiece* pPiece = m_pBreak->GetBreakPieceUnstable(i);
+      CFGAS_TextUserData* pUserData = pPiece->m_pUserData.Get();
       if (pUserData)
         pStyle = pUserData->m_pStyle;
       float fVerScale = pPiece->m_iVerticalScale / 100.0f;
@@ -1080,8 +1085,8 @@ void CXFA_TextLayout::AppendTextLine(CFX_BreakType dwStatus,
     float fLineStep = 0;
     float fLineWidth = 0;
     for (int32_t i = 0; i < iPieces; i++) {
-      const CFX_BreakPiece* pPiece = m_pBreak->GetBreakPieceUnstable(i);
-      CFX_TextUserData* pUserData = pPiece->m_pUserData.Get();
+      const CFGAS_BreakPiece* pPiece = m_pBreak->GetBreakPieceUnstable(i);
+      CFGAS_TextUserData* pUserData = pPiece->m_pUserData.Get();
       if (pUserData)
         pStyle = pUserData->m_pStyle;
       float fVerScale = pPiece->m_iVerticalScale / 100.0f;
@@ -1110,7 +1115,7 @@ void CXFA_TextLayout::AppendTextLine(CFX_BreakType dwStatus,
   }
 
   m_pBreak->ClearBreakPieces();
-  if (dwStatus == CFX_BreakType::kParagraph) {
+  if (dwStatus == CFGAS_Char::BreakType::kParagraph) {
     m_pBreak->Reset();
     if (!pStyle && bEndBreak) {
       CXFA_Para* para = m_pTextProvider->GetParaIfExists();
@@ -1171,7 +1176,7 @@ void CXFA_TextLayout::RenderPath(CFX_RenderDevice* pDevice,
   if (bNoUnderline && bNoLineThrough)
     return;
 
-  CFX_PathData path;
+  CFX_Path path;
   size_t szChars = GetDisplayPos(pPiece, pCharPos);
   if (szChars > 0) {
     CFX_PointF pt1;

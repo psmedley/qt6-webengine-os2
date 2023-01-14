@@ -47,10 +47,10 @@ trivially removed as of late 2020.
 ## How does it work?
 
 The bytecode rewriting happens at build time by
-[FragmentActivityReplacer](https://source.chromium.org/chromium/chromium/src/+/master:build/android/bytecode/java/org/chromium/bytecode/FragmentActivityReplacer.java),
+[FragmentActivityReplacer](https://source.chromium.org/chromium/chromium/src/+/main:build/android/bytecode/java/org/chromium/bytecode/FragmentActivityReplacer.java),
 which is specified as a bytecode rewriter via the `bytecode_rewriter_target` rule.  Compilation errors
 related to this should get detected by
-[compile_java.py](https://source.chromium.org/chromium/chromium/src/+/master:build/android/gyp/compile_java.py),
+[compile_java.py](https://source.chromium.org/chromium/chromium/src/+/main:build/android/gyp/compile_java.py),
 and print a message pointing users here, which is likely why you're reading this :)
 
 If you need to apply FragmentActivityReplacer to a given target then add …
@@ -60,6 +60,15 @@ bytecode_rewriter_target = "//build/android/bytecode:fragment_activity_replacer"
 ```
 
 … to the build configuration for that target.
+
+If you still get a build or runtime error related to a FragmentActivity after adding in the
+replacer, then the library may actually rely on the Activity being a FragmentActivity. If so, it
+likely won't work with WebLayer as-is. If you know there are no plans to use the library in
+WebLayer, you can try adding this instead:
+
+```
+bytecode_rewriter_target = "//build/android/bytecode:fragment_activity_replacer_single_androidx"
+```
 
 ## How does this affect my code?
 

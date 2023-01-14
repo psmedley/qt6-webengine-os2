@@ -34,7 +34,6 @@
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap_source.h"
 #include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
-#include "third_party/khronos/GLES2/gl2.h"
 
 namespace blink {
 class ImageBitmapOptions;
@@ -110,8 +109,10 @@ class CORE_EXPORT HTMLVideoElement final
       bool allow_accelerated_images = true);
 
   // CanvasImageSource implementation
-  scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                               const FloatSize&) override;
+  scoped_refptr<Image> GetSourceImageForCanvas(
+      SourceImageStatus*,
+      const FloatSize&,
+      const AlphaDisposition alpha_disposition = kPremultiplyAlpha) override;
   bool IsVideoElement() const override { return true; }
   bool WouldTaintOrigin() const override;
   FloatSize ElementSize(const FloatSize&,
@@ -125,12 +126,11 @@ class CORE_EXPORT HTMLVideoElement final
   // ImageBitmapSource implementation
   IntSize BitmapSourceSize() const override;
   ScriptPromise CreateImageBitmap(ScriptState*,
-                                  base::Optional<IntRect> crop_rect,
+                                  absl::optional<IntRect> crop_rect,
                                   const ImageBitmapOptions*,
                                   ExceptionState&) override;
 
   // WebMediaPlayerClient implementation.
-  void OnBecamePersistentVideo(bool) final;
   void OnRequestVideoFrameCallback() final;
 
   bool IsPersistent() const;
@@ -143,6 +143,7 @@ class CORE_EXPORT HTMLVideoElement final
   DisplayType GetDisplayType() const final;
   bool IsInAutoPIP() const final;
   void OnPictureInPictureStateChange() final;
+  void SetPersistentState(bool persistent) final;
 
   // Used by the PictureInPictureController as callback when the video element
   // enters or exits Picture-in-Picture state.
@@ -201,6 +202,8 @@ class CORE_EXPORT HTMLVideoElement final
 
   void OnIntersectionChangedForLazyLoad(
       const HeapVector<Member<IntersectionObserverEntry>>& entries);
+
+  void SetPersistentStateInternal(bool persistent);
 
   Member<HTMLImageLoader> image_loader_;
   Member<MediaCustomControlsFullscreenDetector>

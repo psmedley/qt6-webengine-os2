@@ -143,8 +143,10 @@ def Main():
   AdbCall('root')
   AdbCall('wait-for-device')
 
-  target_dir = '/data/local/tmp/' + args.test_name
-  AdbCall('shell', 'rm -rf "%s"; mkdir -p "%s"' % (2 * (target_dir,)))
+  target_dir = '/data/local/tmp/perfetto_tests'
+  if not args.no_cleanup:
+    AdbCall('shell', 'rm -rf "%s"' % target_dir)
+  AdbCall('shell', 'mkdir -p "%s"' % target_dir)
   # Some tests require the trace directory to exist, while true for android
   # devices in general some emulators might not have it set up. So we check to
   # see if it exists, and if not create it.
@@ -155,7 +157,7 @@ def Main():
   AdbCall('shell', 'echo 0 > /d/tracing/tracing_on')
 
   # This needs to go into /data/nativetest in order to have the system linker
-  # namespace applied, which we need in order to link libdexfile_external.so.
+  # namespace applied, which we need in order to link libdexfile.so.
   # This gets linked into our tests via libundwindstack.so.
   #
   # See https://android.googlesource.com/platform/system/core/+/master/rootdir/etc/ld.config.txt.

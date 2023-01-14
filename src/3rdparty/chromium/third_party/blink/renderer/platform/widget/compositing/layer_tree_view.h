@@ -15,6 +15,7 @@
 #include "cc/input/browser_controls_state.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
+#include "cc/trees/paint_holding_reason.h"
 #include "cc/trees/swap_promise.h"
 #include "cc/trees/swap_promise_monitor.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -29,8 +30,11 @@ class LayerTreeHost;
 class LayerTreeSettings;
 class RenderFrameMetadataObserver;
 class TaskGraphRunner;
-class UkmRecorderFactory;
 }  // namespace cc
+
+namespace gfx {
+class RenderingPipeline;
+}  // namespace gfx
 
 namespace blink {
 
@@ -45,6 +49,8 @@ class PLATFORM_EXPORT LayerTreeView
  public:
   LayerTreeView(LayerTreeViewDelegate* delegate,
                 scheduler::WebThreadScheduler* scheduler);
+  LayerTreeView(const LayerTreeView&) = delete;
+  LayerTreeView& operator=(const LayerTreeView&) = delete;
   ~LayerTreeView() override;
 
   // The |main_thread| is the task runner that the compositor will use for the
@@ -57,7 +63,8 @@ class PLATFORM_EXPORT LayerTreeView
                   scoped_refptr<base::SingleThreadTaskRunner> main_thread,
                   scoped_refptr<base::SingleThreadTaskRunner> compositor_thread,
                   cc::TaskGraphRunner* task_graph_runner,
-                  std::unique_ptr<cc::UkmRecorderFactory> ukm_recorder_factory);
+                  gfx::RenderingPipeline* main_thread_pipeline,
+                  gfx::RenderingPipeline* compositor_thread_pipeline);
 
   // Drops any references back to the delegate in preparation for being
   // destroyed.
@@ -74,7 +81,8 @@ class PLATFORM_EXPORT LayerTreeView
   void DidUpdateLayers() override;
   void BeginMainFrame(const viz::BeginFrameArgs& args) override;
   void OnDeferMainFrameUpdatesChanged(bool) override;
-  void OnDeferCommitsChanged(bool) override;
+  void OnDeferCommitsChanged(bool defer_status,
+                             cc::PaintHoldingReason reason) override;
   void BeginMainFrameNotExpectedSoon() override;
   void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void UpdateLayerTreeHost() override;
@@ -110,11 +118,14 @@ class PLATFORM_EXPORT LayerTreeView
   // cc::LayerTreeHostSingleThreadClient implementation.
   void DidSubmitCompositorFrame() override;
   void DidLoseLayerTreeFrameSink() override;
+  void ScheduleAnimationForWebTests() override;
 
   // cc::LayerTreeHostSchedulingClient implementation.
   void DidScheduleBeginMainFrame() override;
   void DidRunBeginMainFrame() override;
 
+  // Registers a callback that will be run on the first successful presentation
+  // for `frame_token` or a following frame.
   void AddPresentationCallback(
       uint32_t frame_token,
       base::OnceCallback<void(base::TimeTicks)> callback);
@@ -154,8 +165,6 @@ class PLATFORM_EXPORT LayerTreeView
       presentation_callbacks_;
 
   base::WeakPtrFactory<LayerTreeView> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(LayerTreeView);
 };
 
 }  // namespace blink

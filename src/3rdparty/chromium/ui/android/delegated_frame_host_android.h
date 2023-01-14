@@ -42,6 +42,7 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     virtual void OnFrameTokenChanged(uint32_t frame_token,
                                      base::TimeTicks activation_time) = 0;
     virtual void WasEvicted() = 0;
+    virtual void OnSurfaceIdChanged() = 0;
   };
 
   DelegatedFrameHostAndroid(ViewAndroid* view,
@@ -66,11 +67,13 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     return TimeDeltaToFrames(FirstFrameTimeout());
   }
 
-  // Wait up to 1 second for a frame of the correct size to be produced. Android
-  // OS will only wait 4 seconds, so we limit this to 1 second to make sure we
-  // have always produced a frame before the OS stops waiting.
+  // Wait up to 175 milliseconds for a frame of the correct size to be produced.
+  // Android OS will only wait 200 milliseconds, so we limit this to make sure
+  // that Viz is able to produce the latest frame from the Browser before the OS
+  // stops waiting. Otherwise a rotated version of the previous frame will be
+  // displayed with a large black region where there is no content yet.
   static constexpr base::TimeDelta ResizeTimeout() {
-    return base::TimeDelta::FromSeconds(1);
+    return base::TimeDelta::FromMilliseconds(175);
   }
   static int64_t ResizeTimeoutFrames() {
     return TimeDeltaToFrames(ResizeTimeout());
@@ -88,8 +91,8 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
   const viz::FrameSinkId& GetFrameSinkId() const;
 
   // Should only be called when the host has a content layer. Use this for one-
-  // off screen capture, not for video. Always provides RGBA_BITMAP
-  // CopyOutputResults.
+  // off screen capture, not for video. Always provides ResultFormat::RGBA,
+  // ResultDestination::kSystemMemory CopyOutputResults.
   void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& output_size,
@@ -146,6 +149,8 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
 
   void ProcessCopyOutputRequest(
       std::unique_ptr<viz::CopyOutputRequest> request);
+
+  void SetLocalSurfaceId(const viz::LocalSurfaceId& local_surface_id);
 
   const viz::FrameSinkId frame_sink_id_;
 

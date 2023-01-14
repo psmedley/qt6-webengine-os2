@@ -13,6 +13,7 @@
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
 #include "media/base/output_device_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -86,7 +87,7 @@ class MEDIA_EXPORT AudioOutputIPC {
   virtual void CreateStream(
       AudioOutputIPCDelegate* delegate,
       const AudioParameters& params,
-      const base::Optional<base::UnguessableToken>& processing_id) = 0;
+      const absl::optional<base::UnguessableToken>& processing_id) = 0;
 
   // Starts playing the stream.  This should generate a call to
   // AudioOutputController::Play().

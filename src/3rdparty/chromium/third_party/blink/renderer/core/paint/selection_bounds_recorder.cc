@@ -3,9 +3,15 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/selection_bounds_recorder.h"
+
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/layout/api/selection_state.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
+#include "third_party/blink/renderer/core/layout/layout_box.h"
+#include "third_party/blink/renderer/core/page/focus_controller.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 
 namespace blink {
@@ -91,6 +97,18 @@ void SetBoundEdge(IntRect selection_rect,
   }
 }
 
+PhysicalOffset GetSamplePointForVisibility(const PhysicalOffset& edge_start,
+                                           const PhysicalOffset& edge_end,
+                                           float zoom_factor) {
+  FloatSize diff(edge_start - edge_end);
+  // Adjust by ~1px to avoid integer snapping error. This logic is the same
+  // as that in ComputeViewportSelectionBound in cc.
+  diff.Scale(zoom_factor / diff.DiagonalLength());
+  PhysicalOffset sample_point = edge_end;
+  sample_point += PhysicalOffset::FromFloatSizeRound(diff);
+  return sample_point;
+}
+
 }  // namespace
 
 SelectionBoundsRecorder::SelectionBoundsRecorder(
@@ -98,18 +116,20 @@ SelectionBoundsRecorder::SelectionBoundsRecorder(
     PhysicalRect selection_rect,
     PaintController& paint_controller,
     TextDirection text_direction,
-    WritingMode writing_mode)
+    WritingMode writing_mode,
+    const LayoutObject& layout_object)
     : state_(state),
       selection_rect_(selection_rect),
       paint_controller_(paint_controller),
       text_direction_(text_direction),
-      writing_mode_(writing_mode) {
+      writing_mode_(writing_mode),
+      selection_layout_object_(layout_object) {
   DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
 }
 
 SelectionBoundsRecorder::~SelectionBoundsRecorder() {
-  base::Optional<PaintedSelectionBound> start;
-  base::Optional<PaintedSelectionBound> end;
+  absl::optional<PaintedSelectionBound> start;
+  absl::optional<PaintedSelectionBound> end;
   auto selection_rect = PixelSnappedIntRect(selection_rect_);
   const bool is_ltr = IsLtr(text_direction_);
   BoundEdges edges = GetBoundEdges(writing_mode_, is_ltr);
@@ -119,10 +139,9 @@ SelectionBoundsRecorder::~SelectionBoundsRecorder() {
     start->type = is_ltr ? gfx::SelectionBound::Type::LEFT
                          : gfx::SelectionBound::Type::RIGHT;
     SetBoundEdge(selection_rect, edges.start, *start);
-
-    // TODO(crbug.com/1065049) Handle the case where selection within input
-    // text is clipped out.
-    start->hidden = false;
+    start->hidden =
+        !IsVisible(selection_layout_object_, PhysicalOffset(start->edge_start),
+                   PhysicalOffset(start->edge_end));
   }
 
   if (state_ == SelectionState::kStartAndEnd ||
@@ -131,7 +150,9 @@ SelectionBoundsRecorder::~SelectionBoundsRecorder() {
     end->type = is_ltr ? gfx::SelectionBound::Type::RIGHT
                        : gfx::SelectionBound::Type::LEFT;
     SetBoundEdge(selection_rect, edges.end, *end);
-    end->hidden = false;
+    end->hidden =
+        !IsVisible(selection_layout_object_, PhysicalOffset(end->edge_start),
+                   PhysicalOffset(end->edge_end));
   }
 
   paint_controller_.RecordSelection(start, end);
@@ -146,10 +167,49 @@ bool SelectionBoundsRecorder::ShouldRecordSelection(
   if (!frame_selection.IsHandleVisible() || frame_selection.IsHidden())
     return false;
 
+  // If the currently focused frame is not the one in which selection
+  // lives, don't paint the selection bounds. Note this is subtly different
+  // from whether the frame has focus (i.e. `FrameSelection::SelectionHasFocus`)
+  // which is false if the hosting window is not focused.
+  LocalFrame* local_frame = frame_selection.GetFrame();
+  LocalFrame* focused_frame =
+      local_frame->GetPage()->GetFocusController().FocusedFrame();
+  if (local_frame != focused_frame)
+    return false;
+
   if (state == SelectionState::kInside || state == SelectionState::kNone)
     return false;
 
   return true;
+}
+
+// Returns whether this position is not visible on the screen (because
+// clipped out).
+bool SelectionBoundsRecorder::IsVisible(const LayoutObject& rect_layout_object,
+                                        const PhysicalOffset& edge_start,
+                                        const PhysicalOffset& edge_end) {
+  Node* const node = rect_layout_object.GetNode();
+  if (!node)
+    return true;
+  TextControlElement* text_control = EnclosingTextControl(node);
+  if (!text_control)
+    return true;
+  if (!IsA<HTMLInputElement>(text_control))
+    return true;
+
+  LayoutObject* layout_object = text_control->GetLayoutObject();
+  if (!layout_object || !layout_object->IsBox())
+    return true;
+
+  const PhysicalOffset sample_point = GetSamplePointForVisibility(
+      edge_start, edge_end, rect_layout_object.GetFrame()->PageZoomFactor());
+
+  auto* const text_control_object = To<LayoutBox>(layout_object);
+  const PhysicalOffset position_in_input =
+      rect_layout_object.LocalToAncestorPoint(sample_point, text_control_object,
+                                              kTraverseDocumentBoundaries);
+  return text_control_object->PhysicalBorderBoxRect().Contains(
+      position_in_input);
 }
 
 }  // namespace blink

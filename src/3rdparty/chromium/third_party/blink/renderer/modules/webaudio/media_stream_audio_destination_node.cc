@@ -25,9 +25,11 @@
 
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_destination_node.h"
 
+#include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_node_options.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_context.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
@@ -62,9 +64,11 @@ MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(
                                  node,
                                  node.context()->sampleRate()),
       source_(static_cast<MediaStreamAudioDestinationNode&>(node).source()),
-      mix_bus_(AudioBus::Create(number_of_channels,
-                                audio_utilities::kRenderQuantumFrames)) {
-  source_.Lock()->SetAudioFormat(number_of_channels,
+      mix_bus_(
+          AudioBus::Create(number_of_channels,
+                           GetDeferredTaskHandler().RenderQuantumFrames())) {
+  SendLogMessage(String::Format("%s", __func__));
+  source_.Lock()->SetAudioFormat(static_cast<int>(number_of_channels),
                                  node.context()->sampleRate());
   SetInternalChannelCountMode(kExplicit);
   Initialize();
@@ -100,10 +104,11 @@ void MediaStreamAudioDestinationHandler::Process(uint32_t number_of_frames) {
   if (try_locker.Locked()) {
     unsigned count = ChannelCount();
     if (count != mix_bus_->NumberOfChannels()) {
-      mix_bus_ = AudioBus::Create(count, audio_utilities::kRenderQuantumFrames);
+      mix_bus_ = AudioBus::Create(
+          count, GetDeferredTaskHandler().RenderQuantumFrames());
       // setAudioFormat has an internal lock.  This can cause audio to
       // glitch.  This is outside of our control.
-      source->SetAudioFormat(count, Context()->sampleRate());
+      source->SetAudioFormat(static_cast<int>(count), Context()->sampleRate());
     }
   }
 
@@ -111,7 +116,7 @@ void MediaStreamAudioDestinationHandler::Process(uint32_t number_of_frames) {
 
   // consumeAudio has an internal lock (also used by setAudioFormat).
   // This can cause audio to glitch.  This is outside of our control.
-  source->ConsumeAudio(mix_bus_.get(), number_of_frames);
+  source->ConsumeAudio(mix_bus_.get(), static_cast<int>(number_of_frames));
 }
 
 void MediaStreamAudioDestinationHandler::SetChannelCount(
@@ -157,7 +162,7 @@ void MediaStreamAudioDestinationHandler::CheckNumberOfChannelsForInput(
   DCHECK(Context()->IsAudioThread());
   Context()->AssertGraphOwner();
 
-  DCHECK_EQ(input, &this->Input(0));
+  DCHECK_EQ(input, &Input(0));
 
   AudioHandler::CheckNumberOfChannelsForInput(input);
 
@@ -186,6 +191,13 @@ void MediaStreamAudioDestinationHandler::UpdatePullStatusIfNeeded() {
   }
 }
 
+void MediaStreamAudioDestinationHandler::SendLogMessage(const String& message) {
+  WebRtcLogMessage(String::Format("[WA]MSADH::%s [this=0x%" PRIXPTR "]",
+                                  message.Utf8().c_str(),
+                                  reinterpret_cast<uintptr_t>(this))
+                       .Utf8());
+}
+
 // ----------------------------------------------------------------
 
 MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
@@ -206,6 +218,15 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
   DidCreateMediaStreamAndTracks(stream_->Descriptor());
   SetHandler(
       MediaStreamAudioDestinationHandler::Create(*this, number_of_channels));
+  WebRtcLogMessage(
+      String::Format(
+          "[WA]MSADN::%s({context.state=%s}, {context.sampleRate=%.0f}, "
+          "{number_of_channels=%u}, {handler=0x%" PRIXPTR "}, [this=0x%" PRIXPTR
+          "])",
+          __func__, context.state().Utf8().c_str(), context.sampleRate(),
+          number_of_channels, reinterpret_cast<uintptr_t>(&Handler()),
+          reinterpret_cast<uintptr_t>(this))
+          .Utf8());
 }
 
 MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::Create(

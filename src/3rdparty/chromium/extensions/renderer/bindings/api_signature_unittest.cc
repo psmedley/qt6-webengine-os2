@@ -75,13 +75,17 @@ std::unique_ptr<APISignature> IntAndCallback() {
   return std::make_unique<APISignature>(std::move(specs));
 }
 
-std::unique_ptr<APISignature> IntAndOptionalCallback() {
+SpecVector IntAndOptionalCallbackSpec() {
   SpecVector specs;
   specs.push_back(ArgumentSpecBuilder(ArgumentType::INTEGER, "int").Build());
   specs.push_back(ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback")
                       .MakeOptional()
                       .Build());
-  return std::make_unique<APISignature>(std::move(specs));
+  return specs;
+}
+
+std::unique_ptr<APISignature> IntAndOptionalCallback() {
+  return std::make_unique<APISignature>(IntAndOptionalCallbackSpec());
 }
 
 std::unique_ptr<APISignature> OptionalIntAndCallback() {
@@ -217,7 +221,7 @@ class APISignatureTest : public APIBindingTest {
 
   void ExpectResponsePass(const APISignature& signature,
                           base::StringPiece arg_values) {
-    RunResponseTest(signature, arg_values, base::nullopt);
+    RunResponseTest(signature, arg_values, absl::nullopt);
   }
 
   void ExpectResponseFailure(const APISignature& signature,
@@ -245,14 +249,14 @@ class APISignatureTest : public APIBindingTest {
 
     APISignature::JSONParseResult parse_result =
         signature.ParseArgumentsToJSON(context, vector_args, type_refs_);
-    ASSERT_EQ(should_succeed, !!parse_result.arguments);
+    ASSERT_EQ(should_succeed, !!parse_result.arguments_list);
     ASSERT_NE(should_succeed, parse_result.error.has_value());
     EXPECT_EQ(expected_response_type, parse_result.async_type);
     EXPECT_EQ(expected_response_type == binding::AsyncResponseType::kCallback,
               !parse_result.callback.IsEmpty());
     if (should_succeed) {
       EXPECT_EQ(ReplaceSingleQuotes(expected_parsed_args),
-                ValueToString(*parse_result.arguments));
+                ValueToString(*parse_result.arguments_list));
     } else {
       EXPECT_EQ(expected_error, *parse_result.error);
     }
@@ -260,7 +264,7 @@ class APISignatureTest : public APIBindingTest {
 
   void RunResponseTest(const APISignature& signature,
                        base::StringPiece arg_values,
-                       base::Optional<std::string> expected_error) {
+                       absl::optional<std::string> expected_error) {
     SCOPED_TRACE(arg_values);
     v8::Local<v8::Context> context = MainContext();
     v8::Local<v8::Value> v8_args = V8ValueFromScriptSource(context, arg_values);
@@ -498,8 +502,8 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     APISignature::JSONParseResult parse_result =
         signature->ConvertArgumentsIgnoringSchema(context, v8_args);
     EXPECT_FALSE(parse_result.error);
-    ASSERT_TRUE(parse_result.arguments);
-    EXPECT_EQ("[1]", ValueToString(*parse_result.arguments));
+    ASSERT_TRUE(parse_result.arguments_list);
+    EXPECT_EQ("[1]", ValueToString(*parse_result.arguments_list));
     EXPECT_FALSE(parse_result.callback.IsEmpty());
   }
 
@@ -513,8 +517,8 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     APISignature::JSONParseResult parse_result =
         signature->ConvertArgumentsIgnoringSchema(context, v8_args);
     EXPECT_FALSE(parse_result.error);
-    ASSERT_TRUE(parse_result.arguments);
-    EXPECT_EQ("[1]", ValueToString(*parse_result.arguments));
+    ASSERT_TRUE(parse_result.arguments_list);
+    EXPECT_EQ("[1]", ValueToString(*parse_result.arguments_list));
     EXPECT_TRUE(parse_result.callback.IsEmpty());
   }
 
@@ -527,9 +531,9 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     APISignature::JSONParseResult parse_result =
         signature->ConvertArgumentsIgnoringSchema(context, v8_args);
     EXPECT_FALSE(parse_result.error);
-    ASSERT_TRUE(parse_result.arguments);
+    ASSERT_TRUE(parse_result.arguments_list);
     EXPECT_EQ(R"([{"not":"a string"}])",
-              ValueToString(*parse_result.arguments));
+              ValueToString(*parse_result.arguments_list));
     EXPECT_TRUE(parse_result.callback.IsEmpty());
   }
 
@@ -540,9 +544,9 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     APISignature::JSONParseResult parse_result =
         signature->ConvertArgumentsIgnoringSchema(context, v8_args);
     EXPECT_FALSE(parse_result.error);
-    ASSERT_TRUE(parse_result.arguments);
+    ASSERT_TRUE(parse_result.arguments_list);
     EXPECT_EQ(R"([{"other":"bar","prop1":"foo"}])",
-              ValueToString(*parse_result.arguments));
+              ValueToString(*parse_result.arguments_list));
     EXPECT_TRUE(parse_result.callback.IsEmpty());
   }
 
@@ -556,8 +560,8 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     APISignature::JSONParseResult parse_result =
         signature->ConvertArgumentsIgnoringSchema(context, v8_args);
     EXPECT_FALSE(parse_result.error);
-    ASSERT_TRUE(parse_result.arguments);
-    EXPECT_EQ("[1,null,null]", ValueToString(*parse_result.arguments));
+    ASSERT_TRUE(parse_result.arguments_list);
+    EXPECT_EQ("[1,null,null]", ValueToString(*parse_result.arguments_list));
     EXPECT_TRUE(parse_result.callback.IsEmpty());
   }
 }
@@ -599,6 +603,42 @@ TEST_F(APISignatureTest, ParseArgumentsToV8) {
   std::string prop2;
   ASSERT_TRUE(dict.Get("prop2", &prop2));
   EXPECT_EQ("baz", prop2);
+}
+
+// Tests that unspecified optional callback is filled with NullCallback in
+// APISignature.
+//
+// Regression test for https://crbug.com/1218569.
+TEST_F(APISignatureTest, ParseArgumentsToV8WithUnspecifiedOptionalCallback) {
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  bool context_allows_promises = true;
+  auto promises_available = base::BindRepeating(
+      [](bool* flag, v8::Local<v8::Context> context) { return *flag; },
+      &context_allows_promises);
+  auto api_available =
+      base::BindRepeating([](v8::Local<v8::Context> context,
+                             const std::string& name) { return true; });
+  BindingAccessChecker access_checker(api_available, promises_available);
+
+  auto signature = std::make_unique<APISignature>(IntAndOptionalCallbackSpec(),
+                                                  true, &access_checker);
+
+  std::vector<v8::Local<v8::Value>> args =
+      StringToV8Vector(context, R"([1337])");
+
+  APISignature::V8ParseResult parse_result =
+      signature->ParseArgumentsToV8(context, args, type_refs());
+  ASSERT_TRUE(parse_result.arguments);
+
+  ASSERT_EQ(2u, parse_result.arguments->size());
+  int int_value = -1;
+  gin::ConvertFromV8(context->GetIsolate(), (*parse_result.arguments)[0],
+                     &int_value);
+  EXPECT_EQ(1337, int_value);
+  ASSERT_FALSE((*parse_result.arguments)[1].IsEmpty());
+  EXPECT_TRUE((*parse_result.arguments)[1]->IsNull());
 }
 
 // Tests response validation, which is stricter than typical validation.

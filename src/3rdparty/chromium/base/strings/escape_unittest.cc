@@ -8,7 +8,6 @@
 #include "base/strings/escape.h"
 
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -250,7 +249,7 @@ TEST(EscapeTest, UnescapeAndDecodeUTF8URLComponentWithAdjustments) {
     // The adjustments argument is covered by the next test.
     //
     // TODO: Need to test unescape_spaces and unescape_percent.
-    string16 decoded = UnescapeAndDecodeUTF8URLComponentWithAdjustments(
+    std::u16string decoded = UnescapeAndDecodeUTF8URLComponentWithAdjustments(
         unescape_case.input, UnescapeRule::NORMAL, nullptr);
     EXPECT_EQ(WideToUTF16(unescape_case.decoded), decoded);
   }
@@ -422,8 +421,10 @@ TEST(EscapeTest, ContainsEncodedBytes) {
   EXPECT_TRUE(ContainsEncodedBytes("abc%2fdef", {'/', '\\'}));
 
   // Should be looking for byte values, not UTF-8 character values.
-  EXPECT_TRUE(ContainsEncodedBytes("caf%C3%A9", {'\xc3'}));
-  EXPECT_FALSE(ContainsEncodedBytes("caf%C3%A9", {'\xe9'}));
+  EXPECT_TRUE(
+      ContainsEncodedBytes("caf%C3%A9", {static_cast<uint8_t>('\xc3')}));
+  EXPECT_FALSE(
+      ContainsEncodedBytes("caf%C3%A9", {static_cast<uint8_t>('\xe9')}));
 }
 
 }  // namespace base

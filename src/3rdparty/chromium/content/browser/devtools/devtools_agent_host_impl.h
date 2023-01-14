@@ -11,7 +11,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
-#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/process/kill.h"
 #include "content/browser/devtools/devtools_io_context.h"
@@ -91,9 +90,9 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
     return result;
   }
 
-  virtual base::Optional<network::CrossOriginEmbedderPolicy>
+  virtual absl::optional<network::CrossOriginEmbedderPolicy>
   cross_origin_embedder_policy(const std::string& id);
-  virtual base::Optional<network::CrossOriginOpenerPolicy>
+  virtual absl::optional<network::CrossOriginOpenerPolicy>
   cross_origin_opener_policy(const std::string& id);
 
  protected:

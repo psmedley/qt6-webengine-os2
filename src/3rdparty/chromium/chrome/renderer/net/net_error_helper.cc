@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/common/chrome_resource_request_blocked_reason.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
 #include "components/error_page/common/error.h"
@@ -41,6 +42,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -80,6 +82,11 @@ NetErrorHelperCore::FrameType GetFrameType(RenderFrame* render_frame) {
   if (render_frame->IsMainFrame())
     return NetErrorHelperCore::MAIN_FRAME;
   return NetErrorHelperCore::SUB_FRAME;
+}
+
+bool IsExtensionExtendedErrorCode(int extended_error_code) {
+  return extended_error_code ==
+         static_cast<int>(ChromeResourceRequestBlockedReason::kExtension);
 }
 
 #if defined(OS_ANDROID)
@@ -251,7 +258,8 @@ LocalizedError::PageState NetErrorHelper::GenerateLocalizedErrorPage(
       error.stale_copy_in_cache(), can_show_network_diagnostics_dialog,
       ChromeRenderThreadObserver::is_incognito_process(),
       IsOfflineContentOnNetErrorFeatureEnabled(), IsAutoFetchFeatureEnabled(),
-      IsRunningInForcedAppMode(), RenderThread::Get()->GetLocale());
+      IsRunningInForcedAppMode(), RenderThread::Get()->GetLocale(),
+      IsExtensionExtendedErrorCode(error.extended_reason()));
   DCHECK(!template_html.empty()) << "unable to load template.";
   // "t" is the id of the template's root node.
   *error_html =
@@ -276,14 +284,15 @@ LocalizedError::PageState NetErrorHelper::UpdateErrorPage(
       error.stale_copy_in_cache(), can_show_network_diagnostics_dialog,
       ChromeRenderThreadObserver::is_incognito_process(),
       IsOfflineContentOnNetErrorFeatureEnabled(), IsAutoFetchFeatureEnabled(),
-      IsRunningInForcedAppMode(), RenderThread::Get()->GetLocale());
+      IsRunningInForcedAppMode(), RenderThread::Get()->GetLocale(),
+      IsExtensionExtendedErrorCode(error.extended_reason()));
 
   std::string json;
   JSONWriter::Write(page_state.strings, &json);
 
   std::string js = "if (window.updateForDnsProbe) "
                    "updateForDnsProbe(" + json + ");";
-  base::string16 js16;
+  std::u16string js16;
   if (base::UTF8ToUTF16(js.c_str(), js.length(), &js16)) {
     render_frame()->ExecuteJavaScript(js16);
   } else {
@@ -297,7 +306,7 @@ void NetErrorHelper::InitializeErrorPageEasterEggHighScore(int high_score) {
       "if (window.initializeEasterEggHighScore) "
       "initializeEasterEggHighScore(%i);",
       high_score);
-  base::string16 js16;
+  std::u16string js16;
   if (!base::UTF8ToUTF16(js.c_str(), js.length(), &js16)) {
     NOTREACHED();
     return;

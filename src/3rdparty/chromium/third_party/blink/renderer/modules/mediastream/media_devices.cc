@@ -6,22 +6,29 @@
 
 #include <utility>
 
+#include "base/metrics/histogram_functions.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
+#include "third_party/blink/public/mojom/media/capture_handle_config.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_capture_handle_config.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_constraints.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_supported_constraints.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_domexception_overconstrainederror.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/mediastream/identifiability_metrics.h"
 #include "third_party/blink/renderer/modules/mediastream/input_device_info.h"
 #include "third_party/blink/renderer/modules/mediastream/media_error_state.h"
@@ -33,6 +40,7 @@
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/mediastream/webrtc_uma_histograms.h"
 #include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -54,7 +62,7 @@ class PromiseResolverCallbacks final : public UserMediaRequest::Callbacks {
     resolver_->Resolve(stream);
   }
   void OnError(ScriptWrappable* callback_this_value,
-               DOMExceptionOrOverconstrainedError error) override {
+               const V8MediaStreamError* error) override {
     resolver_->Reject(error);
   }
 
@@ -65,6 +73,14 @@ class PromiseResolverCallbacks final : public UserMediaRequest::Callbacks {
 
  private:
   Member<ScriptPromiseResolver> resolver_;
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class DisplayCapturePolicyResult {
+  kDisallowed = 0,
+  kAllowed = 1,
+  kMaxValue = kAllowed
 };
 
 }  // namespace
@@ -180,39 +196,100 @@ ScriptPromise MediaDevices::getDisplayMedia(
     ScriptState* script_state,
     const MediaStreamConstraints* options,
     ExceptionState& exception_state) {
+  const ExecutionContext* const context = GetExecutionContext();
+  if (!context) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        "No media device controller available; is this a detached window?");
+    return ScriptPromise();
+  }
+
+  // The kDisplayCapturePermissionsPolicyEnabled preference controls whether
+  // the display-capture permissions-policy is applied or skipped.
+  // The kDisplayCapturePermissionsPolicyEnabled preference is translated
+  // into DisplayCapturePermissionsPolicyEnabled RuntimeEnabledFeature.
+  if (RuntimeEnabledFeatures::DisplayCapturePermissionsPolicyEnabled()) {
+    const bool capture_allowed_by_permissions_policy =
+        context->IsFeatureEnabled(
+            mojom::blink::PermissionsPolicyFeature::kDisplayCapture,
+            ReportOptions::kReportOnFailure);
+
+    base::UmaHistogramEnumeration(
+        "Media.Ui.GetDisplayMedia.DisplayCapturePolicyResult",
+        capture_allowed_by_permissions_policy
+            ? DisplayCapturePolicyResult::kAllowed
+            : DisplayCapturePolicyResult::kDisallowed);
+
+    if (!capture_allowed_by_permissions_policy) {
+      exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
+      return ScriptPromise();
+    }
+  }
+
   return SendUserMediaRequest(script_state,
                               UserMediaRequest::MediaType::kDisplayMedia,
                               options, exception_state);
 }
 
-ScriptPromise MediaDevices::getCurrentBrowsingContextMedia(
-    ScriptState* script_state,
-    const MediaStreamConstraints* options,
-    ExceptionState& exception_state) {
-  const ExecutionContext* const context = GetExecutionContext();
-  if (!context) {
+void MediaDevices::setCaptureHandleConfig(ScriptState* script_state,
+                                          const CaptureHandleConfig* config,
+                                          ExceptionState& exception_state) {
+  DCHECK(config->hasExposeOrigin());
+  DCHECK(config->hasHandle());
+
+  if (config->handle().length() > 1024) {
+    exception_state.ThrowTypeError(
+        "Handle length exceeds 1024 16-bit characters.");
+    return;
+  }
+
+  if (!script_state->ContextIsValid()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      "Current frame is detached.");
+    return;
+  }
+
+  LocalDOMWindow* const window = To<LocalDOMWindow>(GetExecutionContext());
+  if (!window || !window->GetFrame()) {
+    return;
+  }
+
+  if (window->GetFrame() != window->GetFrame()->Top()) {
     exception_state.ThrowDOMException(
-        DOMExceptionCode::kNotSupportedError,
-        "The implementation did not support the requested type of object or "
-        "operation.");
-    return ScriptPromise();
+        DOMExceptionCode::kInvalidStateError,
+        "Can only be called from the top-level document.");
   }
 
-  // This call should not be possible otherwise, as per the RuntimeEnabled
-  // in the IDL.
-  CHECK(RuntimeEnabledFeatures::GetCurrentBrowsingContextMediaEnabled(context));
+  auto config_ptr = mojom::blink::CaptureHandleConfig::New();
+  config_ptr->expose_origin = config->exposeOrigin();
+  config_ptr->capture_handle = config->handle();
+  if (config->permittedOrigins().size() == 1 &&
+      config->permittedOrigins()[0] == "*") {
+    config_ptr->all_origins_permitted = true;
+  } else {
+    config_ptr->all_origins_permitted = false;
+    config_ptr->permitted_origins.ReserveCapacity(
+        config->permittedOrigins().size());
+    for (const auto& permitted_origin : config->permittedOrigins()) {
+      if (permitted_origin == "*") {
+        exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                          "Wildcard only valid in isolation.");
+        return;
+      }
 
-  if (!context->IsFeatureEnabled(
-          mojom::blink::FeaturePolicyFeature::kDisplayCapture,
-          ReportOptions::kReportOnFailure)) {
-    exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
-    return ScriptPromise();
+      scoped_refptr<SecurityOrigin> origin =
+          SecurityOrigin::CreateFromString(permitted_origin);
+      if (!origin || origin->IsOpaque()) {
+        exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                          "Invalid origin encountered.");
+        return;
+      }
+      config_ptr->permitted_origins.emplace_back(std::move(origin));
+    }
   }
 
-  return SendUserMediaRequest(
-      script_state,
-      UserMediaRequest::MediaType::kGetCurrentBrowsingContextMedia, options,
-      exception_state);
+  GetDispatcherHost(window->GetFrame())
+      ->SetCaptureHandleConfig(std::move(config_ptr));
 }
 
 const AtomicString& MediaDevices::InterfaceName() const {

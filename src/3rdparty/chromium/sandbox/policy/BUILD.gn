@@ -6,8 +6,11 @@ import("//build/buildflag_header.gni")
 import("//build/config/chromecast_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/sanitizers/sanitizers.gni")
+import("//chromeos/assistant/assistant.gni")
+import("//printing/buildflags/buildflags.gni")
 import("//testing/test.gni")
 
+# Most consumers of sandbox::policy should depend on this target.
 component("policy") {
   sources = [
     "export.h",
@@ -26,7 +29,9 @@ component("policy") {
     ":sanitizer_buildflags",
     "//base",
     "//build:chromeos_buildflags",
+    "//printing/buildflags",
     "//sandbox:common",
+    "//sandbox/policy/mojom",
   ]
   public_deps = []
   if (is_linux || is_chromeos) {
@@ -49,12 +54,14 @@ component("policy") {
       "linux/bpf_network_policy_linux.h",
       "linux/bpf_ppapi_policy_linux.cc",
       "linux/bpf_ppapi_policy_linux.h",
+      "linux/bpf_print_backend_policy_linux.cc",
+      "linux/bpf_print_backend_policy_linux.h",
       "linux/bpf_print_compositor_policy_linux.cc",
       "linux/bpf_print_compositor_policy_linux.h",
       "linux/bpf_renderer_policy_linux.cc",
       "linux/bpf_renderer_policy_linux.h",
-      "linux/bpf_sharing_service_policy_linux.cc",
-      "linux/bpf_sharing_service_policy_linux.h",
+      "linux/bpf_service_policy_linux.cc",
+      "linux/bpf_service_policy_linux.h",
       "linux/bpf_speech_recognition_policy_linux.cc",
       "linux/bpf_speech_recognition_policy_linux.h",
       "linux/bpf_utility_policy_linux.cc",
@@ -85,6 +92,14 @@ component("policy") {
       "linux/bpf_tts_policy_linux.cc",
       "linux/bpf_tts_policy_linux.h",
     ]
+    deps += [ "//chromeos/assistant:buildflags" ]
+
+    if (enable_cros_libassistant) {
+      sources += [
+        "linux/bpf_libassistant_policy_linux.cc",
+        "linux/bpf_libassistant_policy_linux.h",
+      ]
+    }
   }
   if (is_mac) {
     sources += [
@@ -158,6 +173,7 @@ source_set("tests") {
     ":policy",
     "//base",
     "//base/test:test_support",
+    "//printing/buildflags",
     "//testing/gtest",
   ]
 

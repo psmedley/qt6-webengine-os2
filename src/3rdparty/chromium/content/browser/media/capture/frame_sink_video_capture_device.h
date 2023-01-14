@@ -12,7 +12,6 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
@@ -27,6 +26,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
@@ -74,7 +74,7 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   void Resume() final;
   void StopAndDeAllocate() final;
   void OnUtilizationReport(int frame_feedback_id,
-                           media::VideoFrameFeedback feedback) final;
+                           media::VideoCaptureFeedback feedback) final;
 
   // FrameSinkVideoConsumer implementation.
   void OnFrameCaptured(
@@ -86,10 +86,30 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   void OnStopped() final;
   void OnLog(const std::string& message) final;
 
+  // All of the information necessary to select a target for capture.
+  struct VideoCaptureTarget {
+    // The target frame sink id.
+    viz::FrameSinkId frame_sink_id;
+
+    // The subtree capture identifier--may be default initialized to indicate
+    // that the entire frame sink (defined by |frame_sink_id|) should be
+    // captured.
+    viz::SubtreeCaptureId subtree_capture_id;
+
+    inline bool operator==(const VideoCaptureTarget& other) const {
+      return frame_sink_id == other.frame_sink_id &&
+             subtree_capture_id == other.subtree_capture_id;
+    }
+
+    inline bool operator!=(const VideoCaptureTarget& other) const {
+      return !(*this == other);
+    }
+  };
+
   // These are called to notify when the capture target has changed or was
   // permanently lost.
-  void OnTargetChanged(const viz::FrameSinkId& frame_sink_id);
-  void OnTargetPermanentlyLost();
+  virtual void OnTargetChanged(const VideoCaptureTarget& target);
+  virtual void OnTargetPermanentlyLost();
 
  protected:
   MouseCursorOverlayController* cursor_controller() const {
@@ -138,7 +158,7 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   // Current capture target. This is cached to resolve a race where
   // OnTargetChanged() can be called before the |capturer_| is created in
   // OnCapturerCreated().
-  viz::FrameSinkId target_;
+  VideoCaptureTarget target_;
 
   // The requested format, rate, and other capture constraints.
   media::VideoCaptureParams capture_params_;
@@ -164,7 +184,7 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
 
   // Set when OnFatalError() is called. This prevents any future
   // AllocateAndStartWithReceiver() calls from succeeding.
-  base::Optional<std::string> fatal_error_message_;
+  absl::optional<std::string> fatal_error_message_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

@@ -20,11 +20,10 @@
 
 class CFX_RenderDevice;
 class CPDF_Annot;
-class CPDF_Dictionary;
 class CPDF_FormControl;
 class CPDF_FormField;
 class CPDF_RenderOptions;
-class CPDF_Stream;
+class CPDFSDK_FormFillEnvironment;
 class CPDFSDK_InteractiveForm;
 class CPDFSDK_PageView;
 struct CPDFSDK_FieldAction;
@@ -43,6 +42,8 @@ enum PDFSDK_XFAAActionType {
 
 class CPDFSDK_Widget final : public CPDFSDK_BAAnnot {
  public:
+  enum ValueChanged : bool { kValueUnchanged = false, kValueChanged = true };
+
   CPDFSDK_Widget(CPDF_Annot* pAnnot,
                  CPDFSDK_PageView* pPageView,
                  CPDFSDK_InteractiveForm* pInteractiveForm);
@@ -67,7 +68,6 @@ class CPDFSDK_Widget final : public CPDFSDK_BAAnnot {
 
   int GetSelectedIndex(int nIndex) const;
   WideString GetValue() const;
-  WideString GetDefaultValue() const;
   WideString GetExportValue() const;
   WideString GetOptionLabel(int nIndex) const;
   int CountOptions() const;
@@ -77,10 +77,10 @@ class CPDFSDK_Widget final : public CPDFSDK_BAAnnot {
   int GetAlignment() const;
   int GetMaxLen() const;
 
-  void SetCheck(bool bChecked, NotificationOption notify);
-  void SetValue(const WideString& sValue, NotificationOption notify);
-  void SetOptionSelection(int index, bool bSelected, NotificationOption notify);
-  void ClearSelection(NotificationOption notify);
+  void SetCheck(bool bChecked);
+  void SetValue(const WideString& sValue);
+  void SetOptionSelection(int index);
+  void ClearSelection();
   void SetTopVisibleIndex(int index);
 
 #ifdef PDF_ENABLE_XFA
@@ -88,20 +88,20 @@ class CPDFSDK_Widget final : public CPDFSDK_BAAnnot {
   bool HasXFAAAction(PDFSDK_XFAAActionType eXFAAAT) const;
   bool OnXFAAAction(PDFSDK_XFAAActionType eXFAAAT,
                     CPDFSDK_FieldAction* data,
-                    CPDFSDK_PageView* pPageView);
+                    const CPDFSDK_PageView* pPageView);
   void Synchronize(bool bSynchronizeElse);
   // TODO(thestig): Figure out if the parameter should be used or removed.
-  void ResetXFAAppearance(bool bValueChanged);
+  void ResetXFAAppearance(ValueChanged bValueChanged);
 #endif  // PDF_ENABLE_XFA
 
-  void ResetAppearance(Optional<WideString> sValue, bool bValueChanged);
+  void ResetAppearance(Optional<WideString> sValue, ValueChanged bValueChanged);
   void ResetFieldAppearance();
   void UpdateField();
   Optional<WideString> OnFormat();
 
   bool OnAAction(CPDF_AAction::AActionType type,
                  CPDFSDK_FieldAction* data,
-                 CPDFSDK_PageView* pPageView);
+                 const CPDFSDK_PageView* pPageView);
 
   CPDFSDK_InteractiveForm* GetInteractiveForm() const {
     return m_pInteractiveForm.Get();
@@ -136,6 +136,9 @@ class CPDFSDK_Widget final : public CPDFSDK_BAAnnot {
   CXFA_FFWidgetHandler* GetXFAWidgetHandler() const;
   CXFA_FFWidget* GetGroupMixXFAWidget() const;
   WideString GetName() const;
+  bool HandleXFAAAction(CPDF_AAction::AActionType type,
+                        CPDFSDK_FieldAction* data,
+                        CPDFSDK_FormFillEnvironment* pFormFillEnv);
 #endif  // PDF_ENABLE_XFA
 
   UnownedPtr<CPDFSDK_InteractiveForm> const m_pInteractiveForm;

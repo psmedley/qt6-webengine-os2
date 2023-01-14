@@ -84,6 +84,11 @@ class MockDB : public LevelDB {
                     std::map<std::string, std::string>*,
                     const leveldb::ReadOptions&,
                     const std::string&));
+  MOCK_METHOD4(LoadKeysAndEntriesWhile,
+               bool(std::map<std::string, std::string>*,
+                    const leveldb::ReadOptions&,
+                    const std::string&,
+                    const KeyIteratorController&));
   MOCK_METHOD5(LoadKeysAndEntriesWhile,
                bool(const KeyFilter&,
                     std::map<std::string, std::string>*,
@@ -332,7 +337,7 @@ ACTION_P(AppendLoadEntries, model) {
 }
 
 ACTION_P(AppendLoadKeysAndEntries, model) {
-  std::map<std::string, std::string>* output = arg1;
+  std::map<std::string, std::string>* output = arg0;
   for (const auto& pair : model)
     output->insert(std::make_pair(pair.first, pair.second.SerializeAsString()));
 
@@ -369,7 +374,7 @@ TEST_F(UniqueProtoDatabaseTest, TestDBLoadSuccess) {
                         base::BindOnce(&MockDatabaseCaller::InitStatusCallback,
                                        base::Unretained(&caller)));
 
-  EXPECT_CALL(*mock_db, LoadKeysAndEntriesWhile(_, _, _, _, _))
+  EXPECT_CALL(*mock_db, LoadKeysAndEntriesWhile(_, _, _, _))
       .WillOnce(AppendLoadKeysAndEntries(model));
   EXPECT_CALL(caller, LoadKeysAndEntriesCallback1(true, _))
       .WillOnce(VerifyLoadKeysAndEntries(testing::ByRef(model)));
@@ -897,7 +902,7 @@ void TestLevelDBSaveAndLoad(bool close_after_save) {
   EXPECT_TRUE(db->Save(save_entries, remove_keys, &status));
 
   if (close_after_save) {
-    db.reset(new LevelDB(kTestLevelDBClientName));
+    db = std::make_unique<LevelDB>(kTestLevelDBClientName);
     EXPECT_TRUE(db->Init(temp_dir.GetPath(), CreateSimpleOptions()));
   }
 

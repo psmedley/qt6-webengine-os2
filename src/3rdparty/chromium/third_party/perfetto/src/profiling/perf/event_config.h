@@ -17,10 +17,11 @@
 #ifndef SRC_PROFILING_PERF_EVENT_CONFIG_H_
 #define SRC_PROFILING_PERF_EVENT_CONFIG_H_
 
+#include <cinttypes>
 #include <functional>
 #include <string>
+#include <vector>
 
-#include <inttypes.h>
 #include <linux/perf_event.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -28,6 +29,8 @@
 #include "perfetto/base/flat_set.h"
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/tracing/core/data_source_config.h"
+
+#include "protos/perfetto/common/perf_events.gen.h"
 
 namespace perfetto {
 namespace protos {
@@ -48,21 +51,54 @@ struct TargetFilter {
   uint32_t additional_cmdline_count = 0;
 };
 
-// Information to configure a counter via perf_event_open.
+// Describes a perf event for two purposes:
+// * encoding the event in the perf_event_open syscall
+// * echoing the counter's config in the trace packet defaults, so that the
+//   parser can tell which datastream belongs to which counter.
+// Note: It's slightly odd to decode & pass around values we don't use outside
+// of reencoding back into a defaults proto. One option would be to carry the
+// Timebase proto, but this won't fit with the eventual support of multiple
+// counters, as at the proto level it'll be a distinct message from Timebase.
 struct PerfCounter {
-  // perf_event_attr.type
-  uint32_t type = 0;
-  // perf_event_attr.config
-  uint32_t config = 0;
+  enum class Type { kBuiltinCounter, kTracepoint, kRawEvent };
 
-  // Optional filter, ignored unless type == PERF_TYPE_TRACEPOINT.
+  Type type = Type::kBuiltinCounter;
+
+  // Optional config-supplied name for the counter, to identify it during
+  // trace parsing, does not affect the syscall.
+  std::string name;
+
+  // valid if kBuiltinCounter
+  protos::gen::PerfEvents::Counter counter =
+      protos::gen::PerfEvents::PerfEvents::UNKNOWN_COUNTER;
+  // valid if kTracepoint. Example: "sched:sched_switch".
+  std::string tracepoint_name;
+  // valid if kTracepoint
   std::string tracepoint_filter;
 
-  PerfCounter() = default;
-  PerfCounter(uint32_t _type,
-              uint32_t _config,
-              std::string filter = std::string())
-      : type(_type), config(_config), tracepoint_filter(filter) {}
+  // sycall-level description of the event (perf_event_attr):
+  uint32_t attr_type = 0;
+  uint64_t attr_config = 0;
+  uint64_t attr_config1 = 0;  // optional extension
+  uint64_t attr_config2 = 0;  // optional extension
+
+  Type event_type() const { return type; }
+
+  static PerfCounter BuiltinCounter(std::string name,
+                                    protos::gen::PerfEvents::Counter counter,
+                                    uint32_t type,
+                                    uint64_t config);
+
+  static PerfCounter Tracepoint(std::string name,
+                                std::string tracepoint_name,
+                                std::string tracepoint_filter,
+                                uint64_t id);
+
+  static PerfCounter RawEvent(std::string name,
+                              uint32_t type,
+                              uint64_t config,
+                              uint64_t config1,
+                              uint64_t config2);
 };
 
 // Describes a single profiling configuration. Bridges the gap between the data
@@ -92,6 +128,9 @@ class EventConfig {
   uint32_t unwind_state_clear_period_ms() const {
     return unwind_state_clear_period_ms_;
   }
+  uint64_t max_enqueued_footprint_bytes() const {
+    return max_enqueued_footprint_bytes_;
+  }
   bool sample_callstacks() const { return sample_callstacks_; }
   const TargetFilter& filter() const { return target_filter_; }
   bool kernel_frames() const { return kernel_frames_; }
@@ -99,6 +138,9 @@ class EventConfig {
     return const_cast<perf_event_attr*>(&perf_event_attr_);
   }
   const PerfCounter& timebase_event() const { return timebase_event_; }
+  const std::vector<std::string>& target_installed_by() const {
+    return target_installed_by_;
+  }
   const DataSourceConfig& raw_ds_config() const { return raw_ds_config_; }
 
  private:
@@ -112,7 +154,9 @@ class EventConfig {
               uint32_t read_tick_period_ms,
               uint64_t samples_per_tick_limit,
               uint32_t remote_descriptor_timeout_ms,
-              uint32_t unwind_state_clear_period_ms);
+              uint32_t unwind_state_clear_period_ms,
+              uint64_t max_enqueued_footprint_bytes,
+              std::vector<std::string> target_installed_by);
 
   // Parameter struct for the leader (timebase) perf_event_open syscall.
   perf_event_attr perf_event_attr_ = {};
@@ -149,6 +193,15 @@ class EventConfig {
 
   // Optional period for clearing cached unwinder state. Skipped if zero.
   const uint32_t unwind_state_clear_period_ms_;
+
+  const uint64_t max_enqueued_footprint_bytes_;
+
+  // Only profile target if it was installed by one of the packages given.
+  // Special values are:
+  // * "@system": installed on the system partition
+  // * "@product": installed on the product partition
+  // * "@null": sideloaded
+  const std::vector<std::string> target_installed_by_;
 
   // The raw data source config, as a pbzero-generated C++ class.
   const DataSourceConfig raw_ds_config_;

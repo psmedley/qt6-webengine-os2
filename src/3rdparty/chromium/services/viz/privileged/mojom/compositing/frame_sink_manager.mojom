@@ -12,6 +12,8 @@ import "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom
 import "services/viz/privileged/mojom/compositing/renderer_settings.mojom";
 import "services/viz/public/mojom/compositing/compositor_frame_sink.mojom";
 import "services/viz/public/mojom/compositing/copy_output_request.mojom";
+import "services/viz/public/mojom/compositing/frame_sink_bundle.mojom";
+import "services/viz/public/mojom/compositing/frame_sink_bundle_id.mojom";
 import "services/viz/public/mojom/compositing/frame_sink_id.mojom";
 import "services/viz/public/mojom/compositing/local_surface_id.mojom";
 import "services/viz/public/mojom/compositing/surface_id.mojom";
@@ -89,11 +91,28 @@ interface FrameSinkManager {
   // ExternalBeginFrameController.
   CreateRootCompositorFrameSink(RootCompositorFrameSinkParams params);
 
+  // Used by unprivileged clients to create a new FrameSinkBundle in the
+  // service. Each bundle is associated with a parent frame sink and can be
+  // used to communicate aggregate notifications and requests to and from any
+  // of the other frame sinks belonging to the same client.
+  CreateFrameSinkBundle(FrameSinkId parent_frame_sink_id,
+                        FrameSinkBundleId bundle_id,
+                        pending_receiver<FrameSinkBundle> receiver,
+                        pending_remote<FrameSinkBundleClient> client);
+
   // CreateCompositorFrameSink is used by unprivileged clients. This
   // CompositorFrameSink is not a root, and has to be parented by another
   // CompositorFrameSink in order to appear on screen.
+  //
+  // If `bundle_id` is provided, the new frame sink is added to the identified
+  // bundle. This means its client will receive OnBeginFrame() and various
+  // other notifications exclusively through the corresponding FrameSinkBundle,
+  // in batch with notifications for other bundled frame sinks; it also means
+  // the client can submit frames for this sink in batch with other bundled
+  // sinks using the FrameSinkBundle interface.
   CreateCompositorFrameSink(
       FrameSinkId frame_sink_id,
+      FrameSinkBundleId? bundle_id,
       pending_receiver<CompositorFrameSink> compositor_frame_sink,
       pending_remote<CompositorFrameSinkClient> compositor_frame_sink_client);
 
@@ -101,7 +120,7 @@ interface FrameSinkManager {
   // This function should only be used synchronously for destroying root
   // CompositorFrameSinks to ensure the GL context/surface is destroyed before
   // the platform window.
-  [Sync]
+  [Sync, NoInterrupt]
   DestroyCompositorFrameSink(FrameSinkId frame_sink_id) => ();
 
   // Set up a BeginFrame relationship between two FrameSinkIds. In this case,
@@ -123,18 +142,6 @@ interface FrameSinkManager {
 
   // Marks the given SurfaceIds for destruction.
   EvictSurfaces(array<SurfaceId> surface_ids);
-
-  // Starts throttling the frame sinks specified by |frame_sink_ids| and all
-  // their descendant sinks to send BeginFrames at an interval of |interval|.
-  // |interval| should be greater than zero. Previous throttling operation on
-  // any frame sinks must be first ended by calling EndThrottling() before
-  // applying the current throttling operation.
-  StartThrottling(
-      array<FrameSinkId> frame_sink_ids,
-      mojo_base.mojom.TimeDelta interval);
-
-  // Ends all previously throttled frame sinks.
-  EndThrottling();
 
   // Throttles the frame sinks specified by |frame_sink_ids| and all their
   // descendant sinks to send BeginFrames at an interval of |interval|. This

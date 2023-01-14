@@ -1710,18 +1710,6 @@
 #define __NR_clone3 435
 #endif
 
-#if !defined(__NR_landlock_create_ruleset)
-#define __NR_landlock_create_ruleset 444
-#endif
-
-#if !defined(__NR_landlock_add_rule)
-#define __NR_landlock_add_rule 445
-#endif
-
-#if !defined(__NR_landlock_restrict_self)
-#define __NR_landlock_restrict_self 446
-#endif
-
 #if !defined(__NR_close_range)
 #define __NR_close_range 436
 #endif
@@ -1748,6 +1736,18 @@
 
 #if !defined(__NR_mount_setattr)
 #define __NR_mount_setattr 442
+#endif
+
+#if !defined(__NR_landlock_create_ruleset)
+#define __NR_landlock_create_ruleset 444
+#endif
+
+#if !defined(__NR_landlock_add_rule)
+#define __NR_landlock_add_rule 445
+#endif
+
+#if !defined(__NR_landlock_restrict_self)
+#define __NR_landlock_restrict_self 446
 #endif
 
 #endif  // SANDBOX_LINUX_SYSTEM_HEADERS_X86_32_LINUX_SYSCALLS_H_

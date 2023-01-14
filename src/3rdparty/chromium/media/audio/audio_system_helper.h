@@ -7,6 +7,7 @@
 
 #include "media/audio/audio_system.h"
 #include "media/base/media_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 class AudioManager;
@@ -44,9 +45,9 @@ class MEDIA_EXPORT AudioSystemHelper {
       AudioSystem::OnInputDeviceInfoCallback on_input_device_info_cb);
 
  private:
-  base::Optional<AudioParameters> ComputeInputParameters(
+  absl::optional<AudioParameters> ComputeInputParameters(
       const std::string& device_id);
-  base::Optional<AudioParameters> ComputeOutputParameters(
+  absl::optional<AudioParameters> ComputeOutputParameters(
       const std::string& device_id);
 
   AudioManager* const audio_manager_;

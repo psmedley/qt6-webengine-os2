@@ -15,9 +15,9 @@
 namespace {
 
 const char* const kScrollIntoViewIfNeededScript =
-    R"(function(node) {
-    node.scrollIntoViewIfNeeded();
-  })";
+    R"(function() {
+      this.scrollIntoViewIfNeeded();
+    })";
 
 }  // namespace
 
@@ -39,8 +39,13 @@ ElementPositionGetter::~ElementPositionGetter() = default;
 void ElementPositionGetter::Start(content::RenderFrameHost* frame_host,
                                   std::string element_object_id,
                                   Callback callback) {
-  object_id_ = element_object_id;
   callback_ = std::move(callback);
+  if (!frame_host) {
+    OnError(ClientStatus(FRAME_HOST_NOT_FOUND));
+    return;
+  }
+
+  object_id_ = element_object_id;
   remaining_rounds_ = max_rounds_;
   // TODO(crbug/806868): Consider using autofill_assistant::RetryTimer
 
@@ -61,7 +66,7 @@ void ElementPositionGetter::OnVisualStateUpdatedCallback(bool success) {
     return;
   }
 
-  OnError();
+  OnError(ClientStatus(ELEMENT_UNSTABLE));
 }
 
 void ElementPositionGetter::GetAndWaitBoxModelStable() {
@@ -75,9 +80,11 @@ void ElementPositionGetter::GetAndWaitBoxModelStable() {
 void ElementPositionGetter::OnGetBoxModelForStableCheck(
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<dom::GetBoxModelResult> result) {
-  if (!result || !result->GetModel() || !result->GetModel()->GetContent()) {
-    VLOG(1) << __func__ << " Failed to get box model.";
-    OnError();
+  if (!result || !result->GetModel() || !result->GetModel()->GetContent() ||
+      result->GetModel()->GetWidth() == 0 ||
+      result->GetModel()->GetHeight() == 0) {
+    VLOG(2) << __func__ << " No box model.";
+    RunNextRound();
     return;
   }
 
@@ -89,7 +96,9 @@ void ElementPositionGetter::OnGetBoxModelForStableCheck(
 
   DCHECK(max_rounds_ >= remaining_rounds_);
 
-  if (has_point_) {
+  if (has_point_ || max_rounds_ <= 1) {
+    // Less than 3 rounds returns immediately, we don't expect stability
+    // information to be useful with too few rounds.
     if (max_rounds_ <= 2) {
       OnResult(new_point_x, new_point_y);
       return;
@@ -111,11 +120,6 @@ void ElementPositionGetter::OnGetBoxModelForStableCheck(
     }
   }
 
-  if (remaining_rounds_ <= 0) {
-    OnError();
-    return;
-  }
-
   bool is_first_round = !has_point_;
   has_point_ = true;
   point_x_ = new_point_x;
@@ -124,12 +128,9 @@ void ElementPositionGetter::OnGetBoxModelForStableCheck(
   // Scroll the element into view again if it was moved out of view, starting
   // from the second round.
   if (!is_first_round) {
-    std::vector<std::unique_ptr<runtime::CallArgument>> argument;
-    AddRuntimeCallArgumentObjectId(object_id_, &argument);
     devtools_client_->GetRuntime()->CallFunctionOn(
         runtime::CallFunctionOnParams::Builder()
             .SetObjectId(object_id_)
-            .SetArguments(std::move(argument))
             .SetFunctionDeclaration(std::string(kScrollIntoViewIfNeededScript))
             .SetReturnByValue(true)
             .Build(),
@@ -139,12 +140,7 @@ void ElementPositionGetter::OnGetBoxModelForStableCheck(
     return;
   }
 
-  --remaining_rounds_;
-  content::GetUIThreadTaskRunner({})->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&ElementPositionGetter::GetAndWaitBoxModelStable,
-                     weak_ptr_factory_.GetWeakPtr()),
-      check_interval_);
+  RunNextRound();
 }
 
 void ElementPositionGetter::OnScrollIntoView(
@@ -154,7 +150,17 @@ void ElementPositionGetter::OnScrollIntoView(
       CheckJavaScriptResult(reply_status, result.get(), __FILE__, __LINE__);
   if (!status.ok()) {
     VLOG(1) << __func__ << " Failed to scroll the element: " << status;
-    OnError();
+    OnError(status);
+    return;
+  }
+
+  RunNextRound();
+}
+
+void ElementPositionGetter::RunNextRound() {
+  if (remaining_rounds_ <= 0) {
+    OnError(ClientStatus(has_point_ ? ELEMENT_UNSTABLE
+                                    : ELEMENT_POSITION_NOT_FOUND));
     return;
   }
 
@@ -174,9 +180,9 @@ void ElementPositionGetter::OnResult(int x, int y) {
   }
 }
 
-void ElementPositionGetter::OnError() {
+void ElementPositionGetter::OnError(const ClientStatus& status) {
   if (callback_) {
-    std::move(callback_).Run(ClientStatus(ELEMENT_UNSTABLE));
+    std::move(callback_).Run(status);
   }
 }
 

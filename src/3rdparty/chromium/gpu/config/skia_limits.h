@@ -5,9 +5,8 @@
 #ifndef GPU_CONFIG_SKIA_LIMITS_H_
 #define GPU_CONFIG_SKIA_LIMITS_H_
 
-#include <memory>
+#include <stddef.h>
 
-#include "base/optional.h"
 #include "gpu/gpu_export.h"
 
 namespace gpu {

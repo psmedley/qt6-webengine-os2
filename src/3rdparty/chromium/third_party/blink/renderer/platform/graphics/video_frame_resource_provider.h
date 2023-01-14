@@ -44,7 +44,7 @@ class PLATFORM_EXPORT VideoFrameResourceProvider {
                           viz::SharedBitmapReporter* shared_bitmap_reporter);
   virtual void AppendQuads(viz::CompositorRenderPass*,
                            scoped_refptr<media::VideoFrame>,
-                           media::VideoRotation,
+                           media::VideoTransformation,
                            bool is_opaque);
   virtual void ReleaseFrameResources();
 
@@ -58,7 +58,7 @@ class PLATFORM_EXPORT VideoFrameResourceProvider {
       const WebVector<viz::ResourceId>& resource_ids,
       WebVector<viz::TransferableResource>* transferable_resources);
   virtual void ReceiveReturnsFromParent(
-      const Vector<viz::ReturnedResource>& transferable_resources);
+      Vector<viz::ReturnedResource> transferable_resources);
 
  private:
   const cc::LayerTreeSettings settings_;

@@ -42,6 +42,8 @@
 
 #include "content/public/browser/browser_main_parts.h"
 
+#include "web_usb_detector_qt.h"
+
 namespace base {
 class MessagePump;
 }
@@ -51,7 +53,7 @@ class ServiceManagerConnection;
 }
 
 namespace device {
-class GeolocationSystemPermissionManager;
+class GeolocationManager;
 }
 
 namespace performance_manager {
@@ -70,22 +72,24 @@ public:
     ~BrowserMainPartsQt() override = default;
 
     int PreEarlyInitialization() override;
-    void PreMainMessageLoopStart() override;
-    void PreMainMessageLoopRun() override;
+    void PreCreateMainMessageLoop() override;
+    void PostCreateMainMessageLoop() override;
+    int PreMainMessageLoopRun() override;
     void PostMainMessageLoopRun() override;
     int PreCreateThreads() override;
     void PostCreateThreads() override;
 
 #if defined(OS_MAC)
-    device::GeolocationSystemPermissionManager *GetLocationPermissionManager();
+    device::GeolocationManager *GetGeolocationManager();
 #endif
 
 private:
     DISALLOW_COPY_AND_ASSIGN(BrowserMainPartsQt);
     std::unique_ptr<performance_manager::PerformanceManager> performance_manager_;
     std::unique_ptr<performance_manager::PerformanceManagerRegistry> performance_manager_registry_;
+    std::unique_ptr<WebUsbDetectorQt> m_webUsbDetector;
 #if defined(OS_MAC)
-    std::unique_ptr<device::GeolocationSystemPermissionManager> m_locationPermissionManager;
+    std::unique_ptr<device::GeolocationManager> m_geolocationManager;
 #endif
 };
 

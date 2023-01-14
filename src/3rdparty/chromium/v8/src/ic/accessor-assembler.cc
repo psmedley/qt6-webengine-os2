@@ -8,6 +8,7 @@
 #include "src/base/optional.h"
 #include "src/builtins/builtins-constructor-gen.h"
 #include "src/codegen/code-factory.h"
+#include "src/codegen/interface-descriptors-inl.h"
 #include "src/ic/handler-configuration.h"
 #include "src/ic/ic.h"
 #include "src/ic/keyed-store-generic.h"
@@ -16,6 +17,7 @@
 #include "src/objects/cell.h"
 #include "src/objects/foreign.h"
 #include "src/objects/heap-number.h"
+#include "src/objects/megadom-handler.h"
 #include "src/objects/module.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/property-details.h"
@@ -23,9 +25,6 @@
 
 namespace v8 {
 namespace internal {
-
-using compiler::CodeAssemblerState;
-using compiler::Node;
 
 //////////////////// Private helpers.
 
@@ -137,6 +136,55 @@ void AccessorAssembler::HandlePolymorphicCase(
   }
 }
 
+void AccessorAssembler::TryMegaDOMCase(TNode<Object> lookup_start_object,
+                                       TNode<Map> lookup_start_object_map,
+                                       TVariable<MaybeObject>* var_handler,
+                                       TNode<Object> vector,
+                                       TNode<TaggedIndex> slot, Label* miss,
+                                       ExitPoint* exit_point) {
+  // Check if the receiver is a JS_API_OBJECT
+  GotoIfNot(IsJSApiObjectMap(lookup_start_object_map), miss);
+
+  // Check if receiver requires access check
+  GotoIf(IsSetWord32<Map::Bits1::IsAccessCheckNeededBit>(
+             LoadMapBitField(lookup_start_object_map)),
+         miss);
+
+  CSA_ASSERT(this, TaggedEqual(LoadFeedbackVectorSlot(CAST(vector), slot),
+                               MegaDOMSymbolConstant()));
+
+  // In some cases, we load the
+  TNode<MegaDomHandler> handler;
+  if (var_handler->IsBound()) {
+    handler = CAST(var_handler->value());
+  } else {
+    TNode<MaybeObject> maybe_handler =
+        LoadFeedbackVectorSlot(CAST(vector), slot, kTaggedSize);
+    CSA_ASSERT(this, IsStrong(maybe_handler));
+    handler = CAST(maybe_handler);
+  }
+
+  // Check if dom protector cell is still valid
+  GotoIf(IsMegaDOMProtectorCellInvalid(), miss);
+
+  // Load the getter
+  TNode<MaybeObject> maybe_getter = LoadMegaDomHandlerAccessor(handler);
+  CSA_ASSERT(this, IsWeakOrCleared(maybe_getter));
+  TNode<FunctionTemplateInfo> getter =
+      CAST(GetHeapObjectAssumeWeak(maybe_getter, miss));
+
+  // Load the accessor context
+  TNode<MaybeObject> maybe_context = LoadMegaDomHandlerContext(handler);
+  CSA_ASSERT(this, IsWeakOrCleared(maybe_context));
+  TNode<Context> context = CAST(GetHeapObjectAssumeWeak(maybe_context, miss));
+
+  // TODO(gsathya): This builtin throws an exception on interface check fail but
+  // we should miss to the runtime.
+  exit_point->Return(
+      CallBuiltin(Builtin::kCallFunctionTemplate_CheckCompatibleReceiver,
+                  context, getter, IntPtrConstant(0), lookup_start_object));
+}
+
 void AccessorAssembler::HandleLoadICHandlerCase(
     const LazyLoadICParameters* p, TNode<Object> handler, Label* miss,
     ExitPoint* exit_point, ICMode ic_mode, OnNonExistent on_nonexistent,
@@ -154,7 +202,7 @@ void AccessorAssembler::HandleLoadICHandlerCase(
 
   BIND(&try_proto_handler);
   {
-    GotoIf(IsCodeMap(LoadMap(CAST(handler))), &call_handler);
+    GotoIf(IsCodeT(CAST(handler)), &call_handler);
     HandleLoadICProtoHandler(p, CAST(handler), &var_holder, &var_smi_handler,
                              &if_smi_handler, miss, exit_point, ic_mode,
                              access_mode);
@@ -171,7 +219,9 @@ void AccessorAssembler::HandleLoadICHandlerCase(
 
   BIND(&call_handler);
   {
-    exit_point->ReturnCallStub(LoadWithVectorDescriptor{}, CAST(handler),
+    // TODO(v8:11880): avoid roundtrips between cdc and code.
+    TNode<Code> code_handler = FromCodeT(CAST(handler));
+    exit_point->ReturnCallStub(LoadWithVectorDescriptor{}, code_handler,
                                p->context(), p->lookup_start_object(),
                                p->name(), p->slot(), p->vector());
   }
@@ -239,7 +289,7 @@ void AccessorAssembler::HandleLoadField(TNode<JSObject> holder,
                                         TVariable<Float64T>* var_double_value,
                                         Label* rebox_double, Label* miss,
                                         ExitPoint* exit_point) {
-  Comment("field_load");
+  Comment("LoadField");
   TNode<IntPtrT> index =
       Signed(DecodeWord<LoadHandler::FieldIndexBits>(handler_word));
   TNode<IntPtrT> offset = IntPtrMul(index, IntPtrConstant(kTaggedSize));
@@ -283,6 +333,118 @@ void AccessorAssembler::HandleLoadField(TNode<JSObject> holder,
     Goto(rebox_double);
   }
 }
+
+#if V8_ENABLE_WEBASSEMBLY
+
+void AccessorAssembler::HandleLoadWasmField(
+    TNode<WasmObject> holder, TNode<Int32T> wasm_value_type,
+    TNode<IntPtrT> field_offset, TVariable<Float64T>* var_double_value,
+    Label* rebox_double, ExitPoint* exit_point) {
+  Label type_I8(this), type_I16(this), type_I32(this), type_U32(this),
+      type_I64(this), type_U64(this), type_F32(this), type_F64(this),
+      type_Ref(this), unsupported_type(this, Label::kDeferred),
+      unexpected_type(this, Label::kDeferred);
+  Label* wasm_value_type_labels[] = {
+      &type_I8,  &type_I16, &type_I32, &type_U32, &type_I64,
+      &type_F32, &type_F64, &type_Ref, &type_Ref, &unsupported_type};
+  int32_t wasm_value_types[] = {
+      static_cast<int32_t>(WasmValueType::kI8),
+      static_cast<int32_t>(WasmValueType::kI16),
+      static_cast<int32_t>(WasmValueType::kI32),
+      static_cast<int32_t>(WasmValueType::kU32),
+      static_cast<int32_t>(WasmValueType::kI64),
+      static_cast<int32_t>(WasmValueType::kF32),
+      static_cast<int32_t>(WasmValueType::kF64),
+      static_cast<int32_t>(WasmValueType::kRef),
+      static_cast<int32_t>(WasmValueType::kOptRef),
+      // TODO(v8:11804): support the following value types.
+      static_cast<int32_t>(WasmValueType::kS128)};
+  const size_t kWasmValueTypeCount =
+      static_cast<size_t>(WasmValueType::kNumTypes);
+  DCHECK_EQ(kWasmValueTypeCount, arraysize(wasm_value_types));
+  DCHECK_EQ(kWasmValueTypeCount, arraysize(wasm_value_type_labels));
+
+  Switch(wasm_value_type, &unexpected_type, wasm_value_types,
+         wasm_value_type_labels, kWasmValueTypeCount);
+  BIND(&type_I8);
+  {
+    Comment("type_I8");
+    TNode<Int32T> value = LoadObjectField<Int8T>(holder, field_offset);
+    exit_point->Return(SmiFromInt32(value));
+  }
+  BIND(&type_I16);
+  {
+    Comment("type_I16");
+    TNode<Int32T> value = LoadObjectField<Int16T>(holder, field_offset);
+    exit_point->Return(SmiFromInt32(value));
+  }
+  BIND(&type_I32);
+  {
+    Comment("type_I32");
+    TNode<Int32T> value = LoadObjectField<Int32T>(holder, field_offset);
+    exit_point->Return(ChangeInt32ToTagged(value));
+  }
+  BIND(&type_U32);
+  {
+    Comment("type_U32");
+    TNode<Uint32T> value = LoadObjectField<Uint32T>(holder, field_offset);
+    exit_point->Return(ChangeUint32ToTagged(value));
+  }
+  BIND(&type_I64);
+  {
+    Comment("type_I64");
+    TNode<RawPtrT> data_pointer =
+        ReinterpretCast<RawPtrT>(BitcastTaggedToWord(holder));
+    TNode<BigInt> value = LoadFixedBigInt64ArrayElementAsTagged(
+        data_pointer,
+        Signed(IntPtrSub(field_offset, IntPtrConstant(kHeapObjectTag))));
+    exit_point->Return(value);
+  }
+  BIND(&type_F32);
+  {
+    Comment("type_F32");
+    TNode<Float32T> value = LoadObjectField<Float32T>(holder, field_offset);
+    *var_double_value = ChangeFloat32ToFloat64(value);
+    Goto(rebox_double);
+  }
+  BIND(&type_F64);
+  {
+    Comment("type_F64");
+    TNode<Float64T> value = LoadObjectField<Float64T>(holder, field_offset);
+    *var_double_value = value;
+    Goto(rebox_double);
+  }
+  BIND(&type_Ref);
+  {
+    Comment("type_Ref");
+    TNode<Object> value = LoadObjectField(holder, field_offset);
+    exit_point->Return(value);
+  }
+  BIND(&unsupported_type);
+  {
+    Print("Not supported Wasm field type");
+    Unreachable();
+  }
+  BIND(&unexpected_type);
+  { Unreachable(); }
+}
+
+void AccessorAssembler::HandleLoadWasmField(
+    TNode<WasmObject> holder, TNode<WordT> handler_word,
+    TVariable<Float64T>* var_double_value, Label* rebox_double,
+    ExitPoint* exit_point) {
+  Comment("LoadWasmField");
+  TNode<Int32T> wasm_value_type =
+      Signed(DecodeWord32<LoadHandler::WasmFieldTypeBits>(
+          TruncateWordToInt32(handler_word)));
+  TNode<IntPtrT> field_offset =
+      Signed(DecodeWord<LoadHandler::WasmFieldOffsetBits>(handler_word));
+
+  HandleLoadWasmField(holder, wasm_value_type, field_offset, var_double_value,
+                      rebox_double, exit_point);
+}
+
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 TNode<Object> AccessorAssembler::LoadDescriptorValue(
     TNode<Map> map, TNode<IntPtrT> descriptor_entry) {
@@ -330,6 +492,8 @@ void AccessorAssembler::HandleLoadICSmiHandlerCase(
     BIND(&if_element);
     {
       Comment("element_load");
+      // TODO(ishell): implement
+      CSA_ASSERT(this, IsClearWord<LoadHandler::IsWasmArrayBits>(handler_word));
       TVARIABLE(Int32T, var_instance_type);
       TNode<IntPtrT> intptr_index = TryToIntptr(
           p->name(), &try_string_to_array_index, &var_instance_type);
@@ -392,7 +556,7 @@ void AccessorAssembler::HandleLoadICSmiHandlerCase(
       if (Is64()) {
         GotoIfNot(
             UintPtrLessThanOrEqual(var_intptr_index.value(),
-                                   IntPtrConstant(JSArray::kMaxArrayIndex)),
+                                   IntPtrConstant(JSObject::kMaxElementIndex)),
             miss);
       } else {
         GotoIf(IntPtrLessThan(var_intptr_index.value(), IntPtrConstant(0)),
@@ -510,8 +674,24 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
          &module_export, &interceptor);
 
   BIND(&field);
-  HandleLoadField(CAST(holder), handler_word, var_double_value, rebox_double,
-                  miss, exit_point);
+  {
+#if V8_ENABLE_WEBASSEMBLY
+    Label is_wasm_field(this);
+    GotoIf(IsSetWord<LoadHandler::IsWasmStructBits>(handler_word),
+           &is_wasm_field);
+#else
+    CSA_ASSERT(this, IsClearWord<LoadHandler::IsWasmStructBits>(handler_word));
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+    HandleLoadField(CAST(holder), handler_word, var_double_value, rebox_double,
+                    miss, exit_point);
+
+#if V8_ENABLE_WEBASSEMBLY
+    BIND(&is_wasm_field);
+    HandleLoadWasmField(CAST(holder), handler_word, var_double_value,
+                        rebox_double, exit_point);
+#endif  // V8_ENABLE_WEBASSEMBLY
+  }
 
   BIND(&nonexistent);
   // This is a handler for a load of a non-existent value.
@@ -532,20 +712,21 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
   BIND(&normal);
   {
     Comment("load_normal");
-    TNode<NameDictionary> properties = CAST(LoadSlowProperties(CAST(holder)));
+    TNode<PropertyDictionary> properties =
+        CAST(LoadSlowProperties(CAST(holder)));
     TVARIABLE(IntPtrT, var_name_index);
     Label found(this, &var_name_index);
-    NameDictionaryLookup<NameDictionary>(properties, CAST(p->name()), &found,
-                                         &var_name_index, miss);
+    NameDictionaryLookup<PropertyDictionary>(properties, CAST(p->name()),
+                                             &found, &var_name_index, miss);
     BIND(&found);
     {
       TVARIABLE(Uint32T, var_details);
       TVARIABLE(Object, var_value);
-      LoadPropertyFromNameDictionary(properties, var_name_index.value(),
-                                     &var_details, &var_value);
+      LoadPropertyFromDictionary<PropertyDictionary>(
+          properties, var_name_index.value(), &var_details, &var_value);
       TNode<Object> value = CallGetterIfAccessor(
           var_value.value(), CAST(holder), var_details.value(), p->context(),
-          p->receiver(), miss);
+          p->receiver(), p->name(), miss);
       exit_point->Return(value);
     }
   }
@@ -565,11 +746,23 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
   }
 
   BIND(&native_data_property);
-  HandleLoadCallbackProperty(p, CAST(holder), handler_word, exit_point);
+  {
+    GotoIf(IsSideEffectFreeDebuggingActive(), &slow);
+    HandleLoadCallbackProperty(p, CAST(holder), handler_word, exit_point);
+  }
 
   BIND(&api_getter);
-  HandleLoadAccessor(p, CAST(holder), handler_word, CAST(handler), handler_kind,
-                     exit_point);
+  {
+    if (p->receiver() != p->lookup_start_object()) {
+      // Force super ICs using API getters into the slow path, so that we get
+      // the correct receiver checks.
+      Goto(&slow);
+    } else {
+      GotoIf(IsSideEffectFreeDebuggingActive(), &slow);
+      HandleLoadAccessor(p, CAST(holder), handler_word, CAST(handler),
+                         handler_kind, exit_point);
+    }
+  }
 
   BIND(&proxy);
   {
@@ -595,7 +788,7 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
 
       BIND(&if_unique_name);
       exit_point->ReturnCallStub(
-          Builtins::CallableFor(isolate(), Builtins::kProxyGetProperty),
+          Builtins::CallableFor(isolate(), Builtin::kProxyGetProperty),
           p->context(), holder, var_unique.value(), p->receiver(),
           SmiConstant(on_nonexistent));
 
@@ -612,7 +805,7 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
                                     p->receiver(), SmiConstant(on_nonexistent));
     } else {
       exit_point->ReturnCallStub(
-          Builtins::CallableFor(isolate(), Builtins::kProxyGetProperty),
+          Builtins::CallableFor(isolate(), Builtin::kProxyGetProperty),
           p->context(), holder, p->name(), p->receiver(),
           SmiConstant(on_nonexistent));
     }
@@ -629,7 +822,8 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
     GotoIf(IsTheHole(value), miss);
 
     exit_point->Return(CallGetterIfAccessor(value, CAST(holder), details,
-                                            p->context(), p->receiver(), miss));
+                                            p->context(), p->receiver(),
+                                            p->name(), miss));
   }
 
   BIND(&interceptor);
@@ -647,8 +841,9 @@ void AccessorAssembler::HandleLoadICSmiHandlerLoadNamedCase(
                                     p->name(), p->slot(), p->vector());
 
     } else {
-      exit_point->ReturnCallRuntime(Runtime::kGetProperty, p->context(), holder,
-                                    p->name(), p->receiver());
+      exit_point->ReturnCallRuntime(Runtime::kGetProperty, p->context(),
+                                    p->lookup_start_object(), p->name(),
+                                    p->receiver());
     }
   }
 
@@ -736,18 +931,19 @@ void AccessorAssembler::HandleLoadICSmiHandlerHasNamedCase(
                 WordEqual(handler_kind,
                           IntPtrConstant(LoadHandler::kModuleExport)))));
     exit_point->ReturnCallStub(
-        Builtins::CallableFor(isolate(), Builtins::kHasProperty), p->context(),
+        Builtins::CallableFor(isolate(), Builtin::kHasProperty), p->context(),
         p->receiver(), p->name());
   }
 
   BIND(&normal);
   {
     Comment("has_normal");
-    TNode<NameDictionary> properties = CAST(LoadSlowProperties(CAST(holder)));
+    TNode<PropertyDictionary> properties =
+        CAST(LoadSlowProperties(CAST(holder)));
     TVARIABLE(IntPtrT, var_name_index);
     Label found(this);
-    NameDictionaryLookup<NameDictionary>(properties, CAST(p->name()), &found,
-                                         &var_name_index, miss);
+    NameDictionaryLookup<PropertyDictionary>(properties, CAST(p->name()),
+                                             &found, &var_name_index, miss);
 
     BIND(&found);
     exit_point->Return(TrueConstant());
@@ -820,8 +1016,9 @@ TNode<Object> AccessorAssembler::HandleProtoHandler(
     if (on_code_handler) {
       Label if_smi_handler(this);
       GotoIf(TaggedIsSmi(smi_or_code_handler), &if_smi_handler);
-
-      on_code_handler(CAST(smi_or_code_handler));
+      // TODO(v8:11880): avoid roundtrips between cdc and code.
+      TNode<Code> code = FromCodeT(CAST(smi_or_code_handler));
+      on_code_handler(code);
 
       BIND(&if_smi_handler);
     }
@@ -862,11 +1059,6 @@ TNode<Object> AccessorAssembler::HandleProtoHandler(
 
       BIND(&if_lookup_on_lookup_start_object);
       {
-        if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-          // TODO(v8:11167) remove once OrderedNameDictionary supported.
-          GotoIf(Int32TrueConstant(), miss);
-        }
-
         // Dictionary lookup on lookup start object is not necessary for
         // Load/StoreGlobalIC (which is the only case when the
         // lookup_start_object can be a JSGlobalObject) because prototype
@@ -876,12 +1068,12 @@ TNode<Object> AccessorAssembler::HandleProtoHandler(
                    Word32BinaryNot(HasInstanceType(
                        CAST(p->lookup_start_object()), JS_GLOBAL_OBJECT_TYPE)));
 
-        TNode<NameDictionary> properties =
+        TNode<PropertyDictionary> properties =
             CAST(LoadSlowProperties(CAST(p->lookup_start_object())));
         TVARIABLE(IntPtrT, var_name_index);
         Label found(this, &var_name_index);
-        NameDictionaryLookup<NameDictionary>(properties, CAST(p->name()),
-                                             &found, &var_name_index, &done);
+        NameDictionaryLookup<PropertyDictionary>(
+            properties, CAST(p->name()), &found, &var_name_index, &done);
         BIND(&found);
         {
           if (on_found_on_lookup_start_object) {
@@ -908,17 +1100,17 @@ void AccessorAssembler::HandleLoadICProtoHandler(
       // Code sub-handlers are not expected in LoadICs, so no |on_code_handler|.
       nullptr,
       // on_found_on_lookup_start_object
-      [=](TNode<NameDictionary> properties, TNode<IntPtrT> name_index) {
+      [=](TNode<PropertyDictionary> properties, TNode<IntPtrT> name_index) {
         if (access_mode == LoadAccessMode::kHas) {
           exit_point->Return(TrueConstant());
         } else {
           TVARIABLE(Uint32T, var_details);
           TVARIABLE(Object, var_value);
-          LoadPropertyFromNameDictionary(properties, name_index, &var_details,
-                                         &var_value);
+          LoadPropertyFromDictionary<PropertyDictionary>(
+              properties, name_index, &var_details, &var_value);
           TNode<Object> value = CallGetterIfAccessor(
               var_value.value(), CAST(var_holder->value()), var_details.value(),
-              p->context(), p->receiver(), miss);
+              p->context(), p->receiver(), p->name(), miss);
           exit_point->Return(value);
         }
       },
@@ -1054,11 +1246,12 @@ void AccessorAssembler::HandleStoreICHandlerCase(
            &if_slow);
     CSA_ASSERT(this,
                Word32Equal(handler_kind, Int32Constant(StoreHandler::kNormal)));
-    TNode<NameDictionary> properties = CAST(LoadSlowProperties(CAST(holder)));
+    TNode<PropertyDictionary> properties =
+        CAST(LoadSlowProperties(CAST(holder)));
 
     TVARIABLE(IntPtrT, var_name_index);
     Label dictionary_found(this, &var_name_index);
-    NameDictionaryLookup<NameDictionary>(
+    NameDictionaryLookup<PropertyDictionary>(
         properties, CAST(p->name()), &dictionary_found, &var_name_index, miss);
     BIND(&dictionary_found);
     {
@@ -1075,8 +1268,8 @@ void AccessorAssembler::HandleStoreICHandlerCase(
         GotoIf(IsPropertyDetailsConst(details), &if_constant);
       }
 
-      StoreValueByKeyIndex<NameDictionary>(properties, var_name_index.value(),
-                                           p->value());
+      StoreValueByKeyIndex<PropertyDictionary>(
+          properties, var_name_index.value(), p->value());
       Return(p->value());
 
       if (V8_DICT_PROPERTY_CONST_TRACKING_BOOL) {
@@ -1147,7 +1340,7 @@ void AccessorAssembler::HandleStoreICHandlerCase(
     GotoIf(IsWeakOrCleared(handler), &store_transition_or_global);
     TNode<HeapObject> strong_handler = CAST(handler);
     TNode<Map> handler_map = LoadMap(strong_handler);
-    Branch(IsCodeMap(handler_map), &call_handler, &if_proto_handler);
+    Branch(IsCodeTMap(handler_map), &call_handler, &if_proto_handler);
 
     BIND(&if_proto_handler);
     {
@@ -1158,9 +1351,11 @@ void AccessorAssembler::HandleStoreICHandlerCase(
     // |handler| is a heap object. Must be code, call it.
     BIND(&call_handler);
     {
-      TailCallStub(StoreWithVectorDescriptor{}, CAST(strong_handler),
-                   p->context(), p->receiver(), p->name(), p->value(),
-                   p->slot(), p->vector());
+      // TODO(v8:11880): avoid roundtrips between cdc and code.
+      TNode<Code> code_handler = FromCodeT(CAST(strong_handler));
+      TailCallStub(StoreWithVectorDescriptor{}, code_handler, p->context(),
+                   p->receiver(), p->name(), p->value(), p->slot(),
+                   p->vector());
     }
   }
 
@@ -1256,9 +1451,6 @@ void AccessorAssembler::CheckFieldType(TNode<DescriptorArray> descriptors,
                                        TNode<Word32T> representation,
                                        TNode<Object> value, Label* bailout) {
   Label r_smi(this), r_double(this), r_heapobject(this), all_fine(this);
-  // Ignore FLAG_track_fields etc. and always emit code for all checks,
-  // because this builtin is part of the snapshot and therefore should
-  // be flag independent.
   GotoIf(Word32Equal(representation, Int32Constant(Representation::kSmi)),
          &r_smi);
   GotoIf(Word32Equal(representation, Int32Constant(Representation::kDouble)),
@@ -1512,7 +1704,6 @@ void AccessorAssembler::HandleStoreAccessor(const StoreICParameters* p,
       LoadObjectField(accessor_pair, AccessorPair::kSetterOffset);
   CSA_ASSERT(this, Word32BinaryNot(IsTheHole(setter)));
 
-  Callable callable = CodeFactory::Call(isolate());
   Return(Call(p->context(), setter, p->receiver(), p->value()));
 }
 
@@ -1555,7 +1746,7 @@ void AccessorAssembler::HandleStoreICProtoHandler(
   TNode<Object> smi_handler = HandleProtoHandler<StoreHandler>(
       p, handler, on_code_handler,
       // on_found_on_lookup_start_object
-      [=](TNode<NameDictionary> properties, TNode<IntPtrT> name_index) {
+      [=](TNode<PropertyDictionary> properties, TNode<IntPtrT> name_index) {
         TNode<Uint32T> details = LoadDetailsByKeyIndex(properties, name_index);
         // Check that the property is a writable data property (no accessor).
         const int kTypeAndReadOnlyMask =
@@ -1564,8 +1755,8 @@ void AccessorAssembler::HandleStoreICProtoHandler(
         STATIC_ASSERT(kData == 0);
         GotoIf(IsSetWord32(details, kTypeAndReadOnlyMask), miss);
 
-        StoreValueByKeyIndex<NameDictionary>(properties, name_index,
-                                             p->value());
+        StoreValueByKeyIndex<PropertyDictionary>(properties, name_index,
+                                                 p->value());
         Return(p->value());
       },
       miss, ic_mode);
@@ -1636,9 +1827,9 @@ void AccessorAssembler::HandleStoreICProtoHandler(
       TNode<Map> receiver_map = LoadMap(CAST(p->receiver()));
       InvalidateValidityCellIfPrototype(receiver_map);
 
-      TNode<NameDictionary> properties =
+      TNode<PropertyDictionary> properties =
           CAST(LoadSlowProperties(CAST(p->receiver())));
-      Add<NameDictionary>(properties, CAST(p->name()), p->value(), &slow);
+      Add<PropertyDictionary>(properties, CAST(p->name()), p->value(), &slow);
       Return(p->value());
 
       BIND(&slow);
@@ -1691,9 +1882,12 @@ void AccessorAssembler::HandleStoreICProtoHandler(
       Goto(&store);
 
       BIND(&store);
-      TNode<IntPtrT> argc = IntPtrConstant(1);
-      Return(CallApiCallback(context, callback, argc, data, api_holder.value(),
-                             p->receiver(), p->value()));
+      {
+        GotoIf(IsSideEffectFreeDebuggingActive(), &if_slow);
+        TNode<IntPtrT> argc = IntPtrConstant(1);
+        Return(CallApiCallback(context, callback, argc, data,
+                               api_holder.value(), p->receiver(), p->value()));
+      }
     }
 
     BIND(&if_store_global_proxy);
@@ -1719,7 +1913,7 @@ void AccessorAssembler::HandleStoreToProxy(const StoreICParameters* p,
               &to_name_failed);
 
     BIND(&if_unique_name);
-    CallBuiltin(Builtins::kProxySetProperty, p->context(), proxy,
+    CallBuiltin(Builtin::kProxySetProperty, p->context(), proxy,
                 var_unique.value(), p->value(), p->receiver());
     Return(p->value());
 
@@ -1733,9 +1927,8 @@ void AccessorAssembler::HandleStoreToProxy(const StoreICParameters* p,
     TailCallRuntime(Runtime::kSetPropertyWithReceiver, p->context(), proxy,
                     p->name(), p->value(), p->receiver());
   } else {
-    TNode<Object> name =
-        CallBuiltin(Builtins::kToName, p->context(), p->name());
-    TailCallBuiltin(Builtins::kProxySetProperty, p->context(), proxy, name,
+    TNode<Object> name = CallBuiltin(Builtin::kToName, p->context(), p->name());
+    TailCallBuiltin(Builtin::kProxySetProperty, p->context(), proxy, name,
                     p->value(), p->receiver());
   }
 }
@@ -2041,9 +2234,9 @@ void AccessorAssembler::EmitElementLoad(
     Label* if_hole, Label* rebox_double, TVariable<Float64T>* var_double_value,
     Label* unimplemented_elements_kind, Label* out_of_bounds, Label* miss,
     ExitPoint* exit_point, LoadAccessMode access_mode) {
-  Label if_typed_array(this), if_fast(this), if_fast_packed(this),
-      if_fast_holey(this), if_fast_double(this), if_fast_holey_double(this),
-      if_nonfast(this), if_dictionary(this);
+  Label if_rab_gsab_typed_array(this), if_typed_array(this), if_fast(this),
+      if_fast_packed(this), if_fast_holey(this), if_fast_double(this),
+      if_fast_holey_double(this), if_nonfast(this), if_dictionary(this);
   Branch(Int32GreaterThan(elements_kind,
                           Int32Constant(LAST_ANY_NONEXTENSIBLE_ELEMENTS_KIND)),
          &if_nonfast, &if_fast);
@@ -2124,7 +2317,16 @@ void AccessorAssembler::EmitElementLoad(
 
   BIND(&if_nonfast);
   {
-    STATIC_ASSERT(LAST_ELEMENTS_KIND == LAST_FIXED_TYPED_ARRAY_ELEMENTS_KIND);
+    Label uint8_elements(this), int8_elements(this), uint16_elements(this),
+        int16_elements(this), uint32_elements(this), int32_elements(this),
+        float32_elements(this), float64_elements(this), bigint64_elements(this),
+        biguint64_elements(this);
+    STATIC_ASSERT(LAST_ELEMENTS_KIND ==
+                  LAST_RAB_GSAB_FIXED_TYPED_ARRAY_ELEMENTS_KIND);
+    GotoIf(Int32GreaterThanOrEqual(
+               elements_kind,
+               Int32Constant(FIRST_RAB_GSAB_FIXED_TYPED_ARRAY_ELEMENTS_KIND)),
+           &if_rab_gsab_typed_array);
     GotoIf(Int32GreaterThanOrEqual(
                elements_kind,
                Int32Constant(FIRST_FIXED_TYPED_ARRAY_ELEMENTS_KIND)),
@@ -2137,7 +2339,7 @@ void AccessorAssembler::EmitElementLoad(
     {
       Comment("dictionary elements");
       if (Is64()) {
-        GotoIf(UintPtrLessThan(IntPtrConstant(JSArray::kMaxArrayIndex),
+        GotoIf(UintPtrLessThan(IntPtrConstant(JSObject::kMaxElementIndex),
                                intptr_index),
                out_of_bounds);
       } else {
@@ -2150,88 +2352,129 @@ void AccessorAssembler::EmitElementLoad(
       exit_point->Return(access_mode == LoadAccessMode::kHas ? TrueConstant()
                                                              : value);
     }
-
-    BIND(&if_typed_array);
     {
-      Comment("typed elements");
-      // Check if buffer has been detached.
-      TNode<JSArrayBuffer> buffer = LoadJSArrayBufferViewBuffer(CAST(object));
-      GotoIf(IsDetachedBuffer(buffer), miss);
+      TVARIABLE(RawPtrT, data_ptr);
+      BIND(&if_rab_gsab_typed_array);
+      {
+        Comment("rab gsab typed elements");
+        Label variable_length(this), normal(this), length_check_ok(this);
 
-      // Bounds check.
-      TNode<UintPtrT> length = LoadJSTypedArrayLength(CAST(object));
-      GotoIfNot(UintPtrLessThan(intptr_index, length), out_of_bounds);
-      if (access_mode == LoadAccessMode::kHas) {
-        exit_point->Return(TrueConstant());
-      } else {
-        TNode<RawPtrT> data_ptr = LoadJSTypedArrayDataPtr(CAST(object));
+        TNode<JSTypedArray> array = CAST(object);
+        TNode<JSArrayBuffer> buffer = LoadJSArrayBufferViewBuffer(array);
 
-        Label uint8_elements(this), int8_elements(this), uint16_elements(this),
-            int16_elements(this), uint32_elements(this), int32_elements(this),
-            float32_elements(this), float64_elements(this),
-            bigint64_elements(this), biguint64_elements(this);
-        Label* elements_kind_labels[] = {
-            &uint8_elements,    &uint8_elements,    &int8_elements,
-            &uint16_elements,   &int16_elements,    &uint32_elements,
-            &int32_elements,    &float32_elements,  &float64_elements,
-            &bigint64_elements, &biguint64_elements};
-        int32_t elements_kinds[] = {
-            UINT8_ELEMENTS,    UINT8_CLAMPED_ELEMENTS, INT8_ELEMENTS,
-            UINT16_ELEMENTS,   INT16_ELEMENTS,         UINT32_ELEMENTS,
-            INT32_ELEMENTS,    FLOAT32_ELEMENTS,       FLOAT64_ELEMENTS,
-            BIGINT64_ELEMENTS, BIGUINT64_ELEMENTS};
-        const size_t kTypedElementsKindCount =
-            LAST_FIXED_TYPED_ARRAY_ELEMENTS_KIND -
-            FIRST_FIXED_TYPED_ARRAY_ELEMENTS_KIND + 1;
-        DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kinds));
-        DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kind_labels));
-        Switch(elements_kind, miss, elements_kinds, elements_kind_labels,
-               kTypedElementsKindCount);
+        // Bounds check (incl. detachedness check).
+        TNode<UintPtrT> length =
+            LoadVariableLengthJSTypedArrayLength(array, buffer, miss);
+        Branch(UintPtrLessThan(intptr_index, length), &length_check_ok,
+               out_of_bounds);
+        BIND(&length_check_ok);
+        {
+          if (access_mode == LoadAccessMode::kHas) {
+            exit_point->Return(TrueConstant());
+          } else {
+            data_ptr = LoadJSTypedArrayDataPtr(array);
+            Label* elements_kind_labels[] = {
+                &uint8_elements,    &uint8_elements,    &int8_elements,
+                &uint16_elements,   &int16_elements,    &uint32_elements,
+                &int32_elements,    &float32_elements,  &float64_elements,
+                &bigint64_elements, &biguint64_elements};
+            int32_t elements_kinds[] = {
+                RAB_GSAB_UINT8_ELEMENTS,    RAB_GSAB_UINT8_CLAMPED_ELEMENTS,
+                RAB_GSAB_INT8_ELEMENTS,     RAB_GSAB_UINT16_ELEMENTS,
+                RAB_GSAB_INT16_ELEMENTS,    RAB_GSAB_UINT32_ELEMENTS,
+                RAB_GSAB_INT32_ELEMENTS,    RAB_GSAB_FLOAT32_ELEMENTS,
+                RAB_GSAB_FLOAT64_ELEMENTS,  RAB_GSAB_BIGINT64_ELEMENTS,
+                RAB_GSAB_BIGUINT64_ELEMENTS};
+            const size_t kTypedElementsKindCount =
+                LAST_RAB_GSAB_FIXED_TYPED_ARRAY_ELEMENTS_KIND -
+                FIRST_RAB_GSAB_FIXED_TYPED_ARRAY_ELEMENTS_KIND + 1;
+            DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kinds));
+            DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kind_labels));
+            Switch(elements_kind, miss, elements_kinds, elements_kind_labels,
+                   kTypedElementsKindCount);
+          }
+        }
+      }
+      BIND(&if_typed_array);
+      {
+        Comment("typed elements");
+        // Check if buffer has been detached.
+        TNode<JSArrayBuffer> buffer = LoadJSArrayBufferViewBuffer(CAST(object));
+        GotoIf(IsDetachedBuffer(buffer), miss);
+
+        // Bounds check.
+        TNode<UintPtrT> length = LoadJSTypedArrayLength(CAST(object));
+        GotoIfNot(UintPtrLessThan(intptr_index, length), out_of_bounds);
+        if (access_mode == LoadAccessMode::kHas) {
+          exit_point->Return(TrueConstant());
+        } else {
+          data_ptr = LoadJSTypedArrayDataPtr(CAST(object));
+
+          Label* elements_kind_labels[] = {
+              &uint8_elements,    &uint8_elements,    &int8_elements,
+              &uint16_elements,   &int16_elements,    &uint32_elements,
+              &int32_elements,    &float32_elements,  &float64_elements,
+              &bigint64_elements, &biguint64_elements};
+          int32_t elements_kinds[] = {
+              UINT8_ELEMENTS,    UINT8_CLAMPED_ELEMENTS, INT8_ELEMENTS,
+              UINT16_ELEMENTS,   INT16_ELEMENTS,         UINT32_ELEMENTS,
+              INT32_ELEMENTS,    FLOAT32_ELEMENTS,       FLOAT64_ELEMENTS,
+              BIGINT64_ELEMENTS, BIGUINT64_ELEMENTS};
+          const size_t kTypedElementsKindCount =
+              LAST_FIXED_TYPED_ARRAY_ELEMENTS_KIND -
+              FIRST_FIXED_TYPED_ARRAY_ELEMENTS_KIND + 1;
+          DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kinds));
+          DCHECK_EQ(kTypedElementsKindCount, arraysize(elements_kind_labels));
+          Switch(elements_kind, miss, elements_kinds, elements_kind_labels,
+                 kTypedElementsKindCount);
+        }
+      }
+      if (access_mode != LoadAccessMode::kHas) {
         BIND(&uint8_elements);
         {
           Comment("UINT8_ELEMENTS");  // Handles UINT8_CLAMPED_ELEMENTS too.
-          TNode<Int32T> element = Load<Uint8T>(data_ptr, intptr_index);
+          TNode<Int32T> element = Load<Uint8T>(data_ptr.value(), intptr_index);
           exit_point->Return(SmiFromInt32(element));
         }
         BIND(&int8_elements);
         {
           Comment("INT8_ELEMENTS");
-          TNode<Int32T> element = Load<Int8T>(data_ptr, intptr_index);
+          TNode<Int32T> element = Load<Int8T>(data_ptr.value(), intptr_index);
           exit_point->Return(SmiFromInt32(element));
         }
         BIND(&uint16_elements);
         {
           Comment("UINT16_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(1));
-          TNode<Int32T> element = Load<Uint16T>(data_ptr, index);
+          TNode<Int32T> element = Load<Uint16T>(data_ptr.value(), index);
           exit_point->Return(SmiFromInt32(element));
         }
         BIND(&int16_elements);
         {
           Comment("INT16_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(1));
-          TNode<Int32T> element = Load<Int16T>(data_ptr, index);
+          TNode<Int32T> element = Load<Int16T>(data_ptr.value(), index);
           exit_point->Return(SmiFromInt32(element));
         }
         BIND(&uint32_elements);
         {
           Comment("UINT32_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(2));
-          TNode<Uint32T> element = Load<Uint32T>(data_ptr, index);
+          TNode<Uint32T> element = Load<Uint32T>(data_ptr.value(), index);
           exit_point->Return(ChangeUint32ToTagged(element));
         }
         BIND(&int32_elements);
         {
           Comment("INT32_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(2));
-          TNode<Int32T> element = Load<Int32T>(data_ptr, index);
+          TNode<Int32T> element = Load<Int32T>(data_ptr.value(), index);
           exit_point->Return(ChangeInt32ToTagged(element));
         }
         BIND(&float32_elements);
         {
           Comment("FLOAT32_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(2));
-          TNode<Float32T> element = Load<Float32T>(data_ptr, index);
+          TNode<Float32T> element = Load<Float32T>(data_ptr.value(), index);
           *var_double_value = ChangeFloat32ToFloat64(element);
           Goto(rebox_double);
         }
@@ -2239,7 +2482,7 @@ void AccessorAssembler::EmitElementLoad(
         {
           Comment("FLOAT64_ELEMENTS");
           TNode<IntPtrT> index = WordShl(intptr_index, IntPtrConstant(3));
-          TNode<Float64T> element = Load<Float64T>(data_ptr, index);
+          TNode<Float64T> element = Load<Float64T>(data_ptr.value(), index);
           *var_double_value = element;
           Goto(rebox_double);
         }
@@ -2247,13 +2490,13 @@ void AccessorAssembler::EmitElementLoad(
         {
           Comment("BIGINT64_ELEMENTS");
           exit_point->Return(LoadFixedTypedArrayElementAsTagged(
-              data_ptr, Unsigned(intptr_index), BIGINT64_ELEMENTS));
+              data_ptr.value(), Unsigned(intptr_index), BIGINT64_ELEMENTS));
         }
         BIND(&biguint64_elements);
         {
           Comment("BIGUINT64_ELEMENTS");
           exit_point->Return(LoadFixedTypedArrayElementAsTagged(
-              data_ptr, Unsigned(intptr_index), BIGUINT64_ELEMENTS));
+              data_ptr.value(), Unsigned(intptr_index), BIGUINT64_ELEMENTS));
         }
       }
     }
@@ -2328,11 +2571,11 @@ void AccessorAssembler::GenericElementLoad(
     // without ever checking the prototype chain.
     GotoIf(IsJSTypedArrayInstanceType(lookup_start_object_instance_type),
            &return_undefined);
-    // Positive OOB indices within JSArray index range are effectively the same
+    // Positive OOB indices within elements index range are effectively the same
     // as hole loads. Larger keys and negative keys are named loads.
     if (Is64()) {
       Branch(UintPtrLessThanOrEqual(index,
-                                    IntPtrConstant(JSArray::kMaxArrayIndex)),
+                                    IntPtrConstant(JSObject::kMaxElementIndex)),
              &if_element_hole, slow);
     } else {
       Branch(IntPtrLessThan(index, IntPtrConstant(0)), slow, &if_element_hole);
@@ -2354,7 +2597,7 @@ void AccessorAssembler::GenericElementLoad(
     TNode<IntPtrT> length = LoadStringLengthAsWord(CAST(lookup_start_object));
     GotoIfNot(UintPtrLessThan(index, length), slow);
     IncrementCounter(isolate()->counters()->ic_keyed_load_generic_smi(), 1);
-    TailCallBuiltin(Builtins::kStringCharAt, NoContextConstant(),
+    TailCallBuiltin(Builtin::kStringCharAt, NoContextConstant(),
                     lookup_start_object, index);
   }
 
@@ -2442,26 +2685,21 @@ void AccessorAssembler::GenericPropertyLoad(
 
   BIND(&if_property_dictionary);
   {
-    if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-      // TODO(v8:11167) remove once OrderedNameDictionary supported.
-      GotoIf(Int32TrueConstant(), slow);
-    }
-
     Comment("dictionary property load");
     // We checked for LAST_CUSTOM_ELEMENTS_RECEIVER before, which rules out
     // seeing global objects here (which would need special handling).
 
     TVARIABLE(IntPtrT, var_name_index);
     Label dictionary_found(this, &var_name_index);
-    TNode<NameDictionary> properties =
+    TNode<PropertyDictionary> properties =
         CAST(LoadSlowProperties(CAST(lookup_start_object)));
-    NameDictionaryLookup<NameDictionary>(properties, name, &dictionary_found,
-                                         &var_name_index,
-                                         &lookup_prototype_chain);
+    NameDictionaryLookup<PropertyDictionary>(properties, name,
+                                             &dictionary_found, &var_name_index,
+                                             &lookup_prototype_chain);
     BIND(&dictionary_found);
     {
-      LoadPropertyFromNameDictionary(properties, var_name_index.value(),
-                                     &var_details, &var_value);
+      LoadPropertyFromDictionary<PropertyDictionary>(
+          properties, var_name_index.value(), &var_details, &var_value);
       Goto(&if_found_on_lookup_start_object);
     }
   }
@@ -2470,7 +2708,7 @@ void AccessorAssembler::GenericPropertyLoad(
   {
     TNode<Object> value = CallGetterIfAccessor(
         var_value.value(), lookup_start_object, var_details.value(),
-        p->context(), p->receiver(), slow);
+        p->context(), p->receiver(), p->name(), slow);
     IncrementCounter(isolate()->counters()->ic_keyed_load_generic_symbol(), 1);
     Return(value);
   }
@@ -2532,6 +2770,7 @@ void AccessorAssembler::GenericPropertyLoad(
 
   BIND(&special_receiver);
   {
+    // TODO(ishell): Consider supporting WasmObjects.
     // TODO(jkummerow): Consider supporting JSModuleNamespace.
     GotoIfNot(
         InstanceTypeEqual(lookup_start_object_instance_type, JS_PROXY_TYPE),
@@ -2541,7 +2780,7 @@ void AccessorAssembler::GenericPropertyLoad(
     GotoIf(IsPrivateSymbol(name), slow);
 
     direct_exit.ReturnCallStub(
-        Builtins::CallableFor(isolate(), Builtins::kProxyGetProperty),
+        Builtins::CallableFor(isolate(), Builtin::kProxyGetProperty),
         p->context(), lookup_start_object, name, p->receiver(),
         SmiConstant(OnNonExistent::kReturnUndefined));
   }
@@ -2720,8 +2959,7 @@ void AccessorAssembler::LoadIC_BytecodeHandler(const LazyLoadICParameters* p,
     Comment("LoadIC_BytecodeHandler_noninlined");
 
     // Call into the stub that implements the non-inlined parts of LoadIC.
-    Callable ic =
-        Builtins::CallableFor(isolate(), Builtins::kLoadIC_Noninlined);
+    Callable ic = Builtins::CallableFor(isolate(), Builtin::kLoadIC_Noninlined);
     TNode<Code> code_target = HeapConstant(ic.code());
     exit_point->ReturnCallStub(ic.descriptor(), code_target, p->context(),
                                p->receiver_and_lookup_start_object(), p->name(),
@@ -2733,7 +2971,7 @@ void AccessorAssembler::LoadIC_BytecodeHandler(const LazyLoadICParameters* p,
     Comment("LoadIC_BytecodeHandler_nofeedback");
     // Call into the stub that implements the non-inlined parts of LoadIC.
     exit_point->ReturnCallStub(
-        Builtins::CallableFor(isolate(), Builtins::kLoadIC_NoFeedback),
+        Builtins::CallableFor(isolate(), Builtin::kLoadIC_NoFeedback),
         p->context(), p->receiver(), p->name(),
         SmiConstant(FeedbackSlotKind::kLoadProperty));
   }
@@ -2796,7 +3034,7 @@ void AccessorAssembler::LoadIC(const LoadICParameters* p) {
     Comment("LoadIC_nofeedback");
     // Call into the stub that implements the non-inlined parts of LoadIC.
     direct_exit.ReturnCallStub(
-        Builtins::CallableFor(isolate(), Builtins::kLoadIC_NoFeedback),
+        Builtins::CallableFor(isolate(), Builtin::kLoadIC_NoFeedback),
         p->context(), p->receiver(), p->name(),
         SmiConstant(FeedbackSlotKind::kLoadProperty));
   }
@@ -2874,11 +3112,23 @@ void AccessorAssembler::LoadIC_Noninlined(const LoadICParameters* p,
   DCHECK_EQ(MachineRepresentation::kTagged, var_handler->rep());
 
   {
-    // Check megamorphic case.
-    GotoIfNot(TaggedEqual(feedback, MegamorphicSymbolConstant()), miss);
+    Label try_megamorphic(this), try_megadom(this);
+    GotoIf(TaggedEqual(feedback, MegamorphicSymbolConstant()),
+           &try_megamorphic);
+    GotoIf(TaggedEqual(feedback, MegaDOMSymbolConstant()), &try_megadom);
+    Goto(miss);
 
-    TryProbeStubCache(isolate()->load_stub_cache(), p->lookup_start_object(),
-                      CAST(p->name()), if_handler, var_handler, miss);
+    BIND(&try_megamorphic);
+    {
+      TryProbeStubCache(isolate()->load_stub_cache(), p->lookup_start_object(),
+                        CAST(p->name()), if_handler, var_handler, miss);
+    }
+
+    BIND(&try_megadom);
+    {
+      TryMegaDOMCase(p->lookup_start_object(), lookup_start_object_map,
+                     var_handler, p->vector(), p->slot(), miss, exit_point);
+    }
   }
 }
 
@@ -2974,11 +3224,11 @@ void AccessorAssembler::LoadGlobalIC(TNode<HeapObject> maybe_feedback_vector,
   BIND(&no_feedback);
   {
     int ic_kind =
-        static_cast<int>((typeof_mode == INSIDE_TYPEOF)
+        static_cast<int>((typeof_mode == TypeofMode::kInside)
                              ? FeedbackSlotKind::kLoadGlobalInsideTypeof
                              : FeedbackSlotKind::kLoadGlobalNotInsideTypeof);
     exit_point->ReturnCallStub(
-        Builtins::CallableFor(isolate(), Builtins::kLoadGlobalIC_NoFeedback),
+        Builtins::CallableFor(isolate(), Builtin::kLoadGlobalIC_NoFeedback),
         lazy_context(), lazy_name(), SmiConstant(ic_kind));
   }
 }
@@ -3033,7 +3283,7 @@ void AccessorAssembler::LoadGlobalIC_TryHandlerCase(
   TNode<Object> handler = CAST(feedback_element);
   GotoIf(TaggedEqual(handler, UninitializedSymbolConstant()), miss);
 
-  OnNonExistent on_nonexistent = typeof_mode == NOT_INSIDE_TYPEOF
+  OnNonExistent on_nonexistent = typeof_mode == TypeofMode::kNotInside
                                      ? OnNonExistent::kThrowReferenceError
                                      : OnNonExistent::kReturnUndefined;
 
@@ -3101,7 +3351,7 @@ void AccessorAssembler::LoadGlobalIC_NoFeedback(TNode<Context> context,
   BIND(&regular_load);
   TNode<JSGlobalObject> global_object =
       CAST(LoadContextElement(native_context, Context::EXTENSION_INDEX));
-  TailCallStub(Builtins::CallableFor(isolate(), Builtins::kLoadIC_NoFeedback),
+  TailCallStub(Builtins::CallableFor(isolate(), Builtin::kLoadIC_NoFeedback),
                context, global_object, name, smi_typeof_mode);
 }
 
@@ -3156,11 +3406,10 @@ void AccessorAssembler::KeyedLoadIC(const LoadICParameters* p,
   BIND(&generic);
   {
     // TODO(jkummerow): Inline this? Or some of it?
-    TailCallBuiltin(access_mode == LoadAccessMode::kLoad
-                        ? Builtins::kKeyedLoadIC_Megamorphic
-                        : Builtins::kKeyedHasIC_Megamorphic,
-                    p->context(), p->receiver(), p->name(), p->slot(),
-                    p->vector());
+    TailCallBuiltin(
+        access_mode == LoadAccessMode::kLoad ? Builtin::kKeyedLoadIC_Megamorphic
+                                             : Builtin::kKeyedHasIC_Megamorphic,
+        p->context(), p->receiver(), p->name(), p->slot(), p->vector());
   }
 
   BIND(&try_uninitialized);
@@ -3213,8 +3462,8 @@ void AccessorAssembler::KeyedLoadIC(const LoadICParameters* p,
       // If the name comparison succeeded, we know we have a weak fixed array
       // with at least one map/handler pair.
       TailCallBuiltin(access_mode == LoadAccessMode::kLoad
-                          ? Builtins::kKeyedLoadIC_PolymorphicName
-                          : Builtins::kKeyedHasIC_PolymorphicName,
+                          ? Builtin::kKeyedLoadIC_PolymorphicName
+                          : Builtin::kKeyedHasIC_PolymorphicName,
                       p->context(), p->receiver(), var_name.value(), p->slot(),
                       p->vector());
     }
@@ -3258,7 +3507,7 @@ void AccessorAssembler::KeyedLoadICGeneric(const LoadICParameters* p) {
 
     BIND(&if_other);
     {
-      var_name = CallBuiltin(Builtins::kToName, p->context(), var_name.value());
+      var_name = CallBuiltin(Builtin::kToName, p->context(), var_name.value());
       TryToName(var_name.value(), &if_index, &var_index, &if_unique_name,
                 &var_unique, &if_runtime, &if_notunique);
     }
@@ -3407,7 +3656,7 @@ void AccessorAssembler::StoreIC(const StoreICParameters* p) {
 
   BIND(&no_feedback);
   {
-    TailCallBuiltin(Builtins::kStoreIC_NoFeedback, p->context(), p->receiver(),
+    TailCallBuiltin(Builtin::kStoreIC_NoFeedback, p->context(), p->receiver(),
                     p->name(), p->value(), p->slot());
   }
 
@@ -3598,7 +3847,7 @@ void AccessorAssembler::KeyedStoreIC(const StoreICParameters* p) {
 
     BIND(&no_feedback);
     {
-      TailCallBuiltin(Builtins::kKeyedStoreIC_Megamorphic, p->context(),
+      TailCallBuiltin(Builtin::kKeyedStoreIC_Megamorphic, p->context(),
                       p->receiver(), p->name(), p->value(), p->slot());
     }
 
@@ -3653,10 +3902,16 @@ void AccessorAssembler::StoreInArrayLiteralIC(const StoreICParameters* p) {
       GotoIf(TaggedIsSmi(var_handler.value()), &if_smi_handler);
 
       TNode<HeapObject> handler = CAST(var_handler.value());
-      GotoIfNot(IsCode(handler), &if_transitioning_element_store);
-      TailCallStub(StoreWithVectorDescriptor{}, CAST(handler), p->context(),
-                   p->receiver(), p->name(), p->value(), p->slot(),
-                   p->vector());
+      GotoIfNot(IsCodeT(handler), &if_transitioning_element_store);
+
+      {
+        // Call the handler.
+        // TODO(v8:11880): avoid roundtrips between cdc and code.
+        TNode<Code> code_handler = FromCodeT(CAST(handler));
+        TailCallStub(StoreWithVectorDescriptor{}, code_handler, p->context(),
+                     p->receiver(), p->name(), p->value(), p->slot(),
+                     p->vector());
+      }
 
       BIND(&if_transitioning_element_store);
       {
@@ -3665,8 +3920,9 @@ void AccessorAssembler::StoreInArrayLiteralIC(const StoreICParameters* p) {
         TNode<Map> transition_map =
             CAST(GetHeapObjectAssumeWeak(maybe_transition_map, &miss));
         GotoIf(IsDeprecatedMap(transition_map), &miss);
-        TNode<Code> code =
-            CAST(LoadObjectField(handler, StoreHandler::kSmiHandlerOffset));
+        // TODO(v8:11880): avoid roundtrips between cdc and code.
+        TNode<Code> code = FromCodeT(
+            CAST(LoadObjectField(handler, StoreHandler::kSmiHandlerOffset)));
         TailCallStub(StoreTransitionDescriptor{}, code, p->context(),
                      p->receiver(), p->name(), transition_map, p->value(),
                      p->slot(), p->vector());
@@ -3716,8 +3972,8 @@ void AccessorAssembler::StoreInArrayLiteralIC(const StoreICParameters* p) {
   BIND(&no_feedback);
   {
     Comment("StoreInArrayLiteralIC_NoFeedback");
-    TailCallBuiltin(Builtins::kSetPropertyInLiteral, p->context(),
-                    p->receiver(), p->name(), p->value());
+    TailCallBuiltin(Builtin::kSetPropertyInLiteral, p->context(), p->receiver(),
+                    p->name(), p->value());
   }
 
   BIND(&miss);
@@ -3834,7 +4090,7 @@ void AccessorAssembler::GenerateLoadICTrampoline() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kLoadIC, context, receiver, name, slot, vector);
+  TailCallBuiltin(Builtin::kLoadIC, context, receiver, name, slot, vector);
 }
 
 void AccessorAssembler::GenerateLoadICBaseline() {
@@ -3846,7 +4102,7 @@ void AccessorAssembler::GenerateLoadICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kLoadIC, context, receiver, name, slot, vector);
+  TailCallBuiltin(Builtin::kLoadIC, context, receiver, name, slot, vector);
 }
 
 void AccessorAssembler::GenerateLoadICTrampoline_Megamorphic() {
@@ -3858,7 +4114,7 @@ void AccessorAssembler::GenerateLoadICTrampoline_Megamorphic() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kLoadIC_Megamorphic, context, receiver, name, slot,
+  TailCallBuiltin(Builtin::kLoadIC_Megamorphic, context, receiver, name, slot,
                   vector);
 }
 
@@ -3887,8 +4143,8 @@ void AccessorAssembler::GenerateLoadSuperICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kLoadSuperIC, context, receiver,
-                  lookup_start_object, name, slot, vector);
+  TailCallBuiltin(Builtin::kLoadSuperIC, context, receiver, lookup_start_object,
+                  name, slot, vector);
 }
 
 void AccessorAssembler::GenerateLoadGlobalIC_NoFeedback() {
@@ -3968,7 +4224,7 @@ void AccessorAssembler::GenerateLookupContextBaseline(TypeofMode typeof_mode) {
   BIND(&slowpath);
   {
     auto name = Parameter<Object>(Descriptor::kName);
-    Runtime::FunctionId function_id = typeof_mode == INSIDE_TYPEOF
+    Runtime::FunctionId function_id = typeof_mode == TypeofMode::kInside
                                           ? Runtime::kLoadLookupSlotInsideTypeof
                                           : Runtime::kLoadLookupSlot;
     TailCallRuntime(function_id, context, name);
@@ -4000,7 +4256,7 @@ void AccessorAssembler::GenerateLookupGlobalICBaseline(TypeofMode typeof_mode) {
 
   // Slow path when we have to call out to the runtime
   BIND(&slowpath);
-  Runtime::FunctionId function_id = typeof_mode == INSIDE_TYPEOF
+  Runtime::FunctionId function_id = typeof_mode == TypeofMode::kInside
                                         ? Runtime::kLoadLookupSlotInsideTypeof
                                         : Runtime::kLoadLookupSlot;
   TailCallRuntime(function_id, context, name);
@@ -4041,8 +4297,7 @@ void AccessorAssembler::GenerateKeyedLoadICTrampoline() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kKeyedLoadIC, context, receiver, name, slot,
-                  vector);
+  TailCallBuiltin(Builtin::kKeyedLoadIC, context, receiver, name, slot, vector);
 }
 
 void AccessorAssembler::GenerateKeyedLoadICBaseline() {
@@ -4054,8 +4309,7 @@ void AccessorAssembler::GenerateKeyedLoadICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kKeyedLoadIC, context, receiver, name, slot,
-                  vector);
+  TailCallBuiltin(Builtin::kKeyedLoadIC, context, receiver, name, slot, vector);
 }
 
 void AccessorAssembler::GenerateKeyedLoadICTrampoline_Megamorphic() {
@@ -4067,7 +4321,7 @@ void AccessorAssembler::GenerateKeyedLoadICTrampoline_Megamorphic() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kKeyedLoadIC_Megamorphic, context, receiver, name,
+  TailCallBuiltin(Builtin::kKeyedLoadIC_Megamorphic, context, receiver, name,
                   slot, vector);
 }
 
@@ -4106,7 +4360,7 @@ void AccessorAssembler::GenerateStoreGlobalICTrampoline() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kStoreGlobalIC, context, name, value, slot, vector);
+  TailCallBuiltin(Builtin::kStoreGlobalIC, context, name, value, slot, vector);
 }
 
 void AccessorAssembler::GenerateStoreGlobalICBaseline() {
@@ -4118,7 +4372,7 @@ void AccessorAssembler::GenerateStoreGlobalICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kStoreGlobalIC, context, name, value, slot, vector);
+  TailCallBuiltin(Builtin::kStoreGlobalIC, context, name, value, slot, vector);
 }
 
 void AccessorAssembler::GenerateStoreIC() {
@@ -4145,7 +4399,7 @@ void AccessorAssembler::GenerateStoreICTrampoline() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kStoreIC, context, receiver, name, value, slot,
+  TailCallBuiltin(Builtin::kStoreIC, context, receiver, name, value, slot,
                   vector);
 }
 
@@ -4159,7 +4413,7 @@ void AccessorAssembler::GenerateStoreICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kStoreIC, context, receiver, name, value, slot,
+  TailCallBuiltin(Builtin::kStoreIC, context, receiver, name, value, slot,
                   vector);
 }
 
@@ -4187,7 +4441,7 @@ void AccessorAssembler::GenerateKeyedStoreICTrampoline() {
   auto context = Parameter<Context>(Descriptor::kContext);
   TNode<FeedbackVector> vector = LoadFeedbackVectorForStub();
 
-  TailCallBuiltin(Builtins::kKeyedStoreIC, context, receiver, name, value, slot,
+  TailCallBuiltin(Builtin::kKeyedStoreIC, context, receiver, name, value, slot,
                   vector);
 }
 
@@ -4201,7 +4455,7 @@ void AccessorAssembler::GenerateKeyedStoreICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kKeyedStoreIC, context, receiver, name, value, slot,
+  TailCallBuiltin(Builtin::kKeyedStoreIC, context, receiver, name, value, slot,
                   vector);
 }
 
@@ -4230,8 +4484,8 @@ void AccessorAssembler::GenerateStoreInArrayLiteralICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kStoreInArrayLiteralIC, context, array, index,
-                  value, slot, vector);
+  TailCallBuiltin(Builtin::kStoreInArrayLiteralIC, context, array, index, value,
+                  slot, vector);
 }
 
 void AccessorAssembler::GenerateCloneObjectIC_Slow() {
@@ -4297,7 +4551,7 @@ void AccessorAssembler::GenerateCloneObjectICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kCloneObjectIC, context, source, flags, slot,
+  TailCallBuiltin(Builtin::kCloneObjectIC, context, source, flags, slot,
                   vector);
 }
 
@@ -4430,7 +4684,7 @@ void AccessorAssembler::GenerateCloneObjectIC() {
 
   BIND(&slow);
   {
-    TailCallBuiltin(Builtins::kCloneObjectIC_Slow, context, source, flags, slot,
+    TailCallBuiltin(Builtin::kCloneObjectIC_Slow, context, source, flags, slot,
                     maybe_vector);
   }
 
@@ -4469,7 +4723,7 @@ void AccessorAssembler::GenerateKeyedHasICBaseline() {
   TNode<FeedbackVector> vector = LoadFeedbackVectorFromBaseline();
   TNode<Context> context = LoadContextFromBaseline();
 
-  TailCallBuiltin(Builtins::kKeyedHasIC, context, receiver, name, slot, vector);
+  TailCallBuiltin(Builtin::kKeyedHasIC, context, receiver, name, slot, vector);
 }
 
 void AccessorAssembler::GenerateKeyedHasIC_Megamorphic() {

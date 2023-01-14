@@ -5,7 +5,9 @@
 #include "fuchsia/engine/browser/frame_window_tree_host.h"
 
 #include "base/fuchsia/fuchsia_logging.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "fuchsia/engine/features.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/base/ime/input_method.h"
@@ -58,8 +60,13 @@ FrameWindowTreeHost::FrameWindowTreeHost(
   CreateCompositor();
 
   ui::PlatformWindowInitProperties properties;
-  properties.view_token = std::move(view_token);
+  properties.view_token = std::move(view_token.value);
   properties.view_ref_pair = std::move(view_ref_pair);
+  properties.enable_keyboard =
+      base::FeatureList::IsEnabled(features::kKeyboardInput);
+  properties.enable_virtual_keyboard =
+      base::FeatureList::IsEnabled(features::kVirtualKeyboard);
+  properties.scenic_window_delegate = this;
   CreateAndSetPlatformWindow(std::move(properties));
 
   window_parenting_client_ =
@@ -85,6 +92,7 @@ void FrameWindowTreeHost::OnActivationChanged(bool active) {
 }
 
 void FrameWindowTreeHost::OnWindowStateChanged(
+    ui::PlatformWindowState old_state,
     ui::PlatformWindowState new_state) {
   // Tell the root aura::Window whether it is shown or hidden.
   if (new_state == ui::PlatformWindowState::kMinimized) {
@@ -94,4 +102,18 @@ void FrameWindowTreeHost::OnWindowStateChanged(
     Show();
     web_contents_->WasShown();
   }
+}
+
+void FrameWindowTreeHost::OnWindowBoundsChanged(const BoundsChange& bounds) {
+  aura::WindowTreeHostPlatform::OnBoundsChanged(bounds);
+
+  if (web_contents_->GetMainFrame()->IsRenderFrameLive()) {
+    web_contents_->GetMainFrame()->GetView()->SetInsets(
+        bounds.system_ui_overlap);
+  }
+}
+
+void FrameWindowTreeHost::OnScenicPixelScale(ui::PlatformWindow* window,
+                                             float scale) {
+  scenic_pixel_scale_ = scale;
 }

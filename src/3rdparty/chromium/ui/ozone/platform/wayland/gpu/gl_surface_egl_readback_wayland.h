@@ -6,7 +6,6 @@
 #define UI_OZONE_PLATFORM_WAYLAND_GPU_GL_SURFACE_EGL_READBACK_WAYLAND_H_
 
 #include "base/containers/circular_deque.h"
-#include "base/containers/flat_map.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "ui/ozone/common/gl_surface_egl_readback.h"
 #include "ui/ozone/platform/wayland/gpu/wayland_surface_gpu.h"
@@ -73,7 +72,8 @@ class GLSurfaceEglReadbackWayland : public GLSurfaceEglReadback,
 
   // WaylandSurfaceGpu:
   void OnSubmission(uint32_t buffer_id,
-                    const gfx::SwapResult& swap_result) override;
+                    const gfx::SwapResult& swap_result,
+                    gfx::GpuFenceHandle release_fence) override;
   void OnPresentation(uint32_t buffer_id,
                       const gfx::PresentationFeedback& feedback) override;
 

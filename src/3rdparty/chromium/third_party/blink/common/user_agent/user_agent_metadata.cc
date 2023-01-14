@@ -42,10 +42,10 @@ const std::string UserAgentMetadata::SerializeBrandVersionList() {
 }
 
 // static
-base::Optional<std::string> UserAgentMetadata::Marshal(
-    const base::Optional<UserAgentMetadata>& in) {
+absl::optional<std::string> UserAgentMetadata::Marshal(
+    const absl::optional<UserAgentMetadata>& in) {
   if (!in)
-    return base::nullopt;
+    return absl::nullopt;
   base::Pickle out;
   out.WriteUInt32(kVersionUA);
 
@@ -61,14 +61,15 @@ base::Optional<std::string> UserAgentMetadata::Marshal(
   out.WriteString(in->architecture);
   out.WriteString(in->model);
   out.WriteBool(in->mobile);
+  out.WriteString(in->bitness);
   return std::string(reinterpret_cast<const char*>(out.data()), out.size());
 }
 
 // static
-base::Optional<UserAgentMetadata> UserAgentMetadata::Demarshal(
-    const base::Optional<std::string>& encoded) {
+absl::optional<UserAgentMetadata> UserAgentMetadata::Demarshal(
+    const absl::optional<std::string>& encoded) {
   if (!encoded)
-    return base::nullopt;
+    return absl::nullopt;
 
   base::Pickle pickle(encoded->data(), encoded->size());
   base::PickleIterator in(pickle);
@@ -76,33 +77,35 @@ base::Optional<UserAgentMetadata> UserAgentMetadata::Demarshal(
   uint32_t version;
   UserAgentMetadata out;
   if (!in.ReadUInt32(&version) || version != kVersionUA)
-    return base::nullopt;
+    return absl::nullopt;
 
   uint32_t brand_version_size;
   if (!in.ReadUInt32(&brand_version_size))
-    return base::nullopt;
+    return absl::nullopt;
   for (uint32_t i = 0; i < brand_version_size; i++) {
     UserAgentBrandVersion brand_version;
     if (!in.ReadString(&brand_version.brand))
-      return base::nullopt;
+      return absl::nullopt;
     if (!in.ReadString(&brand_version.major_version))
-      return base::nullopt;
+      return absl::nullopt;
     out.brand_version_list.push_back(std::move(brand_version));
   }
 
   if (!in.ReadString(&out.full_version))
-    return base::nullopt;
+    return absl::nullopt;
   if (!in.ReadString(&out.platform))
-    return base::nullopt;
+    return absl::nullopt;
   if (!in.ReadString(&out.platform_version))
-    return base::nullopt;
+    return absl::nullopt;
   if (!in.ReadString(&out.architecture))
-    return base::nullopt;
+    return absl::nullopt;
   if (!in.ReadString(&out.model))
-    return base::nullopt;
+    return absl::nullopt;
   if (!in.ReadBool(&out.mobile))
-    return base::nullopt;
-  return base::make_optional(std::move(out));
+    return absl::nullopt;
+  if (!in.ReadString(&out.bitness))
+    return absl::nullopt;
+  return absl::make_optional(std::move(out));
 }
 
 bool UserAgentBrandVersion::operator==(const UserAgentBrandVersion& a) const {
@@ -114,7 +117,7 @@ bool operator==(const UserAgentMetadata& a, const UserAgentMetadata& b) {
          a.full_version == b.full_version && a.platform == b.platform &&
          a.platform_version == b.platform_version &&
          a.architecture == b.architecture && a.model == b.model &&
-         a.mobile == b.mobile;
+         a.mobile == b.mobile && a.bitness == b.bitness;
 }
 
 bool operator==(const UserAgentOverride& a, const UserAgentOverride& b) {

@@ -16,7 +16,7 @@
 
 namespace sandbox {
 
-class AppContainerProfile;
+class AppContainer;
 class PolicyInfo;
 
 class TargetPolicy {
@@ -32,7 +32,8 @@ class TargetPolicy {
     SUBSYS_REGISTRY,         // Creation and opening of registry keys.
     SUBSYS_SYNC,             // Creation of named sync objects.
     SUBSYS_WIN32K_LOCKDOWN,  // Win32K Lockdown related policy.
-    SUBSYS_SIGNED_BINARY     // Signed binary policy.
+    SUBSYS_SIGNED_BINARY,    // Signed binary policy.
+    SUBSYS_SOCKET            // Socket brokering policy.
   };
 
   // Allowable semantics when a rule is matched.
@@ -59,7 +60,8 @@ class TargetPolicy {
     FAKE_USER_GDI_INIT,     // Fakes user32 and gdi32 initialization. This can
                             // be used to allow the DLLs to load and initialize
                             // even if the process cannot access that subsystem.
-    SIGNED_ALLOW_LOAD       // Allows loading the module when CIG is enabled.
+    SIGNED_ALLOW_LOAD,      // Allows loading the module when CIG is enabled.
+    SOCKET_ALLOW_BROKER     // Allows brokering of sockets.
   };
 
   // Increments the reference count of this object. The reference count must
@@ -261,8 +263,8 @@ class TargetPolicy {
   virtual ResultCode AddAppContainerProfile(const wchar_t* package_name,
                                             bool create_profile) = 0;
 
-  // Get the configured AppContainerProfile.
-  virtual scoped_refptr<AppContainerProfile> GetAppContainerProfile() = 0;
+  // Get the configured AppContainer.
+  virtual scoped_refptr<AppContainer> GetAppContainer() = 0;
 
   // Set effective token that will be used for creating the initial and
   // lockdown tokens. The token the caller passes must remain valid for the

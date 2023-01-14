@@ -5,7 +5,7 @@
 #include "third_party/blink/renderer/platform/graphics/compositor_filter_operations.h"
 
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace blink {
@@ -35,6 +35,15 @@ void CompositorFilterOperations::AppendHueRotateFilter(float amount) {
   filter_operations_.Append(cc::FilterOperation::CreateHueRotateFilter(amount));
 }
 
+void CompositorFilterOperations::AppendColorMatrixFilter(Vector<float> values) {
+  DCHECK_EQ(values.size(), 20u);
+  cc::FilterOperation::Matrix matrix = {};
+  for (WTF::wtf_size_t i = 0; i < values.size(); ++i)
+    matrix[i] = values[i];
+  filter_operations_.Append(
+      cc::FilterOperation::CreateColorMatrixFilter(matrix));
+}
+
 void CompositorFilterOperations::AppendInvertFilter(float amount) {
   filter_operations_.Append(cc::FilterOperation::CreateInvertFilter(amount));
 }
@@ -60,7 +69,7 @@ void CompositorFilterOperations::AppendBlurFilter(float amount,
 
 void CompositorFilterOperations::AppendDropShadowFilter(IntPoint offset,
                                                         float std_deviation,
-                                                        Color color) {
+                                                        const Color& color) {
   gfx::Point gfx_offset(offset.X(), offset.Y());
   filter_operations_.Append(cc::FilterOperation::CreateDropShadowFilter(
       gfx_offset, std_deviation, color.Rgb()));

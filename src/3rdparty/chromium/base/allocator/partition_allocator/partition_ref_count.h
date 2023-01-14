@@ -8,13 +8,13 @@
 #include <atomic>
 #include <cstdint>
 
+#include "base/allocator/buildflags.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_constants.h"
 #include "base/allocator/partition_allocator/partition_alloc_forward.h"
-#include "base/allocator/partition_allocator/partition_cookie.h"
 #include "base/base_export.h"
-#include "base/check_op.h"
-#include "base/notreached.h"
-#include "base/partition_alloc_buildflags.h"
+#include "base/compiler_specific.h"
+#include "base/dcheck_is_on.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -22,6 +22,15 @@ namespace base {
 namespace internal {
 
 #if BUILDFLAG(USE_BACKUP_REF_PTR)
+
+namespace {
+
+[[noreturn]] NOINLINE NOT_TAIL_CALLED void DoubleFreeOrCorruptionDetected() {
+  NO_CODE_FOLDING();
+  IMMEDIATE_CRASH();
+}
+
+}  // namespace
 
 // Special-purpose atomic reference count class used by BackupRefPtrImpl.
 // The least significant bit of the count is reserved for tracking the liveness
@@ -84,7 +93,8 @@ class BASE_EXPORT PartitionRefCount {
 #endif
 
     int32_t old_count = count_.fetch_sub(1, std::memory_order_release);
-    PA_CHECK(old_count & 1);  // double-free detection
+    if (UNLIKELY(!(old_count & 1)))
+      DoubleFreeOrCorruptionDetected();
     if (old_count == 1) {
       std::atomic_thread_fence(std::memory_order_acquire);
 #if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
@@ -97,7 +107,12 @@ class BASE_EXPORT PartitionRefCount {
     return false;
   }
 
-  ALWAYS_INLINE bool HasOneRef() {
+  // "IsAlive" means is allocated and not freed. "KnownRefs" refers to
+  // raw_ptr<T> references. There may be other references from raw pointers or
+  // unique_ptr, but we have no way of tracking them, so we hope for the best.
+  // To summarize, the function returns whether we believe the allocation can be
+  // safely freed.
+  ALWAYS_INLINE bool IsAliveWithNoKnownRefs() {
 #if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
     CheckCookie();
 #endif
@@ -142,7 +157,7 @@ ALWAYS_INLINE PartitionRefCount::PartitionRefCount()
 {
 }
 
-#if BUILDFLAG(REF_COUNT_AT_END_OF_ALLOCATION)
+#if BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
 
 static_assert(base::kAlignment % alignof(PartitionRefCount) == 0,
               "kAlignment must be multiples of alignof(PartitionRefCount).");
@@ -153,9 +168,42 @@ static constexpr size_t kInSlotRefCountBufferSize = sizeof(PartitionRefCount);
 constexpr size_t kPartitionRefCountOffsetAdjustment = 0;
 constexpr size_t kPartitionPastAllocationAdjustment = 0;
 
-BASE_EXPORT PartitionRefCount* PartitionRefCountPointer(void* slot_start);
+constexpr size_t kPartitionRefCountIndexMultiplier =
+    SystemPageSize() /
+    (sizeof(PartitionRefCount) * (kSuperPageSize / SystemPageSize()));
 
-#else  // BUILDFLAG(REF_COUNT_AT_END_OF_ALLOCATION)
+static_assert((sizeof(PartitionRefCount) * (kSuperPageSize / SystemPageSize()) *
+                   kPartitionRefCountIndexMultiplier <=
+               SystemPageSize()),
+              "PartitionRefCount Bitmap size must be smaller than or equal to "
+              "<= SystemPageSize().");
+
+ALWAYS_INLINE PartitionRefCount* PartitionRefCountPointer(void* slot_start) {
+#if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
+  CheckThatSlotOffsetIsZero(slot_start);
+#endif
+  uintptr_t slot_start_as_uintptr = reinterpret_cast<uintptr_t>(slot_start);
+  if (LIKELY(slot_start_as_uintptr & SystemPageOffsetMask())) {
+    uintptr_t refcount_ptr_as_uintptr =
+        slot_start_as_uintptr - sizeof(PartitionRefCount);
+#if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
+    PA_CHECK(refcount_ptr_as_uintptr % alignof(PartitionRefCount) == 0);
+#endif
+    return reinterpret_cast<PartitionRefCount*>(refcount_ptr_as_uintptr);
+  } else {
+    PartitionRefCount* bitmap_base = reinterpret_cast<PartitionRefCount*>(
+        (slot_start_as_uintptr & kSuperPageBaseMask) + SystemPageSize() * 2);
+    size_t index =
+        ((slot_start_as_uintptr & kSuperPageOffsetMask) >> SystemPageShift()) *
+        kPartitionRefCountIndexMultiplier;
+#if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
+    PA_CHECK(sizeof(PartitionRefCount) * index <= SystemPageSize());
+#endif
+    return bitmap_base + index;
+  }
+}
+
+#else  // BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
 
 // Allocate extra space for the reference count to satisfy the alignment
 // requirement.
@@ -168,11 +216,13 @@ constexpr size_t kPartitionRefCountOffsetAdjustment = kInSlotRefCountBufferSize;
 constexpr size_t kPartitionPastAllocationAdjustment = 1;
 
 ALWAYS_INLINE PartitionRefCount* PartitionRefCountPointer(void* slot_start) {
-  DCheckGetSlotOffsetIsZero(slot_start);
+#if DCHECK_IS_ON() || BUILDFLAG(ENABLE_BACKUP_REF_PTR_SLOW_CHECKS)
+  CheckThatSlotOffsetIsZero(slot_start);
+#endif
   return reinterpret_cast<PartitionRefCount*>(slot_start);
 }
 
-#endif  // BUILDFLAG(REF_COUNT_AT_END_OF_ALLOCATION)
+#endif  // BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
 
 static_assert(sizeof(PartitionRefCount) <= kInSlotRefCountBufferSize,
               "PartitionRefCount should fit into the in-slot buffer.");

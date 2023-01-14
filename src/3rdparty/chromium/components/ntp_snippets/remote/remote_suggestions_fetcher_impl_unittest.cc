@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
 #include "base/json/json_reader.h"
-#include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -32,13 +31,16 @@
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/variations/entropy_provider.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "net/http/http_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace ntp_snippets {
 
@@ -204,7 +206,10 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
     fetcher_->SetClockForTesting(task_environment_.GetMockClock());
   }
 
-  void SignIn() { identity_test_env_.MakePrimaryAccountAvailable(kTestEmail); }
+  void SignIn() {
+    identity_test_env_.MakePrimaryAccountAvailable(kTestEmail,
+                                                   signin::ConsentLevel::kSync);
+  }
 
   RemoteSuggestionsFetcher::SnippetsAvailableCallback
   ToSnippetsAvailableCallback(MockSnippetsAvailableCallback* callback) {
@@ -262,6 +267,8 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
  private:
   test::RemoteSuggestionsTestUtils utils_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   std::unique_ptr<RemoteSuggestionsFetcherImpl> fetcher_;
   std::unique_ptr<UserClassifier> user_classifier_;
   MockSnippetsAvailableCallback mock_callback_;
@@ -652,8 +659,7 @@ TEST_F(RemoteSuggestionsFetcherImplTest,
   ASSERT_THAT(fetched_categories->size(), Eq(1u));
   EXPECT_THAT(fetched_categories->front().info.additional_action(),
               Eq(ContentSuggestionsAdditionalAction::NONE));
-  EXPECT_THAT(fetched_categories->front().info.title(),
-              Eq(base::UTF8ToUTF16("Articles for Me")));
+  EXPECT_THAT(fetched_categories->front().info.title(), Eq(u"Articles for Me"));
 }
 
 TEST_F(RemoteSuggestionsFetcherImplTest, ExclusiveCategoryOnly) {
@@ -714,7 +720,7 @@ TEST_F(RemoteSuggestionsFetcherImplTest, ExclusiveCategoryOnly) {
 
   RequestParams params = test_params();
   params.exclusive_category =
-      base::Optional<Category>(Category::FromRemoteCategory(2));
+      absl::optional<Category>(Category::FromRemoteCategory(2));
 
   fetcher().FetchSnippets(params,
                           ToSnippetsAvailableCallback(&mock_callback()));

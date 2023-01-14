@@ -7,6 +7,9 @@
 
 namespace continuous_search {
 
+// Keep values in this enum up to date with the entry for
+// SearchResultExtractorClientStatus in enums.xml.
+
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.continuous_search
 enum SearchResultExtractorClientStatus {
   kSuccess,
@@ -16,6 +19,8 @@ enum SearchResultExtractorClientStatus {
   kNativeNotInitialized,
   kAlreadyCapturing,
   kWebContentsHasNonSrpUrl,
+  kNotEnoughResults,
+  kMaxValue,
 };
 
 }  // namespace continuous_search

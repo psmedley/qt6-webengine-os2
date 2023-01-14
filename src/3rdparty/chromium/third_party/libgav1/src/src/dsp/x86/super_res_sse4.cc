@@ -90,11 +90,13 @@ void SuperResCoefficients_SSE4_1(const int upscaled_width,
   } while (--x != 0);
 }
 
-void SuperRes_SSE4_1(const void* const coefficients, void* const source,
+void SuperRes_SSE4_1(const void* LIBGAV1_RESTRICT const coefficients,
+                     void* LIBGAV1_RESTRICT const source,
                      const ptrdiff_t source_stride, const int height,
                      const int downscaled_width, const int upscaled_width,
                      const int initial_subpixel_x, const int step,
-                     void* const dest, const ptrdiff_t dest_stride) {
+                     void* LIBGAV1_RESTRICT const dest,
+                     const ptrdiff_t dest_stride) {
   auto* src = static_cast<uint8_t*>(source) - DivideBy2(kSuperResFilterTaps);
   auto* dst = static_cast<uint8_t*>(dest);
   int y = height;
@@ -156,8 +158,12 @@ void SuperRes_SSE4_1(const void* const coefficients, void* const source,
 
 void Init8bpp() {
   Dsp* dsp = dsp_internal::GetWritableDspTable(kBitdepth8);
+#if DSP_ENABLED_8BPP_SSE4_1(SuperResCoefficients)
   dsp->super_res_coefficients = SuperResCoefficients_SSE4_1;
+#endif  // DSP_ENABLED_8BPP_SSE4_1(SuperResCoefficients)
+#if DSP_ENABLED_8BPP_SSE4_1(SuperRes)
   dsp->super_res = SuperRes_SSE4_1;
+#endif  // DSP_ENABLED_8BPP_SSE4_1(SuperRes)
 }
 
 }  // namespace
@@ -223,11 +229,13 @@ void SuperResCoefficients_SSE4_1(const int upscaled_width,
 }
 
 template <int bitdepth>
-void SuperRes_SSE4_1(const void* const coefficients, void* const source,
+void SuperRes_SSE4_1(const void* LIBGAV1_RESTRICT const coefficients,
+                     void* LIBGAV1_RESTRICT const source,
                      const ptrdiff_t source_stride, const int height,
                      const int downscaled_width, const int upscaled_width,
                      const int initial_subpixel_x, const int step,
-                     void* const dest, const ptrdiff_t dest_stride) {
+                     void* LIBGAV1_RESTRICT const dest,
+                     const ptrdiff_t dest_stride) {
   auto* src = static_cast<uint16_t*>(source) - DivideBy2(kSuperResFilterTaps);
   auto* dst = static_cast<uint16_t*>(dest);
   int y = height;

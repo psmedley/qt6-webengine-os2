@@ -25,6 +25,7 @@
 
 namespace dawn_native { namespace metal {
 
+    class CommandRecordingContext;
     class Device;
 
     MTLPixelFormat MetalPixelFormat(wgpu::TextureFormat format);
@@ -35,36 +36,57 @@ namespace dawn_native { namespace metal {
 
     class Texture final : public TextureBase {
       public:
-        Texture(Device* device, const TextureDescriptor* descriptor);
-        Texture(Device* device,
-                const TextureDescriptor* descriptor,
-                NSPRef<id<MTLTexture>> mtlTexture);
-        Texture(Device* device,
-                const ExternalImageDescriptor* descriptor,
-                IOSurfaceRef ioSurface,
-                uint32_t plane);
+        static ResultOrError<Ref<Texture>> Create(Device* device,
+                                                  const TextureDescriptor* descriptor);
+        static ResultOrError<Ref<Texture>> CreateFromIOSurface(
+            Device* device,
+            const ExternalImageDescriptor* descriptor,
+            IOSurfaceRef ioSurface,
+            uint32_t plane);
+        static Ref<Texture> CreateWrapping(Device* device,
+                                           const TextureDescriptor* descriptor,
+                                           NSPRef<id<MTLTexture>> wrapped);
 
         id<MTLTexture> GetMTLTexture();
 
-        void EnsureSubresourceContentInitialized(const SubresourceRange& range);
+        void EnsureSubresourceContentInitialized(CommandRecordingContext* commandContext,
+                                                 const SubresourceRange& range);
 
       private:
+        using TextureBase::TextureBase;
         ~Texture() override;
+
+        NSRef<MTLTextureDescriptor> CreateMetalTextureDescriptor() const;
+
+        MaybeError InitializeAsInternalTexture(const TextureDescriptor* descriptor);
+        MaybeError InitializeFromIOSurface(const ExternalImageDescriptor* descriptor,
+                                           const TextureDescriptor* textureDescriptor,
+                                           IOSurfaceRef ioSurface,
+                                           uint32_t plane);
+        void InitializeAsWrapping(const TextureDescriptor* descriptor,
+                                  NSPRef<id<MTLTexture>> wrapped);
 
         void DestroyImpl() override;
 
-        MaybeError ClearTexture(const SubresourceRange& range, TextureBase::ClearValue clearValue);
+        MaybeError ClearTexture(CommandRecordingContext* commandContext,
+                                const SubresourceRange& range,
+                                TextureBase::ClearValue clearValue);
 
         NSPRef<id<MTLTexture>> mMtlTexture;
+        MTLTextureUsage mMtlUsage;
     };
 
     class TextureView final : public TextureViewBase {
       public:
-        TextureView(TextureBase* texture, const TextureViewDescriptor* descriptor);
+        static ResultOrError<Ref<TextureView>> Create(TextureBase* texture,
+                                                      const TextureViewDescriptor* descriptor);
 
         id<MTLTexture> GetMTLTexture();
 
       private:
+        using TextureViewBase::TextureViewBase;
+        MaybeError Initialize(const TextureViewDescriptor* descriptor);
+
         NSPRef<id<MTLTexture>> mMtlTextureView;
     };
 

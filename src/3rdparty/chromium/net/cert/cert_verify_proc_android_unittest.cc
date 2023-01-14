@@ -104,7 +104,8 @@ CreateMockRequestWithInvalidCertificate() {
                   "CERTIFICATE", &der);
   if (!r)
     return r;
-  *result = X509Certificate::CreateFromBytes(der.data(), der.length());
+  *result =
+      X509Certificate::CreateFromBytes(base::as_bytes(base::make_span(der)));
   if (!result) {
     return ::testing::AssertionFailure()
            << "X509Certificate::CreateFromBytes() failed";
@@ -157,7 +158,7 @@ class CertVerifyProcAndroidTestWithAIAFetching : public testing::Test {
     ::testing::AssertionResult r = ReadTestAIARoot(&root_);
     if (!r)
       return r;
-    scoped_test_root_.reset(new ScopedTestRoot(root_.get()));
+    scoped_test_root_ = std::make_unique<ScopedTestRoot>(root_.get());
     return ::testing::AssertionSuccess();
   }
 

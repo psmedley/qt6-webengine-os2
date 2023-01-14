@@ -17,13 +17,13 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check_op.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -61,6 +61,7 @@
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -79,6 +80,7 @@
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/rrect_f.h"
 #include "ui/gfx/skia_util.h"
 
@@ -303,7 +305,7 @@ struct GLRenderer::DrawRenderPassDrawQuadParams {
   gfx::Transform quad_to_target_transform;
   const cc::FilterOperations* filters = nullptr;
   const cc::FilterOperations* backdrop_filters = nullptr;
-  base::Optional<gfx::RRectF> backdrop_filter_bounds;
+  absl::optional<gfx::RRectF> backdrop_filter_bounds;
 
   // Whether the texture to be sampled from needs to be flipped.
   bool source_needs_flip = false;
@@ -867,7 +869,7 @@ bool GLRenderer::ShouldApplyBackdropFilters(
 gfx::Rect GLRenderer::GetBackdropBoundingBoxForRenderPassQuad(
     DrawRenderPassDrawQuadParams* params,
     gfx::Transform* backdrop_filter_bounds_transform,
-    base::Optional<gfx::RRectF>* backdrop_filter_bounds,
+    absl::optional<gfx::RRectF>* backdrop_filter_bounds,
     gfx::Rect* unclipped_rect) const {
   DCHECK(backdrop_filter_bounds_transform);
   DCHECK(backdrop_filter_bounds);
@@ -1053,7 +1055,7 @@ static sk_sp<SkImage> FinalizeImage(sk_sp<SkSurface> surface) {
 sk_sp<SkImage> GLRenderer::ApplyBackdropFilters(
     DrawRenderPassDrawQuadParams* params,
     const gfx::Rect& unclipped_rect,
-    const base::Optional<gfx::RRectF>& backdrop_filter_bounds,
+    const absl::optional<gfx::RRectF>& backdrop_filter_bounds,
     const gfx::Transform& backdrop_filter_bounds_transform) {
   DCHECK(ShouldApplyBackdropFilters(params));
   DCHECK(params->backdrop_filter_quality > 0.0f &&
@@ -1421,7 +1423,7 @@ void GLRenderer::UpdateRPDQShadersForBlending(
   if (params->use_shaders_for_blending) {
     // Compute a bounding box around the pixels that will be visible through
     // the quad.
-    base::Optional<gfx::RRectF> backdrop_filter_bounds;
+    absl::optional<gfx::RRectF> backdrop_filter_bounds;
     gfx::Transform backdrop_filter_bounds_transform;
     gfx::Rect unclipped_rect;
     params->background_rect = GetBackdropBoundingBoxForRenderPassQuad(
@@ -1519,18 +1521,21 @@ bool GLRenderer::UpdateRPDQWithSkiaFilters(
         filter = sk_ref_sp(filter->getInput(0));
       }
       if (filter) {
-        gfx::Rect clip_rect = quad->shared_quad_state->clip_rect;
-        if (clip_rect.IsEmpty()) {
-          clip_rect = current_draw_rect_;
-        }
+        gfx::Rect clip_rect =
+            quad->shared_quad_state->clip_rect.value_or(current_draw_rect_);
         gfx::Transform transform = params->quad_to_target_transform;
+        transform.FlattenTo2d();
         if (!transform.IsInvertible()) {
           return false;
         }
-        gfx::QuadF clip_quad = gfx::QuadF(gfx::RectF(clip_rect));
-        gfx::QuadF local_clip =
-            cc::MathUtil::InverseMapQuadToLocalSpace(transform, clip_quad);
-        params->dst_rect.Intersect(local_clip.BoundingBox());
+        // If the transform has perspective, there might be visible content
+        // outside of the bounds of the quad.
+        if (!transform.HasPerspective()) {
+          gfx::QuadF clip_quad = gfx::QuadF(gfx::RectF(clip_rect));
+          gfx::QuadF local_clip =
+              cc::MathUtil::InverseMapQuadToLocalSpace(transform, clip_quad);
+          params->dst_rect.Intersect(local_clip.BoundingBox());
+        }
         // If we've been fully clipped out (by crop rect or clipping), there's
         // nothing to draw.
         if (params->dst_rect.IsEmpty()) {
@@ -2158,9 +2163,9 @@ void GLRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
 
   // Apply any color matrix that may be present.
   if (HasOutputColorMatrix()) {
-    const SkMatrix44& output_color_matrix = output_surface_->color_matrix();
-    const SkVector4 color_v(color_f.fR, color_f.fG, color_f.fB, color_f.fA);
-    const SkVector4 result = output_color_matrix * color_v;
+    const skia::Matrix44& output_color_matrix = output_surface_->color_matrix();
+    const skia::Vector4 color_v(color_f.fR, color_f.fG, color_f.fB, color_f.fA);
+    const skia::Vector4 result = output_color_matrix * color_v;
     std::copy(result.fData, result.fData + 4, color_f.vec());
     color = color_f.toSkColor();
   }
@@ -2598,7 +2603,7 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
   }
 #endif
 
-  // TODO(jbauman): Use base::Optional when available.
+  // TODO(jbauman): Use absl::optional when available.
   std::unique_ptr<DisplayResourceProviderGL::ScopedSamplerGL> v_plane_lock;
   if (uv_texture_mode == UV_TEXTURE_MODE_U_V) {
     v_plane_lock = std::make_unique<DisplayResourceProviderGL::ScopedSamplerGL>(
@@ -2832,7 +2837,8 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
   // Bind the program to the GL state.
   SetUseProgram(draw_cache_.program_key, locked_quad.color_space(),
                 CurrentRenderPassColorSpace(),
-                /*adjust_src_white_level=*/draw_cache_.is_video_frame);
+                /*adjust_src_white_level=*/draw_cache_.is_video_frame,
+                locked_quad.hdr_metadata());
 
   if (current_program_->rounded_corner_rect_location() != -1) {
     SetShaderRoundedCorner(
@@ -3453,7 +3459,15 @@ void GLRenderer::SwapBuffersSkipped() {
   }
 }
 
-void GLRenderer::SwapBuffersComplete() {
+void GLRenderer::SwapBuffersComplete(gfx::GpuFenceHandle release_fence) {
+  // Returned release fence is signalled when the latest swap is presented,
+  // and tells us we can re-use the buffers from the /previous/ swap.
+  if (swapping_overlay_resources_.size() > 1) {
+    for (auto& lock : swapping_overlay_resources_[0]) {
+      lock->SetReleaseFence(release_fence.Clone());
+    }
+  }
+
   if (settings_->release_overlay_resources_after_gpu_query) {
     // Once a resource has been swap-ACKed, send a query to the GPU process to
     // ask if the resource is no longer being consumed by the system compositor.
@@ -3496,6 +3510,19 @@ void GLRenderer::SwapBuffersComplete() {
     // that once a swap buffer has completed we can remove the oldest buffers
     // from the queue, but only once we've swapped another frame afterward.
     if (swapping_overlay_resources_.size() > 1) {
+      auto& read_lock_release_fence_overlay_locks =
+          read_lock_release_fence_overlay_locks_.emplace_back();
+      if (!release_fence.is_null()) {
+        auto read_lock_iter = std::partition(
+            swapping_overlay_resources_.front().begin(),
+            swapping_overlay_resources_.front().end(),
+            [](auto& lock) { return !lock->HasReadLockFence(); });
+        read_lock_release_fence_overlay_locks.insert(
+            read_lock_release_fence_overlay_locks.end(),
+            std::make_move_iterator(read_lock_iter),
+            std::make_move_iterator(swapping_overlay_resources_.front().end()));
+      }
+
       DisplayResourceProviderGL::ScopedBatchReturnResources returner(
           resource_provider());
       swapping_overlay_resources_.pop_front();
@@ -3509,6 +3536,11 @@ void GLRenderer::SwapBuffersComplete() {
     // passed.
     DCHECK(displayed_overlay_textures_.empty());
   }
+}
+
+void GLRenderer::BuffersPresented() {
+  if (!read_lock_release_fence_overlay_locks_.empty())
+    read_lock_release_fence_overlay_locks_.pop_front();
 }
 
 void GLRenderer::DidReceiveTextureInUseResponses(
@@ -3593,9 +3625,11 @@ void GLRenderer::BindFramebufferToTexture(
                                  offscreen_stencil_renderbuffer_id_);
   }
 
+#if EXPENSIVE_DCHECKS_ARE_ON()
   DCHECK(gl_->CheckFramebufferStatus(GL_FRAMEBUFFER) ==
              GL_FRAMEBUFFER_COMPLETE ||
          IsContextLost());
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 
   if (overdraw_feedback_) {
     SetupOverdrawFeedback();
@@ -3658,15 +3692,21 @@ void GLRenderer::PrepareGeometry(BoundGeometry binding) {
 void GLRenderer::SetUseProgram(const ProgramKey& program_key_no_color,
                                const gfx::ColorSpace& src_color_space,
                                const gfx::ColorSpace& dst_color_space,
-                               bool adjust_src_white_level) {
+                               bool adjust_src_white_level,
+                               absl::optional<gfx::HDRMetadata> hdr_metadata) {
   DCHECK(dst_color_space.IsValid());
   gfx::ColorSpace adjusted_src_color_space = src_color_space;
-  if (adjust_src_white_level) {
-    // If the input color space is HDR, and it did not specify a white level,
-    // override it with the frame's white level.
+  if (adjust_src_white_level && src_color_space.IsHDR()) {
+    // TODO(b/183236148): consider using the destination's HDR static metadata
+    // in current_frame()->display_color_spaces.hdr_static_metadata() and the
+    // color volume metadata in |src_hdr_metadata| for the tone mapping; e.g.
+    // the content might be mastered in 0-1000 nits but the display only be able
+    // to represent 0 to 500.
     adjusted_src_color_space = src_color_space.GetWithSDRWhiteLevel(
         current_frame()->display_color_spaces.GetSDRWhiteLevel());
   }
+  // TODO(b/183236148): consider using the destination's HDR static metadata
+  // in current_frame()->display_color_spaces.hdr_static_metadata().
 
   ProgramKey program_key = program_key_no_color;
   const gfx::ColorTransform* color_transform =
@@ -3681,7 +3721,7 @@ void GLRenderer::SetUseProgram(const ProgramKey& program_key_no_color,
   // Create and set the program if needed.
   std::unique_ptr<Program>& program = program_cache_[program_key];
   if (!program) {
-    program.reset(new Program);
+    program = std::make_unique<Program>();
     program->Initialize(output_surface_->context_provider(), program_key);
   }
   DCHECK(program);
@@ -3730,8 +3770,7 @@ const gfx::ColorTransform* GLRenderer::GetColorTransform(
   std::unique_ptr<gfx::ColorTransform>& transform =
       color_transform_cache_[dst][src];
   if (!transform) {
-    transform = gfx::ColorTransform::NewColorTransform(
-        src, dst, gfx::ColorTransform::Intent::INTENT_PERCEPTUAL);
+    transform = gfx::ColorTransform::NewColorTransform(src, dst);
   }
   return transform.get();
 }
@@ -3908,9 +3947,10 @@ void GLRenderer::ScheduleDCLayers() {
     const gfx::Rect& content_rect = dc_layer_overlay.content_rect;
     const gfx::Rect& quad_rect = dc_layer_overlay.quad_rect;
     DCHECK(dc_layer_overlay.transform.IsFlat());
-    const SkMatrix44& transform = dc_layer_overlay.transform.matrix();
-    bool is_clipped = dc_layer_overlay.is_clipped;
-    const gfx::Rect& clip_rect = dc_layer_overlay.clip_rect;
+    const skia::Matrix44& transform = dc_layer_overlay.transform.matrix();
+    bool is_clipped = dc_layer_overlay.clip_rect.has_value();
+    const gfx::Rect& clip_rect =
+        dc_layer_overlay.clip_rect.value_or(gfx::Rect());
     unsigned protected_video_type =
         static_cast<unsigned>(dc_layer_overlay.protected_video_type);
 
@@ -3957,12 +3997,10 @@ void GLRenderer::ScheduleOutputSurfaceAsOverlay() {
   DCHECK(texture_id || IsContextLost());
   // Output surface is also z-order 0.
   int plane_z_order = 0;
-  // Output surface always uses the full texture.
-  gfx::RectF uv_rect(0.f, 0.f, 1.f, 1.f);
 
   context_support_->ScheduleOverlayPlane(
       plane_z_order, overlay_candidate.transform, texture_id,
-      ToNearestRect(overlay_candidate.display_rect), uv_rect,
+      ToNearestRect(overlay_candidate.display_rect), overlay_candidate.uv_rect,
       overlay_candidate.enable_blending, overlay_candidate.gpu_fence_id);
 }
 
@@ -4225,7 +4263,7 @@ GLRenderer::ScheduleRenderPassDrawQuad(const CALayerOverlay* ca_layer_overlay) {
       ca_layer_overlay->shared_state->rounded_corner_bounds.GetSimpleRadius()};
 
   GLint sorting_context_id = ca_layer_overlay->shared_state->sorting_context_id;
-  SkMatrix44 transform = ca_layer_overlay->shared_state->transform;
+  skia::Matrix44 transform = ca_layer_overlay->shared_state->transform;
   GLfloat gl_transform[16];
   transform.asColMajorf(gl_transform);
   unsigned filter = ca_layer_overlay->filter;
@@ -4353,7 +4391,7 @@ ResourceFormat GLRenderer::CurrentRenderPassResourceFormat() const {
 bool GLRenderer::HasOutputColorMatrix() const {
   const bool is_root_render_pass =
       current_frame()->current_render_pass == current_frame()->root_render_pass;
-  const SkMatrix44& output_color_matrix = output_surface_->color_matrix();
+  const skia::Matrix44& output_color_matrix = output_surface_->color_matrix();
   return is_root_render_pass && !output_color_matrix.isIdentity();
 }
 
@@ -4382,40 +4420,39 @@ bool GLRenderer::CanUseFastSolidColorDraw(
   if (!sqs->quad_to_target_transform.Preserves2dAxisAlignment())
     return false;
 
-  // If no blending is needed for the quad, then fast draw can be safely used.
-  if (!quad->ShouldDrawWithBlending() && SkColorGetA(quad->color) == 255)
+  // When no blending is needed, glClear can be used.
+  SkBlendMode blend_mode = quad->shared_quad_state->blend_mode;
+  if (blend_mode == SkBlendMode::kSrc)
     return true;
 
-  // It is safe to use glClearColor with alpha blending when the render
-  // pass has transparent background because the blending happens against
-  // (0, 0, 0, 0) which is the same as replacing the destination color & alpha.
-  // However, if the render pass does not have a transparent background, using
-  // glClear with a color that has alpha or opacity, would end up punching an
-  // unwanted hole in the frame buffer.
-  if (!current_frame()->current_render_pass->has_transparent_background)
-    return false;
+  if (blend_mode == SkBlendMode::kSrcOver) {
+    // Blending will replace destination color and alpha if the quad is opaque.
+    if (SkColorGetA(quad->color) == 255 &&
+        quad->shared_quad_state->opacity >= 1.0f) {
+      return true;
+    }
 
-  // If the color has any alpha and blending is needed, ensure the blend mode
-  // allows replacing destination color & alpha.
-  const bool is_translucent =
-      SkColorGetA(quad->color) != 255 || quad->shared_quad_state->opacity < 1.f;
-  if (is_translucent &&
-      !(quad->shared_quad_state->blend_mode == SkBlendMode::kSrc ||
-        quad->shared_quad_state->blend_mode == SkBlendMode::kSrcOver)) {
-    return false;
+    // It is safe to use glClearColor with alpha blending when the render
+    // pass has transparent background and nothing has drawn to the same rect
+    // area because the blending happens against (0, 0, 0, 0) which is the same
+    // as replacing the destination color & alpha.
+    if (!current_frame()->current_render_pass->has_transparent_background)
+      return false;
+
+    gfx::RectF quad_rect_in_target(quad->visible_rect);
+    sqs->quad_to_target_transform.TransformRect(&quad_rect_in_target);
+    const gfx::Rect quad_rect_in_target_rounded =
+        gfx::ToRoundedRect(quad_rect_in_target);
+
+    // If the quad does not intersect any region that has already been drawn
+    // to, then blending is not an issue and fast draw path can be used.
+    for (const auto& rect : drawn_rects_)
+      if (quad_rect_in_target_rounded.Intersects(rect))
+        return false;
+    return true;
   }
 
-  gfx::RectF quad_rect_in_target(quad->visible_rect);
-  sqs->quad_to_target_transform.TransformRect(&quad_rect_in_target);
-  const gfx::Rect quad_rect_in_target_rounded =
-      gfx::ToRoundedRect(quad_rect_in_target);
-
-  // If the quad does not intersect with any region that has already been drawn
-  // to, then blending is not an issue and fast draw path can be used.
-  for (const auto& rect : drawn_rects_)
-    if (quad_rect_in_target_rounded.Intersects(rect))
-      return false;
-  return true;
+  return false;
 }
 
 void GLRenderer::AllocateRenderPassResourceIfNeeded(

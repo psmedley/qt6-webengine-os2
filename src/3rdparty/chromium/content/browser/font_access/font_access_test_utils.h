@@ -12,16 +12,22 @@ namespace content {
 class TestFontAccessPermissionManager : public MockPermissionManager {
  public:
   TestFontAccessPermissionManager();
+
+  TestFontAccessPermissionManager(const TestFontAccessPermissionManager&) =
+      delete;
+  TestFontAccessPermissionManager& operator=(
+      const TestFontAccessPermissionManager&) = delete;
+
   ~TestFontAccessPermissionManager() override;
 
   using PermissionCallback =
       base::OnceCallback<void(blink::mojom::PermissionStatus)>;
 
-  int RequestPermission(PermissionType permissions,
-                        RenderFrameHost* render_frame_host,
-                        const GURL& requesting_origin,
-                        bool user_gesture,
-                        PermissionCallback callback) override;
+  void RequestPermission(PermissionType permissions,
+                         RenderFrameHost* render_frame_host,
+                         const GURL& requesting_origin,
+                         bool user_gesture,
+                         PermissionCallback callback) override;
 
   blink::mojom::PermissionStatus GetPermissionStatusForFrame(
       PermissionType permission,

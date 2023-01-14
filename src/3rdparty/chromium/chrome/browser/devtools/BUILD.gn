@@ -86,7 +86,6 @@ static_library("devtools") {
   sources = []
 
   configs += [
-    "//build/config/compiler:no_size_t_to_int_warning",
     "//build/config/compiler:wexit_time_destructors",
     "//build/config:precompiled_headers",
   ]
@@ -121,9 +120,11 @@ static_library("devtools") {
       "//chrome:strings",
       "//chrome/app/theme:theme_resources",
       "//chrome/browser:browser_process",
+      "//chrome/browser/media/router:media_router_feature",
       "//chrome/browser/profiles:profile",
       "//chrome/common",
       "//components/guest_view/browser",
+      "//components/infobars/content",
       "//components/infobars/core",
       "//components/javascript_dialogs",
       "//components/keep_alive_registry",

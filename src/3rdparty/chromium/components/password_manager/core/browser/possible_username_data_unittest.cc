@@ -6,7 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
-#include "components/autofill/core/common/renderer_id.h"
+#include "components/autofill/core/common/unique_ids.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -16,7 +16,7 @@ namespace password_manager {
 
 namespace {
 
-constexpr base::char16 kUser[] = STRING16_LITERAL("user");
+constexpr char16_t kUser[] = u"user";
 
 class IsPossibleUsernameValidTest : public testing::Test {
  protected:
@@ -24,57 +24,27 @@ class IsPossibleUsernameValidTest : public testing::Test {
       base::test::SingleThreadTaskEnvironment::TimeSource::MOCK_TIME};
   PossibleUsernameData possible_username_data_{
       "https://example.com/" /* submitted_signon_realm */,
-      autofill::FieldRendererId(1u), kUser /* value */,
-      base::Time::Now() /* last_change */, 10 /* driver_id */};
+      autofill::FieldRendererId(1u),
+      u"username_field" /* field name */,
+      kUser /* value */,
+      base::Time::Now() /* last_change */,
+      10 /* driver_id */};
 };
 
-TEST_F(IsPossibleUsernameValidTest, Valid) {
-  EXPECT_TRUE(IsPossibleUsernameValid(
-      possible_username_data_, possible_username_data_.signon_realm, {kUser}));
-}
+// Check that if more than |kPossibleUsernameExpirationTimeout| time has
+// passed since the last change of |possible_username_data_|, then it is stale.
+TEST_F(IsPossibleUsernameValidTest, IsPossibleUsernameStale) {
+  EXPECT_FALSE(possible_username_data_.IsStale());
 
-// Check that if time delta between last change and submission is more than 60
-// seconds, than data is invalid.
-TEST_F(IsPossibleUsernameValidTest, TimeDeltaBeforeLastChangeAndSubmission) {
-  task_environment_.FastForwardBy(kMaxDelayBetweenTypingUsernameAndSubmission);
-  EXPECT_TRUE(IsPossibleUsernameValid(
-      possible_username_data_, possible_username_data_.signon_realm, {kUser}));
-  task_environment_.FastForwardBy(TimeDelta::FromSeconds(1));
-  EXPECT_FALSE(IsPossibleUsernameValid(
-      possible_username_data_, possible_username_data_.signon_realm, {kUser}));
-}
+  // Fast forward for a little less than expiration time, but not
+  // exactly to not flake the test.
+  task_environment_.FastForwardBy(kPossibleUsernameExpirationTimeout -
+                                  TimeDelta::FromSeconds(3));
+  EXPECT_FALSE(possible_username_data_.IsStale());
 
-TEST_F(IsPossibleUsernameValidTest, SignonRealm) {
-  EXPECT_FALSE(IsPossibleUsernameValid(possible_username_data_,
-                                       "https://m.example.com/", {kUser}));
-
-  EXPECT_FALSE(IsPossibleUsernameValid(possible_username_data_,
-                                       "https://google.com/", {kUser}));
-}
-
-TEST_F(IsPossibleUsernameValidTest, PossibleUsernameValue) {
-  // Different capitalization is okay.
-  EXPECT_TRUE(IsPossibleUsernameValid(possible_username_data_,
-                                      possible_username_data_.signon_realm,
-                                      {STRING16_LITERAL("USER")}));
-  // Different email hosts are okay.
-  EXPECT_TRUE(IsPossibleUsernameValid(possible_username_data_,
-                                      possible_username_data_.signon_realm,
-                                      {STRING16_LITERAL("user@gmail.com")}));
-
-  // Other usernames are okay.
-  EXPECT_TRUE(IsPossibleUsernameValid(possible_username_data_,
-                                      possible_username_data_.signon_realm,
-                                      {kUser, STRING16_LITERAL("alice")}));
-
-  // No usernames are not okay.
-  EXPECT_FALSE(IsPossibleUsernameValid(
-      possible_username_data_, possible_username_data_.signon_realm, {}));
-
-  // Completely different usernames are not okay.
-  EXPECT_FALSE(IsPossibleUsernameValid(
-      possible_username_data_, possible_username_data_.signon_realm,
-      {STRING16_LITERAL("alice"), STRING16_LITERAL("bob")}));
+  // Fast forward more until the data becomes stale.
+  task_environment_.FastForwardBy(TimeDelta::FromSeconds(5));
+  EXPECT_TRUE(possible_username_data_.IsStale());
 }
 
 }  // namespace

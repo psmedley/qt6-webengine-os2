@@ -65,11 +65,6 @@ class DownloadUIAdapter : public OfflineContentProvider,
                           int64_t offline_id,
                           const OpenParams& open_params) = 0;
 
-    // Suppresses the download complete notification
-    // depending on flags and origin.
-    virtual bool MaybeSuppressNotification(const std::string& origin,
-                                           const ClientId& id) = 0;
-
     // Share item to other apps.
     virtual void GetShareInfoForItem(const ContentId& id,
                                      ShareCallback share_callback) = 0;
@@ -109,7 +104,7 @@ class DownloadUIAdapter : public OfflineContentProvider,
                   const std::string& name,
                   RenameCallback callback) override;
   void ChangeSchedule(const ContentId& id,
-                      base::Optional<OfflineItemSchedule> schedule) override;
+                      absl::optional<OfflineItemSchedule> schedule) override;
 
   // OfflinePageModel::Observer
   void OfflinePageModelLoaded(OfflinePageModel* model) override;

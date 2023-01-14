@@ -31,6 +31,7 @@
 #include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_trust_token.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/dom/document_parser_client.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -54,8 +55,6 @@
 
 namespace blink {
 
-class
-    DocumentOrBlobOrArrayBufferOrArrayBufferViewOrFormDataOrURLSearchParamsOrUSVString;
 class Blob;
 class BlobDataHandle;
 class DOMArrayBuffer;
@@ -134,9 +133,8 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
             const KURL&,
             bool async,
             ExceptionState&);
-  void send(
-      const DocumentOrBlobOrArrayBufferOrArrayBufferViewOrFormDataOrURLSearchParamsOrUSVString&,
-      ExceptionState&);
+  void send(const V8UnionDocumentOrXMLHttpRequestBodyInit* body,
+            ExceptionState& exception_state);
   void abort();
   void Dispose();
   void setRequestHeader(const AtomicString& name,
@@ -190,8 +188,8 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   void DidDownloadData(uint64_t data_length) override;
   void DidDownloadToBlob(scoped_refptr<BlobDataHandle>) override;
   void DidFinishLoading(uint64_t identifier) override;
-  void DidFail(const ResourceError&) override;
-  void DidFailRedirectCheck() override;
+  void DidFail(uint64_t, const ResourceError&) override;
+  void DidFailRedirectCheck(uint64_t) override;
 
   // BlobLoader notifications.
   void DidFinishLoadingInternal();
@@ -275,10 +273,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // Handles didFail() call for timeout.
   void HandleDidTimeout();
 
-  void HandleRequestError(DOMExceptionCode,
-                          const AtomicString&,
-                          int64_t,
-                          int64_t);
+  void HandleRequestError(DOMExceptionCode, const AtomicString&);
 
   void UpdateContentTypeAndCharset(const AtomicString& content_type,
                                    const String& charset);
@@ -320,9 +315,13 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
 
   std::unique_ptr<TextResourceDecoder> decoder_;
 
+  // TODO(crbug.com/1226775): Remove these on M96.
+  static constexpr size_t kResponseBodyHeadSize = 2;
+  Vector<uint8_t, kResponseBodyHeadSize> response_body_head_;
+
   // Avoid using a flat WTF::String here and rather use a traced v8::String
   // which internally builds a string rope.
-  GC_PLUGIN_IGNORE("crbug.com/841830") TraceWrapperV8String response_text_;
+  TraceWrapperV8String response_text_;
   Member<Document> response_document_;
   Member<DocumentParser> response_document_parser_;
 

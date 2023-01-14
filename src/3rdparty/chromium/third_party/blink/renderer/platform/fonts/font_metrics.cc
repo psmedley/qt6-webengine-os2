@@ -52,8 +52,8 @@ void FontMetrics::AscentDescentWithHacks(
     const FontPlatformData& platform_data,
     const SkFont& font,
     bool subpixel_ascent_descent,
-    base::Optional<float> ascent_override,
-    base::Optional<float> descent_override) {
+    absl::optional<float> ascent_override,
+    absl::optional<float> descent_override) {
   SkTypeface* face = font.getTypeface();
   DCHECK(face);
 
@@ -148,5 +148,71 @@ void FontMetrics::AscentDescentWithHacks(
       family_name == font_family_names::kCourier)
     ascent += floorf(((ascent + descent) * 0.15f) + 0.5f);
 #endif
+}
+
+float FontMetrics::FloatAscentInternal(FontBaseline baseline_type) const {
+  switch (baseline_type) {
+    case kAlphabeticBaseline:
+      NOTREACHED();
+      return float_ascent_;
+    case kCentralBaseline:
+      return FloatHeight() / 2;
+
+      // The following computations are based on 'dominant-baseline' support in
+      // the legacy SVG <text>.
+
+    case kTextUnderBaseline:
+      return FloatHeight();
+    case kIdeographicUnderBaseline:
+      // TODO(layout-dev): Should refer to 'ideo' in OpenType.
+      return FloatHeight();
+    case kXMiddleBaseline:
+      return float_ascent_ - XHeight() / 2;
+    case kMathBaseline:
+      // TODO(layout-dev): Should refer to 'math' in OpenType or 'bsln' value 4
+      // in TrueType AAT.
+      return float_ascent_ * 0.5f;
+    case kHangingBaseline:
+      // TODO(layout-dev): Should refer to 'hang' in OpenType or 'bsln' value 3
+      // in TrueType AAT.
+      return float_ascent_ * 0.2f;
+    case kTextOverBaseline:
+      return 0;
+  }
+  NOTREACHED();
+  return float_ascent_;
+}
+
+int FontMetrics::IntAscentInternal(FontBaseline baseline_type) const {
+  switch (baseline_type) {
+    case kAlphabeticBaseline:
+      NOTREACHED();
+      return int_ascent_;
+    case kCentralBaseline:
+      return Height() - Height() / 2;
+
+      // The following computations are based on 'dominant-baseline' support in
+      // the legacy SVG <text>.
+
+    case kTextUnderBaseline:
+      return Height();
+    case kIdeographicUnderBaseline:
+      // TODO(layout-dev): Should refer to 'ideo' in OpenType.
+      return Height();
+    case kXMiddleBaseline:
+      return int_ascent_ - static_cast<int>(XHeight() / 2);
+    case kMathBaseline:
+      // TODO(layout-dev): Should refer to 'math' in OpenType or 'bsln' value 4
+      // in TrueType AAT.
+      return int_ascent_ / 2;
+    case kHangingBaseline:
+      // TODO(layout-dev): Should refer to 'hang' in OpenType or 'bsln' value 3
+      // in TrueType AAT.
+      return int_ascent_ * 2 / 10;
+    case kTextOverBaseline:
+      return 0;
+  }
+  NOTREACHED();
+  return int_ascent_;
 }
 }

@@ -7,6 +7,7 @@
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace exo {
 class Surface;
@@ -44,9 +45,9 @@ class SurfaceDelegate {
   // Called when surface was requested to set a specific application ID label.
   virtual void OnSetApplicationId(const char* application_id) = 0;
 
-  // Whether to hide the shelf when fullscreen. If true, shelf is inaccessible
-  // (plain fullscreen). If false, shelf auto-hides and can be shown with a
-  // mouse gesture (immersive fullscreen).
+  // Whether to show/hide the shelf when fullscreen. If true, the titlebar/shelf
+  // will show when the mouse moves to the top/bottom of the screen. If false
+  // (plain fullscreen), the titlebar and shelf are always hidden.
   virtual void SetUseImmersiveForFullscreen(bool value) = 0;
 
   // Called when the surface's application wants it to be activated.
@@ -67,6 +68,24 @@ class SurfaceDelegate {
   virtual void SetSnappedToLeft() = 0;
   virtual void SetSnappedToRight() = 0;
   virtual void UnsetSnap() = 0;
+
+  // Whether the current client window can go back, as per its navigation list.
+  virtual void SetCanGoBack() = 0;
+  virtual void UnsetCanGoBack() = 0;
+
+  // Called when surface was requested to enter pip.
+  virtual void SetPip() = 0;
+  virtual void UnsetPip() = 0;
+
+  // Called when surface was requested to maintain an aspect ratio.
+  virtual void SetAspectRatio(const gfx::SizeF& aspect_ratio) = 0;
+
+  // Called when surface was requested to move the window to a desk at
+  // |desk_index|.
+  virtual void MoveToDesk(int desk_index) = 0;
+
+  // Called when surface was requested to be visible on all workspaces.
+  virtual void SetVisibleOnAllWorkspaces() = 0;
 
  protected:
   virtual ~SurfaceDelegate() {}

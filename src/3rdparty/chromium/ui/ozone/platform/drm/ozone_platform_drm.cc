@@ -90,6 +90,7 @@ class OzonePlatformDrm : public OzonePlatform {
     NOTREACHED();
     return nullptr;
   }
+  void InitScreen(PlatformScreen* screen) override { NOTREACHED(); }
 
   GpuPlatformSupportHost* GetGpuPlatformSupportHost() override {
     return drm_device_connector_.get();
@@ -125,7 +126,7 @@ class OzonePlatformDrm : public OzonePlatform {
       binders->Add<ozone::mojom::DrmDevice>(
           base::BindRepeating(
               &OzonePlatformDrm::CreateDrmDeviceReceiverOnDrmThread,
-              weak_factory_.GetWeakPtr()),
+              weak_factory_on_drm_.GetWeakPtr()),
           drm_thread_proxy_->GetDrmThreadTaskRunner());
     }
   }
@@ -304,7 +305,7 @@ class OzonePlatformDrm : public OzonePlatform {
     } else {
       auto safe_receiver_request_drainer = CreateSafeOnceCallback(
           base::BindOnce(&OzonePlatformDrm::DrainReceiverRequests,
-                         weak_factory_.GetWeakPtr()));
+                         weak_factory_on_drm_.GetWeakPtr()));
       drm_thread_proxy_->StartDrmThread(
           std::move(safe_receiver_request_drainer));
     }
@@ -345,6 +346,7 @@ class OzonePlatformDrm : public OzonePlatform {
   InitializedHostProperties host_properties_;
 
   base::WeakPtrFactory<OzonePlatformDrm> weak_factory_{this};
+  base::WeakPtrFactory<OzonePlatformDrm> weak_factory_on_drm_{this};
   OzonePlatformDrm(const OzonePlatformDrm&) = delete;
   OzonePlatformDrm& operator=(const OzonePlatformDrm&) = delete;
 };

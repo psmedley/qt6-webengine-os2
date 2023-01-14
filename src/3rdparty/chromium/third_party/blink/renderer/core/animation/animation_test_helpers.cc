@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/animation/animation_test_helpers.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_csskeywordvalue_cssnumericvalue_scrolltimelineelementbasedoffset_string.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_types_map.h"
 #include "third_party/blink/renderer/core/animation/invalidatable_interpolation.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/renderer/core/css/cssom/css_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
 #include "third_party/blink/renderer/core/css/resolver/style_cascade.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -24,6 +26,8 @@ void SetV8ObjectPropertyAsString(v8::Isolate* isolate,
                                  v8::Local<v8::Object> object,
                                  const StringView& name,
                                  const StringView& value) {
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
   object
       ->Set(isolate->GetCurrentContext(), V8String(isolate, name),
             V8String(isolate, value))
@@ -34,6 +38,8 @@ void SetV8ObjectPropertyAsNumber(v8::Isolate* isolate,
                                  v8::Local<v8::Object> object,
                                  const StringView& name,
                                  double value) {
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
   object
       ->Set(isolate->GetCurrentContext(), V8String(isolate, name),
             v8::Number::New(isolate, value))
@@ -69,11 +75,12 @@ void EnsureInterpolatedValueCached(ActiveInterpolations* interpolations,
                                    Document& document,
                                    Element* element) {
   // TODO(smcgruer): We should be able to use a saner API approach like
-  // document.GetStyleResolver().StyleForElement(element). However that would
+  // document.GetStyleResolver().ResolveStyle(element). However that would
   // require our callers to properly register every animation they pass in
   // here, which the current tests do not do.
-  auto style = ComputedStyle::Create();
-  StyleResolverState state(document, *element, style.get(), style.get());
+  auto style = document.GetStyleResolver().CreateComputedStyle();
+  StyleResolverState state(document, *element, StyleRecalcContext(),
+                           StyleRequest(style.get()));
   state.SetStyle(style);
 
   ActiveInterpolationsMap map;
@@ -84,21 +91,19 @@ void EnsureInterpolatedValueCached(ActiveInterpolations* interpolations,
   cascade.Apply();
 }
 
-ScrollTimelineOffsetValue OffsetFromString(Document& document,
-                                           const String& string) {
-  ScrollTimelineOffsetValue result;
-
+V8ScrollTimelineOffset* OffsetFromString(Document& document,
+                                         const String& string) {
   const CSSValue* value = css_test_helpers::ParseValue(
       document, "<length-percentage> | auto", string);
 
-  if (const auto* primitive = DynamicTo<CSSPrimitiveValue>(value))
-    result.SetCSSNumericValue(CSSNumericValue::FromCSSValue(*primitive));
-  else if (DynamicTo<CSSIdentifierValue>(value))
-    result.SetCSSKeywordValue(CSSKeywordValue::Create("auto"));
-  else
-    result.SetString(string);
-
-  return result;
+  if (const auto* primitive = DynamicTo<CSSPrimitiveValue>(value)) {
+    return MakeGarbageCollected<V8ScrollTimelineOffset>(
+        CSSNumericValue::FromCSSValue(*primitive));
+  } else if (DynamicTo<CSSIdentifierValue>(value)) {
+    return MakeGarbageCollected<V8ScrollTimelineOffset>(
+        CSSKeywordValue::Create("auto"));
+  }
+  return MakeGarbageCollected<V8ScrollTimelineOffset>(string);
 }
 
 }  // namespace animation_test_helpers

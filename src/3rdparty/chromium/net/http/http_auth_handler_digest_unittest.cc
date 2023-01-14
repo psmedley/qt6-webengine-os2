@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/net_errors.h"
@@ -80,8 +80,7 @@ bool RespondToChallenge(HttpAuth::Target target,
   TestCompletionCallback callback;
   std::unique_ptr<HttpRequestInfo> request(new HttpRequestInfo());
   request->url = GURL(request_url);
-  AuthCredentials credentials(base::ASCIIToUTF16("foo"),
-                              base::ASCIIToUTF16("bar"));
+  AuthCredentials credentials(u"foo", u"bar");
   int rv_generate = handler->GenerateAuthToken(
       &credentials, request.get(), callback.callback(), token);
   if (rv_generate != OK) {

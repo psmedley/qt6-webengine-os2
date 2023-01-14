@@ -19,6 +19,8 @@
 
 namespace skottie::internal {
 
+#ifdef SK_ENABLE_SKSL
+
 namespace  {
 
 // This shader maps its child shader onto a sphere.  To simplify things, we set it up such that:
@@ -126,10 +128,12 @@ static constexpr char gFancyLightSkSL[] = R"(
 
 static sk_sp<SkRuntimeEffect> sphere_fancylight_effect() {
     static const SkRuntimeEffect* effect =
-        SkRuntimeEffect::Make(SkStringPrintf(gSphereSkSL, gFancyLightSkSL), {}).effect.release();
+            SkRuntimeEffect::MakeForShader(SkStringPrintf(gSphereSkSL, gFancyLightSkSL), {})
+                    .effect.release();
     if (0 && !effect) {
-        printf("!!! %s\n", SkRuntimeEffect::Make(SkStringPrintf(gSphereSkSL, gFancyLightSkSL),
-                                                 {}).errorText.c_str());
+        printf("!!! %s\n",
+               SkRuntimeEffect::MakeForShader(SkStringPrintf(gSphereSkSL, gFancyLightSkSL), {})
+                       .errorText.c_str());
     }
     SkASSERT(effect);
 
@@ -138,7 +142,8 @@ static sk_sp<SkRuntimeEffect> sphere_fancylight_effect() {
 
 static sk_sp<SkRuntimeEffect> sphere_basiclight_effect() {
     static const SkRuntimeEffect* effect =
-        SkRuntimeEffect::Make(SkStringPrintf(gSphereSkSL, gBasicLightSkSL), {}).effect.release();
+            SkRuntimeEffect::MakeForShader(SkStringPrintf(gSphereSkSL, gBasicLightSkSL), {})
+                    .effect.release();
     SkASSERT(effect);
 
     return sk_ref_sp(effect);
@@ -410,11 +415,18 @@ private:
 
 } // namespace
 
+#endif  // SK_ENABLE_SKSL
+
 sk_sp<sksg::RenderNode> EffectBuilder::attachSphereEffect(
         const skjson::ArrayValue& jprops, sk_sp<sksg::RenderNode> layer) const {
+#ifdef SK_ENABLE_SKSL
     auto sphere = sk_make_sp<SphereNode>(std::move(layer), fLayerSize);
 
     return fBuilder->attachDiscardableAdapter<SphereAdapter>(jprops, fBuilder, std::move(sphere));
+#else
+    // TODO(skia:12197)
+    return layer;
+#endif
 }
 
 } // namespace skottie::internal

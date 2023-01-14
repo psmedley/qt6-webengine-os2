@@ -311,7 +311,7 @@ sk_sp<TestSVGTypeface> TestSVGTypeface::Default() {
     return sk_make_sp<DefaultTypeface>("Emoji",
                                        1000,
                                        metrics,
-                                       SkSpan(glyphs),
+                                       SkMakeSpan(glyphs),
                                        SkFontStyle::Normal());
 }
 
@@ -361,7 +361,7 @@ sk_sp<TestSVGTypeface> TestSVGTypeface::Planets() {
     return sk_make_sp<PlanetTypeface>("Planets",
                                       200,
                                       metrics,
-                                      SkSpan(glyphs),
+                                      SkMakeSpan(glyphs),
                                       SkFontStyle::Normal());
 }
 
@@ -800,13 +800,13 @@ void TestSVGTypeface::exportTtxCbdt(SkWStream* out, SkSpan<unsigned> strikeSizes
             out->writeText("        </SmallGlyphMetrics>\n");
             out->writeText("        <rawimagedata>");
             uint8_t const* bytes = data->bytes();
-            for (size_t i = 0; i < data->size(); ++i) {
-                if ((i % 0x10) == 0x0) {
+            for (size_t j = 0; j < data->size(); ++j) {
+                if ((j % 0x10) == 0x0) {
                     out->writeText("\n          ");
-                } else if (((i - 1) % 0x4) == 0x3) {
+                } else if (((j - 1) % 0x4) == 0x3) {
                     out->writeText(" ");
                 }
-                out->writeHexAsText(bytes[i], 2);
+                out->writeHexAsText(bytes[j], 2);
             }
             out->writeText("\n");
             out->writeText("        </rawimagedata>\n");
@@ -1029,13 +1029,13 @@ void TestSVGTypeface::exportTtxSbix(SkWStream* out, SkSpan<unsigned> strikeSizes
 
             out->writeText("        <hexdata>");
             uint8_t const* bytes = data->bytes();
-            for (size_t i = 0; i < data->size(); ++i) {
-                if ((i % 0x10) == 0x0) {
+            for (size_t j = 0; j < data->size(); ++j) {
+                if ((j % 0x10) == 0x0) {
                     out->writeText("\n          ");
-                } else if (((i - 1) % 0x4) == 0x3) {
+                } else if (((j - 1) % 0x4) == 0x3) {
                     out->writeText(" ");
                 }
-                out->writeHexAsText(bytes[i], 2);
+                out->writeHexAsText(bytes[j], 2);
             }
             out->writeText("\n");
             out->writeText("        </hexdata>\n");

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_TEXT_DECORATION_INFO_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_TEXT_DECORATION_INFO_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
 #include "third_party/blink/renderer/core/paint/text_paint_style.h"
@@ -37,12 +38,11 @@ class CORE_EXPORT TextDecorationInfo {
 
  public:
   TextDecorationInfo(
-      const PhysicalOffset& box_origin,
       PhysicalOffset local_origin,
       LayoutUnit width,
       FontBaseline baseline_type,
       const ComputedStyle& style,
-      const base::Optional<AppliedTextDecoration> selection_text_decoration,
+      const absl::optional<AppliedTextDecoration> selection_text_decoration,
       const ComputedStyle* decorating_box_style);
 
   // Set the decoration to use when painting and returning values.
@@ -93,7 +93,7 @@ class CORE_EXPORT TextDecorationInfo {
 
   // Return a path for a wavy line at the given position, for the
   // current decoration.
-  base::Optional<Path> PrepareWavyStrokePath(TextDecoration line) const;
+  absl::optional<Path> PrepareWavyStrokePath(TextDecoration line) const;
 
   static float DoubleOffsetFromThickness(float thickness_pixels) {
     return thickness_pixels + 1.0f;
@@ -108,7 +108,7 @@ class CORE_EXPORT TextDecorationInfo {
   FloatRect BoundsForWavy(TextDecoration line) const;
 
   const ComputedStyle& style_;
-  const base::Optional<AppliedTextDecoration> selection_text_decoration_;
+  const absl::optional<AppliedTextDecoration> selection_text_decoration_;
   const FontBaseline baseline_type_;
   const LayoutUnit width_;
   const SimpleFontData* font_data_;
@@ -129,7 +129,7 @@ class CORE_EXPORT TextDecorationInfo {
     float line_offset;
     float double_offset;
     int wavy_offset_factor;
-    mutable base::Optional<Path> stroke_path;
+    mutable absl::optional<Path> stroke_path;
   };
   PerLineData line_data_[3];
 };

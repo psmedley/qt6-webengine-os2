@@ -8,8 +8,8 @@
 #include <list>
 
 #include "ash/public/cpp/shell_window_ids.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/chrome_web_dialog_view.h"
 #include "components/session_manager/core/session_manager.h"
@@ -29,10 +29,23 @@ namespace chromeos {
 
 namespace {
 
+constexpr int kSystemDialogCornerRadiusDp = 12;
+
 // Track all open system web dialog instances. This should be a small list.
 std::list<SystemWebDialogDelegate*>* GetInstances() {
   static base::NoDestructor<std::list<SystemWebDialogDelegate*>> instances;
   return instances.get();
+}
+
+// Creates default initial parameters. The system web dialog has 12 dip corner
+// radius by default. If the window has a non-client frame view, we don't need
+// to set shadow, since the bubble frame view will help draw the shadow.
+views::Widget::InitParams CreateWidgetParams() {
+  views::Widget::InitParams params;
+  params.corner_radius = kSystemDialogCornerRadiusDp;
+  // Dialog frame view has its own shadow.
+  params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
+  return params;
 }
 
 }  // namespace
@@ -104,7 +117,7 @@ gfx::Size SystemWebDialogDelegate::ComputeDialogSizeForInternalScreen(
 }
 
 SystemWebDialogDelegate::SystemWebDialogDelegate(const GURL& gurl,
-                                                 const base::string16& title)
+                                                 const std::u16string& title)
     : gurl_(gurl), title_(title), modal_type_(ui::MODAL_TYPE_NONE) {
   set_can_resize(false);
   switch (session_manager::SessionManager::Get()->session_state()) {
@@ -151,7 +164,7 @@ ui::ModalType SystemWebDialogDelegate::GetDialogModalType() const {
   return modal_type_;
 }
 
-base::string16 SystemWebDialogDelegate::GetDialogTitle() const {
+std::u16string SystemWebDialogDelegate::GetDialogTitle() const {
   return title_;
 }
 
@@ -164,6 +177,11 @@ void SystemWebDialogDelegate::GetWebUIMessageHandlers(
 
 void SystemWebDialogDelegate::GetDialogSize(gfx::Size* size) const {
   size->SetSize(kDialogWidth, kDialogHeight);
+}
+
+SystemWebDialogDelegate::FrameKind
+SystemWebDialogDelegate::GetWebDialogFrameKind() const {
+  return FrameKind::kDialog;
 }
 
 std::string SystemWebDialogDelegate::GetDialogArgs() const {
@@ -200,14 +218,15 @@ bool SystemWebDialogDelegate::ShouldShowDialogTitle() const {
 void SystemWebDialogDelegate::ShowSystemDialogForBrowserContext(
     content::BrowserContext* browser_context,
     gfx::NativeWindow parent) {
-  views::Widget::InitParams extra_params;
+  views::Widget::InitParams extra_params = CreateWidgetParams();
+
   // If unparented and not modal, keep it on top (see header comment).
   if (!parent && GetDialogModalType() == ui::MODAL_TYPE_NONE)
     extra_params.z_order = ui::ZOrderLevel::kFloatingWindow;
   AdjustWidgetInitParams(&extra_params);
   dialog_window_ = chrome::ShowWebDialogWithParams(
       parent, browser_context, this,
-      base::make_optional<views::Widget::InitParams>(std::move(extra_params)));
+      absl::make_optional<views::Widget::InitParams>(std::move(extra_params)));
 }
 
 void SystemWebDialogDelegate::ShowSystemDialog(gfx::NativeWindow parent) {

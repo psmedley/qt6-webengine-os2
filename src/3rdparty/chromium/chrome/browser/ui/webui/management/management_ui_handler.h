@@ -11,7 +11,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/strings/string16.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/common/url_constants.h"
@@ -35,6 +34,9 @@ extern const char kManagementReportNetworkInterfaces[];
 extern const char kManagementReportUsers[];
 extern const char kManagementReportCrashReports[];
 extern const char kManagementReportAppInfoAndActivity[];
+extern const char kManagementReportPrintJobs[];
+extern const char kManagementReportDlpEvents[];
+extern const char kManagementReportLoginLogout[];
 extern const char kManagementPrinting[];
 extern const char kManagementCrostini[];
 extern const char kManagementCrostiniContainerConfiguration[];
@@ -73,6 +75,7 @@ extern const char kPolicyKeyReportMachineIdData[];
 extern const char kPolicyKeyReportUserIdData[];
 extern const char kPolicyKeyReportVersionData[];
 extern const char kPolicyKeyReportPolicyData[];
+extern const char kPolicyKeyReportDlpEvents[];
 extern const char kPolicyKeyReportExtensionsData[];
 extern const char kPolicyKeyReportSystemTelemetryData[];
 extern const char kPolicyKeyReportUserBrowsingData[];
@@ -92,7 +95,8 @@ class Extension;
 }  // namespace extensions
 
 namespace policy {
-class DeviceCloudPolicyManagerChromeOS;
+class DeviceCloudPolicyManagerAsh;
+class DlpRulesManager;
 class PolicyService;
 class StatusCollector;
 class SystemLogUploader;
@@ -123,8 +127,8 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
   // be the email address of the admin of the FlexOrg (ie user@foo.com). If
   // DMServer does not provide this information, this method defaults to
   // |GetAccountDomain|. If unmanaged, an empty string is returned.
-  // TODO(crbug.com/1081272): refactor localization hints for all strings that
-  // depend on this method
+  // TODO(crbug.com/1188594): Remove this function and replace all call sites
+  // with chrome::GetAccountManagerIdentity().
   static std::string GetAccountManager(Profile* profile);
 
   void OnJavascriptAllowed() override;
@@ -138,14 +142,16 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
   void AddReportingInfo(base::Value* report_sources);
 
   base::Value GetContextualManagedData(Profile* profile);
-  base::Value GetThreatProtectionInfo(Profile* profile) const;
-  virtual policy::PolicyService* GetPolicyService() const;
+  base::Value GetThreatProtectionInfo(Profile* profile);
+  base::Value GetManagedWebsitesInfo(Profile* profile) const;
+  virtual policy::PolicyService* GetPolicyService();
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Protected for testing.
   virtual const std::string GetDeviceManager() const;
-  virtual const policy::DeviceCloudPolicyManagerChromeOS*
+  virtual const policy::DeviceCloudPolicyManagerAsh*
   GetDeviceCloudPolicyManager() const;
+  virtual const policy::DlpRulesManager* GetDlpRulesManager() const;
   void AddDeviceReportingInfo(base::Value* report_sources,
                               const policy::StatusCollector* collector,
                               const policy::SystemLogUploader* uploader,
@@ -174,6 +180,7 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
   void HandleGetExtensions(const base::ListValue* args);
   void HandleGetContextualManagedData(const base::ListValue* args);
   void HandleGetThreatProtectionInfo(const base::ListValue* args);
+  void HandleGetManagedWebsites(const base::ListValue* args);
   void HandleInitBrowserReportingInfo(const base::ListValue* args);
 
   void AsyncUpdateLogo();

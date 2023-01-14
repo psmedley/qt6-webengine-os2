@@ -23,6 +23,7 @@
 
 #include <memory>
 
+#include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "fxbarcode/oned/BC_OnedCode39Writer.h"
 
@@ -49,7 +50,7 @@ bool CBC_Code39::Encode(WideStringView contents) {
 }
 
 bool CBC_Code39::RenderDevice(CFX_RenderDevice* device,
-                              const CFX_Matrix* matrix) {
+                              const CFX_Matrix& matrix) {
   auto* pWriter = GetOnedCode39Writer();
   WideString renderCon;
   if (!pWriter->encodedContents(m_renderContents.AsStringView(), &renderCon))

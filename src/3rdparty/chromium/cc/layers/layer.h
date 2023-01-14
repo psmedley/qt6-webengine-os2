@@ -11,13 +11,11 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "base/auto_reset.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/observer_list.h"
 #include "cc/base/region.h"
 #include "cc/benchmarks/micro_benchmark.h"
 #include "cc/cc_export.h"
@@ -54,7 +52,7 @@ class PictureLayer;
 
 // For tracing and debugging. The info will be attached to this layer's tracing
 // output.
-struct LayerDebugInfo {
+struct CC_EXPORT LayerDebugInfo {
   LayerDebugInfo();
   LayerDebugInfo(const LayerDebugInfo&);
   ~LayerDebugInfo();
@@ -317,9 +315,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   // For layer tree mode only.
   void SetBackdropFilterBounds(const gfx::RRectF& backdrop_filter_bounds);
   void ClearBackdropFilterBounds();
-  base::Optional<gfx::RRectF> backdrop_filter_bounds() const {
+  absl::optional<gfx::RRectF> backdrop_filter_bounds() const {
     return layer_tree_inputs() ? layer_tree_inputs()->backdrop_filter_bounds
-                               : base::nullopt;
+                               : absl::nullopt;
   }
 
   // For layer tree mode only.
@@ -402,11 +400,8 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
 
   // For layer tree mode only.
   // Marks this layer as being scrollable and needing an associated scroll node,
-  // and specifies the total size of the content to be scrolled (ie the max
-  // scroll offsets. The size should be a union of the layer and its subtree, as
-  // well as any layers for whom this layer is their scroll parent, and their
-  // subtrees, when they are transformed into this layer's space. Thus
-  // transforms of children affect the size of the |scroll_container_bounds|.
+  // and specifies the size of the container in which the scrolling contents are
+  // visible. (Use SetBounds to set the size of the content to be scrolled.)
   // Once scrollable, a Layer cannot become un-scrollable.
   void SetScrollable(const gfx::Size& scroll_container_bounds);
   bool scrollable() const {
@@ -597,9 +592,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   int mirror_count() const {
     return layer_tree_inputs() ? layer_tree_inputs()->mirror_count : 0;
   }
-
-  // Called on the scroll layer to trigger showing the overlay scrollbars.
-  void ShowScrollbars() { needs_show_scrollbars_ = true; }
 
   // Captures text content within the given |rect| and returns the associated
   // NodeInfo in |content|.
@@ -921,7 +913,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
 
     FilterOperations filters;
     FilterOperations backdrop_filters;
-    base::Optional<gfx::RRectF> backdrop_filter_bounds;
+    absl::optional<gfx::RRectF> backdrop_filter_bounds;
     float backdrop_filter_quality = 1.0f;
 
     int mirror_count = 0;
@@ -970,7 +962,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   bool force_render_surface_for_testing_ : 1;
   bool subtree_property_changed_ : 1;
   bool may_contain_video_ : 1;
-  bool needs_show_scrollbars_ : 1;
   bool has_transform_node_ : 1;
   bool has_clip_node_ : 1;
   // This value is valid only when LayerTreeHost::has_copy_request() is true

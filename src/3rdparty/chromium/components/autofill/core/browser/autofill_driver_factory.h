@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_
-#define AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_
+#ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_
+#define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_
 
 #include <memory>
 #include <unordered_map>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/types/strong_alias.h"
 
 namespace autofill {
 
@@ -20,6 +21,8 @@ class AutofillDriver;
 // creating, notifying, retrieving and deleting on demand.
 class AutofillDriverFactory {
  public:
+  using HideUi = base::StrongAlias<class HideUiTag, bool>;
+
   explicit AutofillDriverFactory(AutofillClient* client);
 
   ~AutofillDriverFactory();
@@ -28,8 +31,8 @@ class AutofillDriverFactory {
   // null if there is none.
   AutofillDriver* DriverForKey(void* key);
 
-  // Handles finished navigation in the main frame.
-  void NavigationFinished();
+  // Handles finished navigation in a main frame.
+  void NavigationFinished(HideUi hide_ui);
 
   // Handles hiding of the corresponding tab.
   void TabHidden();
@@ -61,4 +64,4 @@ class AutofillDriverFactory {
 
 }  // namespace autofill
 
-#endif  // AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_
+#endif  // COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_DRIVER_FACTORY_H_

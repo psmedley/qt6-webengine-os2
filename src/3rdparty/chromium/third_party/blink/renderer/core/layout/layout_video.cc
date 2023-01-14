@@ -25,7 +25,6 @@
 
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/paint/video_painter.h"
@@ -197,18 +196,6 @@ void LayoutVideo::UpdatePlayer(bool is_in_layout) {
     return;
 
   VideoElement()->SetNeedsCompositingUpdate();
-}
-
-LayoutUnit LayoutVideo::ComputeReplacedLogicalWidth(
-    ShouldComputePreferred should_compute_preferred) const {
-  NOT_DESTROYED();
-  return LayoutReplaced::ComputeReplacedLogicalWidth(should_compute_preferred);
-}
-
-LayoutUnit LayoutVideo::ComputeReplacedLogicalHeight(
-    LayoutUnit estimated_used_width) const {
-  NOT_DESTROYED();
-  return LayoutReplaced::ComputeReplacedLogicalHeight(estimated_used_width);
 }
 
 LayoutUnit LayoutVideo::MinimumReplacedHeight() const {

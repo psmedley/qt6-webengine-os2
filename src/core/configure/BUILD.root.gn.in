@@ -121,6 +121,7 @@ shared_library("QtWebEngineCore") {
     "//components/proxy_config",
     "//components/user_prefs",
     "//content/public/app",
+    "//content/public/browser",
     "//content",
     "//media:media_buildflags",
     "//net",
@@ -131,7 +132,6 @@ shared_library("QtWebEngineCore") {
     "//ui/gl",
     "//qtwebengine/browser:interfaces",
     "//qtwebengine/userscript",
-    "//qtwebengine/browser:service_manifests",
     "//qtwebengine/common:mojo_bindings",
     ":qtwebengine_sources",
     ":qtwebengine_resources",
@@ -209,9 +209,11 @@ source_set("qtwebengine_sources") {
   ]
   deps = [
     "//build:branding_buildflags",
+    "//chrome/browser:dev_ui_browser_resources_grit",
     "//chrome/browser/resources/net_internals:resources",
     "//chrome/browser/resources/quota_internals:resources",
     "//chrome/common:buildflags",
+    "//chromeos/components/chromebox_for_meetings/buildflags",
     "//components/nacl/common:buildflags",
     "//components/performance_manager",
     "//components/plugins/renderer/",
@@ -241,6 +243,8 @@ source_set("qtwebengine_sources") {
     "//chrome/browser/tab_contents/form_interaction_tab_helper.h",
     "//chrome/browser/tab_contents/web_contents_collection.cc",
     "//chrome/browser/tab_contents/web_contents_collection.h",
+    "//chrome/browser/ui/webui/device_log_ui.cc",
+    "//chrome/browser/ui/webui/device_log_ui.h",
     "//chrome/browser/ui/webui/devtools_ui.cc",
     "//chrome/browser/ui/webui/devtools_ui.h",
     "//chrome/browser/ui/webui/devtools_ui_data_source.cc",
@@ -332,12 +336,15 @@ source_set("qtwebengine_sources") {
     ]
   }
   if (enable_plugins) {
-      sources += [
-        "//chrome/renderer/pepper/pepper_flash_font_file_host.cc",
-        "//chrome/renderer/pepper/pepper_flash_font_file_host.h",
-        "//chrome/renderer/pepper/pepper_shared_memory_message_filter.cc",
-        "//chrome/renderer/pepper/pepper_shared_memory_message_filter.h",
-      ]
+    sources += [
+      "//chrome/renderer/pepper/pepper_flash_font_file_host.cc",
+      "//chrome/renderer/pepper/pepper_flash_font_file_host.h",
+      "//chrome/renderer/pepper/pepper_shared_memory_message_filter.cc",
+      "//chrome/renderer/pepper/pepper_shared_memory_message_filter.h",
+    ]
+    if (is_linux) {
+      deps += [ "//pdf:font_table_linux" ]
+    }
   }
   if (enable_basic_printing || enable_print_preview) {
     sources += [
@@ -352,16 +359,17 @@ source_set("qtwebengine_sources") {
     ]
   }
   if (enable_pdf) {
-      deps += [
-         "//pdf",
-         "//pdf:buildflags",
-         "//pdf:pdf_ppapi",
-         "//chrome/browser/resources/pdf:resources",
-         "//components/pdf/browser:browser",
-         "//components/pdf/renderer:renderer",
-         "//components/printing/browser",
-         "//components/printing/renderer",
-      ]
+    deps += [
+      "//pdf",
+      "//pdf:buildflags",
+      "//pdf:pdf_ppapi",
+      "//chrome/browser/resources/pdf:resources",
+      "//components/pdf/browser",
+      "//components/pdf/common",
+      "//components/pdf/renderer",
+      "//components/printing/browser",
+      "//components/printing/renderer",
+    ]
   }
 
   if (enable_webrtc && enable_extensions) {
@@ -443,6 +451,7 @@ repack("qtwebengine_repack_resources") {
   sources = [
     "$root_gen_dir/qtwebengine/qt_webengine_resources.pak",
     "$root_gen_dir/chrome/common_resources.pak",
+    "$root_gen_dir/chrome/dev_ui_browser_resources.pak",
     "$root_gen_dir/chrome/net_internals_resources.pak",
     "$root_gen_dir/chrome/quota_internals_resources.pak",
     "$root_gen_dir/components/components_resources.pak",
@@ -460,6 +469,7 @@ repack("qtwebengine_repack_resources") {
   output = "$root_out_dir/qtwebengine_resources.pak"
   deps = [
      "//qtwebengine/browser:qt_webengine_resources",
+     "//chrome/browser:dev_ui_browser_resources_grit",
      "//chrome/browser/resources/net_internals:resources",
      "//chrome/browser/resources/quota_internals:resources",
      "//chrome/common:resources_grit",

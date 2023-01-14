@@ -8,6 +8,7 @@
 #include <cstddef>
 #include "absl/strings/string_view.h"
 #include "quic/core/quic_connection.h"
+#include "quic/core/quic_connection_id.h"
 #include "quic/core/quic_connection_stats.h"
 #include "quic/core/quic_packets.h"
 #include "quic/core/quic_types.h"
@@ -87,6 +88,10 @@ class QuicConnectionPeer {
   static QuicAlarm* GetDiscardPreviousOneRttKeysAlarm(
       QuicConnection* connection);
   static QuicAlarm* GetDiscardZeroRttDecryptionKeysAlarm(
+      QuicConnection* connection);
+  static QuicAlarm* GetRetirePeerIssuedConnectionIdAlarm(
+      QuicConnection* connection);
+  static QuicAlarm* GetRetireSelfIssuedConnectionIdAlarm(
       QuicConnection* connection);
 
   static QuicPacketWriter* GetWriter(QuicConnection* connection);
@@ -177,6 +182,12 @@ class QuicConnectionPeer {
   static QuicByteCount BytesReceivedOnAlternativePath(
       QuicConnection* connection);
 
+  static QuicConnectionId GetClientConnectionIdOnAlternativePath(
+      const QuicConnection* connection);
+
+  static QuicConnectionId GetServerConnectionIdOnAlternativePath(
+      const QuicConnection* connection);
+
   static bool IsAlternativePath(QuicConnection* connection,
                                 const QuicSocketAddress& self_address,
                                 const QuicSocketAddress& peer_address);
@@ -184,6 +195,26 @@ class QuicConnectionPeer {
   static bool IsAlternativePathValidated(QuicConnection* connection);
 
   static QuicByteCount BytesReceivedBeforeAddressValidation(
+      QuicConnection* connection);
+
+  static void EnableMultipleConnectionIdSupport(QuicConnection* connection);
+
+  static void ResetPeerIssuedConnectionIdManager(QuicConnection* connection);
+
+  static QuicConnection::PathState* GetDefaultPath(QuicConnection* connection);
+
+  static QuicConnection::PathState* GetAlternativePath(
+      QuicConnection* connection);
+
+  static void RetirePeerIssuedConnectionIdsNoLongerOnPath(
+      QuicConnection* connection);
+
+  static bool HasUnusedPeerIssuedConnectionId(const QuicConnection* connection);
+
+  static bool HasSelfIssuedConnectionIdToConsume(
+      const QuicConnection* connection);
+
+  static QuicSelfIssuedConnectionIdManager* GetSelfIssuedConnectionIdManager(
       QuicConnection* connection);
 };
 

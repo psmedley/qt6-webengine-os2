@@ -6,11 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_V8_WRAPPER_THREAD_STATE_H_
 
 #include "base/compiler_specific.h"
-#include "base/lazy_instance.h"
+#include "build/build_config.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc.h"
+#include "third_party/blink/renderer/platform/heap/v8_wrapper/thread_local.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/thread_specific.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 #include "v8-profiler.h"
 #include "v8/include/cppgc/heap-consistency.h"
@@ -61,13 +61,19 @@ using V8BuildEmbedderGraphCallback = void (*)(v8::Isolate*,
                                               v8::EmbedderGraph*,
                                               void*);
 
+// Storage for all ThreadState objects. This includes the main-thread
+// ThreadState as well. Keep it outside the class so that PLATFORM_EXPORT
+// doesn't apply to it (otherwise, clang-cl complains).
+extern thread_local ThreadState* g_thread_specific_;
+
 class PLATFORM_EXPORT ThreadState final {
  public:
   class NoAllocationScope;
+  class GCForbiddenScope;
 
-  static ALWAYS_INLINE ThreadState* Current() {
-    return *(thread_specific_.Get());
-  }
+  BLINK_HEAP_DECLARE_THREAD_LOCAL_GETTER(Current,
+                                         ThreadState*,
+                                         g_thread_specific_)
 
   static ALWAYS_INLINE ThreadState* MainThreadState() {
     return reinterpret_cast<ThreadState*>(main_thread_state_storage_);
@@ -89,13 +95,6 @@ class PLATFORM_EXPORT ThreadState final {
   ALWAYS_INLINE cppgc::HeapHandle& heap_handle() const { return heap_handle_; }
   ALWAYS_INLINE v8::CppHeap& cpp_heap() const { return *cpp_heap_; }
   ALWAYS_INLINE v8::Isolate* GetIsolate() const { return isolate_; }
-
-  // Forced garbage collection for testing:
-  //
-  // Collects garbage as long as live memory decreases (capped at 5).
-  void CollectAllGarbageForTesting(
-      BlinkGC::StackState stack_state =
-          BlinkGC::StackState::kNoHeapPointersOnStack);
 
   void SafePoint(BlinkGC::StackState);
 
@@ -121,19 +120,30 @@ class PLATFORM_EXPORT ThreadState final {
       base::OnceCallback<void(size_t allocated_node_bytes,
                               size_t allocated_css_bytes)>);
 
+  bool IsIncrementalMarking();
+
+  // Forced garbage collection for testing:
+  //
+  // Collects garbage as long as live memory decreases (capped at 5).
+  void CollectAllGarbageForTesting(
+      BlinkGC::StackState stack_state =
+          BlinkGC::StackState::kNoHeapPointersOnStack);
+
+  void EnableDetachedGarbageCollectionsForTesting();
+
+  static ThreadState* AttachMainThreadForTesting(v8::Platform*);
+  static ThreadState* AttachCurrentThreadForTesting(v8::Platform*);
+
  private:
   // Main-thread ThreadState avoids TLS completely by using a regular global.
   // The object is manually managed and should not rely on global ctor/dtor.
   static uint8_t main_thread_state_storage_[];
-  // Storage for all ThreadState objects. This includes the main-thread
-  // ThreadState as well.
-  static base::LazyInstance<WTF::ThreadSpecific<ThreadState*>>::Leaky
-      thread_specific_;
 
-  explicit ThreadState();
+  explicit ThreadState(v8::Platform*);
   ~ThreadState();
 
   std::unique_ptr<v8::CppHeap> cpp_heap_;
+  std::unique_ptr<v8::EmbedderRootsHandler> embedder_roots_handler_;
   cppgc::AllocationHandle& allocation_handle_;
   cppgc::HeapHandle& heap_handle_;
   v8::Isolate* isolate_ = nullptr;

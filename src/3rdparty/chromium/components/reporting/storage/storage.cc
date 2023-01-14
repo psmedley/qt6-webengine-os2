@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/containers/flat_set.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
@@ -19,10 +20,13 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/reporting/encryption/encryption_module.h"
+#include "components/reporting/compression/compression_module.h"
+#include "components/reporting/encryption/encryption_module_interface.h"
+#include "components/reporting/encryption/primitives.h"
 #include "components/reporting/encryption/verification.h"
 #include "components/reporting/proto/record.pb.h"
 #include "components/reporting/storage/storage_configuration.h"
@@ -32,7 +36,6 @@
 #include "components/reporting/util/status_macros.h"
 #include "components/reporting/util/statusor.h"
 #include "components/reporting/util/task_runner_context.h"
-#include "third_party/boringssl/src/include/openssl/curve25519.h"
 #include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl.h"
 
 namespace reporting {
@@ -78,14 +81,22 @@ constexpr base::FilePath::CharType kEncryptionKeyFilePrefix[] =
     FILE_PATH_LITERAL("EncryptionKey.");
 const int32_t kEncryptionKeyMaxFileSize = 256;
 
+// Failed upload retry delay: if an upload fails and there are no more incoming
+// events, collected events will not get uploaded for an indefinite time (see
+// b/192666219).
+constexpr base::TimeDelta kFailedUploadRetryDelay =
+    base::TimeDelta::FromSeconds(1);
+
 // Returns vector of <priority, queue_options> for all expected queues in
 // Storage. Queues are all located under the given root directory.
 std::vector<std::pair<Priority, QueueOptions>> ExpectedQueues(
     const StorageOptions& options) {
   return {
-      std::make_pair(IMMEDIATE, QueueOptions(options)
-                                    .set_subdirectory(kImmediateQueueSubdir)
-                                    .set_file_prefix(kImmediateQueuePrefix)),
+      std::make_pair(IMMEDIATE,
+                     QueueOptions(options)
+                         .set_subdirectory(kImmediateQueueSubdir)
+                         .set_file_prefix(kImmediateQueuePrefix)
+                         .set_upload_retry_delay(kFailedUploadRetryDelay)),
       std::make_pair(FAST_BATCH,
                      QueueOptions(options)
                          .set_subdirectory(kFastBatchQueueSubdir)
@@ -101,10 +112,12 @@ std::vector<std::pair<Priority, QueueOptions>> ExpectedQueues(
                          .set_subdirectory(kBackgroundQueueSubdir)
                          .set_file_prefix(kBackgroundQueuePrefix)
                          .set_upload_period(kBackgroundQueueUploadPeriod)),
-      std::make_pair(MANUAL_BATCH, QueueOptions(options)
-                                       .set_subdirectory(kManualQueueSubdir)
-                                       .set_file_prefix(kManualQueuePrefix)
-                                       .set_upload_period(kManualUploadPeriod)),
+      std::make_pair(MANUAL_BATCH,
+                     QueueOptions(options)
+                         .set_subdirectory(kManualQueueSubdir)
+                         .set_file_prefix(kManualQueuePrefix)
+                         .set_upload_period(kManualUploadPeriod)
+                         .set_upload_retry_delay(kFailedUploadRetryDelay)),
   };
 }
 
@@ -118,16 +131,15 @@ class Storage::QueueUploaderInterface : public UploaderInterface {
       : priority_(priority), storage_interface_(std::move(storage_interface)) {}
 
   // Factory method.
-  static StatusOr<std::unique_ptr<UploaderInterface>> ProvideUploader(
+  static void AsyncProvideUploader(
       Priority priority,
-      Storage* storage) {
-    ASSIGN_OR_RETURN(
-        std::unique_ptr<UploaderInterface> uploader,
-        storage->start_upload_cb_.Run(
-            priority, EncryptionModule::is_enabled() &&
-                          storage->encryption_module_->need_encryption_key()));
-    return std::make_unique<QueueUploaderInterface>(priority,
-                                                    std::move(uploader));
+      Storage* storage,
+      UploaderInterfaceResultCb start_uploader_cb) {
+    storage->async_start_upload_cb_.Run(
+        /*need_encryption_key=*/EncryptionModuleInterface::is_enabled() &&
+            storage->encryption_module_->need_encryption_key(),
+        base::BindOnce(&QueueUploaderInterface::WrapInstantiatedUploader,
+                       priority, std::move(start_uploader_cb)));
   }
 
   void ProcessRecord(EncryptedRecord encrypted_record,
@@ -154,8 +166,109 @@ class Storage::QueueUploaderInterface : public UploaderInterface {
   }
 
  private:
+  static void WrapInstantiatedUploader(
+      Priority priority,
+      UploaderInterfaceResultCb start_uploader_cb,
+      StatusOr<std::unique_ptr<UploaderInterface>> uploader_result) {
+    if (!uploader_result.ok()) {
+      std::move(start_uploader_cb).Run(uploader_result.status());
+      return;
+    }
+    std::move(start_uploader_cb)
+        .Run(std::make_unique<QueueUploaderInterface>(
+            priority, std::move(uploader_result.ValueOrDie())));
+  }
+
   const Priority priority_;
   const std::unique_ptr<UploaderInterface> storage_interface_;
+};
+
+class Storage::KeyDelivery {
+ public:
+  using RequestCallback = base::OnceCallback<void(Status)>;
+  explicit KeyDelivery(
+      UploaderInterface::AsyncStartUploaderCb async_start_upload_cb)
+      : async_start_upload_cb_(async_start_upload_cb),
+        sequenced_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
+            {base::TaskPriority::BEST_EFFORT, base::MayBlock()})) {
+    DETACH_FROM_SEQUENCE(sequence_checker_);
+  }
+
+  ~KeyDelivery() = default;
+
+  void Request(RequestCallback callback) {
+    sequenced_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&KeyDelivery::EuqueueRequestAndStart,
+                                  base::Unretained(this), std::move(callback)));
+  }
+
+  void OnCompletion(Status status) {
+    sequenced_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&KeyDelivery::PostResponses,
+                                  base::Unretained(this), status));
+  }
+
+ private:
+  void EuqueueRequestAndStart(RequestCallback callback) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    const bool first_call = callbacks_.empty();
+    callback_subscriptions_.emplace_back(callbacks_.Add(std::move(callback)));
+    DCHECK(callback_subscriptions_.back());
+    if (!first_call) {
+      // Already started.
+      return;
+    }
+    // The first request, starting the roundtrip.
+    // Initiate upload with need_encryption_key flag and no records.
+    UploaderInterface::UploaderInterfaceResultCb start_uploader_cb =
+        base::BindOnce(&KeyDelivery::EncryptionKeyReceiverReady,
+                       base::Unretained(this));
+    async_start_upload_cb_.Run(
+        /*need_encryption_key=*/true,
+        base::BindOnce(&KeyDelivery::WrapInstantiatedKeyUploader,
+                       /*priority=*/MANUAL_BATCH,
+                       std::move(start_uploader_cb)));
+  }
+
+  void PostResponses(Status status) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    callbacks_.Notify(status);
+    DCHECK(callbacks_.empty());
+    callback_subscriptions_.clear();
+  }
+
+  static void WrapInstantiatedKeyUploader(
+      Priority priority,
+      UploaderInterface::UploaderInterfaceResultCb start_uploader_cb,
+      StatusOr<std::unique_ptr<UploaderInterface>> uploader_result) {
+    if (!uploader_result.ok()) {
+      std::move(start_uploader_cb).Run(uploader_result.status());
+      return;
+    }
+    std::move(start_uploader_cb)
+        .Run(std::make_unique<QueueUploaderInterface>(
+            priority, std::move(uploader_result.ValueOrDie())));
+  }
+
+  void EncryptionKeyReceiverReady(
+      StatusOr<std::unique_ptr<UploaderInterface>> uploader_result) {
+    if (!uploader_result.ok()) {
+      OnCompletion(uploader_result.status());
+      return;
+    }
+    uploader_result.ValueOrDie()->Completed(Status::StatusOK());
+  }
+
+  // Upload provider callback.
+  const UploaderInterface::AsyncStartUploaderCb async_start_upload_cb_;
+
+  // List of all request callbacks (protected by |sequenced_task_runner_|).
+  base::OnceCallbackList<void(Status)> callbacks_;
+  std::vector<base::CallbackListSubscription> callback_subscriptions_;
+
+  const scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 };
 
 class Storage::KeyInStorage {
@@ -184,7 +297,8 @@ class Storage::KeyInStorage {
   // Atomically sets |next_key_file_index_| to the a value larger than any found
   // file. Returns key and key id pair, or error status (NOT_FOUND if no valid
   // file has been found). Called once during initialization only.
-  StatusOr<std::pair<std::string, Encryptor::PublicKeyId>> DownloadKeyFile() {
+  StatusOr<std::pair<std::string, EncryptionModuleInterface::PublicKeyId>>
+  DownloadKeyFile() {
     // Make sure the assigned directory exists.
     base::File::Error error;
     if (!base::CreateDirectoryAndGetError(directory_, &error)) {
@@ -224,18 +338,17 @@ class Storage::KeyInStorage {
   }
 
   Status VerifySignature(const SignedEncryptionInfo& signed_encryption_key) {
-    if (signed_encryption_key.public_asymmetric_key().size() !=
-        X25519_PUBLIC_VALUE_LEN) {
+    if (signed_encryption_key.public_asymmetric_key().size() != kKeySize) {
       return Status{error::FAILED_PRECONDITION, "Key size mismatch"};
     }
-    char value_to_verify[sizeof(Encryptor::PublicKeyId) +
-                         X25519_PUBLIC_VALUE_LEN];
-    const Encryptor::PublicKeyId public_key_id =
+    char value_to_verify[sizeof(EncryptionModuleInterface::PublicKeyId) +
+                         kKeySize];
+    const EncryptionModuleInterface::PublicKeyId public_key_id =
         signed_encryption_key.public_key_id();
-    memcpy(value_to_verify, &public_key_id, sizeof(Encryptor::PublicKeyId));
-    memcpy(value_to_verify + sizeof(Encryptor::PublicKeyId),
-           signed_encryption_key.public_asymmetric_key().data(),
-           X25519_PUBLIC_VALUE_LEN);
+    memcpy(value_to_verify, &public_key_id,
+           sizeof(EncryptionModuleInterface::PublicKeyId));
+    memcpy(value_to_verify + sizeof(EncryptionModuleInterface::PublicKeyId),
+           signed_encryption_key.public_asymmetric_key().data(), kKeySize);
     return verifier_.Verify(
         std::string(value_to_verify, sizeof(value_to_verify)),
         signed_encryption_key.signature());
@@ -361,7 +474,7 @@ class Storage::KeyInStorage {
   // Enumerates found key files and locates one with the highest index and
   // valid key. Returns pair of file name and loaded signed key proto.
   // Called once, during initialization.
-  base::Optional<std::pair<base::FilePath, SignedEncryptionInfo>>
+  absl::optional<std::pair<base::FilePath, SignedEncryptionInfo>>
   LocateValidKeyAndParse(
       const base::flat_map<uint64_t, base::FilePath>& found_key_files) {
     // Try to unserialize the key from each found file (latest first).
@@ -412,7 +525,7 @@ class Storage::KeyInStorage {
     }
 
     // Not found, return error.
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Index of the file to serialize the signed key to.
@@ -429,8 +542,9 @@ class Storage::KeyInStorage {
 
 void Storage::Create(
     const StorageOptions& options,
-    UploaderInterface::StartCb start_upload_cb,
-    scoped_refptr<EncryptionModule> encryption_module,
+    UploaderInterface::AsyncStartUploaderCb async_start_upload_cb,
+    scoped_refptr<EncryptionModuleInterface> encryption_module,
+    scoped_refptr<CompressionModule> compression_module,
     base::OnceCallback<void(StatusOr<scoped_refptr<Storage>>)> completion_cb) {
   // Initialize Storage object, populating all the queues.
   class StorageInitContext
@@ -454,12 +568,19 @@ void Storage::Create(
     void OnStart() override {
       CheckOnValidSequence();
 
-      // Locate the latest signed_encryption_key file with matching key
-      // signature after deserialization.
+      // If encryption is not enabled, proceed with the queues.
+      if (!EncryptionModuleInterface::is_enabled()) {
+        InitAllQueues();
+        return;
+      }
+
+      // Encryption is enabled. Locate the latest signed_encryption_key file
+      // with matching key signature after deserialization.
       const auto download_key_result =
           storage_->key_in_storage_->DownloadKeyFile();
       if (!download_key_result.ok()) {
         // Key not found or corrupt. Proceed with queues creation directly.
+        // We will download the key on the first Enqueue.
         EncryptionSetUp(download_key_result.status());
         return;
       }
@@ -484,22 +605,16 @@ void Storage::Create(
         // Encryption key has been found and set up. Must be available now.
         DCHECK(storage_->encryption_module_->has_encryption_key());
       } else {
-        if (EncryptionModule::is_enabled()) {
-          // Encryptor enabled - we cannot proceed with no keys.
-          // Send Upload with need_encryption_key flag and no records.
-          StatusOr<std::unique_ptr<UploaderInterface>> uploader =
-              storage_->start_upload_cb_.Run(
-                  /*priority=*/MANUAL_BATCH,  // Any priority would do.
-                  /*need_encryption_key=*/true);
-          if (!uploader.ok()) {
-            Response(uploader.status());
-            return;
-          }
-          uploader.ValueOrDie()->Completed(Status::StatusOK());
-          // Continue initialization without waiting for it to respond.
-          // Until the response arrives, we will reject Enqueues.
-        }
+        LOG(WARNING)
+            << "Encryption is enabled, but the key is not available yet, "
+               "status="
+            << status;
       }
+      InitAllQueues();
+    }
+
+    void InitAllQueues() {
+      CheckOnValidSequence();
 
       // Construct all queues.
       count_ = queues_options_.size();
@@ -508,10 +623,10 @@ void Storage::Create(
             /*options=*/queue_options.second,
             // Note: the callback below belongs to the Queue and does not
             // outlive Storage.
-            base::BindRepeating(&QueueUploaderInterface::ProvideUploader,
+            base::BindRepeating(&QueueUploaderInterface::AsyncProvideUploader,
                                 /*priority=*/queue_options.first,
                                 base::Unretained(storage_.get())),
-            storage_->encryption_module_,
+            storage_->encryption_module_, storage_->compression_module_,
             base::BindOnce(&StorageInitContext::ScheduleAddQueue,
                            base::Unretained(this),
                            /*priority=*/queue_options.first));
@@ -559,7 +674,8 @@ void Storage::Create(
   // Create Storage object.
   // Cannot use base::MakeRefCounted<Storage>, because constructor is private.
   scoped_refptr<Storage> storage = base::WrapRefCounted(
-      new Storage(options, encryption_module, std::move(start_upload_cb)));
+      new Storage(options, encryption_module, compression_module,
+                  std::move(async_start_upload_cb)));
 
   // Asynchronously run initialization.
   Start<StorageInitContext>(ExpectedQueues(storage->options_),
@@ -567,14 +683,17 @@ void Storage::Create(
 }
 
 Storage::Storage(const StorageOptions& options,
-                 scoped_refptr<EncryptionModule> encryption_module,
-                 UploaderInterface::StartCb start_upload_cb)
+                 scoped_refptr<EncryptionModuleInterface> encryption_module,
+                 scoped_refptr<CompressionModule> compression_module,
+                 UploaderInterface::AsyncStartUploaderCb async_start_upload_cb)
     : options_(options),
       encryption_module_(encryption_module),
+      key_delivery_(std::make_unique<KeyDelivery>(async_start_upload_cb)),
+      compression_module_(compression_module),
       key_in_storage_(std::make_unique<KeyInStorage>(
           options.signature_verification_public_key(),
           options.directory())),
-      start_upload_cb_(std::move(start_upload_cb)) {}
+      async_start_upload_cb_(async_start_upload_cb) {}
 
 Storage::~Storage() = default;
 
@@ -585,11 +704,32 @@ void Storage::Write(Priority priority,
   // no need to protect or serialize access to it.
   ASSIGN_OR_ONCE_CALLBACK_AND_RETURN(scoped_refptr<StorageQueue> queue,
                                      completion_cb, GetQueue(priority));
-  queue->Write(std::move(record), std::move(completion_cb));
+
+  KeyDelivery::RequestCallback action = base::BindOnce(
+      [](scoped_refptr<StorageQueue> queue, Record record,
+         base::OnceCallback<void(Status)> completion_cb, Status status) {
+        if (!status.ok()) {
+          std::move(completion_cb).Run(status);
+          return;
+        }
+        queue->Write(std::move(record), std::move(completion_cb));
+      },
+      queue, std::move(record), std::move(completion_cb));
+
+  if (EncryptionModuleInterface::is_enabled() &&
+      !encryption_module_->has_encryption_key()) {
+    // Key was not found at startup time. Note that if the key is outdated,
+    // we still can't use it, and won't load it now. So this processing can
+    // only happen after Storage is initialized (until the first successful
+    // delivery of a key).
+    key_delivery_->Request(std::move(action));
+  } else {
+    std::move(action).Run(Status::StatusOK());
+  }
 }
 
 void Storage::Confirm(Priority priority,
-                      base::Optional<int64_t> seq_number,
+                      absl::optional<int64_t> seq_number,
                       bool force,
                       base::OnceCallback<void(Status)> completion_cb) {
   // Note: queues_ never change after initialization is finished, so there is
@@ -614,24 +754,39 @@ void Storage::UpdateEncryptionKey(SignedEncryptionInfo signed_encryption_key) {
   if (!signature_verification_status.ok()) {
     LOG(WARNING) << "Key failed verification, status="
                  << signature_verification_status;
+    key_delivery_->OnCompletion(signature_verification_status);
     return;
   }
 
   // Assign the received key to encryption module.
   encryption_module_->UpdateAsymmetricKey(
       signed_encryption_key.public_asymmetric_key(),
-      signed_encryption_key.public_key_id(), base::BindOnce([](Status status) {
-        if (!status.ok()) {
-          LOG(WARNING) << "Encryption key update failed, status=" << status;
-          return;
-        }
-        // Encryption key updated successfully.
-      }));
+      signed_encryption_key.public_key_id(),
+      base::BindOnce(
+          [](Storage* storage, Status status) {
+            if (!status.ok()) {
+              LOG(WARNING) << "Encryption key update failed, status=" << status;
+              storage->key_delivery_->OnCompletion(status);
+              return;
+            }
+            // Encryption key updated successfully.
+            storage->key_delivery_->OnCompletion(Status::StatusOK());
+          },
+          base::Unretained(this)));
 
   // Serialize whole signed_encryption_key to a new file, discard the old
-  // one(s).
-  const Status status = key_in_storage_->UploadKeyFile(signed_encryption_key);
-  LOG_IF(ERROR, !status.ok()) << "Failed to upload the new encription key.";
+  // one(s). Do it on a thread which may block doing file operations.
+  base::ThreadPool::PostTask(
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+      base::BindOnce(
+          [](SignedEncryptionInfo signed_encryption_key,
+             KeyInStorage* key_in_storage) {
+            const Status status =
+                key_in_storage->UploadKeyFile(signed_encryption_key);
+            LOG_IF(ERROR, !status.ok())
+                << "Failed to upload the new encription key.";
+          },
+          std::move(signed_encryption_key), key_in_storage_.get()));
 }
 
 StatusOr<scoped_refptr<StorageQueue>> Storage::GetQueue(Priority priority) {

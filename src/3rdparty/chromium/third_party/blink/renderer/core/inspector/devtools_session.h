@@ -7,7 +7,6 @@
 
 #include <memory>
 #include "base/callback.h"
-#include "base/macros.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -48,6 +47,8 @@ class CORE_EXPORT DevToolsSession : public GarbageCollected<DevToolsSession>,
       bool client_expects_binary_responses,
       const String& session_id,
       scoped_refptr<base::SequencedTaskRunner> mojo_task_runner);
+  DevToolsSession(const DevToolsSession&) = delete;
+  DevToolsSession& operator=(const DevToolsSession&) = delete;
   ~DevToolsSession() override;
 
   void ConnectToV8(v8_inspector::V8Inspector*, int context_group_id);
@@ -105,14 +106,11 @@ class CORE_EXPORT DevToolsSession : public GarbageCollected<DevToolsSession>,
 
   Member<DevToolsAgent> agent_;
   // DevToolsSession is not tied to ExecutionContext
-  HeapMojoAssociatedReceiver<mojom::blink::DevToolsSession,
-                             DevToolsSession,
-                             HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoAssociatedReceiver<mojom::blink::DevToolsSession, DevToolsSession>
       receiver_{this, nullptr};
   // DevToolsSession is not tied to ExecutionContext
-  HeapMojoAssociatedRemote<mojom::blink::DevToolsSessionHost,
-                           HeapMojoWrapperMode::kWithoutContextObserver>
-      host_remote_{nullptr};
+  HeapMojoAssociatedRemote<mojom::blink::DevToolsSessionHost> host_remote_{
+      nullptr};
   IOSession* io_session_;
   std::unique_ptr<v8_inspector::V8InspectorSession> v8_session_;
   std::unique_ptr<protocol::UberDispatcher> inspector_backend_dispatcher_;
@@ -126,8 +124,6 @@ class CORE_EXPORT DevToolsSession : public GarbageCollected<DevToolsSession>,
   InspectorAgentState v8_session_state_;
   InspectorAgentState::Bytes v8_session_state_cbor_;
   const String session_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(DevToolsSession);
 };
 
 }  // namespace blink

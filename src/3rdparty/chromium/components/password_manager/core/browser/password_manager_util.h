@@ -6,14 +6,15 @@
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_UTIL_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "components/device_reauth/biometric_authenticator.h"
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
-#include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/core/browser/password_store_interface.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace network {
@@ -36,6 +37,18 @@ class PrefService;
 
 namespace password_manager_util {
 
+// For credentials returned from PasswordStore::GetLogins, the enum specifies
+// the type of the match for the requested page. Higher value always means
+// weaker match.
+enum class GetLoginMatchType {
+  // Exact origin or Android credentials.
+  kExact,
+  // A web site affiliated with the requesting page.
+  kAffiliated,
+  // eTLD + 1 match.
+  kPSL,
+};
+
 // Update |credential| to reflect usage.
 void UpdateMetadataForUsage(password_manager::PasswordForm* credential);
 
@@ -43,10 +56,6 @@ void UpdateMetadataForUsage(password_manager::PasswordForm* credential);
 // null |sync_service| returns NOT_SYNCING.
 password_manager::SyncState GetPasswordSyncState(
     const syncer::SyncService* sync_service);
-
-// Reports whether passwords are synced with normal encryption, i.e. without a
-// custom passphrase.
-bool IsSyncingWithNormalEncryption(const syncer::SyncService* sync_service);
 
 // Removes Android username-only credentials from |android_credentials|.
 // Transforms federated credentials into non zero-click ones.
@@ -90,7 +99,7 @@ void UserTriggeredManualGenerationFromContextMenu(
 // and it can also be null for some unittests.
 void RemoveUselessCredentials(
     password_manager::CredentialsCleanerRunner* cleaning_tasks_runner,
-    scoped_refptr<password_manager::PasswordStore> store,
+    scoped_refptr<password_manager::PasswordStoreInterface> store,
     PrefService* prefs,
     base::TimeDelta delay,
     base::RepeatingCallback<network::mojom::NetworkContext*()>
@@ -103,6 +112,10 @@ void RemoveUselessCredentials(
 // This assumes that the |form|'s host is a substring of the signon_realm.
 base::StringPiece GetSignonRealmWithProtocolExcluded(
     const password_manager::PasswordForm& form);
+
+// For credentials returned from PasswordStore::GetLogins, specifies the type of
+// the match for the requested page.
+GetLoginMatchType GetMatchType(const password_manager::PasswordForm& form);
 
 // Given all non-blocklisted |non_federated_matches|, finds and populates
 // |non_federated_same_scheme|, |best_matches|, and |preferred_match|
@@ -123,7 +136,7 @@ void FindBestMatches(
 // none exists. If multiple matches exist, returns the first one.
 const password_manager::PasswordForm* FindFormByUsername(
     const std::vector<const password_manager::PasswordForm*>& forms,
-    const base::string16& username_value);
+    const std::u16string& username_value);
 
 // If the user submits a form, they may have used existing credentials, new
 // credentials, or modified existing credentials that should be updated.
@@ -143,7 +156,10 @@ const password_manager::PasswordForm* GetMatchForUpdating(
 // components. In case this fails (e.g. for non-standard origins like Android
 // credentials), the original origin is kept.
 password_manager::PasswordForm MakeNormalizedBlocklistedForm(
-    password_manager::PasswordStore::FormDigest digest);
+    password_manager::PasswordFormDigest digest);
+
+// Helper which checks if biometric authentication is available.
+bool CanUseBiometricAuth(device_reauth::BiometricAuthenticator* authenticator);
 
 }  // namespace password_manager_util
 

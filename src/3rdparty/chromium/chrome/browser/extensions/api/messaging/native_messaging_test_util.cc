@@ -40,10 +40,10 @@ void WriteTestNativeHostManifest(const base::FilePath& target_dir,
   manifest->SetBoolean("supports_native_initiated_connections",
                        supports_native_initiated_connections);
 
-  std::unique_ptr<base::ListValue> origins(new base::ListValue());
-  origins->AppendString(base::StringPrintf(
+  base::Value origins(base::Value::Type::LIST);
+  origins.Append(base::StringPrintf(
       "chrome-extension://%s/", ScopedTestNativeMessagingHost::kExtensionId));
-  manifest->Set("allowed_origins", std::move(origins));
+  manifest->SetKey("allowed_origins", std::move(origins));
 
   base::FilePath manifest_path = target_dir.AppendASCII(host_name + ".json");
   JSONFileValueSerializer serializer(manifest_path);
@@ -90,10 +90,10 @@ void ScopedTestNativeMessagingHost::RegisterTestHost(bool user_level) {
   HKEY root_key = user_level ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
   ASSERT_NO_FATAL_FAILURE(registry_override_.OverrideRegistry(root_key));
 #else
-  path_override_.reset(new base::ScopedPathOverride(
+  path_override_ = std::make_unique<base::ScopedPathOverride>(
       user_level ? chrome::DIR_USER_NATIVE_MESSAGING
                  : chrome::DIR_NATIVE_MESSAGING,
-      temp_dir_.GetPath()));
+      temp_dir_.GetPath());
 #endif
 
   base::CopyFile(test_user_data_dir.AppendASCII("echo.py"),

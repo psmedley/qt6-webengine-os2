@@ -1,4 +1,6 @@
 include_rules = [
+    "+base/bind.h",
+    "+base/threading/sequenced_task_runner_handle.h",
     "+base/threading/thread_task_runner_handle.h",
 
     "+components/viz/common/gpu/raster_context_provider.h",
@@ -18,9 +20,9 @@ include_rules = [
     "+media/renderers",
     "+media/video",
 
+    "+third_party/libaom",
+    "+third_party/libvpx",
     "+third_party/libyuv",
-    "+third_party/openh264",
-    "+third_party/opus",
 
     "+ui/gfx/color_space.h",
     "+ui/gfx/geometry/rect.h",
@@ -29,9 +31,6 @@ include_rules = [
 ]
 
 specific_include_rules = {
-  "video_track_reader_writer_test\.cc": [
-    "+base/run_loop.h",
-  ],
   "video_decoder_broker_test\.cc": [
     "+base/run_loop.h",
     "+base/threading/thread.h",
@@ -43,5 +42,8 @@ specific_include_rules = {
   ],
   "video_frame_test\.cc": [
     "+components/viz/test/test_context_provider.h",
-  ]
+  ],
+  "video_frame_monitor_test\.cc": [
+    "+base/run_loop.h",
+  ],
 }

@@ -5,14 +5,13 @@
 import '../strings.m.js';
 
 import {assert} from 'chrome://resources/js/assert.m.js';
-import {isChromeOS} from 'chrome://resources/js/cr.m.js';
+import {isChromeOS, isLacros} from 'chrome://resources/js/cr.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 
-// <if expr="chromeos">
+// <if expr="chromeos or lacros">
 import {NativeLayerCrosImpl} from '../native_layer_cros.js';
 
 import {Cdd} from './cdd.js';
-import {ColorModeRestriction, DestinationPolicies, DuplexModeRestriction, PinModeRestriction} from './destination_policies.js';
 import {getStatusReasonFromPrinterStatus, PrinterStatus, PrinterStatusReason} from './printer_status_cros.js';
 // </if>
 
@@ -34,9 +33,12 @@ export const DestinationType = {
 export const DestinationOrigin = {
   LOCAL: 'local',
   COOKIES: 'cookies',
-  // <if expr="chromeos">
+  // <if expr="chromeos or lacros">
   DEVICE: 'device',
   // </if>
+  // Note: Privet is deprecated, but used to filter any legacy entries in the
+  // recent destinations, since we can't guarantee all recent privet printers
+  // have been overridden.
   PRIVET: 'privet',
   EXTENSION: 'extension',
   CROS: 'chrome_os',
@@ -48,7 +50,7 @@ export const DestinationOrigin = {
  */
 export const CloudOrigins = [
   DestinationOrigin.COOKIES,
-  // <if expr="chromeos">
+  // <if expr="chromeos or lacros">
   DestinationOrigin.DEVICE,
   // </if>
 ];
@@ -182,7 +184,6 @@ export class Destination {
    *          description: (string|undefined),
    *          certificateStatus:
    *              (DestinationCertificateStatus|undefined),
-   *          policies: (DestinationPolicies|undefined),
    *         }=} opt_params Optional
    *     parameters for the destination.
    */
@@ -222,12 +223,6 @@ export class Destination {
      * @private {?Cdd}
      */
     this.capabilities_ = null;
-
-    /**
-     * Policies affecting the destination.
-     * @private {?DestinationPolicies}
-     */
-    this.policies_ = (opt_params && opt_params.policies) || null;
 
     /**
      * Whether the destination is owned by the user.
@@ -312,7 +307,7 @@ export class Destination {
     this.certificateStatus_ = opt_params && opt_params.certificateStatus ||
         DestinationCertificateStatus.NONE;
 
-    // <if expr="chromeos">
+    // <if expr="chromeos or lacros">
     /**
      * EULA url for printer's PPD. Empty string indicates no provided EULA.
      * @private {string}
@@ -330,6 +325,18 @@ export class Destination {
      * @private {?Promise<string>}
      */
     this.printerStatusRequestedPromise_ = null;
+
+    /**
+     * True if the failed printer status request has already been retried once.
+     * @private {boolean}
+     */
+    this.printerStatusRetrySent_ = false;
+
+    /**
+     * The length of time to wait before retrying a printer status request.
+     * @private {number}
+     */
+    this.printerStatusRetryTimerMs_ = 3000;
     // </if>
 
     assert(
@@ -393,13 +400,7 @@ export class Destination {
   get isLocal() {
     return this.origin_ === DestinationOrigin.LOCAL ||
         this.origin_ === DestinationOrigin.EXTENSION ||
-        this.origin_ === DestinationOrigin.CROS ||
-        this.origin_ === DestinationOrigin.PRIVET;
-  }
-
-  /** @return {boolean} Whether the destination is a Privet local printer */
-  get isPrivet() {
-    return this.origin_ === DestinationOrigin.PRIVET;
+        this.origin_ === DestinationOrigin.CROS;
   }
 
   /**
@@ -489,22 +490,7 @@ export class Destination {
     }
   }
 
-  // <if expr="chromeos">
-  /**
-   * @return {?DestinationPolicies} Print policies affecting the destination.
-   */
-  get policies() {
-    return this.policies_;
-  }
-
-  /**
-   * @param {?DestinationPolicies} policies Print policies affecting the
-   *     destination.
-   */
-  set policies(policies) {
-    this.policies_ = policies;
-  }
-
+  // <if expr="chromeos or lacros">
   /** @return {string} The EULA URL for a the destination */
   get eulaUrl() {
     return this.eulaUrl_;
@@ -521,6 +507,13 @@ export class Destination {
    */
   get printerStatusReason() {
     return this.printerStatusReason_;
+  }
+
+  /**
+   * @param {number} timeoutMs
+   */
+  setPrinterStatusRetryTimeoutForTesting(timeoutMs) {
+    this.printerStatusRetryTimerMs_ = timeoutMs;
   }
 
   /**
@@ -545,18 +538,60 @@ export class Destination {
     }
 
     // Request printer status then set and return the promise.
-    this.printerStatusRequestedPromise_ =
-        NativeLayerCrosImpl.getInstance()
-            .requestPrinterStatusUpdate(this.id_)
-            .then(status => {
-              if (status) {
-                this.printerStatusReason_ = getStatusReasonFromPrinterStatus(
-                    /** @type {!PrinterStatus} */ (status));
-              }
-              return Promise.resolve(this.key);
-            });
+    this.printerStatusRequestedPromise_ = this.requestPrinterStatusPromise_();
     return this.printerStatusRequestedPromise_;
   }
+
+  /**
+   * Requests a printer status for the destination. If the printer status comes
+   * back as |PRINTER_UNREACHABLE|, this function will retry and call itself
+   * again once before resolving the original call.
+   * @return {!Promise<string>} Promise with destination key.
+   * @private
+   */
+  requestPrinterStatusPromise_() {
+    return NativeLayerCrosImpl.getInstance()
+        .requestPrinterStatusUpdate(this.id_)
+        .then(status => {
+          if (status) {
+            const statusReason = getStatusReasonFromPrinterStatus(
+                /** @type {!PrinterStatus} */ (status));
+            const isPrinterUnreachable =
+                statusReason === PrinterStatusReason.PRINTER_UNREACHABLE;
+            if (isPrinterUnreachable && !this.printerStatusRetrySent_) {
+              this.printerStatusRetrySent_ = true;
+              return this.printerStatusWaitForTimerPromise_();
+            }
+
+            this.printerStatusReason_ = statusReason;
+
+            // If this is the second printer status attempt, record the result.
+            if (this.printerStatusRetrySent_) {
+              NativeLayerCrosImpl.getInstance()
+                  .recordPrinterStatusRetrySuccessHistogram(
+                      !isPrinterUnreachable);
+            }
+          }
+          return Promise.resolve(this.key);
+        });
+  }
+
+  /**
+   * Pause for a set timeout then retry the printer status request.
+   * @return {!Promise<string>} Promise with destination key.
+   * @private
+   */
+  printerStatusWaitForTimerPromise_() {
+    return new Promise((resolve, reject) => {
+             setTimeout(() => {
+               resolve();
+             }, this.printerStatusRetryTimerMs_);
+           })
+        .then(() => {
+          return this.requestPrinterStatusPromise_();
+        });
+  }
+
   // </if>
 
   /**
@@ -610,7 +645,8 @@ export class Destination {
 
   /** @return {boolean} Whether the destination is ready to be selected. */
   get readyForSelection() {
-    return (!isChromeOS || this.origin_ !== DestinationOrigin.CROS ||
+    return (!(isChromeOS || isLacros) ||
+            this.origin_ !== DestinationOrigin.CROS ||
             this.capabilities_ !== null) &&
         !this.isProvisional;
   }
@@ -649,7 +685,7 @@ export class Destination {
 
   /** @return {string} Path to the SVG for the destination's icon. */
   get icon() {
-    // <if expr="chromeos">
+    // <if expr="chromeos or lacros">
     if (this.id_ === Destination.GooglePromotedId.SAVE_TO_DRIVE_CROS) {
       return 'print-preview:save-to-drive';
     }
@@ -749,37 +785,6 @@ export class Destination {
         null;
   }
 
-  // <if expr="chromeos">
-  /**
-   * @return {?ColorModeRestriction} Color mode set by policy.
-   */
-  get colorPolicy() {
-    return this.policies && this.policies.allowedColorModes ?
-        this.policies.allowedColorModes :
-        null;
-  }
-
-  /**
-   * @return {?DuplexModeRestriction} Duplex modes allowed by
-   *     policy.
-   */
-  get duplexPolicy() {
-    return this.policies && this.policies.allowedDuplexModes ?
-        this.policies.allowedDuplexModes :
-        null;
-  }
-
-  /**
-   * @return {?PinModeRestriction} Pin mode allowed by policy.
-   */
-  get pinPolicy() {
-    return this.policies && this.policies.allowedPinModes ?
-        this.policies.allowedPinModes :
-        null;
-  }
-
-  // </if>
-
   /** @return {boolean} Whether the printer supports copies. */
   get hasCopiesCapability() {
     const capability = this.copiesCapability_();
@@ -808,32 +813,6 @@ export class Destination {
     });
     return hasColor && hasMonochrome;
   }
-
-  // <if expr="chromeos">
-  /**
-   * @return {?ColorModeRestriction} Value of default color
-   *     setting given by policy.
-   */
-  get defaultColorPolicy() {
-    return this.policies && this.policies.defaultColorMode;
-  }
-
-  /**
-   * @return {?DuplexModeRestriction} Value of default duplex
-   *     setting given by policy.
-   */
-  get defaultDuplexPolicy() {
-    return this.policies && this.policies.defaultDuplexMode;
-  }
-
-  /**
-   * @return {?PinModeRestriction} Value of default pin setting
-   *     given by policy.
-   */
-  get defaultPinPolicy() {
-    return this.policies && this.policies.defaultPinMode;
-  }
-  // </if>
 
   /**
    * @param {boolean} isColor Whether to use a color printing mode.
@@ -910,7 +889,7 @@ Destination.LOCATION_TAG_PREFIXES =
 Destination.GooglePromotedId = {
   DOCS: '__google__docs',
   SAVE_AS_PDF: 'Save as PDF',
-  // <if expr="chromeos">
+  // <if expr="chromeos or lacros">
   SAVE_TO_DRIVE_CROS: 'Save to Drive CrOS',
   // </if>
 };
@@ -919,7 +898,7 @@ Destination.GooglePromotedId = {
 export const PDF_DESTINATION_KEY =
     `${Destination.GooglePromotedId.SAVE_AS_PDF}/${DestinationOrigin.LOCAL}/`;
 
-// <if expr="chromeos">
+// <if expr="chromeos or lacros">
 /** @type {string} Unique identifier for the Save to Drive CrOS destination */
 export const SAVE_TO_DRIVE_CROS_DESTINATION_KEY =
     `${Destination.GooglePromotedId.SAVE_TO_DRIVE_CROS}/${

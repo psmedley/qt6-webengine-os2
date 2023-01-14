@@ -17,11 +17,12 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/scoped_thread_priority.h"
@@ -31,6 +32,7 @@
 #include "base/win/windows_version.h"
 #include "media/base/media_switches.h"
 #include "media/base/win/mf_initializer.h"
+#include "media/capture/capture_switches.h"
 #include "media/capture/video/win/metrics.h"
 #include "media/capture/video/win/video_capture_device_mf_win.h"
 #include "media/capture/video/win/video_capture_device_win.h"
@@ -317,22 +319,24 @@ void FindAndSetDefaultVideoCamera(
 // distributions such as Windows 7 N and Windows 7 KN.
 // static
 bool VideoCaptureDeviceFactoryWin::PlatformSupportsMediaFoundation() {
-  static bool g_dlls_available = LoadMediaFoundationDlls();
-  return g_dlls_available;
+  static const bool has_media_foundation =
+      LoadMediaFoundationDlls() && InitializeMediaFoundation();
+  return has_media_foundation;
 }
 
 VideoCaptureDeviceFactoryWin::VideoCaptureDeviceFactoryWin()
     : use_media_foundation_(
           base::FeatureList::IsEnabled(media::kMediaFoundationVideoCapture)),
-      use_d3d11_with_media_foundation_(base::FeatureList::IsEnabled(
-          media::kMediaFoundationD3D11VideoCapture)),
+      use_d3d11_with_media_foundation_(
+          base::FeatureList::IsEnabled(
+              media::kMediaFoundationD3D11VideoCapture) &&
+          switches::IsVideoCaptureUseGpuMemoryBufferEnabled()),
       com_thread_("Windows Video Capture COM Thread") {
   if (use_media_foundation_ && !PlatformSupportsMediaFoundation()) {
     use_media_foundation_ = false;
     LogVideoCaptureWinBackendUsed(
         VideoCaptureWinBackendUsed::kUsingDirectShowAsFallback);
   } else if (use_media_foundation_) {
-    session_ = InitializeMediaFoundation();
     LogVideoCaptureWinBackendUsed(
         VideoCaptureWinBackendUsed::kUsingMediaFoundationAsDefault);
   } else {
@@ -539,7 +543,7 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
 
   std::vector<VideoCaptureDeviceInfo> devices_info;
 
-  if (use_media_foundation_ && session_) {
+  if (use_media_foundation_) {
     DCHECK(PlatformSupportsMediaFoundation());
     devices_info = GetDevicesInfoMediaFoundation();
     AugmentDevicesListWithDirectShowOnlyDevices(&devices_info);
@@ -564,7 +568,7 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
 void VideoCaptureDeviceFactoryWin::EnumerateDevicesUWP(
     std::vector<VideoCaptureDeviceInfo> devices_info,
     GetDevicesInfoCallback result_callback) {
-  DCHECK_GE(base::win::OSInfo::GetInstance()->version_number().build, 10240);
+  DCHECK_GE(base::win::OSInfo::GetInstance()->version_number().build, 10240u);
 
   VideoCaptureDeviceFactoryWin* factory = this;
   scoped_refptr<base::SingleThreadTaskRunner> com_thread_runner =
@@ -974,11 +978,6 @@ VideoCaptureDeviceFactoryWin::GetSupportedFormatsMediaFoundation(
     type.Reset();
     ++stream_index;
     if (capture_format.pixel_format == PIXEL_FORMAT_UNKNOWN)
-      continue;
-    // If we're using the hardware capture path, ignore non-NV12 pixel formats
-    // to prevent copies
-    if (dxgi_device_manager_available &&
-        capture_format.pixel_format != PIXEL_FORMAT_NV12)
       continue;
     formats.push_back(capture_format);
 

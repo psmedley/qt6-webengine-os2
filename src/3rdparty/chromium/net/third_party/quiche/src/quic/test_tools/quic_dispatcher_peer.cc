@@ -87,10 +87,11 @@ void QuicDispatcherPeer::SendPublicReset(
     const QuicSocketAddress& peer_address,
     QuicConnectionId connection_id,
     bool ietf_quic,
+    size_t received_packet_length,
     std::unique_ptr<QuicPerPacketContext> packet_context) {
   dispatcher->time_wait_list_manager()->SendPublicReset(
       self_address, peer_address, connection_id, ietf_quic,
-      std::move(packet_context));
+      received_packet_length, std::move(packet_context));
 }
 
 // static
@@ -116,31 +117,20 @@ std::string QuicDispatcherPeer::SelectAlpn(
 // static
 QuicSession* QuicDispatcherPeer::GetFirstSessionIfAny(
     QuicDispatcher* dispatcher) {
-  if (dispatcher->use_reference_counted_session_map()) {
-    if (dispatcher->reference_counted_session_map_.empty()) {
-      return nullptr;
-    }
-    return dispatcher->reference_counted_session_map_.begin()->second.get();
-  } else {
-    if (dispatcher->session_map_.empty()) {
-      return nullptr;
-    }
-    return dispatcher->session_map_.begin()->second.get();
+  if (dispatcher->reference_counted_session_map_.empty()) {
+    return nullptr;
   }
+  return dispatcher->reference_counted_session_map_.begin()->second.get();
 }
 
 // static
 const QuicSession* QuicDispatcherPeer::FindSession(
     const QuicDispatcher* dispatcher,
     QuicConnectionId id) {
-  if (dispatcher->use_reference_counted_session_map()) {
-    auto it = dispatcher->reference_counted_session_map_.find(id);
-    return (it == dispatcher->reference_counted_session_map_.end())
-               ? nullptr
-               : it->second.get();
-  }
-  auto it = dispatcher->session_map_.find(id);
-  return (it == dispatcher->session_map_.end()) ? nullptr : it->second.get();
+  auto it = dispatcher->reference_counted_session_map_.find(id);
+  return (it == dispatcher->reference_counted_session_map_.end())
+             ? nullptr
+             : it->second.get();
 }
 
 }  // namespace test

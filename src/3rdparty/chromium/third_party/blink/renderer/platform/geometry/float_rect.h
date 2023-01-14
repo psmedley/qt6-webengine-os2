@@ -30,6 +30,7 @@
 #include <iosfwd>
 
 #include "base/compiler_specific.h"
+#include "base/dcheck_is_on.h"
 #include "base/numerics/clamped_math.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
@@ -229,6 +230,10 @@ inline FloatRect UnionRect(const FloatRect& a, const FloatRect& b) {
 
 PLATFORM_EXPORT FloatRect UnionRect(const Vector<FloatRect>&);
 
+// Return a maximum rectangle in which any point is covered by either a or b.
+PLATFORM_EXPORT FloatRect MaximumCoveredRect(const FloatRect& a,
+                                             const FloatRect& b);
+
 inline FloatRect& operator+=(FloatRect& a, const FloatRect& b) {
   a.Move(b.X(), b.Y());
   a.SetWidth(a.Width() + b.Width());
@@ -272,4 +277,4 @@ PLATFORM_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const FloatRect&);
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_FLOAT_RECT_H_

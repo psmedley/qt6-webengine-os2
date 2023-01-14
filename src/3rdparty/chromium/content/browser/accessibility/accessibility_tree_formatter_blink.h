@@ -40,9 +40,7 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBlink
 
   void RecursiveBuildTree(const ui::AXNode& node, base::Value* dict) const;
 
-  uint32_t ChildCount(const BrowserAccessibility& node) const;
-  BrowserAccessibility* GetChild(const BrowserAccessibility& node,
-                                 uint32_t i) const;
+  base::Value BuildNode(ui::AXPlatformNodeDelegate* node) const override;
 
   void AddProperties(const BrowserAccessibility& node,
                      base::DictionaryValue* dict) const;

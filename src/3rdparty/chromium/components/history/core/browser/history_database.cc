@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
@@ -22,7 +21,6 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/history/core/browser/url_utils.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
@@ -39,7 +37,7 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // our database without *too* many bad effects.
-const int kCurrentVersionNumber = 43;
+const int kCurrentVersionNumber = 48;
 const int kCompatibleVersionNumber = 16;
 const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
@@ -85,7 +83,7 @@ HistoryDatabase::HistoryDatabase(
            // BeginExclusiveMode below which is called later (we have to be in
            // shared mode to start out for the in-memory backend to read the
            // data).
-           // TODO(1153459) Remove this dependency on normal locking mode. 
+           // TODO(1153459) Remove this dependency on normal locking mode.
            /*.exclusive_locking =*/ false,
            // Set the database page size to something a little larger to give us
            // better performance (we're typically seek rather than bandwidth
@@ -104,7 +102,7 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   if (!db_.Open(history_name))
     return LogInitFailure(InitStep::OPEN);
 
-  // Wrap the rest of init in a tranaction. This will prevent the database from
+  // Wrap the rest of init in a transaction. This will prevent the database from
   // getting corrupted if we crash in the middle of initialization or migration.
   sql::Transaction committer(&db_);
   if (!committer.Begin())
@@ -118,17 +116,16 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   // Prime the cache.
   db_.Preload();
 
-  // Create the tables and indices.
-  // NOTE: If you add something here, also add it to
-  //       RecreateAllButStarAndURLTables.
+  // Create the tables and indices. If you add something here, also add it to
+  // `RecreateAllTablesButURL()`.
   if (!meta_table_.Init(&db_, GetCurrentVersion(), kCompatibleVersionNumber))
     return LogInitFailure(InitStep::META_TABLE_INIT);
   if (!CreateURLTable(false) || !InitVisitTable() ||
       !InitKeywordSearchTermsTable() || !InitDownloadTable() ||
 #if !defined(TOOLKIT_QT)
-      !InitSegmentTables() || !InitSyncTable())
+      !InitSegmentTables() || !InitSyncTable() || !InitVisitAnnotationsTables())
 #else
-      !InitSegmentTables())
+      !InitSegmentTables() || !InitVisitAnnotationsTables())
 #endif
     return LogInitFailure(InitStep::CREATE_TABLES);
   CreateMainURLIndex();
@@ -329,6 +326,11 @@ bool HistoryDatabase::RecreateAllTablesButURL() {
   if (!InitSegmentTables())
     return false;
 
+  if (!DropVisitAnnotationsTables())
+    return false;
+  if (!InitVisitAnnotationsTables())
+    return false;
+
   return true;
 }
 
@@ -369,10 +371,6 @@ SegmentID HistoryDatabase::GetSegmentID(VisitID visit_id) {
   if (!s.Step() || s.GetColumnType(0) == sql::ColumnType::kNull)
     return 0;
   return s.ColumnInt64(0);
-}
-
-bool HistoryDatabase::GetVisitsForUrl2(URLID url_id, VisitVector* visits) {
-  return GetVisitsForURL(url_id, visits);
 }
 
 base::Time HistoryDatabase::GetEarlyExpirationThreshold() {
@@ -635,6 +633,39 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   if (cur_version == 42) {
     if (!MigrateVisitsWithoutPubliclyRoutableColumn())
       return LogMigrationFailure(42);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 43) {
+    if (!CanMigrateFlocAllowed() || !MigrateFlocAllowedToAnnotationsTable())
+      return LogMigrationFailure(43);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 44) {
+    MigrateReplaceClusterVisitsTable();
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 45) {
+    // New download reroute infos table is introduced, no migration needed.
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 46) {
+    if (!MigrateContentAnnotationsWithoutEntitiesColumn())
+      return LogMigrationFailure(46);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 47) {
+    if (!MigrateContentAnnotationsAddRelatedSearchesColumn())
+      return LogMigrationFailure(47);
     cur_version++;
     meta_table_.SetVersionNumber(cur_version);
   }

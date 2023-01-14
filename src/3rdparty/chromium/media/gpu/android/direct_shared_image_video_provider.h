@@ -5,13 +5,11 @@
 #ifndef MEDIA_GPU_ANDROID_DIRECT_SHARED_IMAGE_VIDEO_PROVIDER_H_
 #define MEDIA_GPU_ANDROID_DIRECT_SHARED_IMAGE_VIDEO_PROVIDER_H_
 
-#include <memory>
-
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/sequence_bound.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "gpu/command_buffer/service/ref_counted_lock.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/command_buffer/service/texture_owner.h"
@@ -32,18 +30,18 @@ class GpuSharedImageVideoFactory;
 // SharedImageVideoProvider implementation that lives on the thread that it's
 // created on, but hops to the GPU thread to create new shared images on demand.
 class MEDIA_GPU_EXPORT DirectSharedImageVideoProvider
-    : public SharedImageVideoProvider {
+    : public SharedImageVideoProvider,
+      public gpu::RefCountedLockHelperDrDc {
  public:
   DirectSharedImageVideoProvider(
       scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-      GetStubCB get_stub_cb);
+      GetStubCB get_stub_cb,
+      scoped_refptr<gpu::RefCountedLock> drdc_lock);
   ~DirectSharedImageVideoProvider() override;
 
   // SharedImageVideoProvider
   void Initialize(GpuInitCB get_stub_cb) override;
-  void RequestImage(ImageReadyCB cb,
-                    const ImageSpec& spec,
-                    scoped_refptr<gpu::TextureOwner> texture_owner) override;
+  void RequestImage(ImageReadyCB cb, const ImageSpec& spec) override;
 
  private:
   base::SequenceBound<GpuSharedImageVideoFactory> gpu_factory_;
@@ -80,22 +78,18 @@ class GpuSharedImageVideoFactory
   // mailbox support, where we have to have one texture per CodecImage.
   void CreateImage(FactoryImageReadyCB cb,
                    const SharedImageVideoProvider::ImageSpec& spec,
-                   scoped_refptr<gpu::TextureOwner> texture_owner);
+                   scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
  private:
   // Creates a SharedImage for |mailbox|, and returns success or failure.
   bool CreateImageInternal(const SharedImageVideoProvider::ImageSpec& spec,
-                           scoped_refptr<gpu::TextureOwner> texture_owner,
                            gpu::Mailbox mailbox,
-                           scoped_refptr<CodecImage> image);
+                           scoped_refptr<CodecImage> image,
+                           scoped_refptr<gpu::RefCountedLock>);
 
   void OnWillDestroyStub(bool have_context) override;
 
   gpu::CommandBufferStub* stub_ = nullptr;
-
-  // A helper for creating textures. Only valid while |stub_| is valid.
-  std::unique_ptr<GLES2DecoderHelper> decoder_helper_;
-
   bool is_vulkan_ = false;
 
   THREAD_CHECKER(thread_checker_);

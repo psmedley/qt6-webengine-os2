@@ -7,16 +7,15 @@
 
 #include <map>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
-#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_piece.h"
-#include "components/reporting/encryption/encryption_module.h"
+#include "components/reporting/compression/compression_module.h"
+#include "components/reporting/encryption/encryption_module_interface.h"
 #include "components/reporting/proto/record.pb.h"
 #include "components/reporting/proto/record_constants.pb.h"
 #include "components/reporting/storage/storage_configuration.h"
@@ -24,6 +23,7 @@
 #include "components/reporting/storage/storage_uploader_interface.h"
 #include "components/reporting/util/status.h"
 #include "components/reporting/util/statusor.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace reporting {
 
@@ -34,8 +34,9 @@ class Storage : public base::RefCountedThreadSafe<Storage> {
   // Creates Storage instance, and returns it with the completion callback.
   static void Create(
       const StorageOptions& options,
-      UploaderInterface::StartCb start_upload_cb,
-      scoped_refptr<EncryptionModule> encryption_module,
+      UploaderInterface::AsyncStartUploaderCb async_start_upload_cb,
+      scoped_refptr<EncryptionModuleInterface> encryption_module,
+      scoped_refptr<CompressionModule> compression_module,
       base::OnceCallback<void(StatusOr<scoped_refptr<Storage>>)> completion_cb);
 
   // Wraps and serializes Record (taking ownership of it), encrypts and writes
@@ -53,7 +54,7 @@ class Storage : public base::RefCountedThreadSafe<Storage> {
   // only accepted if no higher ids were confirmed before; otherwise it is
   // accepted unconditionally.
   void Confirm(Priority priority,
-               base::Optional<int64_t> sequencing_id,
+               absl::optional<int64_t> sequencing_id,
                bool force,
                base::OnceCallback<void(Status)> completion_cb);
 
@@ -82,11 +83,17 @@ class Storage : public base::RefCountedThreadSafe<Storage> {
   // Private helper class for key upload/download to the file system.
   class KeyInStorage;
 
+  // Private helper class for initial key delivery from the server.
+  // It can be invoked multiple times in parallel, but will only do
+  // one server roundtrip and notify all requestors upon its completion.
+  class KeyDelivery;
+
   // Private constructor, to be called by Create factory method only.
   // Queues need to be added afterwards.
   Storage(const StorageOptions& options,
-          scoped_refptr<EncryptionModule> encryption_module,
-          UploaderInterface::StartCb start_upload_cb);
+          scoped_refptr<EncryptionModuleInterface> encryption_module,
+          scoped_refptr<CompressionModule> compression_module,
+          UploaderInterface::AsyncStartUploaderCb async_start_upload_cb);
 
   // Initializes the object by adding all queues for all priorities.
   // Must be called once and only once after construction.
@@ -103,7 +110,13 @@ class Storage : public base::RefCountedThreadSafe<Storage> {
   const StorageOptions options_;
 
   // Encryption module.
-  scoped_refptr<EncryptionModule> encryption_module_;
+  scoped_refptr<EncryptionModuleInterface> encryption_module_;
+
+  // Internal module for initiail key delivery from server.
+  std::unique_ptr<KeyDelivery> key_delivery_;
+
+  // Compression module.
+  scoped_refptr<CompressionModule> compression_module_;
 
   // Internal key management module.
   std::unique_ptr<KeyInStorage> key_in_storage_;
@@ -112,7 +125,7 @@ class Storage : public base::RefCountedThreadSafe<Storage> {
   base::flat_map<Priority, scoped_refptr<StorageQueue>> queues_;
 
   // Upload provider callback.
-  const UploaderInterface::StartCb start_upload_cb_;
+  const UploaderInterface::AsyncStartUploaderCb async_start_upload_cb_;
 };
 
 }  // namespace reporting

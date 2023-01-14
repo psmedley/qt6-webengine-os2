@@ -380,7 +380,7 @@ void ThroughputAnalyzer::SetUseLocalHostRequestsForTesting(
 
 int64_t ThroughputAnalyzer::GetBitsReceived() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return NetworkActivityMonitor::GetInstance()->GetBytesReceived() * 8;
+  return activity_monitor::GetBytesReceived() * 8;
 }
 
 size_t ThroughputAnalyzer::CountActiveInFlightRequests() const {
@@ -403,7 +403,7 @@ bool ThroughputAnalyzer::DegradesAccuracy(const URLRequest& request) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   bool private_network_request =
-      nqe::internal::IsRequestForPrivateHost(request);
+      nqe::internal::IsRequestForPrivateHost(request, net_log_);
 
   return !(use_localhost_requests_for_tests_ || !private_network_request) ||
          request.creation_time() < last_connection_change_;

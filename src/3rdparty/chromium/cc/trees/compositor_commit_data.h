@@ -13,6 +13,7 @@
 #include "cc/input/scroll_snap_data.h"
 #include "cc/paint/element_id.h"
 #include "cc/trees/layer_tree_host_client.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/transform.h"
@@ -32,7 +33,7 @@ struct CC_EXPORT CompositorCommitData {
     ScrollUpdateInfo();
     ScrollUpdateInfo(ElementId id,
                      gfx::ScrollOffset delta,
-                     base::Optional<TargetSnapAreaElementIds> snap_target_ids);
+                     absl::optional<TargetSnapAreaElementIds> snap_target_ids);
     ScrollUpdateInfo(const ScrollUpdateInfo& other);
     ScrollUpdateInfo& operator=(const ScrollUpdateInfo&);
     ElementId element_id;
@@ -41,7 +42,7 @@ struct CC_EXPORT CompositorCommitData {
     // The target snap area element ids of the scrolling element.
     // This will have a value if the scrolled element's scroll node has snap
     // container data and the scroll delta is non-zero.
-    base::Optional<TargetSnapAreaElementIds> snap_target_element_ids;
+    absl::optional<TargetSnapAreaElementIds> snap_target_element_ids;
 
     bool operator==(const ScrollUpdateInfo& other) const {
       return element_id == other.element_id &&

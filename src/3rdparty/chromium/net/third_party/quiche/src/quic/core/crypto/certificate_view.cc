@@ -30,9 +30,9 @@
 #include "quic/platform/api/quic_bug_tracker.h"
 #include "quic/platform/api/quic_ip_address.h"
 #include "quic/platform/api/quic_logging.h"
-#include "common/platform/api/quiche_text_utils.h"
 #include "common/platform/api/quiche_time_utils.h"
 #include "common/quiche_data_reader.h"
+#include "common/quiche_text_utils.h"
 
 namespace quic {
 namespace {
@@ -495,8 +495,9 @@ bool CertificateView::VerifySignature(absl::string_view data,
                                       uint16_t signature_algorithm) const {
   if (PublicKeyTypeFromSignatureAlgorithm(signature_algorithm) !=
       PublicKeyTypeFromKey(public_key_.get())) {
-    QUIC_BUG << "Mismatch between the requested signature algorithm and the "
-                "type of the public key.";
+    QUIC_BUG(quic_bug_10640_1)
+        << "Mismatch between the requested signature algorithm and the "
+           "type of the public key.";
     return false;
   }
 
@@ -587,8 +588,9 @@ skip:
 std::string CertificatePrivateKey::Sign(absl::string_view input,
                                         uint16_t signature_algorithm) {
   if (!ValidForSignatureAlgorithm(signature_algorithm)) {
-    QUIC_BUG << "Mismatch between the requested signature algorithm and the "
-                "type of the private key.";
+    QUIC_BUG(quic_bug_10640_2)
+        << "Mismatch between the requested signature algorithm and the "
+           "type of the private key.";
     return "";
   }
 

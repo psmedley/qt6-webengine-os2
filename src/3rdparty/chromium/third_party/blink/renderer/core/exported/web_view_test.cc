@@ -35,8 +35,7 @@
 #include <string>
 
 #include "base/callback_helpers.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -50,6 +49,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
@@ -65,7 +65,6 @@
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_drag_data.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/public/test/test_web_frame_content_dumper.h"
@@ -85,6 +84,7 @@
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_widget.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_document.h"
+#include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/css/media_query_list_listener.h"
 #include "third_party/blink/renderer/core/css/media_query_matcher.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -94,6 +94,7 @@
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/core/exported/web_page_popup_impl.h"
 #include "third_party/blink/renderer/core/exported/web_settings_impl.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
@@ -108,7 +109,9 @@
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/forms/external_date_time_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
+#include "third_party/blink/renderer/core/html/forms/internal_popup_menu.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html/html_object_element.h"
@@ -117,6 +120,7 @@
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/interactive_detector.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -124,6 +128,7 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_hidden_state.h"
+#include "third_party/blink/renderer/core/page/page_popup_client.h"
 #include "third_party/blink/renderer/core/page/print_context.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
@@ -149,6 +154,7 @@
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/cursor/cursor.h"
@@ -182,9 +188,7 @@ enum VerticalScrollbarState {
 
 class TestData {
  public:
-  void SetWebView(WebView* web_view) {
-    web_view_ = static_cast<WebViewImpl*>(web_view);
-  }
+  void SetWebView(WebView* web_view) { web_view_ = To<WebViewImpl>(web_view); }
   void SetSize(const gfx::Size& new_size) { size_ = new_size; }
   HorizontalScrollbarState GetHorizontalScrollbarState() const {
     return web_view_->HasHorizontalScrollbar() ? kVisibleHorizontalScrollbar
@@ -428,7 +432,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColor) {
   WebViewImpl* web_view = web_view_helper_.Initialize();
   EXPECT_EQ(SK_ColorWHITE, web_view->BackgroundColor());
 
-  web_view->SetBaseBackgroundColor(SK_ColorBLUE);
+  web_view->SetPageBaseBackgroundColor(SK_ColorBLUE);
   EXPECT_EQ(SK_ColorBLUE, web_view->BackgroundColor());
 
   WebURL base_url = url_test_helpers::ToKURL("http://example.com/");
@@ -448,11 +452,11 @@ TEST_F(WebViewTest, SetBaseBackgroundColor) {
   // Expected: red (50% alpha) blended atop base of SK_ColorBLUE.
   EXPECT_EQ(0xFF80007F, web_view->BackgroundColor());
 
-  web_view->SetBaseBackgroundColor(kTranslucentPutty);
+  web_view->SetPageBaseBackgroundColor(kTranslucentPutty);
   // Expected: red (50% alpha) blended atop kTranslucentPutty. Note the alpha.
   EXPECT_EQ(0xBFE93A31, web_view->BackgroundColor());
 
-  web_view->SetBaseBackgroundColor(SK_ColorTRANSPARENT);
+  web_view->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
   frame_test_helpers::LoadHTMLString(web_view->MainFrameImpl(),
                                      "<html><head><style>body "
                                      "{background-color:transparent}</style></"
@@ -481,19 +485,24 @@ TEST_F(WebViewTest, SetBaseBackgroundColorBeforeMainFrame) {
   // Note: this test doesn't use WebViewHelper since it intentionally runs
   // initialization code between WebView and WebLocalFrame creation.
   frame_test_helpers::TestWebViewClient web_view_client;
-  WebViewImpl* web_view = static_cast<WebViewImpl*>(
+  WebViewImpl* web_view = To<WebViewImpl>(
       WebView::Create(&web_view_client,
                       /*is_hidden=*/false,
+                      /*is_prerendering=*/false,
                       /*is_inside_portal=*/false,
                       /*compositing_enabled=*/true,
+                      /*widgets_never_composited=*/false,
                       /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
-                      web_view_helper_.GetAgentGroupScheduler()));
+                      web_view_helper_.GetAgentGroupScheduler(),
+                      /*session_storage_namespace_id=*/base::EmptyString(),
+                      /*page_base_background_color=*/absl::nullopt));
 
   EXPECT_NE(SK_ColorBLUE, web_view->BackgroundColor());
-  // WebView does not have a frame yet, but we should still be able to set the
-  // background color.
-  web_view->SetBaseBackgroundColor(SK_ColorBLUE);
-  EXPECT_EQ(SK_ColorBLUE, web_view->BackgroundColor());
+  // WebView does not have a frame yet; while it's possible to set the page
+  // background color, it won't have any effect until a local main frame is
+  // attached.
+  web_view->SetPageBaseBackgroundColor(SK_ColorBLUE);
+  EXPECT_NE(SK_ColorBLUE, web_view->BackgroundColor());
 
   frame_test_helpers::TestWebFrameClient web_frame_client;
   WebLocalFrame* frame = WebLocalFrame::CreateMainFrame(
@@ -521,7 +530,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent) {
   WebViewImpl* web_view = web_view_helper_.Initialize();
 
   // Set WebView background to green with alpha.
-  web_view->SetBaseBackgroundColor(kAlphaGreen);
+  web_view->SetPageBaseBackgroundColor(kAlphaGreen);
   web_view->GetSettings()->SetShouldClearDocumentBackground(false);
   web_view->MainFrameViewWidget()->Resize(gfx::Size(kWidth, kHeight));
   UpdateAllLifecyclePhases();
@@ -562,7 +571,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColorWithColorScheme) {
   ColorSchemeHelper color_scheme_helper(*(web_view->GetPage()));
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kLight);
-  web_view->SetBaseBackgroundColor(SK_ColorBLUE);
+  web_view->SetPageBaseBackgroundColor(SK_ColorBLUE);
 
   WebURL base_url = url_test_helpers::ToKURL("http://example.com/");
   frame_test_helpers::LoadHTMLString(
@@ -579,9 +588,9 @@ TEST_F(WebViewTest, SetBaseBackgroundColorWithColorScheme) {
   EXPECT_EQ(Color(0x12, 0x12, 0x12), frame_view->BaseBackgroundColor());
 
   // Don't let dark color-scheme override a transparent background.
-  web_view->SetBaseBackgroundColor(SK_ColorTRANSPARENT);
+  web_view->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
   EXPECT_EQ(Color::kTransparent, frame_view->BaseBackgroundColor());
-  web_view->SetBaseBackgroundColor(SK_ColorBLUE);
+  web_view->SetPageBaseBackgroundColor(SK_ColorBLUE);
   EXPECT_EQ(Color(0x12, 0x12, 0x12), frame_view->BaseBackgroundColor());
 
   color_scheme_helper.SetForcedColors(*(web_view->GetPage()),
@@ -694,9 +703,8 @@ TEST_F(WebViewTest, PlatformColorsChangedOnDeviceEmulation) {
   ASSERT_TRUE(span1);
 
   // Check non-MobileLayoutTheme color.
-  // TODO(crbug.com/929098) Need to pass an appropriate color scheme here.
   Color original = LayoutTheme::GetTheme().FocusRingColor(
-      ComputedStyle::InitialStyle().UsedColorScheme());
+      span1->ComputedStyleRef().UsedColorScheme());
   EXPECT_EQ(original, OutlineColor(span1));
 
   // Set the focus ring color for the mobile theme to something known.
@@ -880,14 +888,14 @@ void WebViewTest::TestAutoResize(
 
   WebLocalFrameImpl* frame = web_view->MainFrameImpl();
   LocalFrameView* frame_view = frame->GetFrame()->View();
-  frame_view->UpdateLayout();
+  frame_view->UpdateStyleAndLayout();
   EXPECT_FALSE(frame_view->LayoutPending());
   EXPECT_FALSE(frame_view->NeedsLayout());
 
   web_view->EnableAutoResizeMode(min_auto_resize, max_auto_resize);
   EXPECT_TRUE(frame_view->LayoutPending());
   EXPECT_TRUE(frame_view->NeedsLayout());
-  frame_view->UpdateLayout();
+  frame_view->UpdateStyleAndLayout();
 
   EXPECT_TRUE(frame->GetFrame()->GetDocument()->IsHTMLDocument());
 
@@ -1568,8 +1576,7 @@ TEST_F(WebViewTest, FinishCompositionDoesNotRevealSelection) {
       web_view_helper_.InitializeAndLoad(base_url_ + "form_with_input.html");
   web_view->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   web_view->MainFrameImpl()->GetFrame()->SetInitialFocus(false);
-  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(gfx::ScrollOffset(), web_view->MainFrameImpl()->GetScrollOffset());
 
   // Set up a composition from existing text that needs to be committed.
   Vector<ImeTextSpan> empty_ime_text_spans;
@@ -1581,8 +1588,8 @@ TEST_F(WebViewTest, FinishCompositionDoesNotRevealSelection) {
   Element* element = static_cast<Element*>(
       web_view->MainFrameImpl()->GetDocument().GetElementById("btn"));
   element->scrollIntoView();
-  float offset_height = web_view->MainFrameImpl()->GetScrollOffset().height;
-  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().width);
+  float offset_height = web_view->MainFrameImpl()->GetScrollOffset().y();
+  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().x());
   EXPECT_LT(0, offset_height);
 
   WebTextInputInfo info = frame->GetInputMethodController()->TextInputInfo();
@@ -1592,8 +1599,8 @@ TEST_F(WebViewTest, FinishCompositionDoesNotRevealSelection) {
   frame->FrameWidget()
       ->GetActiveWebInputMethodController()
       ->FinishComposingText(WebInputMethodController::kDoNotKeepSelection);
-  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_EQ(offset_height, web_view->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(0, web_view->MainFrameImpl()->GetScrollOffset().x());
+  EXPECT_EQ(offset_height, web_view->MainFrameImpl()->GetScrollOffset().y());
 }
 
 TEST_F(WebViewTest, InsertNewLinePlacementAfterFinishComposingText) {
@@ -2426,15 +2433,15 @@ TEST_F(WebViewTest, HistoryResetScrollAndScaleState) {
       web_view_helper_.InitializeAndLoad(base_url_ + "200-by-300.html");
   web_view_impl->MainFrameViewWidget()->Resize(gfx::Size(100, 150));
   UpdateAllLifecyclePhases();
-  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(gfx::ScrollOffset(),
+            web_view_impl->MainFrameImpl()->GetScrollOffset());
 
   // Make the page scale and scroll with the given paremeters.
   web_view_impl->SetPageScaleFactor(2.0f);
-  web_view_impl->MainFrameImpl()->SetScrollOffset(WebSize(94, 111));
+  web_view_impl->MainFrameImpl()->SetScrollOffset(gfx::ScrollOffset(94, 111));
   EXPECT_EQ(2.0f, web_view_impl->PageScaleFactor());
-  EXPECT_EQ(94, web_view_impl->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_EQ(111, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(94, web_view_impl->MainFrameImpl()->GetScrollOffset().x());
+  EXPECT_EQ(111, web_view_impl->MainFrameImpl()->GetScrollOffset().y());
   auto* main_frame_local =
       To<LocalFrame>(web_view_impl->GetPage()->MainFrame());
   main_frame_local->Loader().SaveScrollState();
@@ -2457,8 +2464,8 @@ TEST_F(WebViewTest, HistoryResetScrollAndScaleState) {
   // Confirm that resetting the page state resets the saved scroll position.
   web_view_impl->ResetScrollAndScaleState();
   EXPECT_EQ(1.0f, web_view_impl->PageScaleFactor());
-  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(gfx::ScrollOffset(),
+            web_view_impl->MainFrameImpl()->GetScrollOffset());
   EXPECT_FALSE(main_frame_local->Loader()
                    .GetDocumentLoader()
                    ->GetHistoryItem()
@@ -2475,7 +2482,7 @@ TEST_F(WebViewTest, BackForwardRestoreScroll) {
       DocumentUpdateReason::kTest);
 
   // Emulate a user scroll
-  web_view_impl->MainFrameImpl()->SetScrollOffset(WebSize(0, 900));
+  web_view_impl->MainFrameImpl()->SetScrollOffset(gfx::ScrollOffset(0, 900));
   auto* main_frame_local =
       To<LocalFrame>(web_view_impl->GetPage()->MainFrame());
   Persistent<HistoryItem> item1 =
@@ -2493,18 +2500,21 @@ TEST_F(WebViewTest, BackForwardRestoreScroll) {
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr, false /* has_event */,
-      nullptr);
+      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
+      false /* is_synchronously_committed */,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent, nullptr);
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item2->Url(), WebFrameLoadType::kBackForward, item2.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr, false /* has_event */,
-      nullptr);
+      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
+      false /* is_synchronously_committed */,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent, nullptr);
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr, false /* has_event */,
-      nullptr);
+      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
+      false /* is_synchronously_committed */,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent, nullptr);
   web_view_impl->MainFrameWidget()->UpdateAllLifecyclePhases(
       DocumentUpdateReason::kTest);
 
@@ -2523,21 +2533,23 @@ TEST_F(WebViewTest, BackForwardRestoreScroll) {
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr, false /* has_event */,
-      nullptr);
+      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
+      false /* is_synchronously_committed */,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent, nullptr);
 
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item3->Url(), WebFrameLoadType::kBackForward, item3.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr, false /* has_event */,
-      nullptr);
+      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
+      false /* is_synchronously_committed */,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent, nullptr);
   // The scroll offset is only applied via invoking the anchor via the main
   // lifecycle, or a forced layout.
   // TODO(chrishtr): At the moment, WebLocalFrameImpl::GetScrollOffset() does
   // not force a layout. Script-exposed scroll offset-reading methods do,
   // however. It seems wrong not to force a layout.
-  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().width);
-  EXPECT_GT(web_view_impl->MainFrameImpl()->GetScrollOffset().height, 2000);
+  EXPECT_EQ(0, web_view_impl->MainFrameImpl()->GetScrollOffset().x());
+  EXPECT_GT(web_view_impl->MainFrameImpl()->GetScrollOffset().y(), 2000);
 }
 
 // Tests that scroll offset modified during fullscreen is preserved when
@@ -2550,8 +2562,8 @@ TEST_F(WebViewTest, FullscreenNoResetScroll) {
   UpdateAllLifecyclePhases();
 
   // Scroll the page down.
-  web_view_impl->MainFrameImpl()->SetScrollOffset(WebSize(0, 2000));
-  ASSERT_EQ(2000, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  web_view_impl->MainFrameImpl()->SetScrollOffset(gfx::ScrollOffset(0, 2000));
+  ASSERT_EQ(2000, web_view_impl->MainFrameImpl()->GetScrollOffset().y());
 
   // Enter fullscreen.
   LocalFrame* frame = web_view_impl->MainFrameImpl()->GetFrame();
@@ -2563,14 +2575,14 @@ TEST_F(WebViewTest, FullscreenNoResetScroll) {
   UpdateAllLifecyclePhases();
 
   // Assert the scroll position on the document element doesn't change.
-  ASSERT_EQ(2000, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  ASSERT_EQ(2000, web_view_impl->MainFrameImpl()->GetScrollOffset().y());
 
-  web_view_impl->MainFrameImpl()->SetScrollOffset(WebSize(0, 2100));
+  web_view_impl->MainFrameImpl()->SetScrollOffset(gfx::ScrollOffset(0, 2100));
 
   web_view_impl->DidExitFullscreen();
   UpdateAllLifecyclePhases();
 
-  EXPECT_EQ(2100, web_view_impl->MainFrameImpl()->GetScrollOffset().height);
+  EXPECT_EQ(2100, web_view_impl->MainFrameImpl()->GetScrollOffset().y());
 }
 
 // Tests that background color is read from the backdrop on fullscreen.
@@ -2595,24 +2607,24 @@ TEST_F(WebViewTest, FullscreenBackgroundColor) {
   EXPECT_EQ(SK_ColorYELLOW, web_view_impl->BackgroundColor());
 }
 
-class PrintWebViewClient : public frame_test_helpers::TestWebViewClient {
+class PrintWebFrameClient : public frame_test_helpers::TestWebFrameClient {
  public:
-  PrintWebViewClient() : print_called_(false) {}
+  PrintWebFrameClient() = default;
 
-  // WebViewClient methods
-  void PrintPage(WebLocalFrame*) override { print_called_ = true; }
+  // WebLocalFrameClient overrides:
+  void ScriptedPrint() override { print_called_ = true; }
 
   bool PrintCalled() const { return print_called_; }
 
  private:
-  bool print_called_;
+  bool print_called_ = false;
 };
 
 TEST_F(WebViewTest, PrintWithXHRInFlight) {
-  PrintWebViewClient client;
+  PrintWebFrameClient client;
   RegisterMockedHttpURLLoad("print_with_xhr_inflight.html");
   WebViewImpl* web_view_impl = web_view_helper_.InitializeAndLoad(
-      base_url_ + "print_with_xhr_inflight.html", nullptr, &client);
+      base_url_ + "print_with_xhr_inflight.html", &client, nullptr);
 
   ASSERT_TRUE(To<LocalFrame>(web_view_impl->GetPage()->MainFrame())
                   ->GetDocument()
@@ -2634,7 +2646,8 @@ static void DragAndDropURL(WebViewImpl* web_view, const std::string& url) {
   WebFrameWidget* widget = web_view->MainFrameImpl()->FrameWidget();
   widget->DragTargetDragEnter(drag_data, client_point, screen_point,
                               kDragOperationCopy, 0, base::DoNothing());
-  widget->DragTargetDrop(drag_data, client_point, screen_point, 0);
+  widget->DragTargetDrop(drag_data, client_point, screen_point, 0,
+                         base::DoNothing());
   frame_test_helpers::PumpPendingRequestsForFrameToLoad(
       web_view->MainFrameImpl());
 }
@@ -2723,11 +2736,15 @@ ExternalDateTimeChooser* WebViewTest::GetExternalDateTimeChooser(
 TEST_F(WebViewTest, ClientTapHandlingNullWebViewClient) {
   // Note: this test doesn't use WebViewHelper since WebViewHelper creates an
   // internal WebViewClient on demand if the supplied WebViewClient is null.
-  WebViewImpl* web_view = static_cast<WebViewImpl*>(WebView::Create(
-      /*client=*/nullptr, /*is_hidden=*/false, /*is_inside_portal=*/false,
-      /*compositing_enabled=*/false, /*opener=*/nullptr,
-      mojo::NullAssociatedReceiver(),
-      web_view_helper_.GetAgentGroupScheduler()));
+  WebViewImpl* web_view = To<WebViewImpl>(WebView::Create(
+      /*client=*/nullptr, /*is_hidden=*/false, /*is_prerendering=*/false,
+      /*is_inside_portal=*/false,
+      /*compositing_enabled=*/false,
+      /*widgets_never_composited=*/false,
+      /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
+      web_view_helper_.GetAgentGroupScheduler(),
+      /*session_storage_namespace_id=*/base::EmptyString(),
+      /*page_base_background_color=*/absl::nullopt));
   frame_test_helpers::TestWebFrameClient web_frame_client;
   WebLocalFrame* local_frame = WebLocalFrame::CreateMainFrame(
       web_view, &web_frame_client, nullptr, LocalFrameToken(), nullptr);
@@ -2982,7 +2999,8 @@ TEST_F(WebViewTest, TouchDragContextMenuWithoutDrag) {
   // Simulate the end of a non-moving drag.
   const gfx::PointF dragend_point(250, 8);
   web_view->MainFrameViewWidget()->DragSourceEndedAt(
-      dragend_point, dragend_point, ui::mojom::blink::DragOperation::kNone);
+      dragend_point, dragend_point, ui::mojom::blink::DragOperation::kNone,
+      base::DoNothing());
   EXPECT_TRUE(
       web_view->GetPage()->GetContextMenuController().ContextMenuNodeForFrame(
           web_view->MainFrameImpl()->GetFrame()));
@@ -3021,7 +3039,8 @@ TEST_F(WebViewTest, TouchDragContextMenuWithDrag) {
   // Simulate the end of a drag.
   const gfx::PointF dragend_point(270, 28);
   web_view->MainFrameViewWidget()->DragSourceEndedAt(
-      dragend_point, dragend_point, ui::mojom::blink::DragOperation::kNone);
+      dragend_point, dragend_point, ui::mojom::blink::DragOperation::kNone,
+      base::DoNothing());
   EXPECT_FALSE(
       web_view->GetPage()->GetContextMenuController().ContextMenuNodeForFrame(
           web_view->MainFrameImpl()->GetFrame()));
@@ -3689,7 +3708,7 @@ TEST_F(WebViewTest, FinishComposingTextDoesntTriggerAutofillTextChange) {
   WebVector<ui::ImeTextSpan> empty_ime_text_spans;
   active_input_method_controller->SetComposition(
       WebString::FromUTF8(composition_text.c_str()), empty_ime_text_spans,
-      WebRange(), 0, composition_text.length());
+      WebRange(), 0, static_cast<int>(composition_text.length()));
 
   WebTextInputInfo info = active_input_method_controller->TextInputInfo();
   EXPECT_EQ(0, info.selection_start);
@@ -3751,7 +3770,7 @@ class ViewCreatingWebViewClient : public frame_test_helpers::TestWebViewClient {
                       network::mojom::blink::WebSandboxFlags,
                       const SessionStorageNamespaceId&,
                       bool& consumed_user_gesture,
-                      const base::Optional<WebImpression>&) override {
+                      const absl::optional<WebImpression>&) override {
     return web_view_helper_.InitializeWithOpener(opener);
   }
   void DidFocus() override { did_focus_called_ = true; }
@@ -3834,7 +3853,7 @@ class ViewReusingWebViewClient : public frame_test_helpers::TestWebViewClient {
                       network::mojom::blink::WebSandboxFlags,
                       const SessionStorageNamespaceId&,
                       bool& consumed_user_gesture,
-                      const base::Optional<WebImpression>&) override {
+                      const absl::optional<WebImpression>&) override {
     return web_view_;
   }
 
@@ -4103,7 +4122,7 @@ TEST_F(WebViewTest, AddFrameInCloseURLUnload) {
   web_view_helper_.InitializeAndLoad(base_url_ + "add_frame_in_unload.html",
                                      &frame_client);
   // Dispatch unload event.
-  web_view_helper_.LocalMainFrame()->GetFrame()->ClosePage(base::DoNothing());
+  web_view_helper_.LocalMainFrame()->GetFrame()->ClosePageForTesting();
   EXPECT_EQ(0, frame_client.Count());
   web_view_helper_.Reset();
 }
@@ -4572,18 +4591,21 @@ TEST_F(WebViewTest, PreferredSize) {
   EXPECT_EQ(100, size.height());
 
   web_view->SetZoomLevel(PageZoomFactorToZoomLevel(2.0));
+  UpdateAllLifecyclePhases();
   size = web_view->ContentsPreferredMinimumSize();
   EXPECT_EQ(200, size.width());
   EXPECT_EQ(200, size.height());
 
   // Verify that both width and height are rounded (in this case up)
   web_view->SetZoomLevel(PageZoomFactorToZoomLevel(0.9995));
+  UpdateAllLifecyclePhases();
   size = web_view->ContentsPreferredMinimumSize();
   EXPECT_EQ(100, size.width());
   EXPECT_EQ(100, size.height());
 
   // Verify that both width and height are rounded (in this case down)
   web_view->SetZoomLevel(PageZoomFactorToZoomLevel(1.0005));
+  UpdateAllLifecyclePhases();
   size = web_view->ContentsPreferredMinimumSize();
   EXPECT_EQ(100, size.width());
   EXPECT_EQ(100, size.height());
@@ -4594,6 +4616,7 @@ TEST_F(WebViewTest, PreferredSize) {
   web_view = web_view_helper_.InitializeAndLoad(url);
 
   web_view->SetZoomLevel(PageZoomFactorToZoomLevel(1));
+  UpdateAllLifecyclePhases();
   size = web_view->ContentsPreferredMinimumSize();
   EXPECT_EQ(2, size.width());
   EXPECT_EQ(2, size.height());
@@ -4635,8 +4658,46 @@ TEST_F(WebViewTest, PreferredSizeWithGrid) {
                                      base_url);
 
   gfx::Size size = web_view->ContentsPreferredMinimumSize();
-  EXPECT_EQ(100, size.width());
+  if (RuntimeEnabledFeatures::LayoutNGEnabled())
+    EXPECT_EQ(0, size.width());
+  else
+    EXPECT_EQ(100, size.width());
+
   EXPECT_EQ(100, size.height());
+}
+
+TEST_F(WebViewTest, PreferredSizeWithNGGridSkipped) {
+  WebViewImpl* web_view = web_view_helper_.Initialize();
+  WebURL base_url = url_test_helpers::ToKURL("http://example.com/");
+  frame_test_helpers::LoadHTMLString(web_view->MainFrameImpl(),
+                                     R"HTML(<!DOCTYPE html>
+    <style>
+      body { margin: 0px; }
+    </style>
+    <div style="display: inline-grid;
+                padding: 1%;
+                border: 5px solid black;
+                grid-template-rows: 1fr 2fr">
+      <svg id="target" viewBox="0 0 1 1" style="background: green;
+                                                height: 100%;" >
+        <circle id="c1" cx="50" cy="50" r="50"/>
+      </svg>
+    </div>
+                                   )HTML",
+                                     base_url);
+
+  LocalFrame* main_frame = web_view->MainFrameImpl()->GetFrame();
+  Document* document = main_frame->GetDocument();
+  Element* element = document->getElementById("target");
+
+  // Note: Not entirely clear how we get into this state in release builds, we
+  // *should* be layout clean and have cached results for the preferred size
+  // query. See https://crbug.com/1245654 for how we saw this issue in the wild.
+  element->GetLayoutBox()->ClearLayoutResults();
+
+  gfx::Size size = web_view->ContentsPreferredMinimumSize();
+  EXPECT_EQ(10, size.width());
+  EXPECT_EQ(10, size.height());
 }
 
 TEST_F(WebViewTest, PreferredSizeWithGridMinWidth) {
@@ -4747,8 +4808,8 @@ class ShowUnhandledTapTest : public WebViewTest {
     RegisterMockedHttpURLLoad("Ahem.ttf");
     RegisterMockedHttpURLLoad(test_file);
 
-    mojo_test_helper_.reset(new MojoTestHelper(
-        WebString::FromUTF8(base_url_ + test_file), web_view_helper_));
+    mojo_test_helper_ = std::make_unique<MojoTestHelper>(
+        WebString::FromUTF8(base_url_ + test_file), web_view_helper_);
 
     web_view_ = mojo_test_helper_->WebView();
     web_view_->MainFrameViewWidget()->Resize(gfx::Size(500, 300));
@@ -5959,47 +6020,6 @@ TEST_F(WebViewTest, RootLayerAttachment) {
   EXPECT_TRUE(layer_tree_host->root_layer());
 }
 
-// Verifies that we emit Blink.UseCounter.FeaturePolicy.PotentialAnimation for
-// CSS and JS animations in a document.
-// TODO(crbug.com/1066620): enable this test after metrics for document policy
-// are added. Needs to update histogram name to document policy equivalent
-// when re-enabled.
-TEST_F(WebViewTest, DISABLED_PotentialViolationReportsForLayoutAnimations) {
-  const char* kHistogramName =
-      "Blink.UseCounter.FeaturePolicy.PotentialViolation";
-  WebViewImpl* web_view = web_view_helper_.Initialize();
-  // A page with non-violating animation does not generate report.
-  WebURL base_url_no_violation =
-      url_test_helpers::ToKURL("http://good-css.example.com/");
-  frame_test_helpers::LoadHTMLString(
-      web_view->MainFrameImpl(),
-      "<html><head><style>@keyframes foo {from "
-      "{color: blue;} to {color: red}}</style></head></html>",
-      base_url_no_violation);
-  HistogramTester histogram_tester;
-  histogram_tester.ExpectTotalCount(kHistogramName, 0);
-  // Page with 2 potential (CSS) layout-animation violations.
-  WebURL base_url_css_violations =
-      url_test_helpers::ToKURL("http://bad-css.example.com/");
-  frame_test_helpers::LoadHTMLString(
-      web_view->MainFrameImpl(),
-      "<html><head><style>@keyframes bar {"
-      "from{height: 100px;} to {height: 200px;}}"
-      "@keyframes baz {from{top: 100px;} to {top: 200px;}}"
-      "</style></head></html>",
-      base_url_css_violations);
-  histogram_tester.ExpectTotalCount(kHistogramName, 1);
-  // Page with a JS layout-animations violation.
-  WebURL base_url_js_violations =
-      url_test_helpers::ToKURL("http://js.example.com/");
-  frame_test_helpers::LoadHTMLString(
-      web_view->MainFrameImpl(),
-      "<html><body><div></div><script>document.body.firstChild.animate("
-      "{top: '100px'});</script></body></html>",
-      base_url_js_violations);
-  histogram_tester.ExpectTotalCount(kHistogramName, 2);
-}
-
 TEST_F(WebViewTest, ForceDarkModeInvalidatesPaint) {
   WebViewImpl* web_view = web_view_helper_.Initialize();
   web_view->MainFrameViewWidget()->Resize(gfx::Size(500, 500));
@@ -6103,6 +6123,140 @@ TEST_F(WebViewTest, LongPressAndThenLongTapLinkInIframeShouldShowContextMenu) {
                 WebCoalescedInputEvent(tap_event, ui::LatencyInfo())));
   EXPECT_EQ("anchor contextmenu",
             web_view->MainFrameImpl()->GetDocument().Title());
+}
+
+TEST_F(WebViewTest, SetHistoryLengthAndOffset) {
+  WebViewImpl* web_view_impl = web_view_helper_.Initialize();
+
+  // No history to merge; one committed page.
+  web_view_impl->SetHistoryListFromNavigation(0, 1);
+  EXPECT_EQ(1, web_view_impl->HistoryBackListCount() +
+                   web_view_impl->HistoryForwardListCount() + 1);
+  EXPECT_EQ(0, web_view_impl->HistoryBackListCount());
+
+  // History of length 1 to merge; one committed page.
+  web_view_impl->SetHistoryListFromNavigation(1, 2);
+  EXPECT_EQ(2, web_view_impl->HistoryBackListCount() +
+                   web_view_impl->HistoryForwardListCount() + 1);
+  EXPECT_EQ(1, web_view_impl->HistoryBackListCount());
+}
+
+// PopupWidgetImpl should inherit emulation params from the parent.
+TEST_F(WebViewTest, EmulatingPopupRect) {
+  // Some platforms don't support PagePopups so just return.
+  if (!RuntimeEnabledFeatures::PagePopupEnabled())
+    return;
+  WebViewImpl* web_view = web_view_helper_.Initialize();
+  WebURL base_url = url_test_helpers::ToKURL("http://example.com/");
+  frame_test_helpers::LoadHTMLString(web_view->MainFrameImpl(),
+                                     "<html><div id=\"container\">"
+                                     "   <select id=\"select\">"
+                                     "     <option>1</option>"
+                                     "     <option>2</option>"
+                                     "   </select></div>"
+                                     "</html>",
+                                     base_url);
+
+  LocalFrame* frame = web_view->MainFrameImpl()->GetFrame();
+  auto* select =
+      To<HTMLSelectElement>(frame->GetDocument()->getElementById("select"));
+  ASSERT_TRUE(select);
+
+  // Real screen rect set to 800x600.
+  gfx::Rect screen_rect(800, 600);
+  // Real widget and window screen rects.
+  gfx::Rect window_screen_rect(1, 2, 137, 139);
+  gfx::Rect widget_screen_rect(5, 7, 57, 59);
+
+  blink::VisualProperties visual_properties;
+  visual_properties.screen_infos = display::ScreenInfos(display::ScreenInfo());
+  visual_properties.new_size = gfx::Size(400, 300);
+  visual_properties.visible_viewport_size = gfx::Size(400, 300);
+  visual_properties.screen_infos.mutable_current().rect = gfx::Rect(800, 600);
+
+  web_view->MainFrameWidget()->ApplyVisualProperties(visual_properties);
+
+  // Verify screen rect will be set.
+  EXPECT_EQ(gfx::Rect(web_view->MainFrameWidget()->GetScreenInfo().rect),
+            screen_rect);
+
+  auto* menu = MakeGarbageCollected<InternalPopupMenu>(
+      MakeGarbageCollected<EmptyChromeClient>(), *select);
+  {
+    // Make a popup widget.
+    WebPagePopup* popup = web_view->OpenPagePopup(menu);
+
+    // Fake that the browser showed it.
+    static_cast<WebPagePopupImpl*>(popup)->DidShowPopup();
+
+    // Set its size.
+    popup->SetScreenRects(widget_screen_rect, window_screen_rect);
+
+    // The WindowScreenRect, WidgetScreenRect, and ScreenRect are all available
+    // to the popup.
+    EXPECT_EQ(window_screen_rect, gfx::Rect(popup->WindowRect()));
+    EXPECT_EQ(widget_screen_rect, gfx::Rect(popup->ViewRect()));
+    EXPECT_EQ(screen_rect, gfx::Rect(popup->GetScreenInfo().rect));
+
+    static_cast<WebPagePopupImpl*>(popup)->ClosePopup();
+  }
+
+  // Enable device emulation on the parent widget.
+  DeviceEmulationParams emulation_params;
+  gfx::Rect emulated_widget_rect(150, 160, 980, 1200);
+  // In mobile emulation the WindowScreenRect and ScreenRect are both set to
+  // match the WidgetScreenRect, which we set here.
+  emulation_params.screen_type = mojom::EmulatedScreenType::kMobile;
+  emulation_params.view_size = emulated_widget_rect.size();
+  emulation_params.view_position = emulated_widget_rect.origin();
+  web_view->EnableDeviceEmulation(emulation_params);
+
+  {
+    // Make a popup again. It should inherit device emulation params.
+    WebPagePopup* popup = web_view->OpenPagePopup(menu);
+
+    // Fake that the browser showed it.
+    static_cast<WebPagePopupImpl*>(popup)->DidShowPopup();
+
+    // Set its size again.
+    popup->SetScreenRects(widget_screen_rect, window_screen_rect);
+
+    // This time, the position of the WidgetScreenRect and WindowScreenRect
+    // should be affected by emulation params.
+    // TODO(danakj): This means the popup sees the top level widget at the
+    // emulated position *plus* the real position. Whereas the top level
+    // widget will see itself at the emulation position. Why this inconsistency?
+    int window_x = emulated_widget_rect.x() + window_screen_rect.x();
+    int window_y = emulated_widget_rect.y() + window_screen_rect.y();
+    EXPECT_EQ(window_x, popup->WindowRect().x());
+    EXPECT_EQ(window_y, popup->WindowRect().y());
+
+    int widget_x = emulated_widget_rect.x() + widget_screen_rect.x();
+    int widget_y = emulated_widget_rect.y() + widget_screen_rect.y();
+    EXPECT_EQ(widget_x, popup->ViewRect().x());
+    EXPECT_EQ(widget_y, popup->ViewRect().y());
+
+    // TODO(danakj): Why don't the sizes get changed by emulation? The comments
+    // that used to be in this test suggest that the sizes used to change, and
+    // we were testing for that. But now we only test for positions changing?
+    EXPECT_EQ(window_screen_rect.width(), popup->WindowRect().width());
+    EXPECT_EQ(window_screen_rect.height(), popup->WindowRect().height());
+    EXPECT_EQ(widget_screen_rect.width(), popup->ViewRect().width());
+    EXPECT_EQ(widget_screen_rect.height(), popup->ViewRect().height());
+    EXPECT_EQ(emulated_widget_rect,
+              gfx::Rect(web_view->MainFrameWidget()->ViewRect()));
+    EXPECT_EQ(emulated_widget_rect,
+              gfx::Rect(web_view->MainFrameWidget()->WindowRect()));
+
+    // TODO(danakj): Why isn't the ScreenRect visible to the popup an emulated
+    // value? The ScreenRect has been changed by emulation as demonstrated
+    // below.
+    EXPECT_EQ(gfx::Rect(800, 600), gfx::Rect(popup->GetScreenInfo().rect));
+    EXPECT_EQ(emulated_widget_rect,
+              gfx::Rect(web_view->MainFrameWidget()->GetScreenInfo().rect));
+
+    static_cast<WebPagePopupImpl*>(popup)->ClosePopup();
+  }
 }
 
 }  // namespace blink

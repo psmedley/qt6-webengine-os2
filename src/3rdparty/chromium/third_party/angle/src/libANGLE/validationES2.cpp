@@ -964,8 +964,8 @@ bool ValidateES2TexImageParametersBase(const Context *context,
         return false;
     }
 
-    if (xoffset < 0 || std::numeric_limits<GLsizei>::max() - xoffset < width ||
-        std::numeric_limits<GLsizei>::max() - yoffset < height)
+    if ((xoffset < 0 || std::numeric_limits<GLsizei>::max() - xoffset < width) ||
+        (yoffset < 0 || std::numeric_limits<GLsizei>::max() - yoffset < height))
     {
         context->validationError(GL_INVALID_VALUE, kResourceMaxTextureSize);
         return false;
@@ -1319,12 +1319,8 @@ bool ValidateES2TexImageParametersBase(const Context *context,
                     context->validationError(GL_INVALID_OPERATION, kInvalidFormat);
                     return false;
                 }
-                else
-                {
-                    context->validationError(GL_INVALID_ENUM, kEnumNotSupported);
-                    return false;
-                }
-                break;
+                context->validationError(GL_INVALID_ENUM, kEnumNotSupported);
+                return false;
             case GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE:
                 if (context->getExtensions().textureCompressionDXT3)
                 {
@@ -3625,7 +3621,8 @@ bool ValidateCreateShader(const Context *context, ShaderType type)
             break;
 
         case ShaderType::Geometry:
-            if (!context->getExtensions().geometryShader && context->getClientVersion() < ES_3_2)
+            if (!context->getExtensions().geometryShaderAny() &&
+                context->getClientVersion() < ES_3_2)
             {
                 context->validationError(GL_INVALID_ENUM, kInvalidShaderType);
                 return false;
@@ -3757,7 +3754,11 @@ bool ValidateBufferSubData(const Context *context,
         return false;
     }
 
-    if (buffer->isMapped())
+    // EXT_buffer_storage allows persistently mapped buffers to be updated via glBufferSubData
+    bool isPersistent = (buffer->getAccessFlags() & GL_MAP_PERSISTENT_BIT_EXT) != 0;
+
+    // Verify that buffer is not currently mapped unless persistent
+    if (buffer->isMapped() && !isPersistent)
     {
         context->validationError(GL_INVALID_OPERATION, kBufferMapped);
         return false;
@@ -3778,7 +3779,7 @@ bool ValidateBufferSubData(const Context *context,
     }
 
     // Check for possible overflow of size + offset
-    angle::CheckedNumeric<size_t> checkedSize(size);
+    angle::CheckedNumeric<decltype(size + offset)> checkedSize(size);
     checkedSize += offset;
     if (!checkedSize.IsValid())
     {
@@ -3861,8 +3862,7 @@ bool ValidateAttachShader(const Context *context, ShaderProgramID program, Shade
         return false;
     }
 
-    if (programObject->getAttachedShader(shaderObject->getType()) &&
-        !programObject->getState().isShaderMarkedForDetach(shaderObject->getType()))
+    if (programObject->getAttachedShader(shaderObject->getType()))
     {
         context->validationError(GL_INVALID_OPERATION, kShaderAttachmentHasShader);
         return false;
@@ -4050,6 +4050,14 @@ bool ValidateGetString(const Context *context, GLenum name)
 
         case GL_REQUESTABLE_EXTENSIONS_ANGLE:
             if (!context->getExtensions().requestExtension)
+            {
+                context->validationError(GL_INVALID_ENUM, kInvalidName);
+                return false;
+            }
+            break;
+
+        case GL_SERIALIZED_CONTEXT_STRING_ANGLE:
+            if (!context->getExtensions().getSerializedContextStringANGLE)
             {
                 context->validationError(GL_INVALID_ENUM, kInvalidName);
                 return false;
@@ -6289,6 +6297,12 @@ void RecordBindTextureTypeError(const Context *context, TextureType target)
 
         case TextureType::VideoImage:
             ASSERT(!context->getExtensions().webglVideoTexture);
+            context->validationError(GL_INVALID_ENUM, kExtensionNotEnabled);
+            break;
+
+        case TextureType::Buffer:
+            ASSERT(!context->getExtensions().textureBufferOES &&
+                   !context->getExtensions().textureBufferEXT);
             context->validationError(GL_INVALID_ENUM, kExtensionNotEnabled);
             break;
 

@@ -9,9 +9,8 @@
 #include "base/memory/ref_counted_memory.h"
 #include "ui/base/x/selection_owner.h"
 #include "ui/base/x/selection_utils.h"
+#include "ui/base/x/x11_clipboard_helper.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/events/platform/platform_event_source.h"
-#include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/xproto.h"
 #include "ui/gfx/x/xproto_util.h"
@@ -43,13 +42,10 @@ std::vector<uint8_t> CombineData(
 }  // namespace
 
 SelectionRequestor::SelectionRequestor(x11::Window x_window,
-                                       x11::EventObserver* observer)
+                                       XClipboardHelper* helper)
     : x_window_(x_window),
-      x_property_(x11::Atom::None),
-      observer_(observer),
-      current_request_index_(0u) {
-  x_property_ = x11::GetAtom(kChromeSelection);
-}
+      helper_(helper),
+      x_property_(x11::GetAtom(kChromeSelection)) {}
 
 SelectionRequestor::~SelectionRequestor() = default;
 
@@ -207,9 +203,6 @@ void SelectionRequestor::CompleteRequest(size_t index, bool success) {
       ++current_request_index_;
     ConvertSelectionForCurrentRequest();
   }
-
-  if (request->quit_closure)
-    std::move(request->quit_closure).Run();
 }
 
 void SelectionRequestor::ConvertSelectionForCurrentRequest() {
@@ -235,17 +228,8 @@ void SelectionRequestor::BlockTillSelectionNotifyForRequest(Request* request) {
     size_t events_size = events.size();
     for (; i < events_size; ++i) {
       auto& event = events[i];
-      if (auto* notify = event.As<x11::SelectionNotifyEvent>()) {
-        if (notify->requestor == x_window_) {
-          OnSelectionNotify(*notify);
-          event = x11::Event();
-        }
-      } else if (auto* prop = event.As<x11::PropertyNotifyEvent>()) {
-        if (CanDispatchPropertyEvent(*prop)) {
-          OnPropertyEvent(*prop);
-          event = x11::Event();
-        }
-      }
+      if (helper_->DispatchEvent(event))
+        event = x11::Event();
     }
     DCHECK_EQ(events_size, events.size());
   }

@@ -42,7 +42,14 @@ class DISPLAY_EXPORT DisplayObserver : public base::CheckedObserver {
   virtual void OnDisplayAdded(const Display& new_display);
 
   // Called when |old_display| has been removed.
+  // In Ash, this is called *before* the display has been removed.
+  // Everywhere else, this is called *after* the display has been removed.
   virtual void OnDisplayRemoved(const Display& old_display);
+
+  // Called *after* any displays have been removed.  Not called per display.
+  // TODO(enne): resolve the Ash inconsistency for OnDisplayRemoved and
+  // remove this function.
+  virtual void OnDidRemoveDisplays();
 
   // Called when the metrics of a display change.
   // |changed_metrics| is a bitmask of DisplayMatric types indicating which
@@ -61,6 +68,27 @@ class DISPLAY_EXPORT DisplayObserver : public base::CheckedObserver {
 
  protected:
   ~DisplayObserver() override;
+};
+
+// Caller must ensure the lifetime of `observer` outlives ScopedDisplayObserver
+// and ScopedOptionalDisplayObserver.  The "Optional" version does not care
+// whether there is a display::Screen::GetScreen() to observe or not and will
+// silently noop when there is not.  The non-optional ScopedDisplayObserver
+// will CHECK that display::Screen::GetScreen() exists on construction to
+// receive events from.
+class DISPLAY_EXPORT ScopedOptionalDisplayObserver {
+ public:
+  explicit ScopedOptionalDisplayObserver(DisplayObserver* observer);
+  ~ScopedOptionalDisplayObserver();
+
+ private:
+  DisplayObserver* observer_ = nullptr;
+};
+
+class DISPLAY_EXPORT ScopedDisplayObserver
+    : public ScopedOptionalDisplayObserver {
+ public:
+  explicit ScopedDisplayObserver(DisplayObserver* observer);
 };
 
 }  // namespace display

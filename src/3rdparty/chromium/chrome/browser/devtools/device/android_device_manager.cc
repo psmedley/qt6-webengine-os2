@@ -395,6 +395,9 @@ AndroidDeviceManager::BrowserInfo::BrowserInfo()
 AndroidDeviceManager::BrowserInfo::BrowserInfo(const BrowserInfo& other) =
     default;
 
+AndroidDeviceManager::BrowserInfo& AndroidDeviceManager::BrowserInfo::operator=(
+    const BrowserInfo& other) = default;
+
 AndroidDeviceManager::DeviceInfo::DeviceInfo()
     : model(kModelOffline), connected(false) {
 }
@@ -520,7 +523,7 @@ AndroidDeviceManager::HandlerThread::HandlerThread() {
   thread_ = new base::Thread(kDevToolsAdbBridgeThreadName);
   base::Thread::Options options;
   options.message_pump_type = base::MessagePumpType::IO;
-  if (!thread_->StartWithOptions(options)) {
+  if (!thread_->StartWithOptions(std::move(options))) {
     delete thread_;
     thread_ = nullptr;
   }

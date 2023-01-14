@@ -28,7 +28,7 @@ static ResolvedUnderlinePosition ResolveUnderlinePosition(
       if (style.TextUnderlinePosition() & kTextUnderlinePositionFromFont)
         return ResolvedUnderlinePosition::kNearAlphabeticBaselineFromFont;
       return ResolvedUnderlinePosition::kNearAlphabeticBaselineAuto;
-    case kIdeographicBaseline:
+    case kCentralBaseline: {
       // Compute language-appropriate default underline position.
       // https://drafts.csswg.org/css-text-decor-3/#default-stylesheet
       UScriptCode script = style.GetFontDescription().GetScript();
@@ -42,6 +42,10 @@ static ResolvedUnderlinePosition ResolveUnderlinePosition(
         return ResolvedUnderlinePosition::kOver;
       }
       return ResolvedUnderlinePosition::kUnder;
+    }
+    default:
+      NOTREACHED();
+      break;
   }
   NOTREACHED();
   return ResolvedUnderlinePosition::kNearAlphabeticBaselineAuto;
@@ -75,7 +79,7 @@ static float ComputeDecorationThickness(
     return auto_underline_thickness;
 
   if (text_decoration_thickness.IsFromFont()) {
-    base::Optional<float> underline_thickness_font_metric =
+    absl::optional<float> underline_thickness_font_metric =
         font_data->GetFontMetrics().UnderlineThickness().value();
 
     if (!underline_thickness_font_metric)
@@ -154,12 +158,11 @@ static int TextDecorationToLineDataIndex(TextDecoration line) {
 }  // anonymous namespace
 
 TextDecorationInfo::TextDecorationInfo(
-    const PhysicalOffset& box_origin,
     PhysicalOffset local_origin,
     LayoutUnit width,
     FontBaseline baseline_type,
     const ComputedStyle& style,
-    const base::Optional<AppliedTextDecoration> selection_text_decoration,
+    const absl::optional<AppliedTextDecoration> selection_text_decoration,
     const ComputedStyle* decorating_box_style)
     : style_(style),
       selection_text_decoration_(selection_text_decoration),
@@ -333,7 +336,7 @@ FloatRect TextDecorationInfo::BoundsForWavy(TextDecoration line) const {
  *             |-----------|
  *                 step
  */
-base::Optional<Path> TextDecorationInfo::PrepareWavyStrokePath(
+absl::optional<Path> TextDecorationInfo::PrepareWavyStrokePath(
     TextDecoration line) const {
   int line_data_index = TextDecorationToLineDataIndex(line);
   if (line_data_[line_data_index].stroke_path)

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
@@ -15,7 +15,8 @@ class ThemeColorMatchesManifestTest : public ChromeManifestTest {};
 TEST_F(ThemeColorMatchesManifestTest, ThemeColor) {
   Testcase testcases[] = {
       Testcase("theme_color.json", std::string(),
-               extensions::Manifest::INTERNAL, Extension::FROM_BOOKMARK),
+               extensions::mojom::ManifestLocation::kInternal,
+               Extension::FROM_BOOKMARK),
   };
   RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_SUCCESS);
 

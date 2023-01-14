@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
@@ -18,7 +19,6 @@
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_sink.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_device.h"
-#include "third_party/blink/renderer/modules/mediastream/media_stream_video_track_signal_observer.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
@@ -45,8 +45,8 @@ using EncodedVideoFrameInternalCallback =
 
 base::TimeDelta ComputeRefreshIntervalFromBounds(
     const base::TimeDelta required_min_refresh_interval,
-    const base::Optional<double>& min_frame_rate,
-    const base::Optional<double>& max_frame_rate) {
+    const absl::optional<double>& min_frame_rate,
+    const absl::optional<double>& max_frame_rate) {
   // Start with the default required refresh interval, and refine based on
   // constraints. If a minimum frameRate is provided, use that. Otherwise, use
   // the maximum frameRate if it happens to be less than the default.
@@ -423,12 +423,12 @@ WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
 WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     MediaStreamVideoSource* source,
     const VideoTrackAdapterSettings& adapter_settings,
-    const base::Optional<bool>& noise_reduction,
+    const absl::optional<bool>& noise_reduction,
     bool is_screencast,
-    const base::Optional<double>& min_frame_rate,
-    const base::Optional<double>& pan,
-    const base::Optional<double>& tilt,
-    const base::Optional<double>& zoom,
+    const absl::optional<double>& min_frame_rate,
+    const absl::optional<double>& pan,
+    const absl::optional<double>& tilt,
+    const absl::optional<double>& zoom,
     bool pan_tilt_zoom_allowed,
     MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled) {
@@ -483,12 +483,12 @@ MediaStreamVideoTrack::MediaStreamVideoTrack(
 MediaStreamVideoTrack::MediaStreamVideoTrack(
     MediaStreamVideoSource* source,
     const VideoTrackAdapterSettings& adapter_settings,
-    const base::Optional<bool>& noise_reduction,
+    const absl::optional<bool>& noise_reduction,
     bool is_screen_cast,
-    const base::Optional<double>& min_frame_rate,
-    const base::Optional<double>& pan,
-    const base::Optional<double>& tilt,
-    const base::Optional<double>& zoom,
+    const absl::optional<double>& min_frame_rate,
+    const absl::optional<double>& pan,
+    const absl::optional<double>& tilt,
+    const absl::optional<double>& zoom,
     bool pan_tilt_zoom_allowed,
     MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled)
@@ -544,13 +544,20 @@ static void RemoveSinkInternal(Vector<WebMediaStreamSink*>* sinks,
   sinks->erase(it);
 }
 
-void MediaStreamVideoTrack::AddSink(WebMediaStreamSink* sink,
-                                    const VideoCaptureDeliverFrameCB& callback,
-                                    bool is_sink_secure) {
+void MediaStreamVideoTrack::AddSink(
+    WebMediaStreamSink* sink,
+    const VideoCaptureDeliverFrameCB& callback,
+    MediaStreamVideoSink::IsSecure is_secure,
+    MediaStreamVideoSink::UsesAlpha uses_alpha) {
   DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
   AddSinkInternal(&sinks_, sink);
   frame_deliverer_->AddCallback(sink, callback);
-  secure_tracker_.Add(sink, is_sink_secure);
+  secure_tracker_.Add(sink, is_secure == MediaStreamVideoSink::IsSecure::kYes);
+  if (uses_alpha == MediaStreamVideoSink::UsesAlpha::kDefault) {
+    alpha_using_sinks_.insert(sink);
+  } else if (uses_alpha == MediaStreamVideoSink::UsesAlpha::kNo) {
+    alpha_discarding_sinks_.insert(sink);
+  }
   // Request source to deliver a frame because a new sink is added.
   if (!source_)
     return;
@@ -558,6 +565,11 @@ void MediaStreamVideoTrack::AddSink(WebMediaStreamSink* sink,
   RequestRefreshFrame();
   source_->UpdateCapturingLinkSecure(this,
                                      secure_tracker_.is_capturing_secure());
+  // Alpha can't be discarded if any sink uses alpha, or if the only sinks
+  // connected are kDependsOnOtherSinks.
+  const bool can_discard_alpha =
+      alpha_using_sinks_.IsEmpty() && !alpha_discarding_sinks_.IsEmpty();
+  source_->SetCanDiscardAlpha(can_discard_alpha);
   if (is_screencast_)
     StartTimerForRequestingFrames();
 }
@@ -575,6 +587,8 @@ void MediaStreamVideoTrack::AddEncodedSink(WebMediaStreamSink* sink,
 void MediaStreamVideoTrack::RemoveSink(WebMediaStreamSink* sink) {
   DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
   RemoveSinkInternal(&sinks_, sink);
+  alpha_using_sinks_.erase(sink);
+  alpha_discarding_sinks_.erase(sink);
   frame_deliverer_->RemoveCallback(sink);
   secure_tracker_.Remove(sink);
   if (!source_)
@@ -582,6 +596,10 @@ void MediaStreamVideoTrack::RemoveSink(WebMediaStreamSink* sink) {
   UpdateSourceHasConsumers();
   source_->UpdateCapturingLinkSecure(this,
                                      secure_tracker_.is_capturing_secure());
+  const bool can_discard_alpha =
+      sinks_.IsEmpty() ||
+      (alpha_using_sinks_.IsEmpty() && !alpha_discarding_sinks_.IsEmpty());
+  source_->SetCanDiscardAlpha(can_discard_alpha);
   // Restart the timer with existing sinks.
   if (is_screencast_)
     StartTimerForRequestingFrames();
@@ -670,7 +688,7 @@ void MediaStreamVideoTrack::GetSettings(
     settings.frame_rate = frame_rate_;
   }
 
-  base::Optional<media::VideoCaptureFormat> format =
+  absl::optional<media::VideoCaptureFormat> format =
       source_->GetCurrentFormat();
   if (format) {
     if (frame_rate_ == 0.0)
@@ -694,6 +712,37 @@ void MediaStreamVideoTrack::GetSettings(
     settings.logical_surface = info->logical_surface;
     settings.cursor = info->cursor;
   }
+}
+
+MediaStreamTrackPlatform::CaptureHandle
+MediaStreamVideoTrack::GetCaptureHandle() {
+  DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
+
+  MediaStreamTrackPlatform::CaptureHandle capture_handle;
+
+  if (!source_) {
+    return capture_handle;
+  }
+
+  const MediaStreamDevice& device = source_->device();
+  if (!device.display_media_info.has_value()) {
+    return capture_handle;
+  }
+  const media::mojom::DisplayMediaInformationPtr& info =
+      device.display_media_info.value();
+
+  if (!info->capture_handle) {
+    return capture_handle;
+  }
+
+  if (!info->capture_handle->origin.opaque()) {
+    capture_handle.origin =
+        String::FromUTF8(info->capture_handle->origin.Serialize());
+  }
+  capture_handle.handle =
+      WebString::FromUTF16(info->capture_handle->capture_handle);
+
+  return capture_handle;
 }
 
 void MediaStreamVideoTrack::OnReadyStateChanged(
@@ -733,19 +782,6 @@ void MediaStreamVideoTrack::OnFrameDropped(
 void MediaStreamVideoTrack::SetMinimumFrameRate(double min_frame_rate) {
   DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
   min_frame_rate_ = min_frame_rate;
-  if (signal_observer_)
-    signal_observer_->SetMinimumFrameRate(min_frame_rate);
-}
-
-MediaStreamVideoTrackSignalObserver* MediaStreamVideoTrack::SignalObserver() {
-  DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
-  return signal_observer_.Get();
-}
-
-void MediaStreamVideoTrack::SetSignalObserver(
-    MediaStreamVideoTrackSignalObserver* observer) {
-  DCHECK_CALLED_ON_VALID_THREAD(main_render_thread_checker_);
-  signal_observer_ = observer;
 }
 
 void MediaStreamVideoTrack::StartTimerForRequestingFrames() {

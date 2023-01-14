@@ -41,6 +41,10 @@ class RiscvOperandGenerator final : public OperandGenerator {
   }
 
   bool IsIntegerConstant(Node* node) {
+    if (node->opcode() == IrOpcode::kNumberConstant) {
+      const double value = OpParameter<double>(node->op());
+      return bit_cast<int64_t>(value) == 0;
+    }
     return (node->opcode() == IrOpcode::kInt32Constant) ||
            (node->opcode() == IrOpcode::kInt64Constant);
   }
@@ -48,9 +52,13 @@ class RiscvOperandGenerator final : public OperandGenerator {
   int64_t GetIntegerConstantValue(Node* node) {
     if (node->opcode() == IrOpcode::kInt32Constant) {
       return OpParameter<int32_t>(node->op());
+    } else if (node->opcode() == IrOpcode::kInt64Constant) {
+      return OpParameter<int64_t>(node->op());
     }
-    DCHECK_EQ(IrOpcode::kInt64Constant, node->opcode());
-    return OpParameter<int64_t>(node->op());
+    DCHECK_EQ(node->opcode(), IrOpcode::kNumberConstant);
+    const double value = OpParameter<double>(node->op());
+    DCHECK_EQ(bit_cast<int64_t>(value), 0);
+    return bit_cast<int64_t>(value);
   }
 
   bool IsFloatConstant(Node* node) {
@@ -296,12 +304,12 @@ static void VisitBinop(InstructionSelector* selector, Node* node,
 
   if (TryMatchImmediate(selector, &opcode, m.right().node(), &input_count,
                         &inputs[1])) {
-    inputs[0] = g.UseRegister(m.left().node());
+    inputs[0] = g.UseRegisterOrImmediateZero(m.left().node());
     input_count++;
   } else if (has_reverse_opcode &&
              TryMatchImmediate(selector, &reverse_opcode, m.left().node(),
                                &input_count, &inputs[1])) {
-    inputs[0] = g.UseRegister(m.right().node());
+    inputs[0] = g.UseRegisterOrImmediateZero(m.right().node());
     opcode = reverse_opcode;
     input_count++;
   } else {
@@ -448,17 +456,36 @@ void InstructionSelector::VisitLoad(Node* node) {
     case MachineRepresentation::kWord32:
       opcode = load_rep.IsUnsigned() ? kRiscvLwu : kRiscvLw;
       break;
+#ifdef V8_COMPRESS_POINTERS
+    case MachineRepresentation::kTaggedSigned:
+      opcode = kRiscvLoadDecompressTaggedSigned;
+      break;
+    case MachineRepresentation::kTaggedPointer:
+      opcode = kRiscvLoadDecompressTaggedPointer;
+      break;
+    case MachineRepresentation::kTagged:
+      opcode = kRiscvLoadDecompressAnyTagged;
+      break;
+#else
     case MachineRepresentation::kTaggedSigned:   // Fall through.
     case MachineRepresentation::kTaggedPointer:  // Fall through.
     case MachineRepresentation::kTagged:         // Fall through.
+#endif
     case MachineRepresentation::kWord64:
       opcode = kRiscvLd;
       break;
     case MachineRepresentation::kSimd128:
       opcode = kRiscvMsaLd;
       break;
-    case MachineRepresentation::kCompressedPointer:  // Fall through.
-    case MachineRepresentation::kCompressed:         // Fall through.
+    case MachineRepresentation::kCompressedPointer:
+    case MachineRepresentation::kCompressed:
+#ifdef V8_COMPRESS_POINTERS
+      opcode = kRiscvLw;
+      break;
+#else
+                                                 // Fall through.
+#endif
+    case MachineRepresentation::kMapWord:  // Fall through.
     case MachineRepresentation::kNone:
       UNREACHABLE();
   }
@@ -524,7 +551,11 @@ void InstructionSelector::VisitStore(Node* node) {
         break;
       case MachineRepresentation::kTaggedSigned:   // Fall through.
       case MachineRepresentation::kTaggedPointer:  // Fall through.
-      case MachineRepresentation::kTagged:         // Fall through.
+      case MachineRepresentation::kTagged:
+#ifdef V8_COMPRESS_POINTERS
+        opcode = kRiscvStoreCompressTagged;
+        break;
+#endif
       case MachineRepresentation::kWord64:
         opcode = kRiscvSd;
         break;
@@ -532,7 +563,15 @@ void InstructionSelector::VisitStore(Node* node) {
         opcode = kRiscvMsaSt;
         break;
       case MachineRepresentation::kCompressedPointer:  // Fall through.
-      case MachineRepresentation::kCompressed:         // Fall through.
+      case MachineRepresentation::kCompressed:
+#ifdef V8_COMPRESS_POINTERS
+        opcode = kRiscvStoreCompressTagged;
+        break;
+#else
+        UNREACHABLE();
+        break;
+#endif
+      case MachineRepresentation::kMapWord:            // Fall through.
       case MachineRepresentation::kNone:
         UNREACHABLE();
     }
@@ -878,6 +917,22 @@ void InstructionSelector::VisitInt32Mul(Node* node) {
   VisitRRR(this, kRiscvMul32, node);
 }
 
+void InstructionSelector::VisitI32x4ExtAddPairwiseI16x8S(Node* node) {
+  UNIMPLEMENTED();
+}
+
+void InstructionSelector::VisitI32x4ExtAddPairwiseI16x8U(Node* node) {
+  UNIMPLEMENTED();
+}
+
+void InstructionSelector::VisitI16x8ExtAddPairwiseI8x16S(Node* node) {
+  UNIMPLEMENTED();
+}
+
+void InstructionSelector::VisitI16x8ExtAddPairwiseI8x16U(Node* node) {
+  UNIMPLEMENTED();
+}
+
 void InstructionSelector::VisitInt32MulHigh(Node* node) {
   VisitRRR(this, kRiscvMulHigh32, node);
 }
@@ -1193,12 +1248,18 @@ void InstructionSelector::VisitTryTruncateFloat64ToUint64(Node* node) {
 }
 
 void InstructionSelector::VisitBitcastWord32ToWord64(Node* node) {
-  UNIMPLEMENTED();
+  DCHECK(SmiValuesAre31Bits());
+  DCHECK(COMPRESS_POINTERS_BOOL);
+  RiscvOperandGenerator g(this);
+  Emit(kRiscvZeroExtendWord, g.DefineAsRegister(node),
+       g.UseRegister(node->InputAt(0)));
 }
 
 void InstructionSelector::VisitChangeInt32ToInt64(Node* node) {
   Node* value = node->InputAt(0);
-  if (value->opcode() == IrOpcode::kLoad && CanCover(node, value)) {
+  if ((value->opcode() == IrOpcode::kLoad ||
+       value->opcode() == IrOpcode::kLoadImmutable) &&
+      CanCover(node, value)) {
     // Generate sign-extending load.
     LoadRepresentation load_rep = LoadRepresentationOf(value->op());
     InstructionCode opcode = kArchNop;
@@ -1226,7 +1287,8 @@ void InstructionSelector::VisitChangeInt32ToInt64(Node* node) {
 
 bool InstructionSelector::ZeroExtendsWord32ToWord64NoPhis(Node* node) {
   DCHECK_NE(node->opcode(), IrOpcode::kPhi);
-  if (node->opcode() == IrOpcode::kLoad) {
+  if (node->opcode() == IrOpcode::kLoad ||
+      node->opcode() == IrOpcode::kLoadImmutable) {
     LoadRepresentation load_rep = LoadRepresentationOf(node->op());
     if (load_rep.IsUnsigned()) {
       switch (load_rep.representation()) {
@@ -1261,7 +1323,7 @@ void InstructionSelector::VisitTruncateInt64ToInt32(Node* node) {
   if (CanCover(node, value)) {
     switch (value->opcode()) {
       case IrOpcode::kWord64Sar: {
-        if (CanCoverTransitively(node, value, value->InputAt(0)) &&
+        if (CanCover(value, value->InputAt(0)) &&
             TryEmitExtendingLoad(this, value, node)) {
           return;
         } else {
@@ -1500,7 +1562,7 @@ void InstructionSelector::EmitPrepareArguments(
       ++slot;
     }
   } else {
-    int push_count = static_cast<int>(call_descriptor->StackParameterCount());
+    int push_count = static_cast<int>(call_descriptor->ParameterSlotCount());
     if (push_count > 0) {
       // Calculate needed space
       int stack_size = 0;
@@ -1582,6 +1644,7 @@ void InstructionSelector::VisitUnalignedLoad(Node* node) {
     case MachineRepresentation::kBit:                // Fall through.
     case MachineRepresentation::kCompressedPointer:  // Fall through.
     case MachineRepresentation::kCompressed:         // Fall through.
+    case MachineRepresentation::kMapWord:            // Fall through.
     case MachineRepresentation::kNone:
       UNREACHABLE();
   }
@@ -1635,6 +1698,7 @@ void InstructionSelector::VisitUnalignedStore(Node* node) {
     case MachineRepresentation::kBit:                // Fall through.
     case MachineRepresentation::kCompressedPointer:  // Fall through.
     case MachineRepresentation::kCompressed:         // Fall through.
+    case MachineRepresentation::kMapWord:            // Fall through.
     case MachineRepresentation::kNone:
       UNREACHABLE();
   }
@@ -1660,6 +1724,13 @@ static void VisitCompare(InstructionSelector* selector, InstructionCode opcode,
                          InstructionOperand left, InstructionOperand right,
                          FlagsContinuation* cont) {
   selector->EmitWithContinuation(opcode, left, right, cont);
+}
+
+// Shared routine for multiple compare operations.
+static void VisitWordCompareZero(InstructionSelector* selector,
+                                 InstructionOperand value,
+                                 FlagsContinuation* cont) {
+  selector->EmitWithContinuation(kRiscvCmpZero, value, cont);
 }
 
 // Shared routine for multiple float32 compare operations.
@@ -1697,8 +1768,12 @@ void VisitWordCompare(InstructionSelector* selector, Node* node,
   RiscvOperandGenerator g(selector);
   Node* left = node->InputAt(0);
   Node* right = node->InputAt(1);
-
-  // Match immediates on left or right side of comparison.
+  // If one of the two inputs is an immediate, make sure it's on the right.
+  if (!g.CanBeImmediate(right, opcode) && g.CanBeImmediate(left, opcode)) {
+    cont->Commute();
+    std::swap(left, right);
+  }
+  // Match immediates on right side of comparison.
   if (g.CanBeImmediate(right, opcode)) {
     if (opcode == kRiscvTst) {
       VisitCompare(selector, opcode, g.UseRegister(left), g.UseImmediate(right),
@@ -1711,49 +1786,36 @@ void VisitWordCompare(InstructionSelector* selector, Node* node,
             VisitCompare(selector, opcode, g.UseRegister(left),
                          g.UseImmediate(right), cont);
           } else {
+            Int32BinopMatcher m(node, true);
+            NumberBinopMatcher n(node, true);
+            if (m.right().Is(0) || n.right().IsZero()) {
+              VisitWordCompareZero(selector, g.UseRegister(left), cont);
+            } else {
+              VisitCompare(selector, opcode, g.UseRegister(left),
+                           g.UseRegister(right), cont);
+            }
+          }
+          break;
+        case kSignedLessThan:
+        case kSignedGreaterThanOrEqual:
+        case kUnsignedLessThan:
+        case kUnsignedGreaterThanOrEqual: {
+          Int32BinopMatcher m(node, true);
+          if (m.right().Is(0)) {
+            VisitWordCompareZero(selector, g.UseRegister(left), cont);
+          } else {
+            VisitCompare(selector, opcode, g.UseRegister(left),
+                         g.UseImmediate(right), cont);
+          }
+        } break;
+        default:
+          Int32BinopMatcher m(node, true);
+          if (m.right().Is(0)) {
+            VisitWordCompareZero(selector, g.UseRegister(left), cont);
+          } else {
             VisitCompare(selector, opcode, g.UseRegister(left),
                          g.UseRegister(right), cont);
           }
-          break;
-        case kSignedLessThan:
-        case kSignedGreaterThanOrEqual:
-        case kUnsignedLessThan:
-        case kUnsignedGreaterThanOrEqual:
-          VisitCompare(selector, opcode, g.UseRegister(left),
-                       g.UseImmediate(right), cont);
-          break;
-        default:
-          VisitCompare(selector, opcode, g.UseRegister(left),
-                       g.UseRegister(right), cont);
-      }
-    }
-  } else if (g.CanBeImmediate(left, opcode)) {
-    if (!commutative) cont->Commute();
-    if (opcode == kRiscvTst) {
-      VisitCompare(selector, opcode, g.UseRegister(right), g.UseImmediate(left),
-                   cont);
-    } else {
-      switch (cont->condition()) {
-        case kEqual:
-        case kNotEqual:
-          if (cont->IsSet()) {
-            VisitCompare(selector, opcode, g.UseRegister(right),
-                         g.UseImmediate(left), cont);
-          } else {
-            VisitCompare(selector, opcode, g.UseRegister(right),
-                         g.UseRegister(left), cont);
-          }
-          break;
-        case kSignedLessThan:
-        case kSignedGreaterThanOrEqual:
-        case kUnsignedLessThan:
-        case kUnsignedGreaterThanOrEqual:
-          VisitCompare(selector, opcode, g.UseRegister(right),
-                       g.UseImmediate(left), cont);
-          break;
-        default:
-          VisitCompare(selector, opcode, g.UseRegister(right),
-                       g.UseRegister(left), cont);
       }
     }
   } else {
@@ -1761,7 +1823,7 @@ void VisitWordCompare(InstructionSelector* selector, Node* node,
                  cont);
   }
 }
-
+#ifndef V8_COMPRESS_POINTERS
 bool IsNodeUnsigned(Node* n) {
   NodeMatcher m(n);
 
@@ -1776,6 +1838,7 @@ bool IsNodeUnsigned(Node* n) {
            m.IsTruncateFloat64ToUint32() || m.IsTruncateFloat32ToUint32();
   }
 }
+#endif
 
 // Shared routine for multiple word compare operations.
 void VisitFullWord32Compare(InstructionSelector* selector, Node* node,
@@ -1792,6 +1855,7 @@ void VisitFullWord32Compare(InstructionSelector* selector, Node* node,
   VisitCompare(selector, opcode, leftOp, rightOp, cont);
 }
 
+#ifndef V8_COMPRESS_POINTERS
 void VisitOptimizedWord32Compare(InstructionSelector* selector, Node* node,
                                  InstructionCode opcode,
                                  FlagsContinuation* cont) {
@@ -1822,7 +1886,7 @@ void VisitOptimizedWord32Compare(InstructionSelector* selector, Node* node,
 
   VisitWordCompare(selector, node, opcode, cont, false);
 }
-
+#endif
 void VisitWord32Compare(InstructionSelector* selector, Node* node,
                         FlagsContinuation* cont) {
   // RISC-V doesn't support Word32 compare instructions. Instead it relies
@@ -1841,6 +1905,7 @@ void VisitWord32Compare(InstructionSelector* selector, Node* node,
   // int32 value, the simulator do not sign-extended to int64 because in
   // simulator we do not know the function whether return a int32 or int64.
   // so we need do a full word32 compare in this case.
+#ifndef V8_COMPRESS_POINTERS
 #ifndef USE_SIMULATOR
   if (IsNodeUnsigned(node->InputAt(0)) != IsNodeUnsigned(node->InputAt(1))) {
 #else
@@ -1852,6 +1917,9 @@ void VisitWord32Compare(InstructionSelector* selector, Node* node,
   } else {
     VisitOptimizedWord32Compare(selector, node, kRiscvCmp, cont);
   }
+#else
+  VisitFullWord32Compare(selector, node, kRiscvCmp, cont);
+#endif
 }
 
 void VisitWord64Compare(InstructionSelector* selector, Node* node,
@@ -1862,8 +1930,7 @@ void VisitWord64Compare(InstructionSelector* selector, Node* node,
 void EmitWordCompareZero(InstructionSelector* selector, Node* value,
                          FlagsContinuation* cont) {
   RiscvOperandGenerator g(selector);
-  selector->EmitWithContinuation(kRiscvCmp, g.UseRegister(value),
-                                 g.TempImmediate(0), cont);
+  selector->EmitWithContinuation(kRiscvCmpZero, g.UseRegister(value), cont);
 }
 
 void VisitAtomicLoad(InstructionSelector* selector, Node* node,
@@ -2589,8 +2656,12 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(F64x2Trunc, kRiscvF64x2Trunc)                           \
   V(F64x2NearestInt, kRiscvF64x2NearestInt)                 \
   V(I64x2Neg, kRiscvI64x2Neg)                               \
+  V(I64x2Abs, kRiscvI64x2Abs)                               \
   V(I64x2BitMask, kRiscvI64x2BitMask)                       \
   V(I64x2Eq, kRiscvI64x2Eq)                                 \
+  V(I64x2Ne, kRiscvI64x2Ne)                                 \
+  V(I64x2GtS, kRiscvI64x2GtS)                               \
+  V(I64x2GeS, kRiscvI64x2GeS)                               \
   V(F32x4SConvertI32x4, kRiscvF32x4SConvertI32x4)           \
   V(F32x4UConvertI32x4, kRiscvF32x4UConvertI32x4)           \
   V(F32x4Abs, kRiscvF32x4Abs)                               \
@@ -2631,9 +2702,10 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(I8x16Popcnt, kRiscvI8x16Popcnt)                         \
   V(S128Not, kRiscvS128Not)                                 \
   V(V128AnyTrue, kRiscvV128AnyTrue)                         \
-  V(V32x4AllTrue, kRiscvV32x4AllTrue)                       \
-  V(V16x8AllTrue, kRiscvV16x8AllTrue)                       \
-  V(V8x16AllTrue, kRiscvV8x16AllTrue)
+  V(I32x4AllTrue, kRiscvI32x4AllTrue)                       \
+  V(I16x8AllTrue, kRiscvI16x8AllTrue)                       \
+  V(I8x16AllTrue, kRiscvI8x16AllTrue)                       \
+  V(I64x2AllTrue, kRiscvI64x2AllTrue)
 
 #define SIMD_SHIFT_OP_LIST(V) \
   V(I64x2Shl)                 \
@@ -2664,7 +2736,6 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(I64x2Sub, kRiscvI64x2Sub)                           \
   V(I64x2Mul, kRiscvI64x2Mul)                           \
   V(F32x4Add, kRiscvF32x4Add)                           \
-  V(F32x4AddHoriz, kRiscvF32x4AddHoriz)                 \
   V(F32x4Sub, kRiscvF32x4Sub)                           \
   V(F32x4Mul, kRiscvF32x4Mul)                           \
   V(F32x4Div, kRiscvF32x4Div)                           \
@@ -2675,7 +2746,6 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(F32x4Lt, kRiscvF32x4Lt)                             \
   V(F32x4Le, kRiscvF32x4Le)                             \
   V(I32x4Add, kRiscvI32x4Add)                           \
-  V(I32x4AddHoriz, kRiscvI32x4AddHoriz)                 \
   V(I32x4Sub, kRiscvI32x4Sub)                           \
   V(I32x4Mul, kRiscvI32x4Mul)                           \
   V(I32x4MaxS, kRiscvI32x4MaxS)                         \
@@ -2692,7 +2762,6 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(I16x8Add, kRiscvI16x8Add)                           \
   V(I16x8AddSatS, kRiscvI16x8AddSatS)                   \
   V(I16x8AddSatU, kRiscvI16x8AddSatU)                   \
-  V(I16x8AddHoriz, kRiscvI16x8AddHoriz)                 \
   V(I16x8Sub, kRiscvI16x8Sub)                           \
   V(I16x8SubSatS, kRiscvI16x8SubSatS)                   \
   V(I16x8SubSatU, kRiscvI16x8SubSatU)                   \
@@ -2717,7 +2786,6 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   V(I8x16Sub, kRiscvI8x16Sub)                           \
   V(I8x16SubSatS, kRiscvI8x16SubSatS)                   \
   V(I8x16SubSatU, kRiscvI8x16SubSatU)                   \
-  V(I8x16Mul, kRiscvI8x16Mul)                           \
   V(I8x16MaxS, kRiscvI8x16MaxS)                         \
   V(I8x16MinS, kRiscvI8x16MinS)                         \
   V(I8x16MaxU, kRiscvI8x16MaxU)                         \
@@ -2997,6 +3065,12 @@ VISIT_EXT_MUL(I32x4, I16x8U)
 VISIT_EXT_MUL(I16x8, I8x16S)
 VISIT_EXT_MUL(I16x8, I8x16U)
 #undef VISIT_EXT_MUL
+
+void InstructionSelector::AddOutputToSelectContinuation(OperandGenerator* g,
+                                                        int first_input_index,
+                                                        Node* node) {
+  UNREACHABLE();
+}
 
 // static
 MachineOperatorBuilder::Flags

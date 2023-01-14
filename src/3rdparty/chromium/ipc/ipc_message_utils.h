@@ -30,15 +30,12 @@
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/writable_shared_memory_region.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/util/type_safety/id_type.h"
+#include "base/types/id_type.h"
 #include "build/build_config.h"
-#include "ipc/ipc_message_start.h"
 #include "ipc/ipc_param_traits.h"
 #include "ipc/ipc_sync_message.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if defined(OS_OS2)
 #include "base/os2/os2_toolkit.h"
@@ -57,11 +54,11 @@ namespace base {
 class DictionaryValue;
 class FilePath;
 class ListValue;
-class NullableString16;
 class Time;
 class TimeDelta;
 class TimeTicks;
 class UnguessableToken;
+class Value;
 struct FileDescriptor;
 }
 
@@ -337,8 +334,8 @@ struct ParamTraits<std::string> {
 };
 
 template <>
-struct ParamTraits<base::string16> {
-  typedef base::string16 param_type;
+struct ParamTraits<std::u16string> {
+  typedef std::u16string param_type;
   static void Write(base::Pickle* m, const param_type& p) {
     m->WriteString16(p);
   }
@@ -350,7 +347,7 @@ struct ParamTraits<base::string16> {
   COMPONENT_EXPORT(IPC) static void Log(const param_type& p, std::string* l);
 };
 
-#if defined(OS_WIN) && defined(BASE_STRING16_IS_STD_U16STRING)
+#if defined(OS_WIN)
 template <>
 struct COMPONENT_EXPORT(IPC) ParamTraits<std::wstring> {
   typedef std::wstring param_type;
@@ -767,16 +764,6 @@ struct COMPONENT_EXPORT(IPC) ParamTraits<base::Value> {
 };
 
 template <>
-struct COMPONENT_EXPORT(IPC) ParamTraits<base::NullableString16> {
-  typedef base::NullableString16 param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
 struct COMPONENT_EXPORT(IPC) ParamTraits<base::File::Info> {
   typedef base::File::Info param_type;
   static void Write(base::Pickle* m, const param_type& p);
@@ -1054,8 +1041,8 @@ struct ParamTraits<std::unique_ptr<P>> {
 };
 
 template <class P>
-struct ParamTraits<base::Optional<P>> {
-  typedef base::Optional<P> param_type;
+struct ParamTraits<absl::optional<P>> {
+  typedef absl::optional<P> param_type;
   static void Write(base::Pickle* m, const param_type& p) {
     const bool is_set = static_cast<bool>(p);
     WriteParam(m, is_set);
@@ -1087,8 +1074,8 @@ struct ParamTraits<base::Optional<P>> {
 // base/util types ParamTraits
 
 template <typename TypeMarker, typename WrappedType, WrappedType kInvalidValue>
-struct ParamTraits<util::IdType<TypeMarker, WrappedType, kInvalidValue>> {
-  using param_type = util::IdType<TypeMarker, WrappedType, kInvalidValue>;
+struct ParamTraits<base::IdType<TypeMarker, WrappedType, kInvalidValue>> {
+  using param_type = base::IdType<TypeMarker, WrappedType, kInvalidValue>;
   static void Write(base::Pickle* m, const param_type& p) {
     WriteParam(m, p.GetUnsafeValue());
   }

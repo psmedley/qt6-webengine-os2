@@ -5,7 +5,10 @@
 #include "components/embedder_support/user_agent_utils.h"
 
 #include "base/command_line.h"
+#include "base/no_destructor.h"
 #include "base/strings/strcat.h"
+#include "base/strings/stringprintf.h"
+#include "base/system/sys_info.h"
 #include "build/branding_buildflags.h"
 #include "components/embedder_support/switches.h"
 #include "components/version_info/version_info.h"
@@ -32,11 +35,8 @@ std::string GetUserAgent() {
     LOG(WARNING) << "Ignored invalid value for flag --" << kUserAgent;
   }
 
-  if (base::FeatureList::IsEnabled(blink::features::kFreezeUserAgent)) {
-    return content::GetFrozenUserAgent(
-        command_line->HasSwitch(switches::kUseMobileUserAgent),
-        version_info::GetMajorVersionNumber());
-  }
+  if (base::FeatureList::IsEnabled(blink::features::kReduceUserAgent))
+    return GetReducedUserAgent();
 
   std::string product = GetProduct();
 #if defined(OS_ANDROID)
@@ -44,6 +44,13 @@ std::string GetUserAgent() {
     product += " Mobile";
 #endif
   return content::BuildUserAgentFromProduct(product);
+}
+
+std::string GetReducedUserAgent() {
+  return content::GetReducedUserAgent(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseMobileUserAgent),
+      version_info::GetMajorVersionNumber());
 }
 
 // Generate a pseudo-random permutation of the following brand/version pairs:
@@ -54,9 +61,9 @@ std::string GetUserAgent() {
 //      version checking.
 blink::UserAgentBrandList GenerateBrandVersionList(
     int seed,
-    base::Optional<std::string> brand,
+    absl::optional<std::string> brand,
     std::string major_version,
-    base::Optional<std::string> maybe_greasey_brand) {
+    absl::optional<std::string> maybe_greasey_brand) {
   DCHECK_GE(seed, 0);
   const int npermutations = 6;  // 3!
   int permutation = seed % npermutations;
@@ -105,15 +112,15 @@ const blink::UserAgentBrandList& GetBrandVersionList() {
         int major_version_number;
         std::string major_version = version_info::GetMajorVersionNumber();
         base::StringToInt(major_version, &major_version_number);
-        base::Optional<std::string> brand;
+        absl::optional<std::string> brand;
 #if !BUILDFLAG(CHROMIUM_BRANDING)
         brand = version_info::GetProductName();
 #endif
-        base::Optional<std::string> maybe_param_override =
+        absl::optional<std::string> maybe_param_override =
             base::GetFieldTrialParamValueByFeature(features::kGreaseUACH,
                                                    "brand_override");
         if (maybe_param_override->empty())
-          maybe_param_override = base::nullopt;
+          maybe_param_override = absl::nullopt;
 
         return GenerateBrandVersionList(major_version_number, brand,
                                         major_version, maybe_param_override);
@@ -137,17 +144,23 @@ blink::UserAgentMetadata GetUserAgentMetadata() {
   metadata.brand_version_list = GetBrandVersionList();
   metadata.full_version = version_info::GetVersionNumber();
   metadata.platform = GetPlatformForUAMetadata();
-  metadata.platform_version =
-      content::GetOSVersion(content::IncludeAndroidBuildNumber::Exclude,
-                            content::IncludeAndroidModel::Exclude);
   metadata.architecture = content::GetLowEntropyCpuArchitecture();
   metadata.model = content::BuildModelInfo();
-
   metadata.mobile = false;
 #if defined(OS_ANDROID)
   metadata.mobile = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kUseMobileUserAgent);
 #endif
+
+  int32_t major, minor, bugfix = 0;
+  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
+  metadata.platform_version =
+      base::StringPrintf("%d.%d.%d", major, minor, bugfix);
+  // These methods use the same information as the User-Agent string, but are
+  // "low entropy" in that they reduce the number of options for output to a
+  // set number. For more information, see the respective headers.
+  metadata.architecture = content::GetLowEntropyCpuArchitecture();
+  metadata.bitness = content::GetLowEntropyCpuBitness();
 
   return metadata;
 }
@@ -166,9 +179,12 @@ void SetDesktopUserAgentOverride(content::WebContents* web_contents,
   spoofed_ua.ua_metadata_override->platform = "Linux";
   spoofed_ua.ua_metadata_override->platform_version =
       std::string();  // match content::GetOSVersion(false) on Linux
-  spoofed_ua.ua_metadata_override->architecture = "x86";
   spoofed_ua.ua_metadata_override->model = std::string();
   spoofed_ua.ua_metadata_override->mobile = false;
+  // Match the above "CpuInfo" string, which is also the most common Linux
+  // CPU architecture and bitness.`
+  spoofed_ua.ua_metadata_override->architecture = "x86";
+  spoofed_ua.ua_metadata_override->bitness = "64";
 
   web_contents->SetUserAgentOverride(spoofed_ua, override_in_new_tabs);
 }

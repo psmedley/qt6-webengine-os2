@@ -16,10 +16,10 @@
 
 #include <memory>
 
-#include "core/internal/mediums/webrtc/peer_id.h"
-#include "net/proto2/public/text_format.h"
+#include "google/protobuf/text_format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "core/internal/mediums/webrtc/peer_id.h"
 
 namespace location {
 namespace nearby {
@@ -86,11 +86,11 @@ TEST(SignalingFramesTest, SignalingPoke) {
   location::nearby::mediums::WebRtcSignalingFrame frame;
   frame.ParseFromString(std::string(encoded_poke.data(), encoded_poke.size()));
 
-  EXPECT_THAT(frame, testing::EqualsProto(R"(
+  EXPECT_THAT(frame, testing::EqualsProto(R"pb(
                 sender_id { id: "abc" }
                 type: READY_FOR_SIGNALING_POKE_TYPE
                 ready_for_signaling_poke {}
-              )"));
+              )pb"));
 }
 
 TEST(SignalingFramesTest, EncodeValidOffer) {

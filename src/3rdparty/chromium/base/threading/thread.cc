@@ -4,7 +4,9 @@
 
 #include "base/threading/thread.h"
 
+#include <memory>
 #include <type_traits>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -29,6 +31,7 @@
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
 #include "base/files/file_descriptor_watcher_posix.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #endif
 
 #if defined(OS_WIN)
@@ -97,7 +100,7 @@ class SequenceManagerThreadDelegate : public Thread::Delegate {
       sequence_manager_;
   scoped_refptr<sequence_manager::TaskQueue> default_task_queue_;
   OnceCallback<std::unique_ptr<MessagePump>()> message_pump_factory_;
-  base::Optional<SimpleTaskExecutor> simple_task_executor_;
+  absl::optional<SimpleTaskExecutor> simple_task_executor_;
 };
 
 }  // namespace
@@ -107,7 +110,33 @@ Thread::Options::Options() = default;
 Thread::Options::Options(MessagePumpType type, size_t size)
     : message_pump_type(type), stack_size(size) {}
 
-Thread::Options::Options(Options&& other) = default;
+Thread::Options::Options(Options&& other)
+    : message_pump_type(std::move(other.message_pump_type)),
+      delegate(std::move(other.delegate)),
+      timer_slack(std::move(other.timer_slack)),
+      task_queue_time_domain(std::move(other.task_queue_time_domain)),
+      message_pump_factory(std::move(other.message_pump_factory)),
+      stack_size(std::move(other.stack_size)),
+      priority(std::move(other.priority)),
+      joinable(std::move(other.joinable)) {
+  other.moved_from = true;
+}
+
+Thread::Options& Thread::Options::operator=(Thread::Options&& other) {
+  DCHECK_NE(this, &other);
+
+  message_pump_type = std::move(other.message_pump_type);
+  delegate = std::move(other.delegate);
+  timer_slack = std::move(other.timer_slack);
+  task_queue_time_domain = std::move(other.task_queue_time_domain);
+  message_pump_factory = std::move(other.message_pump_factory);
+  stack_size = std::move(other.stack_size);
+  priority = std::move(other.priority);
+  joinable = std::move(other.joinable);
+  other.moved_from = true;
+
+  return *this;
+}
 
 Thread::Options::~Options() = default;
 
@@ -136,10 +165,11 @@ bool Thread::Start() {
   if (com_status_ == STA)
     options.message_pump_type = MessagePumpType::UI;
 #endif
-  return StartWithOptions(options);
+  return StartWithOptions(std::move(options));
 }
 
-bool Thread::StartWithOptions(const Options& options) {
+bool Thread::StartWithOptions(Options options) {
+  DCHECK(options.IsValid());
   DCHECK(owning_sequence_checker_.CalledOnValidSequence());
   DCHECK(!delegate_);
   DCHECK(!IsRunning());
@@ -161,7 +191,7 @@ bool Thread::StartWithOptions(const Options& options) {
   if (options.delegate) {
     DCHECK(!options.message_pump_factory);
     DCHECK(!options.task_queue_time_domain);
-    delegate_ = WrapUnique(options.delegate);
+    delegate_ = std::move(options.delegate);
   } else if (options.message_pump_factory) {
     delegate_ = std::make_unique<SequenceManagerThreadDelegate>(
         MessagePumpType::CUSTOM, options.message_pump_factory,
@@ -352,8 +382,8 @@ void Thread::ThreadMain() {
   // Allow threads running a MessageLoopForIO to use FileDescriptorWatcher API.
   std::unique_ptr<FileDescriptorWatcher> file_descriptor_watcher;
   if (CurrentIOThread::IsSet()) {
-    file_descriptor_watcher.reset(
-        new FileDescriptorWatcher(delegate_->GetDefaultTaskRunner()));
+    file_descriptor_watcher = std::make_unique<FileDescriptorWatcher>(
+        delegate_->GetDefaultTaskRunner());
   }
 #endif
 

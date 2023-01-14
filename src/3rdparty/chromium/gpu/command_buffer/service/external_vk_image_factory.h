@@ -53,14 +53,20 @@ class GPU_GLES2_EXPORT ExternalVkImageFactory
       int client_id,
       gfx::GpuMemoryBufferHandle handle,
       gfx::BufferFormat format,
+      gfx::BufferPlane plane,
       SurfaceHandle surface_handle,
       const gfx::Size& size,
       const gfx::ColorSpace& color_space,
       GrSurfaceOrigin surface_origin,
       SkAlphaType alpha_type,
       uint32_t usage) override;
-  bool CanImportGpuMemoryBuffer(
-      gfx::GpuMemoryBufferType memory_buffer_type) override;
+  bool IsSupported(uint32_t usage,
+                   viz::ResourceFormat format,
+                   bool thread_safe,
+                   gfx::GpuMemoryBufferType gmb_type,
+                   GrContextType gr_context_type,
+                   bool* allow_legacy_mailbox,
+                   bool is_pixel_used) override;
 
  private:
   VkResult CreateExternalVkImage(VkFormat format,
@@ -68,6 +74,8 @@ class GPU_GLES2_EXPORT ExternalVkImageFactory
                                  VkImage* image);
 
   void TransitionToColorAttachment(VkImage image);
+
+  bool CanImportGpuMemoryBuffer(gfx::GpuMemoryBufferType memory_buffer_type);
 
   scoped_refptr<SharedContextState> context_state_;
   std::unique_ptr<VulkanCommandPool> command_pool_;

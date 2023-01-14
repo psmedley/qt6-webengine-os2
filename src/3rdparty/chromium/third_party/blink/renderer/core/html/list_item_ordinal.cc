@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/html/list_item_ordinal.h"
 
 #include "base/numerics/safe_conversions.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/html/html_olist_element.h"
@@ -132,7 +133,7 @@ ListItemOrdinal::NodeAndOrdinal ListItemOrdinal::NextOrdinalItem(
                           : NextListItem(list, item);
 }
 
-base::Optional<int> ListItemOrdinal::ExplicitValue() const {
+absl::optional<int> ListItemOrdinal::ExplicitValue() const {
   if (!HasExplicitValue())
     return {};
   return value_;

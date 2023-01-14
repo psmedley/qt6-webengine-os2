@@ -8,6 +8,7 @@
 #ifndef GrGLSLVertexGeoBuilder_DEFINED
 #define GrGLSLVertexGeoBuilder_DEFINED
 
+#include "src/gpu/GrGeometryProcessor.h"
 #include "src/gpu/glsl/GrGLSLShaderBuilder.h"
 
 /**
@@ -23,6 +24,7 @@ public:
         this->functions().append(functionDefinition);
     }
     using GrGLSLShaderBuilder::functions;
+    using GrGLSLShaderBuilder::code;
 
 protected:
     GrGLSLVertexGeoBuilder(GrGLSLProgramBuilder* program) : INHERITED(program) {}
@@ -35,7 +37,7 @@ protected:
     void emitNormalizedSkPosition(SkString* out, const char* devPos,
                                   GrSLType devPosType = GrSLType::kFloat2_GrSLType);
 
-    friend class GrGLSLGeometryProcessor;
+    friend class GrGeometryProcessor::ProgramImpl;
 
     using INHERITED = GrGLSLShaderBuilder;
 };

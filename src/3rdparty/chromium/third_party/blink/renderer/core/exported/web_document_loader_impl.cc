@@ -93,10 +93,6 @@ WebURL WebDocumentLoaderImpl::UnreachableURL() const {
   return DocumentLoader::UnreachableURL();
 }
 
-void WebDocumentLoaderImpl::RedirectChain(WebVector<WebURL>& result) const {
-  result.Assign(redirect_chain_);
-}
-
 bool WebDocumentLoaderImpl::IsClientRedirect() const {
   return DocumentLoader::IsClientRedirect();
 }
@@ -126,12 +122,12 @@ void WebDocumentLoaderImpl::SetExtraData(
 WebDocumentLoaderImpl::WebDocumentLoaderImpl(
     LocalFrame* frame,
     WebNavigationType navigation_type,
-    ContentSecurityPolicy* content_security_policy,
-    std::unique_ptr<WebNavigationParams> navigation_params)
+    std::unique_ptr<WebNavigationParams> navigation_params,
+    std::unique_ptr<PolicyContainer> policy_container)
     : DocumentLoader(frame,
                      navigation_type,
-                     content_security_policy,
-                     std::move(navigation_params)),
+                     std::move(navigation_params),
+                     std::move(policy_container)),
       response_wrapper_(DocumentLoader::GetResponse()) {}
 
 WebDocumentLoaderImpl::~WebDocumentLoaderImpl() {
@@ -203,6 +199,11 @@ bool WebDocumentLoaderImpl::LastNavigationHadTransientUserActivation() const {
 
 bool WebDocumentLoaderImpl::IsListingFtpDirectory() const {
   return DocumentLoader::IsListingFtpDirectory();
+}
+
+void WebDocumentLoaderImpl::SetCodeCacheHost(
+    mojo::PendingRemote<mojom::CodeCacheHost> code_cache_host) {
+  DocumentLoader::SetCodeCacheHost(std::move(code_cache_host));
 }
 
 void WebDocumentLoaderImpl::Trace(Visitor* visitor) const {

@@ -22,7 +22,6 @@
 
 #include "third_party/blink/renderer/core/html/html_meta_element.h"
 
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -202,11 +201,12 @@ Length HTMLMetaElement::ParseViewportValueAsLength(Document* document,
   if (value < 0)
     return Length();  // auto
 
+  value = ClampLengthValue(value);
   if (document && document->GetPage()) {
     value = document->GetPage()->GetChromeClient().WindowToViewportScalar(
         document->GetFrame(), value);
   }
-  return Length::Fixed(ClampLengthValue(value));
+  return Length::Fixed(value);
 }
 
 float HTMLMetaElement::ParseViewportValueAsZoom(
@@ -483,7 +483,8 @@ void HTMLMetaElement::NameRemoved(const AtomicString& name_value) {
     return;
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->DidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
   } else if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
   } else if (EqualIgnoringASCIICase(name_value, "battery-savings")) {
@@ -502,6 +503,8 @@ void HTMLMetaElement::ParseAttribute(
     ProcessHttpEquiv();
   } else if (params.name == html_names::kHttpEquivAttr) {
     ProcessHttpEquiv();
+  } else if (params.name == html_names::kMediaAttr) {
+    ProcessContent();
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -562,7 +565,8 @@ void HTMLMetaElement::ProcessContent() {
 
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->DidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
     return;
   }
   if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
@@ -593,17 +597,6 @@ void HTMLMetaElement::ProcessContent() {
 
     GetExecutionContext()->ParseAndSetReferrerPolicy(content_value,
                                                      kPolicySourceMetaTag);
-    if (base::FeatureList::IsEnabled(blink::features::kPolicyContainer)) {
-      LocalFrame* frame = GetDocument().GetFrame();
-      // If frame is null, this document is not attached to a frame, hence it
-      // has no PolicyContainer, so we ignore the next step. This function will
-      // run again anyway, should this document or this element be attached to a
-      // frame.
-      if (frame) {
-        frame->GetPolicyContainer()->UpdateReferrerPolicy(
-            GetExecutionContext()->GetReferrerPolicy());
-      }
-    }
   } else if (EqualIgnoringASCIICase(name_value, "handheldfriendly") &&
              EqualIgnoringASCIICase(content_value, "true")) {
     ProcessViewportContentAttribute("width=device-width",
@@ -636,6 +629,10 @@ const AtomicString& HTMLMetaElement::Content() const {
 
 const AtomicString& HTMLMetaElement::HttpEquiv() const {
   return FastGetAttribute(html_names::kHttpEquivAttr);
+}
+
+const AtomicString& HTMLMetaElement::Media() const {
+  return FastGetAttribute(html_names::kMediaAttr);
 }
 
 const AtomicString& HTMLMetaElement::GetName() const {

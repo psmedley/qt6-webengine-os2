@@ -28,7 +28,6 @@
 #include "third_party/blink/renderer/core/editing/commands/editor_command.h"
 
 #include "base/metrics/histogram_functions.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
@@ -53,6 +52,7 @@
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/ime/edit_context.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
 #include "third_party/blink/renderer/core/editing/kill_ring.h"
 #include "third_party/blink/renderer/core/editing/selection_modifier.h"
@@ -715,12 +715,7 @@ static bool ExecuteToggleOverwrite(LocalFrame& frame,
                                    Event*,
                                    EditorCommandSource,
                                    const String&) {
-  // Overwrite mode is disabled by-default. We only return true
-  // if the flag is enabled explicitly by the user in about:flags page.
-  if (base::FeatureList::IsEnabled(features::kInsertKeyToggleMode)) {
-    frame.GetEditor().ToggleOverwriteModeEnabled();
-    return true;
-  }
+  // Overwrite mode is not supported. See https://crbug.com/1030231.
   // We return false to match the expectation of the ExecCommand.
   return false;
 }
@@ -1955,6 +1950,41 @@ bool EditorCommand::Execute(const String& parameter,
       if (frame_->GetDocument()->GetFrame() != frame_)
         return false;
     }
+
+    // If EditContext is active, we may return early and not execute the
+    // command.
+    if (auto* edit_context =
+            frame_->GetInputMethodController().GetActiveEditContext()) {
+      // From EditContext's point of view, there are 3 kinds of commands:
+      switch (command_->command_type) {
+        case EditingCommandType::kToggleBold:
+        case EditingCommandType::kToggleItalic:
+        case EditingCommandType::kToggleUnderline:
+        case EditingCommandType::kInsertTab:
+        case EditingCommandType::kInsertBacktab:
+        case EditingCommandType::kInsertNewline:
+        case EditingCommandType::kInsertLineBreak:
+          // 1) BeforeInput event only, ex ctrl+B or <enter>.
+          return true;
+        case EditingCommandType::kDeleteBackward:
+          // 2) BeforeInput event + EditContext behavior, ex. backspace/delete.
+          edit_context->DeleteBackward();
+          return true;
+        case EditingCommandType::kDeleteForward:
+          edit_context->DeleteForward();
+          return true;
+        case EditingCommandType::kDeleteWordBackward:
+          edit_context->DeleteWordBackward();
+          return true;
+        case EditingCommandType::kDeleteWordForward:
+          edit_context->DeleteWordForward();
+          return true;
+        default:
+          // 3) BeforeInput event + default DOM behavior, ex. caret navigation.
+          // In this case, it's no-op for EditContext.
+          break;
+      }
+    }
   }
 
   GetFrame().GetDocument()->UpdateStyleAndLayout(
@@ -2030,7 +2060,8 @@ const StaticRangeVector* EditorCommand::GetTargetRanges() const {
           TextGranularity::kCharacter);
     case EditingCommandType::kDeleteToBeginningOfLine:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, SelectionModifyDirection::kBackward, TextGranularity::kLine);
+          *frame_, SelectionModifyDirection::kBackward,
+          TextGranularity::kLineBoundary);
     case EditingCommandType::kDeleteToBeginningOfParagraph:
       return RangesFromCurrentSelectionOrExtendCaret(
           *frame_, SelectionModifyDirection::kBackward,

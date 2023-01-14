@@ -14,7 +14,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/task_environment.h"
 #include "base/threading/platform_thread.h"
@@ -82,8 +82,8 @@ class AudioRendererMixerTest
     // Allocate one callback for generating expected results.
     double step = kSineCycles / static_cast<double>(
         output_parameters_.frames_per_buffer());
-    expected_callback_.reset(
-        new FakeAudioRenderCallback(step, output_parameters_.sample_rate()));
+    expected_callback_ = std::make_unique<FakeAudioRenderCallback>(
+        step, output_parameters_.sample_rate());
   }
 
   AudioRendererMixer* GetMixer(const base::UnguessableToken& owner_token,

@@ -36,6 +36,12 @@
 #include "media/capture/video/chromeos/camera_app_device_bridge_impl.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/crosapi/mojom/video_capture.mojom.h"
+#include "chromeos/lacros/lacros_service.h"
+#include "services/video_capture/lacros/device_factory_adapter_lacros.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
 namespace video_capture {
 
 // Intended usage of this class is to instantiate on any sequence, and then
@@ -184,6 +190,29 @@ void VideoCaptureServiceImpl::LazyInitializeDeviceFactory() {
               &GpuDependenciesContext::CreateJpegDecodeAccelerator,
               gpu_dependencies_context_->GetWeakPtr()),
           gpu_dependencies_context_->GetTaskRunner()));
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  // LacrosService might be null in unit tests.
+  auto* lacros_service = chromeos::LacrosService::Get();
+
+  // For requests for fake (including file) video capture device factory, we
+  // don't need to forward the request to Ash-Chrome.
+  if (!media::ShouldUseFakeVideoCaptureDeviceFactory() && lacros_service &&
+      lacros_service->IsVideoCaptureDeviceFactoryAvailable()) {
+    mojo::PendingRemote<crosapi::mojom::VideoCaptureDeviceFactory>
+        device_factory_ash;
+    lacros_service->BindVideoCaptureDeviceFactory(
+        device_factory_ash.InitWithNewPipeAndPassReceiver());
+    device_factory_ = std::make_unique<VirtualDeviceEnabledDeviceFactory>(
+        std::make_unique<DeviceFactoryAdapterLacros>(
+            std::move(device_factory_ash)));
+  } else {
+    LOG(WARNING)
+        << "Connected to an older version of ash. Use device factory in "
+           "Lacros-Chrome which is backed by Linux VCD instead of CrOS VCD.";
+    device_factory_ = std::make_unique<VirtualDeviceEnabledDeviceFactory>(
+        std::make_unique<DeviceFactoryMediaToMojoAdapter>(
+            std::move(video_capture_system)));
+  }
 #else
   device_factory_ = std::make_unique<VirtualDeviceEnabledDeviceFactory>(
       std::make_unique<DeviceFactoryMediaToMojoAdapter>(

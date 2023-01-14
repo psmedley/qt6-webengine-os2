@@ -28,12 +28,11 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
 #include "third_party/blink/renderer/platform/text/icu_error.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator_internal_icu.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -53,6 +52,8 @@ class LineBreakIteratorPool final {
   }
 
   LineBreakIteratorPool() = default;
+  LineBreakIteratorPool(const LineBreakIteratorPool&) = delete;
+  LineBreakIteratorPool& operator=(const LineBreakIteratorPool&) = delete;
 
   icu::BreakIterator* Take(const AtomicString& locale) {
     icu::BreakIterator* iterator = nullptr;
@@ -112,19 +113,17 @@ class LineBreakIteratorPool final {
 
   friend WTF::ThreadSpecific<LineBreakIteratorPool>::
   operator LineBreakIteratorPool*();
-
-  DISALLOW_COPY_AND_ASSIGN(LineBreakIteratorPool);
 };
 
 enum TextContext { kNoContext, kPriorContext, kPrimaryContext };
 
 const int kTextBufferCapacity = 16;
 
-typedef struct {
+struct UTextWithBuffer {
   DISALLOW_NEW();
   UText text;
   UChar buffer[kTextBufferCapacity];
-} UTextWithBuffer;
+};
 
 static inline int64_t TextPinIndex(int64_t& index, int64_t limit) {
   if (index < 0)
@@ -428,7 +427,8 @@ static UText* TextOpenLatin1(UTextWithBuffer* ut_with_buffer,
     DCHECK(!text);
     return nullptr;
   }
-  TextInit(text, &kTextLatin1Funcs, string.data(), string.size(), prior_context,
+  TextInit(text, &kTextLatin1Funcs, string.data(),
+           base::checked_cast<unsigned>(string.size()), prior_context,
            prior_context_length);
   return text;
 }
@@ -575,7 +575,8 @@ static UText* TextOpenUTF16(UText* text,
     DCHECK(!text);
     return nullptr;
   }
-  TextInit(text, &kTextUTF16Funcs, string.data(), string.size(), prior_context,
+  TextInit(text, &kTextUTF16Funcs, string.data(),
+           base::checked_cast<unsigned>(string.size()), prior_context,
            prior_context_length);
   return text;
 }

@@ -141,6 +141,17 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
   }
 #endif
 
+  if (sysno == __NR_uname) {
+    return Allow();
+  }
+
+  // Return -EPERM rather than killing the process with SIGSYS. This happens
+  // because if a sandboxed process attempts to use sendfile(2) it should be
+  // allowed to fall back to read(2)/write(2).
+  if (SyscallSets::IsSendfile(sysno)) {
+    return Error(EPERM);
+  }
+
   if (IsBaselinePolicyAllowed(sysno)) {
     return Allow();
   }
@@ -159,6 +170,15 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
   if (sysno == __NR_rseq)
     return Allow();
 #endif
+
+  // V8 uses PKU (a.k.a. MPK / PKEY) for protecting code spaces.
+  if (sysno == __NR_pkey_alloc) {
+    return RestrictPkeyAllocFlags();
+  }
+
+  if (sysno == __NR_pkey_free) {
+    return Allow();
+  }
 
   if (SyscallSets::IsClockApi(sysno)) {
     return RestrictClockID();
@@ -200,8 +220,14 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
   }
 #endif
 
-  if (sysno == __NR_futex)
+  if (sysno == __NR_futex
+#if defined(__i386__) || defined(__arm__) || \
+    (defined(ARCH_CPU_MIPS_FAMILY) && defined(ARCH_CPU_32_BITS))
+      || sysno == __NR_futex_time64
+#endif
+  ) {
     return RestrictFutex();
+  }
 
   if (sysno == __NR_set_robust_list)
     return Error(EPERM);
@@ -243,8 +269,11 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
     return RestrictMmapFlags();
 #endif
 
-  if (sysno == __NR_mprotect)
+  if (sysno == __NR_mprotect || sysno == __NR_pkey_mprotect) {
+    // pkey_mprotect is identical to mprotect except for the additional (last)
+    // parameter, which can be ignored here.
     return RestrictMprotectFlags();
+  }
 
   if (sysno == __NR_prctl)
     return RestrictPrctl();
@@ -281,6 +310,17 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
   // libc implementations to fstatat syscalls, and we need to rewrite them back.
   if (sysno == __NR_fstatat_default) {
     return RewriteFstatatSIGSYS(fs_denied_errno);
+  }
+
+  // The statx syscall is a filesystem syscall, which will be denied below with
+  // fs_denied_errno. However, on some platforms, glibc will default to statx
+  // for normal stat-family calls. Unfortunately there's no way to rewrite statx
+  // to something safe using a signal handler. Returning ENOSYS will cause glibc
+  // to fallback to old stat paths.
+  if (sysno == __NR_statx) {
+    const Arg<int> mask(3);
+    return If(mask == STATX_BASIC_STATS, Error(ENOSYS))
+        .Else(Error(fs_denied_errno));
   }
 
   if (SyscallSets::IsFileSystem(sysno) ||

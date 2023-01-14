@@ -13,6 +13,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
@@ -22,7 +23,6 @@
 #include "ui/views/controls/menu/menu_host.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -374,9 +374,9 @@ void SubmenuView::SetSelectedRow(int row) {
       GetMenuItemAt(row), MenuController::SELECTION_DEFAULT);
 }
 
-base::string16 SubmenuView::GetTextForRow(int row) {
+std::u16string SubmenuView::GetTextForRow(int row) {
   return MenuItemView::GetAccessibleNameForMenuItem(
-      GetMenuItemAt(row)->title(), base::string16(),
+      GetMenuItemAt(row)->title(), std::u16string(),
       GetMenuItemAt(row)->ShouldShowNewBadge());
 }
 
@@ -384,12 +384,10 @@ bool SubmenuView::IsShowing() const {
   return host_ && host_->IsMenuHostVisible();
 }
 
-void SubmenuView::ShowAt(Widget* parent,
-                         const gfx::Rect& bounds,
-                         bool do_capture) {
+void SubmenuView::ShowAt(const MenuHost::InitParams& init_params) {
   if (host_) {
-    host_->SetMenuHostBounds(bounds);
-    host_->ShowMenuHost(do_capture);
+    host_->SetMenuHostBounds(init_params.bounds);
+    host_->ShowMenuHost(init_params.do_capture);
   } else {
     host_ = new MenuHost(this);
     // Force construction of the scroll view container.
@@ -397,10 +395,16 @@ void SubmenuView::ShowAt(Widget* parent,
     // Force a layout since our preferred size may not have changed but our
     // content may have.
     InvalidateLayout();
-    host_->InitMenuHost(parent, bounds, scroll_view_container_, do_capture);
+
+    MenuHost::InitParams new_init_params = init_params;
+    new_init_params.contents_view = scroll_view_container_;
+    host_->InitMenuHost(new_init_params);
   }
 
-  // Only fire kMenuStart for the top level menu, not for each submenu.
+  // Only fire kMenuStart when a top level menu is being shown to notify that
+  // menu interaction is about to begin. Note that the ScrollViewContainer
+  // is not exposed as a kMenu, but as a kMenuBar for most platforms and a
+  // kNone on the Mac. See MenuScrollViewContainer::GetAccessibleNodeData.
   if (!GetMenuItem()->GetParentMenuItem()) {
     GetScrollViewContainer()->NotifyAccessibilityEvent(
         ax::mojom::Event::kMenuStart, true);
@@ -425,7 +429,7 @@ void SubmenuView::Hide() {
   if (host_) {
     /// -- Fire accessibility events ----
     // Both of these must be fired before HideMenuHost().
-    // Only fire kMenuStart for as top levels menu closes, not for each submenu.
+    // Only fire kMenuEnd when a top level menu closes, not for each submenu.
     // This is sent before kMenuPopupEnd to allow ViewAXPlatformNodeDelegate to
     // remove its focus override before AXPlatformNodeAuraLinux needs to access
     // the previously-focused node while handling kMenuPopupEnd.

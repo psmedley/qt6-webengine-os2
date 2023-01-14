@@ -9,10 +9,6 @@
 
 #include <stdint.h>
 
-class CXFA_Measurement;
-enum class XFA_ObjectType;
-struct XFA_SCRIPTATTRIBUTEINFO;
-
 enum XFA_HashCode : uint32_t {
   XFA_HASHCODE_None = 0,
 
@@ -114,9 +110,6 @@ enum class XFA_AttributeType : uint8_t {
   Integer,
   Measure,
 };
-
-#define XFA_PROPERTYFLAG_OneOf 0x01
-#define XFA_PROPERTYFLAG_DefaultOneOf 0x02
 
 enum class XFA_Unit : uint8_t {
   Percent = 0,

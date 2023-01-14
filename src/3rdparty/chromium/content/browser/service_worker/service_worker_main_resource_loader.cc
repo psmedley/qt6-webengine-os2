@@ -12,7 +12,6 @@
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/strcat.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/service_worker/service_worker_container_host.h"
@@ -21,11 +20,12 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/fetch/fetch_request_type_converters.h"
-#include "content/common/service_worker/service_worker_loader_helpers.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/service_worker/service_worker_loader_helpers.h"
 
 namespace content {
 
@@ -77,11 +77,9 @@ class ServiceWorkerMainResourceLoader::StreamWaiter
 
 ServiceWorkerMainResourceLoader::ServiceWorkerMainResourceLoader(
     NavigationLoaderInterceptor::FallbackCallback fallback_callback,
-    base::WeakPtr<ServiceWorkerContainerHost> container_host,
-    scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter)
+    base::WeakPtr<ServiceWorkerContainerHost> container_host)
     : fallback_callback_(std::move(fallback_callback)),
-      container_host_(std::move(container_host)),
-      url_loader_factory_getter_(std::move(url_loader_factory_getter)) {
+      container_host_(std::move(container_host)) {
   TRACE_EVENT_WITH_FLOW0(
       "ServiceWorker",
       "ServiceWorkerMainResourceLoader::ServiceWorkerMainResourceLoader", this,
@@ -126,7 +124,7 @@ void ServiceWorkerMainResourceLoader::StartRequest(
   resource_request_ = resource_request;
   if (container_host_ && container_host_->fetch_request_window_id()) {
     resource_request_.fetch_window_id =
-        base::make_optional(container_host_->fetch_request_window_id());
+        absl::make_optional(container_host_->fetch_request_window_id());
   }
 
   DCHECK(!receiver_.is_bound());
@@ -175,7 +173,7 @@ void ServiceWorkerMainResourceLoader::StartRequest(
 
   if (container_host_->IsContainerForWindowClient()) {
     did_navigation_preload_ = fetch_dispatcher_->MaybeStartNavigationPreload(
-        resource_request_, url_loader_factory_getter_.get(), std::move(context),
+        resource_request_, std::move(context),
         container_host_->frame_tree_node_id());
   }
 
@@ -339,10 +337,8 @@ void ServiceWorkerMainResourceLoader::StartResponse(
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK_EQ(status_, Status::kStarted);
 
-  ServiceWorkerLoaderHelpers::SaveResponseInfo(*response, response_head_.get());
-  ServiceWorkerLoaderHelpers::SaveResponseHeaders(
-      response->status_code, response->status_text, response->headers,
-      response_head_.get());
+  blink::ServiceWorkerLoaderHelpers::SaveResponseInfo(*response,
+                                                      response_head_.get());
 
   response_head_->did_service_worker_navigation_preload =
       did_navigation_preload_;
@@ -365,9 +361,9 @@ void ServiceWorkerMainResourceLoader::StartResponse(
 
   // Handle a redirect response. ComputeRedirectInfo returns non-null redirect
   // info if the given response is a redirect.
-  base::Optional<net::RedirectInfo> redirect_info =
-      ServiceWorkerLoaderHelpers::ComputeRedirectInfo(resource_request_,
-                                                      *response_head_);
+  absl::optional<net::RedirectInfo> redirect_info =
+      blink::ServiceWorkerLoaderHelpers::ComputeRedirectInfo(resource_request_,
+                                                             *response_head_);
   if (redirect_info) {
     TRACE_EVENT_WITH_FLOW2(
         "ServiceWorker", "ServiceWorkerMainResourceLoader::StartResponse", this,
@@ -404,7 +400,7 @@ void ServiceWorkerMainResourceLoader::StartResponse(
     DCHECK(response->blob->blob.is_valid());
     body_as_blob_.Bind(std::move(response->blob->blob));
     mojo::ScopedDataPipeConsumerHandle data_pipe;
-    int error = ServiceWorkerLoaderHelpers::ReadBlobResponseBody(
+    int error = blink::ServiceWorkerLoaderHelpers::ReadBlobResponseBody(
         &body_as_blob_, response->blob->size,
         base::BindOnce(&ServiceWorkerMainResourceLoader::OnBlobReadingComplete,
                        weak_factory_.GetWeakPtr()),
@@ -437,7 +433,7 @@ void ServiceWorkerMainResourceLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   NOTIMPLEMENTED();
 }
 

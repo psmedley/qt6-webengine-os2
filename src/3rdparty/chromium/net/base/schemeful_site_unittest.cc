@@ -160,7 +160,7 @@ TEST(SchemefulSiteTest, SchemeWithNetworkHost) {
   ASSERT_TRUE(IsStandardSchemeWithNetworkHost("network"));
   ASSERT_FALSE(IsStandardSchemeWithNetworkHost("non-network"));
 
-  base::Optional<SchemefulSite> network_host_site =
+  absl::optional<SchemefulSite> network_host_site =
       SchemefulSite::CreateIfHasRegisterableDomain(
           url::Origin::Create(GURL("network://site.example.test:1337")));
   EXPECT_TRUE(network_host_site.has_value());
@@ -169,7 +169,7 @@ TEST(SchemefulSiteTest, SchemeWithNetworkHost) {
   EXPECT_EQ("example.test",
             network_host_site->GetInternalOriginForTesting().host());
 
-  base::Optional<SchemefulSite> non_network_host_site_null =
+  absl::optional<SchemefulSite> non_network_host_site_null =
       SchemefulSite::CreateIfHasRegisterableDomain(
           url::Origin::Create(GURL("non-network://site.example.test")));
   EXPECT_FALSE(non_network_host_site_null.has_value());
@@ -227,11 +227,44 @@ TEST(SchemefulSiteTest, SerializationConsistent) {
     SCOPED_TRACE(site.GetDebugString());
     EXPECT_FALSE(site.GetInternalOriginForTesting().opaque());
 
-    base::Optional<SchemefulSite> deserialized_site =
+    absl::optional<SchemefulSite> deserialized_site =
         SchemefulSite::Deserialize(site.Serialize());
     EXPECT_TRUE(deserialized_site);
     EXPECT_EQ(site, deserialized_site);
   }
+}
+
+TEST(SchemefulSiteTest, SerializationFileSiteWithHost) {
+  const struct {
+    SchemefulSite site;
+    std::string expected;
+  } kTestCases[] = {
+      {SchemefulSite(GURL("file:///etc/passwd")), "file://"},
+      {SchemefulSite(GURL("file://example.com/etc/passwd")),
+       "file://example.com"},
+      {SchemefulSite(GURL("file://example.com")), "file://example.com"},
+  };
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(test_case.site.GetDebugString());
+    std::string serialized_site = test_case.site.SerializeFileSiteWithHost();
+    EXPECT_EQ(test_case.expected, serialized_site);
+    absl::optional<SchemefulSite> deserialized_site =
+        SchemefulSite::Deserialize(serialized_site);
+    EXPECT_TRUE(deserialized_site);
+    EXPECT_EQ(test_case.site, deserialized_site);
+  }
+}
+
+TEST(SchemefulSiteTest, FileURLWithHostEquality) {
+  // Two file URLs with different hosts should result in unequal SchemefulSites.
+  SchemefulSite site1(GURL("file://foo/some/path.txt"));
+  SchemefulSite site2(GURL("file://bar/some/path.txt"));
+  EXPECT_NE(site1, site2);
+
+  // Two file URLs with the same host should result in equal SchemefulSites.
+  SchemefulSite site3(GURL("file://foo/another/path.pdf"));
+  EXPECT_EQ(site1, site3);
 }
 
 TEST(SchemefulSiteTest, OpaqueSerialization) {
@@ -241,7 +274,7 @@ TEST(SchemefulSiteTest, OpaqueSerialization) {
       SchemefulSite(GURL("data:text/html,<body>Hello World</body>"))};
 
   for (auto& site : kTestSites) {
-    base::Optional<SchemefulSite> deserialized_site =
+    absl::optional<SchemefulSite> deserialized_site =
         SchemefulSite::DeserializeWithNonce(*site.SerializeWithNonce());
     EXPECT_TRUE(deserialized_site);
     EXPECT_EQ(site, *deserialized_site);
@@ -294,7 +327,7 @@ TEST(SchemefulSiteTest, CreateIfHasRegisterableDomain) {
        }) {
     url::Origin origin = url::Origin::Create(GURL(site));
     EXPECT_EQ(SchemefulSite::CreateIfHasRegisterableDomain(origin),
-              base::nullopt)
+              absl::nullopt)
         << "site = \"" << site << "\"";
   }
 }
@@ -374,6 +407,39 @@ TEST(SchemefulSiteTest, SiteDomainIsSafeHistogram) {
   SchemefulSite site6(
       url::Origin::Create(GURL("data:text/html,<body>Hello World</body>")));
   histogram_tester5.ExpectTotalCount("Net.SiteDomainIsSafe", 0);
+}
+
+TEST(SchemefulSiteTest, GetGURL) {
+  struct {
+    url::Origin origin;
+    GURL wantGURL;
+  } kTestCases[] = {
+      {
+          url::Origin::Create(GURL("data:text/html,<body>Hello World</body>")),
+          GURL(),
+      },
+      {url::Origin::Create(GURL("file://foo")), GURL("file:///")},
+      {url::Origin::Create(GURL("http://a.bar.test")), GURL("http://bar.test")},
+      {url::Origin::Create(GURL("http://c.test")), GURL("http://c.test")},
+      {url::Origin::Create(GURL("http://c.test:8000")), GURL("http://c.test")},
+      {
+          url::Origin::Create(GURL("https://a.bar.test")),
+          GURL("https://bar.test"),
+      },
+      {
+          url::Origin::Create(GURL("https://c.test")),
+          GURL("https://c.test"),
+      },
+      {
+          url::Origin::Create(GURL("https://c.test:1337")),
+          GURL("https://c.test"),
+      },
+  };
+
+  for (const auto& testcase : kTestCases) {
+    SchemefulSite site(testcase.origin);
+    EXPECT_EQ(site.GetURL(), testcase.wantGURL);
+  }
 }
 
 }  // namespace net

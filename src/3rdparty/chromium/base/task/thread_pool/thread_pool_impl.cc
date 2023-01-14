@@ -13,11 +13,11 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/task/scoped_set_task_priority_for_current_thread.h"
 #include "base/task/task_features.h"
@@ -30,6 +30,7 @@
 #include "base/task/thread_pool/worker_thread.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if defined(OS_WIN)
 #include "base/task/thread_pool/thread_group_native_win.h"
@@ -66,6 +67,12 @@ bool HasDisableBestEffortTasksSwitch() {
 // avoid having to add a public API to ThreadPoolInstance::InitParams for this
 // internal edge case.
 bool g_synchronous_thread_start_for_testing = false;
+
+// Verifies that |traits| do not have properties that are banned in ThreadPool.
+void AssertNoExtensionInTraits(const base::TaskTraits& traits) {
+  DCHECK_EQ(traits.extension_id(),
+            TaskTraitsExtensionStorage::kInvalidExtensionId);
+}
 
 }  // namespace
 
@@ -129,19 +136,31 @@ void ThreadPoolImpl::Start(const ThreadPoolInstance::InitParams& init_params,
   const int max_best_effort_tasks =
       std::min(kMaxBestEffortTasks, init_params.max_num_foreground_threads);
 
-  // This is set in Start() and not in the constructor because variation params
-  // are usually not ready when ThreadPoolImpl is instantiated in a process.
-  if (FeatureList::IsEnabled(kAllTasksUserBlocking))
-    all_tasks_user_blocking_.Set();
-
 #if HAS_NATIVE_THREAD_POOL()
   if (FeatureList::IsEnabled(kUseNativeThreadPool)) {
-    std::unique_ptr<ThreadGroup> pool = std::move(foreground_thread_group_);
+    std::unique_ptr<ThreadGroup> old_group =
+        std::move(foreground_thread_group_);
     foreground_thread_group_ = std::make_unique<ThreadGroupNativeImpl>(
+#if defined(OS_APPLE)
+        ThreadPriority::NORMAL,
+#endif
         task_tracker_->GetTrackedRef(), tracked_ref_factory_.GetTrackedRef(),
-        pool.get());
-    pool->InvalidateAndHandoffAllTaskSourcesToOtherThreadGroup(
+        old_group.get());
+    old_group->InvalidateAndHandoffAllTaskSourcesToOtherThreadGroup(
         foreground_thread_group_.get());
+  }
+
+  if (FeatureList::IsEnabled(kUseBackgroundNativeThreadPool)) {
+    std::unique_ptr<ThreadGroup> old_group =
+        std::move(background_thread_group_);
+    background_thread_group_ = std::make_unique<ThreadGroupNativeImpl>(
+#if defined(OS_APPLE)
+        ThreadPriority::BACKGROUND,
+#endif
+        task_tracker_->GetTrackedRef(), tracked_ref_factory_.GetTrackedRef(),
+        old_group.get());
+    old_group->InvalidateAndHandoffAllTaskSourcesToOtherThreadGroup(
+        background_thread_group_.get());
   }
 #endif
 
@@ -156,7 +175,7 @@ void ThreadPoolImpl::Start(const ThreadPoolInstance::InitParams& init_params,
       MessagePumpType::DEFAULT;
 #endif
   service_thread_options.timer_slack = TIMER_SLACK_MAXIMUM;
-  CHECK(service_thread_.StartWithOptions(service_thread_options));
+  CHECK(service_thread_.StartWithOptions(std::move(service_thread_options)));
   if (g_synchronous_thread_start_for_testing)
     service_thread_.WaitUntilThreadStarted();
 
@@ -216,18 +235,27 @@ void ThreadPoolImpl::Start(const ThreadPoolInstance::InitParams& init_params,
   }
 
   if (background_thread_group_) {
-    background_thread_group_->Start(
-        max_best_effort_tasks, max_best_effort_tasks, suggested_reclaim_time,
-        service_thread_task_runner, worker_thread_observer,
-#if defined(OS_WIN)
-        // COM STA is a backward-compatibility feature for the foreground thread
-        // group only.
-        worker_environment == ThreadGroup::WorkerEnvironment::COM_STA
-            ? ThreadGroup::WorkerEnvironment::NONE
-            :
+#if HAS_NATIVE_THREAD_POOL()
+    if (FeatureList::IsEnabled(kUseBackgroundNativeThreadPool)) {
+      static_cast<ThreadGroupNative*>(background_thread_group_.get())
+          ->Start(worker_environment);
+    } else
 #endif
-            worker_environment,
-        g_synchronous_thread_start_for_testing);
+    {
+      static_cast<ThreadGroupImpl*>(background_thread_group_.get())
+          ->Start(max_best_effort_tasks, max_best_effort_tasks,
+                  suggested_reclaim_time, service_thread_task_runner,
+                  worker_thread_observer,
+#if defined(OS_WIN)
+                  // COM STA is a backward-compatibility feature for the
+                  // foreground thread group only.
+                  worker_environment == ThreadGroup::WorkerEnvironment::COM_STA
+                      ? ThreadGroup::WorkerEnvironment::NONE
+                      :
+#endif
+                      worker_environment,
+                  g_synchronous_thread_start_for_testing);
+    }
   }
 
   started_ = true;
@@ -237,50 +265,53 @@ bool ThreadPoolImpl::PostDelayedTask(const Location& from_here,
                                      const TaskTraits& traits,
                                      OnceClosure task,
                                      TimeDelta delay) {
+  AssertNoExtensionInTraits(traits);
   // Post |task| as part of a one-off single-task Sequence.
-  const TaskTraits new_traits = VerifyAndAjustIncomingTraits(traits);
   return PostTaskWithSequence(
-      Task(from_here, std::move(task), delay),
-      MakeRefCounted<Sequence>(new_traits, nullptr,
+      Task(from_here, std::move(task), TimeTicks::Now(), delay),
+      MakeRefCounted<Sequence>(traits, nullptr,
                                TaskSourceExecutionMode::kParallel));
 }
 
 scoped_refptr<TaskRunner> ThreadPoolImpl::CreateTaskRunner(
     const TaskTraits& traits) {
-  const TaskTraits new_traits = VerifyAndAjustIncomingTraits(traits);
-  return MakeRefCounted<PooledParallelTaskRunner>(new_traits, this);
+  AssertNoExtensionInTraits(traits);
+  return MakeRefCounted<PooledParallelTaskRunner>(traits, this);
 }
 
 scoped_refptr<SequencedTaskRunner> ThreadPoolImpl::CreateSequencedTaskRunner(
     const TaskTraits& traits) {
-  const TaskTraits new_traits = VerifyAndAjustIncomingTraits(traits);
-  return MakeRefCounted<PooledSequencedTaskRunner>(new_traits, this);
+  AssertNoExtensionInTraits(traits);
+  return MakeRefCounted<PooledSequencedTaskRunner>(traits, this);
 }
 
 scoped_refptr<SingleThreadTaskRunner>
 ThreadPoolImpl::CreateSingleThreadTaskRunner(
     const TaskTraits& traits,
     SingleThreadTaskRunnerThreadMode thread_mode) {
+  AssertNoExtensionInTraits(traits);
   return single_thread_task_runner_manager_.CreateSingleThreadTaskRunner(
-      VerifyAndAjustIncomingTraits(traits), thread_mode);
+      traits, thread_mode);
 }
 
 #if defined(OS_WIN)
 scoped_refptr<SingleThreadTaskRunner> ThreadPoolImpl::CreateCOMSTATaskRunner(
     const TaskTraits& traits,
     SingleThreadTaskRunnerThreadMode thread_mode) {
-  return single_thread_task_runner_manager_.CreateCOMSTATaskRunner(
-      VerifyAndAjustIncomingTraits(traits), thread_mode);
+  AssertNoExtensionInTraits(traits);
+  return single_thread_task_runner_manager_.CreateCOMSTATaskRunner(traits,
+                                                                   thread_mode);
 }
 #endif  // defined(OS_WIN)
 
 scoped_refptr<UpdateableSequencedTaskRunner>
 ThreadPoolImpl::CreateUpdateableSequencedTaskRunner(const TaskTraits& traits) {
-  const TaskTraits new_traits = VerifyAndAjustIncomingTraits(traits);
-  return MakeRefCounted<PooledSequencedTaskRunner>(new_traits, this);
+  AssertNoExtensionInTraits(traits);
+  return MakeRefCounted<PooledSequencedTaskRunner>(traits, this);
 }
 
-Optional<TimeTicks> ThreadPoolImpl::NextScheduledRunTimeForTesting() const {
+absl::optional<TimeTicks> ThreadPoolImpl::NextScheduledRunTimeForTesting()
+    const {
   if (task_tracker_->HasIncompleteTaskSourcesForTesting())
     return TimeTicks::Now();
   return delayed_task_manager_.NextScheduledRunTime();
@@ -406,6 +437,15 @@ bool ThreadPoolImpl::PostTaskWithSequence(Task task,
   // for details.
   CHECK(task.task);
   DCHECK(sequence);
+
+#if defined(OS_WIN) && !defined(TOOLKIT_QT)
+  // Force reading |task.posted_from.file_name()| to produce a useful crash
+  // report if the address is invalid. A crash report generated later when the
+  // task is executed would not contain the PostTask stack.
+  //
+  // TODO(crbug.com/1224432): Remove after resolving the crash.
+  DEBUG_ALIAS_FOR_CSTR(task_posted_from, task.posted_from.file_name(), 32);
+#endif
 
   if (!task_tracker_->WillPostTask(&task, sequence->shutdown_behavior()))
     return false;
@@ -545,16 +585,6 @@ void ThreadPoolImpl::UpdateCanRunPolicy() {
   if (background_thread_group_)
     background_thread_group_->DidUpdateCanRunPolicy();
   single_thread_task_runner_manager_.DidUpdateCanRunPolicy();
-}
-
-TaskTraits ThreadPoolImpl::VerifyAndAjustIncomingTraits(
-    TaskTraits traits) const {
-  DCHECK_EQ(traits.extension_id(),
-            TaskTraitsExtensionStorage::kInvalidExtensionId)
-      << "Extension traits cannot be used with the ThreadPool API.";
-  if (all_tasks_user_blocking_.IsSet())
-    traits.UpdatePriority(TaskPriority::USER_BLOCKING);
-  return traits;
 }
 
 }  // namespace internal

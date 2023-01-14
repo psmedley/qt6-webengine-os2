@@ -79,7 +79,7 @@ class QUIC_EXPORT_PRIVATE RttStats {
   // Sets an initial RTT to be used for SmoothedRtt before any RTT updates.
   void set_initial_rtt(QuicTime::Delta initial_rtt) {
     if (initial_rtt.ToMicroseconds() <= 0) {
-      QUIC_BUG << "Attempt to set initial rtt to <= 0.";
+      QUIC_BUG(quic_bug_10453_1) << "Attempt to set initial rtt to <= 0.";
       return;
     }
     initial_rtt_ = initial_rtt;
@@ -100,12 +100,6 @@ class QUIC_EXPORT_PRIVATE RttStats {
   QuicTime::Delta GetStandardOrMeanDeviation() const;
 
   QuicTime last_update_time() const { return last_update_time_; }
-
-  bool ignore_max_ack_delay() const { return ignore_max_ack_delay_; }
-
-  void set_ignore_max_ack_delay(bool ignore_max_ack_delay) {
-    ignore_max_ack_delay_ = ignore_max_ack_delay;
-  }
 
   void EnableStandardDeviationCalculation() {
     calculate_standard_deviation_ = true;
@@ -130,8 +124,6 @@ class QUIC_EXPORT_PRIVATE RttStats {
   bool calculate_standard_deviation_;
   QuicTime::Delta initial_rtt_;
   QuicTime last_update_time_;
-  // Whether to ignore the peer's max ack delay.
-  bool ignore_max_ack_delay_;
 };
 
 }  // namespace quic

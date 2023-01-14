@@ -17,10 +17,11 @@
 #include <cassert>
 #include <vector>
 
+#include "absl/time/clock.h"
 #include "core/options.h"
+#include "platform/base/feature_flags.h"
 #include "platform/public/count_down_latch.h"
 #include "platform/public/logging.h"
-#include "absl/time/clock.h"
 
 namespace location {
 namespace nearby {
@@ -77,6 +78,22 @@ void Core::RequestConnection(absl::string_view endpoint_id,
                              ConnectionOptions options,
                              ResultCallback callback) {
   assert(!endpoint_id.empty());
+
+  // Assign the default from feature flags for the keep-alive frame interval and
+  // timeout values if client don't mind them or has the unexpected ones.
+  if (options.keep_alive_interval_millis == 0 ||
+      options.keep_alive_timeout_millis == 0 ||
+      options.keep_alive_interval_millis >= options.keep_alive_timeout_millis) {
+    NEARBY_LOG(
+        WARNING,
+        "Client request connection with keep-alive frame as interval=%d, "
+        "timeout=%d, which is un-expected. Change to default.",
+        options.keep_alive_interval_millis, options.keep_alive_timeout_millis);
+    options.keep_alive_interval_millis =
+        FeatureFlags::GetInstance().GetFlags().keep_alive_interval_millis;
+    options.keep_alive_timeout_millis =
+        FeatureFlags::GetInstance().GetFlags().keep_alive_timeout_millis;
+  }
 
   router_.RequestConnection(&client_, endpoint_id, info, options, callback);
 }

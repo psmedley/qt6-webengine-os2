@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_panner_options.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer_source_node.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
@@ -231,55 +232,55 @@ void PannerHandler::Process(uint32_t frames_to_process) {
 void PannerHandler::ProcessSampleAccurateValues(AudioBus* destination,
                                                 const AudioBus* source,
                                                 uint32_t frames_to_process) {
-  CHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
+  CHECK_LE(frames_to_process, GetDeferredTaskHandler().RenderQuantumFrames());
 
   // Get the sample accurate values from all of the AudioParams, including the
   // values from the AudioListener.
-  float panner_x[audio_utilities::kRenderQuantumFrames];
-  float panner_y[audio_utilities::kRenderQuantumFrames];
-  float panner_z[audio_utilities::kRenderQuantumFrames];
+  std::vector<float> panner_x(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<float> panner_y(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<float> panner_z(GetDeferredTaskHandler().RenderQuantumFrames());
 
-  float orientation_x[audio_utilities::kRenderQuantumFrames];
-  float orientation_y[audio_utilities::kRenderQuantumFrames];
-  float orientation_z[audio_utilities::kRenderQuantumFrames];
+  std::vector<float> orientation_x(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<float> orientation_y(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<float> orientation_z(GetDeferredTaskHandler().RenderQuantumFrames());
 
-  position_x_->CalculateSampleAccurateValues(panner_x, frames_to_process);
-  position_y_->CalculateSampleAccurateValues(panner_y, frames_to_process);
-  position_z_->CalculateSampleAccurateValues(panner_z, frames_to_process);
-  orientation_x_->CalculateSampleAccurateValues(orientation_x,
+  position_x_->CalculateSampleAccurateValues(panner_x.data(), frames_to_process);
+  position_y_->CalculateSampleAccurateValues(panner_y.data(), frames_to_process);
+  position_z_->CalculateSampleAccurateValues(panner_z.data(), frames_to_process);
+  orientation_x_->CalculateSampleAccurateValues(orientation_x.data(),
                                                 frames_to_process);
-  orientation_y_->CalculateSampleAccurateValues(orientation_y,
+  orientation_y_->CalculateSampleAccurateValues(orientation_y.data(),
                                                 frames_to_process);
-  orientation_z_->CalculateSampleAccurateValues(orientation_z,
+  orientation_z_->CalculateSampleAccurateValues(orientation_z.data(),
                                                 frames_to_process);
 
   // Get the automation values from the listener.
   auto listener = Listener();
-  const float* listener_x =
-      listener->GetPositionXValues(audio_utilities::kRenderQuantumFrames);
-  const float* listener_y =
-      listener->GetPositionYValues(audio_utilities::kRenderQuantumFrames);
-  const float* listener_z =
-      listener->GetPositionZValues(audio_utilities::kRenderQuantumFrames);
+  const float* listener_x = listener->GetPositionXValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
+  const float* listener_y = listener->GetPositionYValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
+  const float* listener_z = listener->GetPositionZValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
 
-  const float* forward_x =
-      listener->GetForwardXValues(audio_utilities::kRenderQuantumFrames);
-  const float* forward_y =
-      listener->GetForwardYValues(audio_utilities::kRenderQuantumFrames);
-  const float* forward_z =
-      listener->GetForwardZValues(audio_utilities::kRenderQuantumFrames);
+  const float* forward_x = listener->GetForwardXValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
+  const float* forward_y = listener->GetForwardYValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
+  const float* forward_z = listener->GetForwardZValues(
+      GetDeferredTaskHandler().RenderQuantumFrames());
 
   const float* up_x =
-      listener->GetUpXValues(audio_utilities::kRenderQuantumFrames);
+      listener->GetUpXValues(GetDeferredTaskHandler().RenderQuantumFrames());
   const float* up_y =
-      listener->GetUpYValues(audio_utilities::kRenderQuantumFrames);
+      listener->GetUpYValues(GetDeferredTaskHandler().RenderQuantumFrames());
   const float* up_z =
-      listener->GetUpZValues(audio_utilities::kRenderQuantumFrames);
+      listener->GetUpZValues(GetDeferredTaskHandler().RenderQuantumFrames());
 
   // Compute the azimuth, elevation, and total gains for each position.
-  double azimuth[audio_utilities::kRenderQuantumFrames];
-  double elevation[audio_utilities::kRenderQuantumFrames];
-  float total_gain[audio_utilities::kRenderQuantumFrames];
+  std::vector<double> azimuth(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<double> elevation(GetDeferredTaskHandler().RenderQuantumFrames());
+  std::vector<float> total_gain(GetDeferredTaskHandler().RenderQuantumFrames());
 
   for (unsigned k = 0; k < frames_to_process; ++k) {
     FloatPoint3D panner_position(panner_x[k], panner_y[k], panner_z[k]);
@@ -304,25 +305,25 @@ void PannerHandler::ProcessSampleAccurateValues(AudioBus* destination,
     cached_distance_cone_gain_ = total_gain[frames_to_process - 1];
   }
 
-  panner_->PanWithSampleAccurateValues(azimuth, elevation, source, destination,
+  panner_->PanWithSampleAccurateValues(azimuth.data(), elevation.data(), source, destination,
                                        frames_to_process,
                                        InternalChannelInterpretation());
-  destination->CopyWithSampleAccurateGainValuesFrom(*destination, total_gain,
+  destination->CopyWithSampleAccurateGainValuesFrom(*destination, total_gain.data(),
                                                     frames_to_process);
 }
 
 void PannerHandler::ProcessOnlyAudioParams(uint32_t frames_to_process) {
-  float values[audio_utilities::kRenderQuantumFrames];
+  std::vector<float> values(GetDeferredTaskHandler().RenderQuantumFrames());
 
-  DCHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
+  DCHECK_LE(frames_to_process, GetDeferredTaskHandler().RenderQuantumFrames());
 
-  position_x_->CalculateSampleAccurateValues(values, frames_to_process);
-  position_y_->CalculateSampleAccurateValues(values, frames_to_process);
-  position_z_->CalculateSampleAccurateValues(values, frames_to_process);
+  position_x_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  position_y_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  position_z_->CalculateSampleAccurateValues(values.data(), frames_to_process);
 
-  orientation_x_->CalculateSampleAccurateValues(values, frames_to_process);
-  orientation_y_->CalculateSampleAccurateValues(values, frames_to_process);
-  orientation_z_->CalculateSampleAccurateValues(values, frames_to_process);
+  orientation_x_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  orientation_y_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  orientation_z_->CalculateSampleAccurateValues(values.data(), frames_to_process);
 }
 
 void PannerHandler::Initialize() {
@@ -331,6 +332,7 @@ void PannerHandler::Initialize() {
 
   auto listener = Listener();
   panner_ = Panner::Create(panning_model_, Context()->sampleRate(),
+                           GetDeferredTaskHandler().RenderQuantumFrames(),
                            listener->HrtfDatabaseLoader());
   listener->AddPanner(*this);
 
@@ -403,6 +405,7 @@ bool PannerHandler::SetPanningModel(Panner::PanningModel model) {
     // This synchronizes with process().
     MutexLocker process_locker(process_lock_);
     panner_ = Panner::Create(model, Context()->sampleRate(),
+                             GetDeferredTaskHandler().RenderQuantumFrames(),
                              Listener()->HrtfDatabaseLoader());
     panning_model_ = model;
   }

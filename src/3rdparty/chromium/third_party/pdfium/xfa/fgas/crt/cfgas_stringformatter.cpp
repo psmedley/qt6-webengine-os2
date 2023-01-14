@@ -6,29 +6,25 @@
 
 #include "xfa/fgas/crt/cfgas_stringformatter.h"
 
+#include <math.h>
+
 #include <algorithm>
 #include <limits>
 #include <utility>
 #include <vector>
 
+#include "core/fxcrt/cfx_datetime.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_safe_types.h"
+#include "third_party/base/containers/contains.h"
+#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/stl_util.h"
 #include "xfa/fgas/crt/cfgas_decimal.h"
 #include "xfa/fgas/crt/locale_mgr_iface.h"
 
 // NOTE: Code uses the convention for backwards-looping with unsigned types
 // that exploits the well-defined behaviour for unsigned underflow (and hence
 // the standard x < size() can be used in all cases to validate indices).
-
-#define FX_LOCALECATEGORY_DateHash 0xbde9abde
-#define FX_LOCALECATEGORY_TimeHash 0x2d71b00f
-#define FX_LOCALECATEGORY_DateTimeHash 0x158c72ed
-#define FX_LOCALECATEGORY_NumHash 0x0b4ff870
-#define FX_LOCALECATEGORY_TextHash 0x2d08af85
-#define FX_LOCALECATEGORY_ZeroHash 0x568cb500
-#define FX_LOCALECATEGORY_NullHash 0x052931bb
 
 #define FX_NUMSTYLE_Percent 0x01
 #define FX_NUMSTYLE_Exponent 0x02
@@ -48,7 +44,6 @@ struct LocaleNumberSubcategoryWithHash {
 
 #undef SUBC
 #define SUBC(a, b, c) a, c
-
 constexpr LocaleDateTimeSubcategoryWithHash kLocaleDateTimeSubcategoryData[] = {
     {SUBC(0x14da2125, "default", LocaleIface::DateTimeSubcategory::kDefault)},
     {SUBC(0x9041d4b0, "short", LocaleIface::DateTimeSubcategory::kShort)},
@@ -63,7 +58,6 @@ constexpr LocaleNumberSubcategoryWithHash kLocaleNumSubcategoryData[] = {
     {SUBC(0x54034c2f, "decimal", LocaleIface::NumSubcategory::kDecimal)},
     {SUBC(0x7568e6ae, "integer", LocaleIface::NumSubcategory::kInteger)},
 };
-
 #undef SUBC
 
 struct FX_LOCALETIMEZONEINFO {
@@ -72,18 +66,25 @@ struct FX_LOCALETIMEZONEINFO {
   int16_t iMinute;
 };
 
-const FX_LOCALETIMEZONEINFO g_FXLocaleTimeZoneData[] = {
+constexpr FX_LOCALETIMEZONEINFO kFXLocaleTimeZoneData[] = {
     {L"CDT", -5, 0}, {L"CST", -6, 0}, {L"EDT", -4, 0}, {L"EST", -5, 0},
     {L"MDT", -6, 0}, {L"MST", -7, 0}, {L"PDT", -7, 0}, {L"PST", -8, 0},
 };
 
-const wchar_t kTimeSymbols[] = L"hHkKMSFAzZ";
-const wchar_t kDateSymbols[] = L"DJMEeGgYwW";
-const wchar_t kConstChars[] = L",-:/. ";
+constexpr wchar_t kTimeSymbols[] = L"hHkKMSFAzZ";
+constexpr wchar_t kDateSymbols[] = L"DJMEeGgYwW";
+constexpr wchar_t kConstChars[] = L",-:/. ";
 
-size_t ParseTimeZone(pdfium::span<const wchar_t> spStr, FX_TIMEZONE* tz) {
-  tz->tzHour = 0;
-  tz->tzMinute = 0;
+constexpr wchar_t kDateStr[] = L"date";
+constexpr wchar_t kTimeStr[] = L"time";
+constexpr wchar_t kDateTimeStr[] = L"datetime";
+constexpr wchar_t kNumStr[] = L"num";
+constexpr wchar_t kTextStr[] = L"text";
+constexpr wchar_t kZeroStr[] = L"zero";
+constexpr wchar_t kNullStr[] = L"null";
+
+size_t ParseTimeZone(pdfium::span<const wchar_t> spStr, int* tz) {
+  *tz = 0;
   if (spStr.empty())
     return 0;
 
@@ -92,18 +93,21 @@ size_t ParseTimeZone(pdfium::span<const wchar_t> spStr, FX_TIMEZONE* tz) {
 
   size_t iStart = 1;
   size_t iEnd = iStart + 2;
+  int tz_hour = 0;
   while (iStart < spStr.size() && iStart < iEnd)
-    tz->tzHour = tz->tzHour * 10 + FXSYS_DecimalCharToInt(spStr[iStart++]);
+    tz_hour = tz_hour * 10 + FXSYS_DecimalCharToInt(spStr[iStart++]);
 
   if (iStart < spStr.size() && spStr[iStart] == ':')
     iStart++;
 
   iEnd = iStart + 2;
+  int tz_minute = 0;
   while (iStart < spStr.size() && iStart < iEnd)
-    tz->tzMinute = tz->tzMinute * 10 + FXSYS_DecimalCharToInt(spStr[iStart++]);
+    tz_minute = tz_minute * 10 + FXSYS_DecimalCharToInt(spStr[iStart++]);
 
+  *tz = tz_hour * 60 + tz_minute;
   if (bNegative)
-    tz->tzHour = -tz->tzHour;
+    *tz *= -1;
 
   return iStart;
 }
@@ -333,16 +337,13 @@ bool ParseLocaleDate(const WideString& wsDate,
   return !!(*cc);
 }
 
-void ResolveZone(FX_TIMEZONE tzDiff,
+void ResolveZone(int tz_diff_minutes,
                  const LocaleIface* pLocale,
                  uint32_t* wHour,
                  uint32_t* wMinute) {
   int32_t iMinuteDiff = *wHour * 60 + *wMinute;
-  FX_TIMEZONE tzLocale = pLocale->GetTimeZone();
-  iMinuteDiff += tzLocale.tzHour * 60 +
-                 (tzLocale.tzHour < 0 ? -tzLocale.tzMinute : tzLocale.tzMinute);
-  iMinuteDiff -= tzDiff.tzHour * 60 +
-                 (tzDiff.tzHour < 0 ? -tzDiff.tzMinute : tzDiff.tzMinute);
+  iMinuteDiff += pLocale->GetTimeZoneInMinutes();
+  iMinuteDiff -= tz_diff_minutes;
 
   iMinuteDiff %= 1440;
   if (iMinuteDiff < 0)
@@ -447,17 +448,14 @@ bool ParseLocaleTime(const WideString& wsTime,
       tz += spTime[(*cc)++];
       tz += spTime[(*cc)++];
       if (tz.EqualsASCII("GMT")) {
-        FX_TIMEZONE tzDiff;
-        tzDiff.tzHour = 0;
-        tzDiff.tzMinute = 0;
-        if (*cc < spTime.size() && (spTime[*cc] == '-' || spTime[*cc] == '+')) {
-          *cc += ParseTimeZone(spTime.subspan(*cc), &tzDiff);
-        }
-        ResolveZone(tzDiff, pLocale, &hour, &minute);
+        int tz_diff_minutes = 0;
+        if (*cc < spTime.size() && (spTime[*cc] == '-' || spTime[*cc] == '+'))
+          *cc += ParseTimeZone(spTime.subspan(*cc), &tz_diff_minutes);
+        ResolveZone(tz_diff_minutes, pLocale, &hour, &minute);
       } else {
         // Search the timezone list. There are only 8 of them, so linear scan.
-        for (size_t i = 0; i < pdfium::size(g_FXLocaleTimeZoneData); ++i) {
-          const FX_LOCALETIMEZONEINFO& info = g_FXLocaleTimeZoneData[i];
+        for (size_t i = 0; i < pdfium::size(kFXLocaleTimeZoneData); ++i) {
+          const FX_LOCALETIMEZONEINFO& info = kFXLocaleTimeZoneData[i];
           if (tz != info.name)
             continue;
 
@@ -468,9 +466,9 @@ bool ParseLocaleTime(const WideString& wsTime,
       }
     } else if (symbol.EqualsASCII("z")) {
       if (spTime[*cc] != 'Z') {
-        FX_TIMEZONE tzDiff;
-        *cc += ParseTimeZone(spTime.subspan(*cc), &tzDiff);
-        ResolveZone(tzDiff, pLocale, &hour, &minute);
+        int tz_diff_minutes = 0;
+        *cc += ParseTimeZone(spTime.subspan(*cc), &tz_diff_minutes);
+        ResolveZone(tz_diff_minutes, pLocale, &hour, &minute);
       } else {
         (*cc)++;
       }
@@ -682,11 +680,12 @@ WideString TimeFormat(const WideString& wsTimePattern,
     } else if (symbol.EqualsASCIINoCase("z")) {
       if (symbol.EqualsASCII("Z"))
         wsResult += L"GMT";
-      FX_TIMEZONE tz = pLocale->GetTimeZone();
-      if (tz.tzHour != 0 || tz.tzMinute != 0) {
-        wsResult += tz.tzHour < 0 ? L"-" : L"+";
-        wsResult +=
-            WideString::Format(L"%02d:%02d", abs(tz.tzHour), tz.tzMinute);
+      int tz_minutes = pLocale->GetTimeZoneInMinutes();
+      if (tz_minutes != 0) {
+        wsResult += tz_minutes < 0 ? L"-" : L"+";
+        int abs_tz_minutes = abs(tz_minutes);
+        wsResult += WideString::Format(L"%02d:%02d", abs_tz_minutes / 60,
+                                       abs_tz_minutes % 60);
       }
     }
   }
@@ -848,12 +847,10 @@ bool FX_TimeFromCanonical(const LocaleIface* pLocale,
   }
 
   if (cc < spTime.size()) {
-    FX_TIMEZONE tzDiff;
-    tzDiff.tzHour = 0;
-    tzDiff.tzMinute = 0;
+    int tz_diff_minutes = 0;
     if (spTime[cc] != 'Z')
-      cc += ParseTimeZone(spTime.subspan(cc), &tzDiff);
-    ResolveZone(tzDiff, pLocale, &hour, &minute);
+      cc += ParseTimeZone(spTime.subspan(cc), &tz_diff_minutes);
+    ResolveZone(tz_diff_minutes, pLocale, &hour, &minute);
   }
 
   datetime->SetTime(hour, minute, second, millisecond);
@@ -908,22 +905,21 @@ CFGAS_StringFormatter::Category CFGAS_StringFormatter::GetCategory() const {
         wsCategory += m_spPattern[ccf];
         ccf++;
       }
-      uint32_t dwHash = FX_HashCode_GetW(wsCategory.AsStringView(), false);
-      if (dwHash == FX_LOCALECATEGORY_DateTimeHash)
+      if (wsCategory == kDateTimeStr)
         return Category::kDateTime;
-      if (dwHash == FX_LOCALECATEGORY_TextHash)
+      if (wsCategory == kTextStr)
         return Category::kText;
-      if (dwHash == FX_LOCALECATEGORY_NumHash)
+      if (wsCategory == kNumStr)
         return Category::kNum;
-      if (dwHash == FX_LOCALECATEGORY_ZeroHash)
+      if (wsCategory == kZeroStr)
         return Category::kZero;
-      if (dwHash == FX_LOCALECATEGORY_NullHash)
+      if (wsCategory == kNullStr)
         return Category::kNull;
-      if (dwHash == FX_LOCALECATEGORY_DateHash) {
+      if (wsCategory == kDateStr) {
         if (eCategory == Category::kTime)
           return Category::kDateTime;
         eCategory = Category::kDate;
-      } else if (dwHash == FX_LOCALECATEGORY_TimeHash) {
+      } else if (wsCategory == kTimeStr) {
         if (eCategory == Category::kDate)
           return Category::kDateTime;
         eCategory = Category::kTime;
@@ -1031,8 +1027,7 @@ LocaleIface* CFGAS_StringFormatter::GetNumericFormat(
                  m_spPattern[ccf] != '{') {
             wsSubCategory += m_spPattern[ccf++];
           }
-          uint32_t dwSubHash =
-              FX_HashCode_GetW(wsSubCategory.AsStringView(), false);
+          uint32_t dwSubHash = FX_HashCode_GetW(wsSubCategory.AsStringView());
           LocaleIface::NumSubcategory eSubCategory =
               LocaleIface::NumSubcategory::kDecimal;
           for (const auto& data : kLocaleNumSubcategoryData) {
@@ -1561,13 +1556,10 @@ bool CFGAS_StringFormatter::ParseNum(LocaleMgrIface* pLocaleMgr,
   }
   if (iExponent || bHavePercentSymbol) {
     CFGAS_Decimal decimal = CFGAS_Decimal(wsValue->AsStringView());
-    if (iExponent) {
-      decimal = decimal *
-                CFGAS_Decimal(FXSYS_pow(10, static_cast<float>(iExponent)), 3);
-    }
+    if (iExponent)
+      decimal = decimal * CFGAS_Decimal(powf(10, iExponent), 3);
     if (bHavePercentSymbol)
       decimal = decimal / CFGAS_Decimal(100);
-
     *wsValue = decimal.ToWideString();
   }
   if (bNeg)
@@ -1641,8 +1633,7 @@ CFGAS_StringFormatter::DateTimeType CFGAS_StringFormatter::GetDateTimeFormat(
                  m_spPattern[ccf] != '{')
             wsSubCategory += m_spPattern[ccf++];
 
-          uint32_t dwSubHash =
-              FX_HashCode_GetW(wsSubCategory.AsStringView(), false);
+          uint32_t dwSubHash = FX_HashCode_GetW(wsSubCategory.AsStringView());
           LocaleIface::DateTimeSubcategory eSubCategory =
               LocaleIface::DateTimeSubcategory::kMedium;
           for (const auto& data : kLocaleDateTimeSubcategoryData) {

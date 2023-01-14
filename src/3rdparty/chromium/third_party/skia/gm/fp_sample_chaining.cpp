@@ -8,42 +8,17 @@
 #include "gm/gm.h"
 #include "include/core/SkFont.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "src/gpu/GrBitmapTextureMaker.h"
+#include "src/core/SkCanvasPriv.h"
 #include "src/gpu/GrDirectContextPriv.h"
+#include "src/gpu/GrPaint.h"
+#include "src/gpu/SkGr.h"
+#include "src/gpu/effects/GrMatrixEffect.h"
+#include "src/gpu/effects/GrTextureEffect.h"
 #include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/ops/GrFillRectOp.h"
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 #include "tools/ToolUtils.h"
 
-// Samples child with a constant (literal) matrix
-// Scales along X
-class ConstantMatrixEffect : public GrFragmentProcessor {
-public:
-    static constexpr GrProcessor::ClassID CLASS_ID = (GrProcessor::ClassID) 3;
-
-    ConstantMatrixEffect(std::unique_ptr<GrFragmentProcessor> child)
-            : GrFragmentProcessor(CLASS_ID, kNone_OptimizationFlags) {
-        this->registerChild(std::move(child),
-                            SkSL::SampleUsage::UniformMatrix(
-                                "float3x3(float3(0.5, 0.0, 0.0), "
-                                        "float3(0.0, 1.0, 0.0), "
-                                        "float3(0.0, 0.0, 1.0))"));
-    }
-
-    const char* name() const override { return "ConstantMatrixEffect"; }
-    void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
-    bool onIsEqual(const GrFragmentProcessor& that) const override { return this == &that; }
-    std::unique_ptr<GrFragmentProcessor> clone() const override { return nullptr; }
-
-    std::unique_ptr<GrGLSLFragmentProcessor> onMakeProgramImpl() const override {
-        class Impl : public GrGLSLFragmentProcessor {
-            void emitCode(EmitArgs& args) override {
-                SkString sample = this->invokeChildWithMatrix(0, args);
-                args.fFragBuilder->codeAppendf("return %s;\n", sample.c_str());
-            }
-        };
-        return std::make_unique<Impl>();
-    }
-};
+namespace {
 
 // Samples child with a uniform matrix (functionally identical to GrMatrixEffect)
 // Scales along Y
@@ -53,57 +28,34 @@ public:
 
     UniformMatrixEffect(std::unique_ptr<GrFragmentProcessor> child)
             : GrFragmentProcessor(CLASS_ID, kNone_OptimizationFlags) {
-        this->registerChild(std::move(child), SkSL::SampleUsage::UniformMatrix("matrix"));
+        this->registerChild(std::move(child),
+                            SkSL::SampleUsage::UniformMatrix(/*hasPerspective=*/false));
     }
 
     const char* name() const override { return "UniformMatrixEffect"; }
-    void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
+    void onAddToKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
     bool onIsEqual(const GrFragmentProcessor& that) const override { return this == &that; }
     std::unique_ptr<GrFragmentProcessor> clone() const override { return nullptr; }
 
-    std::unique_ptr<GrGLSLFragmentProcessor> onMakeProgramImpl() const override {
-        class Impl : public GrGLSLFragmentProcessor {
+    std::unique_ptr<ProgramImpl> onMakeProgramImpl() const override {
+        class Impl : public ProgramImpl {
+        public:
             void emitCode(EmitArgs& args) override {
-                fMatrixVar = args.fUniformHandler->addUniform(&args.fFp, kFragment_GrShaderFlag,
-                                                              kFloat3x3_GrSLType, "matrix");
+                fMatrixVar =
+                        args.fUniformHandler->addUniform(&args.fFp,
+                                                         kFragment_GrShaderFlag,
+                                                         kFloat3x3_GrSLType,
+                                                         SkSL::SampleUsage::MatrixUniformName());
                 SkString sample = this->invokeChildWithMatrix(0, args);
                 args.fFragBuilder->codeAppendf("return %s;\n", sample.c_str());
             }
+
+        private:
             void onSetData(const GrGLSLProgramDataManager& pdman,
                            const GrFragmentProcessor& proc) override {
                 pdman.setSkMatrix(fMatrixVar, SkMatrix::Scale(1, 0.5f));
             }
             UniformHandle fMatrixVar;
-        };
-        return std::make_unique<Impl>();
-    }
-};
-
-// Samples child with a variable matrix
-// Translates along X
-// Typically, kVariable would be due to multiple sample(matrix) invocations, but this artificially
-// uses kVariable with a single (constant) matrix.
-class VariableMatrixEffect : public GrFragmentProcessor {
-public:
-    static constexpr GrProcessor::ClassID CLASS_ID = (GrProcessor::ClassID) 5;
-
-    VariableMatrixEffect(std::unique_ptr<GrFragmentProcessor> child)
-            : GrFragmentProcessor(CLASS_ID, kNone_OptimizationFlags) {
-        this->registerChild(std::move(child), SkSL::SampleUsage::VariableMatrix());
-    }
-
-    const char* name() const override { return "VariableMatrixEffect"; }
-    void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
-    bool onIsEqual(const GrFragmentProcessor& that) const override { return this == &that; }
-    std::unique_ptr<GrFragmentProcessor> clone() const override { return nullptr; }
-
-    std::unique_ptr<GrGLSLFragmentProcessor> onMakeProgramImpl() const override {
-        class Impl : public GrGLSLFragmentProcessor {
-            void emitCode(EmitArgs& args) override {
-                SkString sample = this->invokeChildWithMatrix(
-                        0, args, "float3x3(1, 0, 0, 0, 1, 0, 8, 0, 1)");
-                args.fFragBuilder->codeAppendf("return %s;\n", sample.c_str());
-            }
         };
         return std::make_unique<Impl>();
     }
@@ -122,12 +74,13 @@ public:
     }
 
     const char* name() const override { return "ExplicitCoordEffect"; }
-    void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
+    void onAddToKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
     bool onIsEqual(const GrFragmentProcessor& that) const override { return this == &that; }
     std::unique_ptr<GrFragmentProcessor> clone() const override { return nullptr; }
 
-    std::unique_ptr<GrGLSLFragmentProcessor> onMakeProgramImpl() const override {
-        class Impl : public GrGLSLFragmentProcessor {
+    std::unique_ptr<ProgramImpl> onMakeProgramImpl() const override {
+        class Impl : public ProgramImpl {
+        public:
             void emitCode(EmitArgs& args) override {
                 args.fFragBuilder->codeAppendf("float2 coord = %s + float2(0, 8);",
                                                args.fSampleCoord);
@@ -135,6 +88,7 @@ public:
                 args.fFragBuilder->codeAppendf("return %s;\n", sample.c_str());
             }
         };
+
         return std::make_unique<Impl>();
     }
 };
@@ -149,12 +103,13 @@ public:
     }
 
     const char* name() const override { return "TestPatternEffect"; }
-    void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
+    void onAddToKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override {}
     bool onIsEqual(const GrFragmentProcessor& that) const override { return this == &that; }
     std::unique_ptr<GrFragmentProcessor> clone() const override { return nullptr; }
 
-    std::unique_ptr<GrGLSLFragmentProcessor> onMakeProgramImpl() const override {
-        class Impl : public GrGLSLFragmentProcessor {
+    std::unique_ptr<ProgramImpl> onMakeProgramImpl() const override {
+        class Impl : public ProgramImpl {
+        public:
             void emitCode(EmitArgs& args) override {
                 auto fb = args.fFragBuilder;
                 fb->codeAppendf("float2 coord = %s / 64.0;", args.fSampleCoord);
@@ -162,6 +117,7 @@ public:
                 fb->codeAppendf("return half2(coord).rg01;\n");
             }
         };
+
         return std::make_unique<Impl>();
     }
 };
@@ -190,31 +146,40 @@ SkBitmap make_test_bitmap() {
 }
 
 enum EffectType {
-    kConstant,
     kUniform,
-    kVariable,
     kExplicit,
+    kDevice,
 };
 
 static std::unique_ptr<GrFragmentProcessor> wrap(std::unique_ptr<GrFragmentProcessor> fp,
-                                                 EffectType effectType) {
+                                                 EffectType effectType,
+                                                 int drawX, int drawY) {
     switch (effectType) {
-        case kConstant:
-            return std::make_unique<ConstantMatrixEffect>(std::move(fp));
         case kUniform:
             return std::make_unique<UniformMatrixEffect>(std::move(fp));
-        case kVariable:
-            return std::make_unique<VariableMatrixEffect>(std::move(fp));
         case kExplicit:
             return std::make_unique<ExplicitCoordEffect>(std::move(fp));
+        case kDevice:
+            // Subtract out upper-left corner of draw so that device is effectively identity.
+            fp = GrMatrixEffect::Make(SkMatrix::Translate(-drawX, -drawY), std::move(fp));
+            return GrFragmentProcessor::DeviceSpace(std::move(fp));
     }
     SkUNREACHABLE;
 }
 
-DEF_SIMPLE_GPU_GM(fp_sample_chaining, ctx, rtCtx, canvas, 380, 306) {
+} // namespace
+
+namespace skiagm {
+
+DEF_SIMPLE_GPU_GM_CAN_FAIL(fp_sample_chaining, rContext, canvas, errorMsg, 232, 306) {
+    auto sdc = SkCanvasPriv::TopDeviceSurfaceDrawContext(canvas);
+    if (!sdc) {
+        *errorMsg = GM::kErrorMsg_DrawSkippedGpuOnly;
+        return DrawResult::kSkip;
+    }
+
     SkBitmap bmp = make_test_bitmap();
 
-    GrBitmapTextureMaker maker(ctx, bmp, GrImageTexGenPolicy::kDraw);
     int x = 10, y = 10;
 
     auto nextCol = [&] { x += (64 + 10); };
@@ -227,16 +192,16 @@ DEF_SIMPLE_GPU_GM(fp_sample_chaining, ctx, rtCtx, canvas, 380, 306) {
 #if 0
         auto fp = std::unique_ptr<GrFragmentProcessor>(new TestPatternEffect());
 #else
-        auto view = maker.view(GrMipmapped::kNo);
-        auto fp = GrTextureEffect::Make(std::move(view), maker.alphaType());
+        auto view = std::get<0>(GrMakeCachedBitmapProxyView(rContext, bmp, GrMipmapped::kNo));
+        auto fp = GrTextureEffect::Make(std::move(view), bmp.alphaType());
 #endif
         for (EffectType effectType : effects) {
-            fp = wrap(std::move(fp), effectType);
+            fp = wrap(std::move(fp), effectType, x, y);
         }
         GrPaint paint;
         paint.setColorFragmentProcessor(std::move(fp));
-        rtCtx->drawRect(nullptr, std::move(paint), GrAA::kNo, SkMatrix::Translate(x, y),
-                        SkRect::MakeIWH(64, 64));
+        sdc->drawRect(nullptr, std::move(paint), GrAA::kNo, SkMatrix::Translate(x, y),
+                      SkRect::MakeIWH(64, 64));
         nextCol();
     };
 
@@ -246,142 +211,27 @@ DEF_SIMPLE_GPU_GM(fp_sample_chaining, ctx, rtCtx, canvas, 380, 306) {
 
     // First row: no transform, then each one independently applied
     draw({});             // Identity (4 rows and columns)
-    draw({ kConstant });  // Scale X axis by 2x (2 visible columns)
     draw({ kUniform  });  // Scale Y axis by 2x (2 visible rows)
-    draw({ kVariable });  // Translate left by 8px
     draw({ kExplicit });  // Translate up by 8px
     nextRow();
 
     // Second row: transform duplicated
-    draw({ kConstant, kUniform  });  // Scale XY by 2x (2 rows and columns)
-    draw({ kConstant, kConstant });  // Scale X axis by 4x (1 visible column)
     draw({ kUniform,  kUniform  });  // Scale Y axis by 4x (1 visible row)
-    draw({ kVariable, kVariable });  // Translate left by 16px
     draw({ kExplicit, kExplicit });  // Translate up by 16px
     nextRow();
 
-    // Remember, these are applied inside out:
-    draw({ kConstant, kExplicit }); // Scale X by 2x and translate up by 8px
-    draw({ kConstant, kVariable }); // Scale X by 2x and translate left by 8px
-    draw({ kUniform,  kVariable }); // Scale Y by 2x and translate left by 8px
+    // Third row: Remember, these are applied inside out:
     draw({ kUniform,  kExplicit }); // Scale Y by 2x and translate up by 8px
-    draw({ kVariable, kExplicit }); // Translate left and up by 8px
+    draw({ kExplicit, kUniform });  // Scale Y by 2x and translate up by 16px
     nextRow();
 
-    draw({ kExplicit, kExplicit, kConstant }); // Scale X by 2x and translate up by 16px
-    draw({ kVariable, kConstant }); // Scale X by 2x and translate left by 16px
-    draw({ kVariable, kVariable, kUniform }); // Scale Y by 2x and translate left by 16px
-    draw({ kExplicit, kUniform }); // Scale Y by 2x and translate up by 16px
-    draw({ kExplicit, kUniform, kVariable, kConstant }); // Scale XY by 2x and translate xy 16px
+    // Fourth row: device space.
+    draw({ kDevice, kUniform });                     // Same as identity (uniform applied *before*
+                                                     // device so ignored).
+    draw({ kExplicit, kUniform, kDevice });          // Scale Y by 2x and translate up by 16px
+    draw({ kDevice, kExplicit, kUniform, kDevice }); // Identity, again.
+
+    return DrawResult::kOk;
 }
 
-const char* gConstantMatrixSkSL = R"(
-    uniform shader child;
-    half4 main(float2 xy) {
-        return sample(child, float3x3(0.5, 0.0, 0.0,
-                                      0.0, 1.0, 0.0,
-                                      0.0, 0.0, 1.0));
-    }
-)";
-
-const char* gUniformMatrixSkSL = R"(
-    uniform shader child;
-    uniform float3x3 matrix;
-    half4 main(float2 xy) {
-        return sample(child, matrix);
-    }
-)";
-
-// This form (uniform * constant) is currently detected as variable, thanks to our limited analysis
-// when scanning for sample matrices. With that pulled into a separate local, it's highly unlikely
-// we'll ever treat this as anything else.
-const char* gVariableMatrixSkSL = R"(
-    uniform shader child;
-    uniform float3x3 matrix;
-    half4 main(float2 xy) {
-        float3x3 varMatrix = matrix * 0.5;
-        return sample(child, varMatrix);
-    }
-)";
-
-const char* gExplicitCoordSkSL = R"(
-    uniform shader child;
-    half4 main(float2 xy) {
-        return sample(child, xy + float2(0, 8));
-    }
-)";
-
-// Version of fp_sample_chaining that uses SkRuntimeEffect
-DEF_SIMPLE_GM(sksl_sample_chaining, canvas, 380, 306) {
-    SkBitmap bmp = make_test_bitmap();
-
-    sk_sp<SkRuntimeEffect> effects[4] = {
-        SkRuntimeEffect::Make(SkString(gConstantMatrixSkSL)).effect,
-        SkRuntimeEffect::Make(SkString(gUniformMatrixSkSL)).effect,
-        SkRuntimeEffect::Make(SkString(gVariableMatrixSkSL)).effect,
-        SkRuntimeEffect::Make(SkString(gExplicitCoordSkSL)).effect,
-    };
-
-    canvas->translate(10, 10);
-    canvas->save();
-    auto nextCol = [&] { canvas->translate(64 + 10, 0); };
-    auto nextRow = [&] { canvas->restore(); canvas->translate(0, 64 + 10); canvas->save(); };
-
-    auto draw = [&](std::initializer_list<EffectType> effectTypes) {
-        auto shader = bmp.makeShader(SkSamplingOptions());
-
-        for (EffectType effectType : effectTypes) {
-            SkRuntimeShaderBuilder builder(effects[effectType]);
-            builder.child("child") = shader;
-            switch (effectType) {
-                case kUniform:
-                    builder.uniform("matrix") = SkMatrix::Scale(1.0f, 0.5f);
-                    break;
-                case kVariable:
-                    builder.uniform("matrix") = SkMatrix::Translate(8, 0);
-                    break;
-                default:
-                    break;
-            }
-            shader = builder.makeShader(nullptr, true);
-        }
-        SkPaint paint;
-        paint.setShader(shader);
-        canvas->drawRect(SkRect::MakeWH(64, 64), paint);
-        nextCol();
-    };
-
-    // Reminder, in every case, the chain is more complicated than it seems, because the
-    // GrTextureEffect is wrapped in a GrMatrixEffect, which is subject to the same bugs that
-    // we're testing (particularly the bug about owner/base in UniformMatrixEffect).
-
-    // First row: no transform, then each one independently applied
-    draw({});             // Identity (4 rows and columns)
-    draw({ kConstant });  // Scale X axis by 2x (2 visible columns)
-    draw({ kUniform  });  // Scale Y axis by 2x (2 visible rows)
-    draw({ kVariable });  // Translate left by 8px
-    draw({ kExplicit });  // Translate up by 8px
-    nextRow();
-
-    // Second row: transform duplicated
-    draw({ kConstant, kUniform  });  // Scale XY by 2x (2 rows and columns)
-    draw({ kConstant, kConstant });  // Scale X axis by 4x (1 visible column)
-    draw({ kUniform,  kUniform  });  // Scale Y axis by 4x (1 visible row)
-    draw({ kVariable, kVariable });  // Translate left by 16px
-    draw({ kExplicit, kExplicit });  // Translate up by 16px
-    nextRow();
-
-    // Remember, these are applied inside out:
-    draw({ kConstant, kExplicit }); // Scale X by 2x and translate up by 8px
-    draw({ kConstant, kVariable }); // Scale X by 2x and translate left by 8px
-    draw({ kUniform,  kVariable }); // Scale Y by 2x and translate left by 8px
-    draw({ kUniform,  kExplicit }); // Scale Y by 2x and translate up by 8px
-    draw({ kVariable, kExplicit }); // Translate left and up by 8px
-    nextRow();
-
-    draw({ kExplicit, kExplicit, kConstant }); // Scale X by 2x and translate up by 16px
-    draw({ kVariable, kConstant }); // Scale X by 2x and translate left by 16px
-    draw({ kVariable, kVariable, kUniform }); // Scale Y by 2x and translate left by 16px
-    draw({ kExplicit, kUniform }); // Scale Y by 2x and translate up by 16px
-    draw({ kExplicit, kUniform, kVariable, kConstant }); // Scale XY by 2x and translate xy 16px
-}
+} // namespace skiagm

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -45,7 +46,7 @@ class FakePaintPreviewCompositorClient : public PaintPreviewCompositorClient {
   FakePaintPreviewCompositorClient& operator=(
       const FakePaintPreviewCompositorClient&) = delete;
 
-  const base::Optional<base::UnguessableToken>& Token() const override {
+  const absl::optional<base::UnguessableToken>& Token() const override {
     return token_;
   }
 
@@ -122,7 +123,7 @@ class FakePaintPreviewCompositorClient : public PaintPreviewCompositorClient {
 
  private:
   mojom::PaintPreviewCompositor::BeginCompositeStatus response_status_;
-  base::Optional<base::UnguessableToken> token_;
+  absl::optional<base::UnguessableToken> token_;
   base::OnceClosure disconnect_handler_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
@@ -641,7 +642,7 @@ TEST_F(PlayerCompositorDelegateTest, CompressOnClose) {
                      false),
       base::BindOnce(
           [](base::FilePath* out,
-             const base::Optional<base::FilePath>& file_path) {
+             const absl::optional<base::FilePath>& file_path) {
             *out = file_path.value();
           },
           base::Unretained(&dir)));
@@ -844,7 +845,7 @@ TEST_F(PlayerCompositorDelegateTest, RequestMainFrameBitmapSuccess) {
 
     base::RunLoop loop;
     player_compositor_delegate.RequestBitmap(
-        base::nullopt, gfx::Rect(10, 20, 30, 40), 1.0,
+        absl::nullopt, gfx::Rect(10, 20, 30, 40), 1.0,
         base::BindOnce(
             [](base::OnceClosure quit,
                mojom::PaintPreviewCompositor::BitmapStatus status,

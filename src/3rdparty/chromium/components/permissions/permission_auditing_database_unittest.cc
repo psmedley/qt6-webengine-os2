@@ -8,10 +8,10 @@
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "sql/test/scoped_error_expecter.h"
@@ -80,7 +80,7 @@ class PermissionAuditingDatabaseTest : public testing::Test {
     return db_.GetPermissionUsageHistory(type, GetOrigin(url), starting_from);
   }
 
-  base::Optional<base::Time> GetLastUsageTime(ContentSettingsType type,
+  absl::optional<base::Time> GetLastUsageTime(ContentSettingsType type,
                                               const char* url) {
     return db_.GetLastPermissionUsageTime(type, GetOrigin(url));
   }

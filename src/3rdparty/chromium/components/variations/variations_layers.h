@@ -7,15 +7,16 @@
 
 #include <map>
 
+#include "base/component_export.h"
 #include "base/metrics/field_trial.h"
-#include "base/optional.h"
 #include "components/variations/proto/variations_seed.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace variations {
 
 // Parses out the Variations Layers data from the provided seed and
 // chooses which member within each layer should be the active one.
-class VariationsLayers {
+class COMPONENT_EXPORT(VARIATIONS) VariationsLayers {
  public:
   VariationsLayers(
       const VariationsSeed& seed,
@@ -40,13 +41,13 @@ class VariationsLayers {
       const Layer& layer_proto);
 
   struct LayerInfo {
-    LayerInfo(base::Optional<uint32_t> active_member_id,
+    LayerInfo(absl::optional<uint32_t> active_member_id,
               Layer::EntropyMode entropy_mode);
     ~LayerInfo();
     LayerInfo(const LayerInfo& other);  // = delete;
     LayerInfo& operator=(const LayerInfo&) = delete;
 
-    base::Optional<uint32_t> active_member_id;
+    absl::optional<uint32_t> active_member_id;
     Layer::EntropyMode entropy_mode;
   };
   std::map<uint32_t, LayerInfo> active_member_for_layer_;

@@ -38,6 +38,7 @@ const char kPrinterSettings[] = R"({
   "deviceName": "printer",
   "scaleFactor": 100,
   "rasterizePDF": false,
+  "rasterizePdfDpi": 150,
   "pagesPerSheet": 1,
   "dpiHorizontal": 300,
   "dpiVertical": 300,
@@ -50,18 +51,18 @@ const char kPrinterSettings[] = R"({
 }  // namespace
 
 TEST(PrintSettingsConversionTest, ConversionTest_InvalidSettings) {
-  base::Optional<base::Value> value = base::JSONReader::Read("{}");
+  absl::optional<base::Value> value = base::JSONReader::Read("{}");
   ASSERT_TRUE(value.has_value());
   EXPECT_FALSE(PrintSettingsFromJobSettings(value.value()));
 }
 
 TEST(PrintSettingsConversionTest, ConversionTest) {
-  base::Optional<base::Value> value = base::JSONReader::Read(kPrinterSettings);
+  absl::optional<base::Value> value = base::JSONReader::Read(kPrinterSettings);
   ASSERT_TRUE(value.has_value());
   std::unique_ptr<PrintSettings> settings =
       PrintSettingsFromJobSettings(value.value());
   ASSERT_TRUE(settings);
-#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
+#if defined(OS_CHROMEOS) || defined(OS_OS2)
   EXPECT_TRUE(settings->send_user_info());
   EXPECT_EQ("username@domain.net", settings->username());
   EXPECT_EQ("0000", settings->pin_value());
@@ -71,6 +72,7 @@ TEST(PrintSettingsConversionTest, ConversionTest) {
   value->SetIntKey("dpiVertical", 600);
   settings = PrintSettingsFromJobSettings(value.value());
   ASSERT_TRUE(settings);
+  EXPECT_EQ(settings->rasterize_pdf_dpi(), 150);
   EXPECT_EQ(settings->dpi_horizontal(), 300);
   EXPECT_EQ(settings->dpi_vertical(), 600);
   EXPECT_TRUE(value->RemoveKey("dpiVertical"));
@@ -78,9 +80,9 @@ TEST(PrintSettingsConversionTest, ConversionTest) {
   EXPECT_FALSE(settings);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
+#if defined(OS_CHROMEOS) || defined(OS_OS2)
 TEST(PrintSettingsConversionTest, ConversionTest_DontSendUsername) {
-  base::Optional<base::Value> value = base::JSONReader::Read(kPrinterSettings);
+  absl::optional<base::Value> value = base::JSONReader::Read(kPrinterSettings);
   ASSERT_TRUE(value.has_value());
   value->SetKey(kSettingSendUserInfo, base::Value(false));
   std::unique_ptr<PrintSettings> settings =

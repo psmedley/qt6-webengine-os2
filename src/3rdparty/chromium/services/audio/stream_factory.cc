@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
 #include "build/chromecast_buildflags.h"
@@ -29,7 +28,8 @@ StreamFactory::~StreamFactory() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
 }
 
-void StreamFactory::Bind(mojo::PendingReceiver<mojom::StreamFactory> receiver) {
+void StreamFactory::Bind(
+    mojo::PendingReceiver<media::mojom::AudioStreamFactory> receiver) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   receivers_.Add(this, std::move(receiver));
 }
@@ -58,8 +58,9 @@ void StreamFactory::CreateInputStream(
       std::move(created_callback), std::move(deleter_callback),
       std::move(stream_receiver), std::move(client), std::move(observer),
       std::move(pending_log), audio_manager_,
-      UserInputMonitor::Create(std::move(key_press_count_buffer)), device_id,
-      params, shared_memory_count, enable_agc));
+      UserInputMonitor::Create(std::move(key_press_count_buffer)),
+      &stream_count_metric_reporter_, device_id, params, shared_memory_count,
+      enable_agc));
 }
 
 void StreamFactory::AssociateInputAndOutputForAec(
@@ -108,11 +109,12 @@ void StreamFactory::CreateOutputStream(
   output_streams_.insert(std::make_unique<OutputStream>(
       std::move(created_callback), std::move(deleter_callback),
       std::move(stream_receiver), std::move(observer), std::move(log),
-      audio_manager_, device_id_or_group_id, params, &coordinator_, group_id));
+      audio_manager_, &stream_count_metric_reporter_, device_id_or_group_id,
+      params, &coordinator_, group_id));
 }
 
 void StreamFactory::BindMuter(
-    mojo::PendingAssociatedReceiver<mojom::LocalMuter> receiver,
+    mojo::PendingAssociatedReceiver<media::mojom::LocalMuter> receiver,
     const base::UnguessableToken& group_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   TRACE_EVENT_NESTABLE_ASYNC_INSTANT1("audio", "BindMuter", this, "group id",
@@ -166,7 +168,7 @@ void StreamFactory::CreateLoopbackStream(
     base::Thread::Options options;
     options.timer_slack = base::TIMER_SLACK_NONE;
     options.priority = base::ThreadPriority::REALTIME_AUDIO;
-    if (loopback_worker_thread_.StartWithOptions(options)) {
+    if (loopback_worker_thread_.StartWithOptions(std::move(options))) {
       task_runner = loopback_worker_thread_.task_runner();
       TRACE_EVENT_END1("audio", "Start Loopback Worker", "success", true);
     } else {

@@ -9,8 +9,8 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -41,8 +41,8 @@ class AsyncDocumentSubresourceFilterTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(test_ruleset_creator_.CreateRulesetWithRules(
         rules, &test_ruleset_pair_));
 
-    dealer_handle_.reset(
-        new VerifiedRulesetDealer::Handle(blocking_task_runner_));
+    dealer_handle_ =
+        std::make_unique<VerifiedRulesetDealer::Handle>(blocking_task_runner_);
   }
 
   void TearDown() override {

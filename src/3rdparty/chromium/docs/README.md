@@ -4,7 +4,7 @@ This directory contains chromium project documentation in
 [Gitiles-flavored Markdown].  It is automatically [rendered by Gitiles].
 
 [Gitiles-flavored Markdown]: https://gerrit.googlesource.com/gitiles/+/master/Documentation/markdown.md
-[rendered by Gitiles]: https://chromium.googlesource.com/chromium/src/+/master/docs/
+[rendered by Gitiles]: https://chromium.googlesource.com/chromium/src/+/main/docs/
 
 If you add new documents, please also add a link to them in the Document Index
 below.
@@ -134,7 +134,6 @@ used when committed.
     Visualizing view trees during debugging
 *   [Bitmap Pipeline](bitmap_pipeline.md) - How bitmaps are moved from the
     renderer to the screen.
-*   [base::Optional](optional.md) - How to use `base::Optional` in C++ code.
 *   [Using the Origin Trials Framework](origin_trials_integration.md) - A
     framework for conditionally enabling experimental APIs for testing.
 *   [`ClientTagBasedModelTypeProcessor` in Unified Sync and Storage](sync/uss/client_tag_based_model_type_processor.md) -
@@ -157,10 +156,13 @@ used when committed.
     you are interested in.
 *   [Shutdown](shutdown.md) - Explains the steps of Chrome shutdown, to make it
     easier to determine where to add a new shutdown operation.
+*   [API Keys](api_keys.md) - When you need access to Google APIs for a custom
+    build, fork, integration of stock Chromium, or are building ChromiumOS (for
+    login).
 
 ### Testing
 *   [Running and Debugging Web Tests](testing/web_tests.md)
-*   [On disabling tests](testing/disabling_tests.md)
+*   [On disabling tests](testing/on_disabling_tests.md)
 *   [Writing Web Tests](testing/writing_web_tests.md) - Web Tests using
     `content_shell`
 *   [Web Test Expectations and Baselines](testing/web_test_expectations.md) -
@@ -242,6 +244,8 @@ used when committed.
     hardware video decode codepaths on Linux
 
 ### Misc MacOS-Specific Docs
+*   [Mac Debugging Tips](mac/debugging.md) - An introduction to debugging on
+    Mac, as well as a collection of useful tips.
 *   [Using CCache on Mac](ccache_mac.md) - Speed up builds on Mac using ccache
     with clang/ninja
 *   [Cocoa tips and tricks](cocoa_tips_and_tricks.md) - A collection of idioms
@@ -274,8 +278,6 @@ used when committed.
     how to debug Java and/or C/C++ code running on Android.
 *   [Android Logging](android_logging.md) - How Chrome's logging API works with
     `android.util.Log` on Android, and usage guidelines.
-*   [Chromoting Android Hacking](chromoting_android_hacking.md) - Viewing the
-    logs and debugging the Chrome Remote Desktop Android client.
 *   [Android Java Static Analysis](../build/android/docs/lint.md) - Catching
     Java related issues at compile time with the 'lint' tool.
 *   [Java Code Coverage](../build/android/docs/coverage.md) - Collecting code
@@ -396,6 +398,8 @@ used when committed.
     patterns for practical IPC conversion work
 *   [Mojo “Style” Guide](security/mojo.md) - Recommendations for best practices
     from Mojo and IPC reviewers
+*   [D-Bus Mojo Connection Service](dbus_mojo_connection_service.md) - A service
+    in Chrome to bootstrap CrOS services' Mojo connection.
 
 ### Speed
 *   [Chrome Speed](speed/README.md) - Documentation for performance measurements and regressions in Chrome.
@@ -415,6 +419,5 @@ used when committed.
 *   [Linux PID Namespace Support](linux/pid_namespace_support.md)
 *   [Vanilla msysgit workflow](vanilla_msysgit_workflow.md) - A workflow for
     using mostly vanilla git on Windows.
-*   [Old Chromoting Build Instructions](old_chromoting_build_instructions.md)
 *   [Old Options](chrome_settings.md) - Pre-Material Design chrome://settings
     notes.

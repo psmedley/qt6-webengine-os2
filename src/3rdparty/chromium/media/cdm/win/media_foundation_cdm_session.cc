@@ -30,8 +30,6 @@ MF_MEDIAKEYSESSION_TYPE ToMFSessionType(CdmSessionType session_type) {
       return MF_MEDIAKEYSESSION_TYPE_TEMPORARY;
     case CdmSessionType::kPersistentLicense:
       return MF_MEDIAKEYSESSION_TYPE_PERSISTENT_LICENSE;
-    case CdmSessionType::kPersistentUsageRecord:
-      return MF_MEDIAKEYSESSION_TYPE_PERSISTENT_USAGE_RECORD;
   }
 }
 
@@ -97,14 +95,14 @@ CdmKeysInfo ToCdmKeysInfo(const MFMediaKeyStatus* key_statuses, int count) {
   return keys_info;
 }
 
-class SessionCallbacks
+class SessionCallbacks final
     : public RuntimeClass<RuntimeClassFlags<ClassicCom>,
                           IMFContentDecryptionModuleSessionCallbacks> {
  public:
   SessionCallbacks() { DVLOG_FUNC(1); }
   SessionCallbacks(const SessionCallbacks&) = delete;
   SessionCallbacks& operator=(const SessionCallbacks&) = delete;
-  ~SessionCallbacks() final { DVLOG_FUNC(1); }
+  ~SessionCallbacks() override { DVLOG_FUNC(1); }
 
   using MessageCB =
       base::RepeatingCallback<void(CdmMessageType message_type,

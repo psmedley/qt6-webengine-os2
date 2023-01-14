@@ -61,7 +61,7 @@ ScriptPromise FontManager::query(ScriptState* script_state,
 
 void FontManager::Trace(blink::Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 void FontManager::DidShowFontChooser(
@@ -73,8 +73,14 @@ void FontManager::DidShowFontChooser(
 
   auto entries = HeapVector<Member<FontMetadata>>();
   for (const auto& font : fonts) {
-    auto entry = FontEnumerationEntry{font->postscript_name, font->full_name,
-                                      font->family};
+    FontEnumerationEntry entry;
+    entry.postscript_name = font->postscript_name;
+    entry.full_name = font->full_name;
+    entry.family = font->family;
+    entry.style = font->style;
+    entry.italic = font->italic;
+    entry.stretch = font->stretch;
+    entry.weight = font->weight;
     entries.push_back(FontMetadata::Create(std::move(entry)));
   }
   resolver->Resolve(std::move(entries));
@@ -115,11 +121,15 @@ void FontManager::DidGetEnumerationResponse(
             selection_utf8.end())
       continue;
 
-    auto entry = FontEnumerationEntry{
-        String::FromUTF8(element.postscript_name().c_str()),
-        String::FromUTF8(element.full_name().c_str()),
-        String::FromUTF8(element.family().c_str()),
-        String::FromUTF8(element.style().c_str())};
+    FontEnumerationEntry entry;
+        entry.postscript_name = String::FromUTF8(element.postscript_name().c_str());
+        entry.full_name = String::FromUTF8(element.full_name().c_str());
+        entry.family = String::FromUTF8(element.family().c_str());
+        entry.style = String::FromUTF8(element.style().c_str());
+        entry.italic = element.italic();
+        entry.stretch = element.stretch();
+        entry.weight = element.weight();
+
     entries.push_back(FontMetadata::Create(std::move(entry)));
   }
 

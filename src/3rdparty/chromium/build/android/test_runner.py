@@ -6,6 +6,7 @@
 
 """Runs all types of tests from one unified interface."""
 
+from __future__ import absolute_import
 import argparse
 import collections
 import contextlib
@@ -41,7 +42,6 @@ from pylib.base import base_test_result
 from pylib.base import environment_factory
 from pylib.base import output_manager
 from pylib.base import output_manager_factory
-from pylib.base import result_sink
 from pylib.base import test_instance_factory
 from pylib.base import test_run_factory
 from pylib.results import json_results
@@ -53,6 +53,8 @@ from pylib.utils import logging_utils
 from pylib.utils import test_filter
 
 from py_utils import contextlib_ext
+
+from lib.results import result_sink  # pylint: disable=import-error
 
 _DEVIL_STATIC_CONFIG_FILE = os.path.abspath(os.path.join(
     host_paths.DIR_SOURCE_ROOT, 'build', 'android', 'devil_config.json'))
@@ -411,6 +413,12 @@ def AddGTestOptions(parser):
       '--coverage-dir',
       type=os.path.realpath,
       help='Directory in which to place all generated coverage files.')
+  parser.add_argument(
+      '--use-existing-test-data',
+      action='store_true',
+      help='Do not push new files to the device, instead using existing APK '
+      'and test data. Only use when running the same test for multiple '
+      'iterations.')
 
 
 def AddInstrumentationTestOptions(parser):
@@ -554,6 +562,13 @@ def AddInstrumentationTestOptions(parser):
       '--test-jar',
       help='Path of jar containing test java files.')
   parser.add_argument(
+      '--test-launcher-batch-limit',
+      dest='test_launcher_batch_limit',
+      type=int,
+      help=('Not actually used for instrumentation tests, but can be used as '
+            'a proxy for determining if the current run is a retry without '
+            'patch.'))
+  parser.add_argument(
       '--timeout-scale',
       type=float,
       help='Factor by which timeouts should be scaled.')
@@ -586,6 +601,10 @@ def AddSkiaGoldTestOptions(parser):
   parser.add_argument(
       '--code-review-system',
       help='A non-default code review system to pass to pass to Gold, if '
+      'applicable')
+  parser.add_argument(
+      '--continuous-integration-system',
+      help='A non-default continuous integration system to pass to Gold, if '
       'applicable')
   parser.add_argument(
       '--git-revision', help='The git commit currently being tested.')
@@ -700,10 +719,11 @@ def AddMonkeyTestOptions(parser):
 
   parser = parser.add_argument_group('monkey arguments')
 
-  parser.add_argument(
-      '--browser',
-      required=True, choices=constants.PACKAGE_INFO.keys(),
-      metavar='BROWSER', help='Browser under test.')
+  parser.add_argument('--browser',
+                      required=True,
+                      choices=list(constants.PACKAGE_INFO.keys()),
+                      metavar='BROWSER',
+                      help='Browser under test.')
   parser.add_argument(
       '--category',
       nargs='*', dest='categories', default=[],
@@ -728,11 +748,12 @@ def AddPythonTestOptions(parser):
 
   parser = parser.add_argument_group('python arguments')
 
-  parser.add_argument(
-      '-s', '--suite',
-      dest='suite_name', metavar='SUITE_NAME',
-      choices=constants.PYTHON_UNIT_TEST_SUITES.keys(),
-      help='Name of the test suite to run.')
+  parser.add_argument('-s',
+                      '--suite',
+                      dest='suite_name',
+                      metavar='SUITE_NAME',
+                      choices=list(constants.PYTHON_UNIT_TEST_SUITES.keys()),
+                      help='Name of the test suite to run.')
 
 
 def _CreateClassToFileNameDict(test_apk):
@@ -904,6 +925,30 @@ def RunTestsInPlatformMode(args, result_sink_client=None):
             global_tags=list(global_results_tags),
             indent=2)
 
+      test_class_to_file_name_dict = {}
+      # Test Location is only supported for instrumentation tests as it
+      # requires the size-info file.
+      if test_instance.TestType() == 'instrumentation':
+        test_class_to_file_name_dict = _CreateClassToFileNameDict(args.test_apk)
+
+      if result_sink_client:
+        for run in all_raw_results:
+          for results in run:
+            for r in results.GetAll():
+              # Matches chrome.page_info.PageInfoViewTest#testChromePage
+              match = re.search(r'^(.+\..+)#', r.GetName())
+              test_file_name = test_class_to_file_name_dict.get(
+                  match.group(1)) if match else None
+              # Some tests put in non utf-8 char as part of the test
+              # which breaks uploads, so need to decode and re-encode.
+              result_sink_client.Post(r.GetName(),
+                                      r.GetType(),
+                                      r.GetDuration(),
+                                      r.GetLog().decode(
+                                          'utf-8', 'replace').encode('utf-8'),
+                                      test_file_name,
+                                      failure_reason=r.GetFailureReason())
+
   @contextlib.contextmanager
   def upload_logcats_file():
     try:
@@ -942,8 +987,8 @@ def RunTestsInPlatformMode(args, result_sink_client=None):
   with out_manager, json_finalizer():
     with json_writer(), logcats_uploader, env, test_instance, test_run:
 
-      repetitions = (xrange(args.repeat + 1) if args.repeat >= 0
-                     else itertools.count())
+      repetitions = (range(args.repeat +
+                           1) if args.repeat >= 0 else itertools.count())
       result_counts = collections.defaultdict(
           lambda: collections.defaultdict(int))
       iteration_count = 0
@@ -964,29 +1009,11 @@ def RunTestsInPlatformMode(args, result_sink_client=None):
         for r in reversed(raw_results):
           iteration_results.AddTestRunResults(r)
         all_iteration_results.append(iteration_results)
-
-        test_class_to_file_name_dict = {}
-        # Test Location is only supported for instrumentation tests as it
-        # requires the size-info file.
-        if test_instance.TestType() == 'instrumentation':
-          test_class_to_file_name_dict = _CreateClassToFileNameDict(
-              args.test_apk)
-
         iteration_count += 1
-        for r in iteration_results.GetAll():
-          if result_sink_client:
-            # Matches chrome.page_info.PageInfoViewTest#testChromePage
-            match = re.search(r'^(.+\..+)#', r.GetName())
-            test_file_name = test_class_to_file_name_dict.get(
-                match.group(1)) if match else None
-            # Some tests put in non utf-8 char as part of the test
-            # which breaks uploads, so need to decode and re-encode.
-            result_sink_client.Post(
-                r.GetName(), r.GetType(),
-                r.GetLog().decode('utf-8', 'replace').encode('utf-8'),
-                test_file_name)
 
+        for r in iteration_results.GetAll():
           result_counts[r.GetName()][r.GetType()] += 1
+
         report_results.LogFull(
             results=iteration_results,
             test_type=test_instance.TestType(),

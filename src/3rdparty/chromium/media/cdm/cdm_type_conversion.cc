@@ -107,8 +107,6 @@ cdm::SessionType ToCdmSessionType(CdmSessionType session_type) {
       return cdm::kTemporary;
     case CdmSessionType::kPersistentLicense:
       return cdm::kPersistentLicense;
-    case CdmSessionType::kPersistentUsageRecord:
-      return cdm::kPersistentUsageRecord;
   }
 
   NOTREACHED() << "Unexpected session type " << static_cast<int>(session_type);
@@ -121,8 +119,10 @@ CdmSessionType ToMediaSessionType(cdm::SessionType session_type) {
       return CdmSessionType::kTemporary;
     case cdm::kPersistentLicense:
       return CdmSessionType::kPersistentLicense;
+    // TODO(crbug.com/1181029): Remove after `kPersistentUsageRecord` is removed
+    // from the CDM interface.
     case cdm::kPersistentUsageRecord:
-      return CdmSessionType::kPersistentUsageRecord;
+      break;
   }
 
   NOTREACHED() << "Unexpected cdm::SessionType " << session_type;
@@ -588,7 +588,7 @@ void ToCdmInputBuffer(const DecoderBuffer& encrypted_buffer,
 
   const DecryptConfig* decrypt_config = encrypted_buffer.decrypt_config();
   if (!decrypt_config) {
-    DVLOG(2) << __func__ << ": Clear buffer.";
+    DVLOG(3) << __func__ << ": Clear buffer.";
     return;
   }
 

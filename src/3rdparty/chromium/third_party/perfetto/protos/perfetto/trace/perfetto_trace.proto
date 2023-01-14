@@ -197,6 +197,12 @@ message TracingServiceState {
 
     // Unix uid of the remote process.
     optional int32 uid = 3;
+
+    // The version of the client library used by the producer.
+    // This is a human readable string with and its format varies depending on
+    // the build system and the repo (standalone vs AOSP).
+    // This is intended for human debugging only.
+    optional string sdk_version = 4;
   }
 
   // Describes a data source registered by a producer. Data sources are listed
@@ -220,6 +226,12 @@ message TracingServiceState {
 
   // Number of tracing sessions in the started state. Always <= num_sessions.
   optional int32 num_sessions_started = 4;
+
+  // The version of traced (the same returned by `traced --version`).
+  // This is a human readable string with and its format varies depending on
+  // the build system and the repo (standalone vs AOSP).
+  // This is intended for human debugging only.
+  optional string tracing_service_version = 5;
 }
 
 // End of protos/perfetto/common/tracing_service_state.proto
@@ -497,6 +509,10 @@ message AndroidPowerConfig {
 
   // Where available enables per-power-rail measurements.
   optional bool collect_power_rails = 3;
+
+  // Provides a breakdown of energy estimation for various subsystem (e.g. GPU).
+  // Available from Android S.
+  optional bool collect_energy_estimation_breakdown = 4;
 }
 
 // End of protos/perfetto/config/power/android_power_config.proto
@@ -555,7 +571,7 @@ message ProcessStatsConfig {
 // Begin of protos/perfetto/config/profiling/heapprofd_config.proto
 
 // Configuration for go/heapprofd.
-// Next id: 26
+// Next id: 27
 message HeapprofdConfig {
   message ContinuousDumpConfig {
     // ms to wait before first dump.
@@ -603,11 +619,25 @@ message HeapprofdConfig {
   // For watermark based triggering or local debugging.
   repeated uint64 pid = 4;
 
+  // Only profile target if it was installed by one of the packages given.
+  // Special values are:
+  // * @system: installed on the system partition
+  // * @product: installed on the product partition
+  // * @null: sideloaded
+  // Supported on Android 12+.
+  repeated string target_installed_by = 26;
+
   // Which heaps to sample, e.g. "libc.malloc". If left empty, only samples
   // "malloc".
   //
   // Introduced in Android 12.
   repeated string heaps = 20;
+
+  // Which heaps not to sample, e.g. "libc.malloc". This is useful when used in
+  // combination with all_heaps;
+  //
+  // Introduced in Android 12.
+  repeated string exclude_heaps = 27;
 
   optional bool stream_allocations = 23;
 
@@ -743,6 +773,14 @@ message JavaHprofConfig {
   // For watermark based triggering or local debugging.
   repeated uint64 pid = 2;
 
+  // Only profile target if it was installed by one of the packages given.
+  // Special values are:
+  // * @system: installed on the system partition
+  // * @product: installed on the product partition
+  // * @null: sideloaded
+  // Supported on Android 12+.
+  repeated string target_installed_by = 7;
+
   // Dump at a predefined interval.
   optional ContinuousDumpConfig continuous_dump_config = 3;
 
@@ -764,6 +802,83 @@ message JavaHprofConfig {
 
 // End of protos/perfetto/config/profiling/java_hprof_config.proto
 
+// Begin of protos/perfetto/common/perf_events.proto
+
+message PerfEvents {
+  // What event to sample on, and how often. Commented from the perspective of
+  // its use in |PerfEventConfig|.
+  message Timebase {
+    // How often the per-cpu sampling will occur. Not guaranteed to be honored
+    // as the kernel can throttle the sampling rate if it's too high.
+    // If unset, an implementation-defined default is used.
+    oneof interval {
+      // Per-cpu sampling frequency in Hz, as requested from the kernel. Not the
+      // same as 1/period.
+      // Details: the actual sampling will still be based on a period, but the
+      // kernel will dynamically adjust it based on the observed event rate, to
+      // approximate this frequency. Works best with steady-rate events like
+      // timers.
+      uint64 frequency = 2;
+
+      // Per-cpu sampling will occur every |period| counts of |event|.
+      // Prefer |frequency| by default, as it's easier to oversample with a
+      // fixed period.
+      uint64 period = 1;
+    }
+
+    // Counting event to use as a timebase for the sampling.
+    // If unset, implies the CPU timer (SW_CPU_CLOCK) as the event,
+    // which is what you usually want.
+    // See common/perf_events.proto for the definitions.
+    oneof event {
+      Counter counter = 4;
+      Tracepoint tracepoint = 3;
+      RawEvent raw_event = 5;
+    }
+
+    // Optional arbitrary name for the event, to identify it in the parsed
+    // trace. Does *not* affect the profiling itself. If unset, the trace
+    // parser will choose a suitable name.
+    optional string name = 10;
+  }
+
+  enum Counter {
+    UNKNOWN_COUNTER = 0;
+    // software:
+    SW_CPU_CLOCK = 1;
+    SW_PAGE_FAULTS = 2;
+    // hardware:
+    HW_CPU_CYCLES = 10;
+    HW_INSTRUCTIONS = 11;
+  }
+
+  message Tracepoint {
+    // Group and name for the tracepoint, acceptable forms:
+    // * "sched/sched_switch"
+    // * "sched:sched_switch"
+    optional string name = 1;
+
+    // Optional field-level filter for the tracepoint. Only events matching this
+    // filter will be counted (and therefore contribute to the sampling period).
+    // Example: "prev_pid >= 42 && next_pid == 0".
+    // For full syntax, see kernel documentation on "Event filtering":
+    // https://www.kernel.org/doc/Documentation/trace/events.txt
+    optional string filter = 2;
+  }
+
+  // Syscall-level description of the event, propagated to the perf_event_attr
+  // struct. Primarily for local use-cases, since the event availability and
+  // encoding is hardware-specific.
+  message RawEvent {
+    optional uint32 type = 1;
+    optional uint64 config = 2;
+    optional uint64 config1 = 3;
+    optional uint64 config2 = 4;
+  }
+}
+
+// End of protos/perfetto/common/perf_events.proto
+
 // Begin of protos/perfetto/config/profiling/perf_event_config.proto
 
 // Configuration for the traced_perf profiler.
@@ -782,10 +897,11 @@ message JavaHprofConfig {
 //     }
 //   }
 //
-// Next id: 17
+// Next id: 19
 message PerfEventConfig {
   // What event to sample on, and how often.
-  optional Timebase timebase = 15;
+  // Defined in common/perf_events.proto.
+  optional PerfEvents.Timebase timebase = 15;
 
   // If set, the profiler will sample userspace processes' callstacks at the
   // interval specified by the |timebase|.
@@ -808,6 +924,12 @@ message PerfEventConfig {
   //
   // Daemon's resource usage limits:
   //
+
+  // Drop samples if the heap memory held by the samples in the unwinder queue
+  // is above the given limit. This counts the memory across all concurrent data
+  // sources (not just this one's), and there is no fairness guarantee - the
+  // whole quota might be used up by a concurrent source.
+  optional uint64 max_enqueued_footprint_kb = 17;
 
   // Stop the data source if traced_perf's combined {RssAnon + Swap} memory
   // footprint exceeds this value.
@@ -833,14 +955,22 @@ message PerfEventConfig {
   // If unset, the cached state will not be cleared.
   optional uint32 unwind_state_clear_period_ms = 10;
 
+  // If set, only profile target if it was installed by a package with one of
+  // these names. Special values:
+  // * "@system": installed on the system partition
+  // * "@product": installed on the product partition
+  // * "@null": sideloaded
+  // Supported on Android 12+.
+  repeated string target_installed_by = 18;
+
   //
   // Deprecated (superseded by options above):
   //
   // Do not set *any* of these fields in new configs.
   //
 
-  // Note: legacy configs had to set |all_cpus| to true to pass parsing. We
-  // might start relying on this for compatibility detection in the future.
+  // Note: legacy configs had to set |all_cpus| to true to pass parsing.
+  // We rely on this to detect such configs.
   optional bool all_cpus = 1;
   optional uint32 sampling_frequency = 2;
   optional bool kernel_frames = 12;
@@ -849,39 +979,12 @@ message PerfEventConfig {
   repeated int32 exclude_pid = 6;
   repeated string exclude_cmdline = 7;
   optional uint32 additional_cmdline_count = 11;
-  optional Tracepoint tracepoint = 14;
+  // previously |tracepoint|
+  reserved 14;
 
   //
   // Sub-messages (nested for generated code namespacing).
   //
-
-  message Timebase {
-    // How often the per-cpu sampling will occur. Not guaranteed to be honored
-    // as the kernel can throttle the sampling rate if it's too high.
-    // If unset, an implementation-defined default is used.
-    oneof interval {
-      // Per-cpu sampling frequency in Hz, as requested from the kernel. Not the
-      // same as 1/period.
-      // Details: the actual sampling will still be based on a period, but the
-      // kernel will dynamically adjust it based on the observed event rate, to
-      // approximate this frequency. Works best with steady-rate events like
-      // timers.
-      uint64 frequency = 2;
-
-      // Per-cpu sampling will occur every |period| counts of |event|.
-      // Prefer |frequency| by default, as it's easier to oversample with a
-      // fixed period.
-      uint64 period = 1;
-    }
-
-    // Counting event to use as a time base for the sampling.
-    // If unset, implies the CPU timer (SW_CPU_CLOCK) as the event,
-    // which is what you usually want.
-    oneof event {
-      Counter counter = 4;
-      Tracepoint tracepoint = 3;
-    }
-  }
 
   message CallstackSampling {
     // Defines a set of processes for which samples are retained/skipped. If
@@ -924,30 +1027,6 @@ message PerfEventConfig {
     // neither explicitly included nor excluded will be considered. Processes
     // are accepted on a first come, first served basis.
     optional uint32 additional_cmdline_count = 5;
-  }
-
-  enum Counter {
-    UNKNOWN_COUNTER = 0;
-    // software:
-    SW_CPU_CLOCK = 1;
-    SW_PAGE_FAULTS = 2;
-    // hardware:
-    HW_CPU_CYCLES = 10;
-    HW_INSTRUCTIONS = 11;
-  }
-
-  message Tracepoint {
-    // Group and name for the tracepoint, acceptable forms:
-    // * "sched/sched_switch"
-    // * "sched:sched_switch"
-    optional string name = 1;
-
-    // Optional field-level filter for the tracepoint. Only events matching this
-    // filter will be counted (and therefore contribute to the sampling period).
-    // Example: "prev_pid >= 42 && next_pid == 0".
-    // For full syntax, see kernel documentation on "Event filtering":
-    // https://www.kernel.org/doc/Documentation/trace/events.txt
-    optional string filter = 2;
   }
 }
 
@@ -1169,6 +1248,12 @@ message SysStatsConfig {
     STAT_FORK_COUNT = 4;
   }
   repeated StatCounters stat_counters = 6;
+
+  // Polls /sys/devfreq/*/curfreq every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  // This option can be used to record unchanging values.
+  // Updates from frequency changes can come from ftrace/set_clock_rate.
+  optional uint32 devfreq_period_ms = 7;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -1264,7 +1349,7 @@ message TrackEventConfig {
   // Default: []
   repeated string enabled_categories = 2;
 
-  // Default: [“slow”, “debug”]
+  // Default: ["slow", "debug"]
   repeated string disabled_tags = 3;
 
   // Default: []
@@ -1278,6 +1363,14 @@ message TrackEventConfig {
 // The configuration that is passed to each data source when starting tracing.
 // Next id: 116
 message DataSourceConfig {
+  enum SessionInitiator {
+    SESSION_INITIATOR_UNSPECIFIED = 0;
+    // This trace was initiated from a trusted system app has DUMP and
+    // USAGE_STATS permission. This system app is expected to not expose the
+    // trace to the user of the device.
+    // This is determined by checking the UID initiating the trace.
+    SESSION_INITIATOR_TRUSTED_SYSTEM = 1;
+  };
   // Data source unique name, e.g., "linux.ftrace". This must match
   // the name passed by the data source when it registers (see
   // RegisterDataSource()).
@@ -1303,6 +1396,10 @@ message DataSourceConfig {
   // guardrails.
   // DO NOT SET in consumer as this will be overridden by the service.
   optional bool enable_extra_guardrails = 6;
+
+  // Set by the service to indicate which user initiated this trace.
+  // DO NOT SET in consumer as this will be overridden by the service.
+  optional SessionInitiator session_initiator = 8;
 
   // Set by the service to indicate which tracing session the data source
   // belongs to. The intended use case for this is checking if two data sources,
@@ -1393,7 +1490,7 @@ message DataSourceConfig {
 // It contains the general config for the logging buffer(s) and the configs for
 // all the data source being enabled.
 //
-// Next id: 31.
+// Next id: 33.
 message TraceConfig {
   message BufferConfig {
     optional uint32 size_kb = 1;
@@ -1470,6 +1567,21 @@ message TraceConfig {
     // only keeps track of the first and the most recent snapshot until
     // ReadBuffers() is called.
     optional uint32 snapshot_interval_ms = 6;
+
+    // Hints to the service that a suspend-aware (i.e. counting time in suspend)
+    // clock should be used for periodic snapshots of service-emitted events.
+    // This means, if a snapshot *should* have happened during suspend, it will
+    // happen immediately after the device resumes.
+    //
+    // Choosing a clock like this is done on best-effort basis; not all
+    // platforms (e.g. Windows) expose a clock which can be used for periodic
+    // tasks counting suspend. If such a clock is not available, the service
+    // falls back to the best-available alternative.
+    //
+    // Introduced in Android S.
+    // TODO(lalitm): deprecate this in T and make this the default if nothing
+    // crashes in S.
+    optional bool prefer_suspend_clock_for_snapshot = 7;
   }
   optional BuiltinDataSource builtin_data_sources = 20;
 
@@ -1553,13 +1665,14 @@ message TraceConfig {
   optional uint64 max_file_size_bytes = 10;
 
   // Contains flags which override the default values of the guardrails inside
-  // Perfetto. These values are only affect userdebug builds.
+  // Perfetto.
   message GuardrailOverrides {
     // Override the default limit (in bytes) for uploading data to server within
     // a 24 hour period.
+    // On R-, this override only affected userdebug builds. Since S, it also
+    // affects user builds.
     optional uint64 max_upload_per_day_bytes = 1;
   }
-
   optional GuardrailOverrides guardrail_overrides = 11;
 
   // When true, data sources are not started until an explicit call to
@@ -1719,20 +1832,52 @@ message TraceConfig {
   }
   optional CompressionType compression_type = 24;
 
-  // Android-only. Not for general use. If set, saves a Dropbox trace into an
+  // Android-only. Not for general use. If set, saves the trace into an
   // incident. This field is read by perfetto_cmd, rather than the tracing
-  // service. All fields are mandatory.
+  // service. This field must be set when passing the --upload flag to
+  // perfetto_cmd.
   message IncidentReportConfig {
+    // In this message, either:
+    //  * all of |destination_package|, |destination_class| and |privacy_level|
+    //    must be set.
+    //  * |skip_incidentd| must be explicitly set to true.
+
     optional string destination_package = 1;
     optional string destination_class = 2;
     // Level of filtering in the requested incident. See |Destination| in
     // frameworks/base/core/proto/android/privacy.proto.
     optional int32 privacy_level = 3;
+
+    // If true, then skips saving the trace to incidentd.
+    //
+    // This flag is useful in testing (e.g. Perfetto-statsd integration tests)
+    // or when we explicitly don't want traces to go to incidentd even when they
+    // usually would (e.g. configs deployed using statsd but only used for
+    // inclusion in bugreports using |bugreport_score|).
+    //
+    // The motivation for having this flag, instead of just not setting
+    // |incident_report_config|, is prevent accidents where
+    // |incident_report_config| is omitted by mistake.
+    optional bool skip_incidentd = 5;
+
     // If true, do not write the trace into dropbox (i.e. incident only).
     // Otherwise, write to both dropbox and incident.
-    optional bool skip_dropbox = 4;
+    // TODO(lalitm): remove this field as we no longer use Dropbox.
+    optional bool skip_dropbox = 4 [deprecated = true];
   }
   optional IncidentReportConfig incident_report_config = 25;
+
+  enum StatsdLogging {
+    STATSD_LOGGING_UNSPECIFIED = 0;
+    STATSD_LOGGING_ENABLED = 1;
+    STATSD_LOGGING_DISABLED = 2;
+  }
+
+  // Android-only. Not for general use. If specified, sets the logging to statsd
+  // of guardrails and checkpoints in the tracing service. perfetto_cmd sets
+  // this to enabled (if not explicitly set in the config) when specifying
+  // --upload.
+  optional StatsdLogging statsd_logging = 31;
 
   // DEPRECATED. Was trace_uuid, use trace_uuid_msb and trace_uuid_lsb instead.
   reserved 26;
@@ -1740,6 +1885,15 @@ message TraceConfig {
   // Alternative encoding of trace_uuid as two int64s.
   optional int64 trace_uuid_msb = 27;
   optional int64 trace_uuid_lsb = 28;
+
+  // When set applies a post-filter to the trace contents using the filter
+  // provided. The filter is applied at ReadBuffers() time and works both in the
+  // case of IPC readback and write_into_file. This filter can be generated
+  // using `tools/proto_filter -s schema.proto -F filter_out.bytes` or
+  // `-T filter_out.escaped_string` (for .pbtx).
+  // Introduced in Android S. See go/trace-filtering for design.
+  message TraceFilter { optional bytes bytecode = 1; }
+  optional TraceFilter trace_filter = 32;
 }
 
 // End of protos/perfetto/config/trace_config.proto
@@ -1886,6 +2040,15 @@ message TraceStats {
   // Packets that failed validation of the TrustedPacket. If this is > 0, there
   // is a bug in the producer.
   optional uint64 invalid_packets = 10;
+
+  // This is set only when the TraceConfig specifies a TraceFilter.
+  message FilterStats {
+    optional uint64 input_packets = 1;
+    optional uint64 input_bytes = 2;
+    optional uint64 output_bytes = 3;
+    optional uint64 errors = 4;
+  }
+  optional FilterStats filter_stats = 11;
 }
 
 // End of protos/perfetto/common/trace_stats.proto
@@ -1977,6 +2140,7 @@ message FrameTimelineEvent {
     JANK_APP_DEADLINE_MISSED = 64;
     JANK_BUFFER_STUFFING = 128;
     JANK_UNKNOWN = 256;
+    JANK_SF_STUFFING = 512;
   };
 
   // Specifies how a frame was presented on screen w.r.t. timing.
@@ -2054,6 +2218,7 @@ message FrameTimelineEvent {
     // frame.
     optional int32 jank_type = 9;
     optional PredictionType prediction_type = 10;
+    optional bool is_buffer = 11;
   };
 
   // Indicates the start of expected timeline slice for DisplayFrames.
@@ -2244,6 +2409,11 @@ message ChromeMetadataPacket {
   // Version code of Chrome used by Android's Play Store. This field is only set
   // on Android.
   optional int32 chrome_version_code = 2;
+
+  // Comma separated list of enabled categories for tracing. The list of
+  // possible category strings are listed in code
+  // base/trace_event/builtin_categories.h.
+  optional string enabled_categories = 3;
 }
 
 // Metadata related to background tracing scenarios, states and triggers.
@@ -2281,10 +2451,15 @@ message BackgroundTracingMetadata {
         NAVIGATION = 2;
         STARTUP = 3;
         REACHED_CODE = 4;
+        CONTENT_TRIGGER = 5;
 
         TEST_RULE = 1000;
       }
       optional EventType event_type = 1;
+
+      // If |event_type| is CONTENT_TRIGGER, then this stores the hash of the
+      // content-trigger that actually fired.
+      optional fixed64 content_trigger_name_hash = 2;
     }
     optional NamedRule named_rule = 3;
   }
@@ -2395,6 +2570,8 @@ message ChromeLegacyJsonTrace {
 message ChromeEventBundle {
   // Deprecated, use TrackEvent protos instead.
   repeated ChromeTraceEvent trace_events = 1 [deprecated = true];
+  // TODO(ssid): This should be deprecated in favor of ChromeMetadataPacket
+  // which contains typed fields.
   repeated ChromeMetadata metadata = 2;
   // ftrace output from CrOS and Cast system tracing agents.
   // TODO(eseckler): Replace system traces with native perfetto service.
@@ -2877,6 +3054,8 @@ message CgroupAttachTaskFtraceEvent {
   optional int32 pid = 3;
   optional string comm = 4;
   optional string cname = 5;
+  optional int32 dst_level = 6;
+  optional string dst_path = 7;
 }
 message CgroupMkdirFtraceEvent {
   optional int32 root = 1;
@@ -3054,8 +3233,24 @@ message CpuhpLatencyFtraceEvent {
   optional uint32 state = 3;
   optional uint64 time = 4;
 }
+message CpuhpPauseFtraceEvent {
+  optional uint32 active_cpus = 1;
+  optional uint32 cpus = 2;
+  optional uint32 pause = 3;
+  optional uint32 time = 4;
+}
 
 // End of protos/perfetto/trace/ftrace/cpuhp.proto
+
+// Begin of protos/perfetto/trace/ftrace/dmabuf_heap.proto
+
+message DmaHeapStatFtraceEvent {
+  optional uint64 inode = 1;
+  optional int64 len = 2;
+  optional uint64 total_allocated = 3;
+}
+
+// End of protos/perfetto/trace/ftrace/dmabuf_heap.proto
 
 // Begin of protos/perfetto/trace/ftrace/dpu.proto
 
@@ -4448,6 +4643,17 @@ message LowmemoryKillFtraceEvent {
 
 // End of protos/perfetto/trace/ftrace/lowmemorykiller.proto
 
+// Begin of protos/perfetto/trace/ftrace/mali.proto
+
+message MaliTracingMarkWriteFtraceEvent {
+  optional string name = 1;
+  optional int32 pid = 2;
+  optional uint32 type = 3;
+  optional int32 value = 4;
+}
+
+// End of protos/perfetto/trace/ftrace/mali.proto
+
 // Begin of protos/perfetto/trace/ftrace/mdss.proto
 
 message MdpCmdKickoffFtraceEvent {
@@ -4780,6 +4986,12 @@ message SchedProcessWaitFtraceEvent {
   optional int32 pid = 2;
   optional int32 prio = 3;
 }
+message SchedPiSetprioFtraceEvent {
+  optional string comm = 1;
+  optional int32 newprio = 2;
+  optional int32 oldprio = 3;
+  optional int32 pid = 4;
+}
 
 // End of protos/perfetto/trace/ftrace/sched.proto
 
@@ -4802,6 +5014,49 @@ message SdeTracingMarkWriteFtraceEvent {
   optional uint32 trace_type = 3;
   optional int32 value = 4;
   optional uint32 trace_begin = 5;
+}
+message SdeSdeEvtlogFtraceEvent {
+  optional string evtlog_tag = 1;
+  optional int32 pid = 2;
+  optional uint32 tag_id = 3;
+}
+message SdeSdePerfCalcCrtcFtraceEvent {
+  optional uint64 bw_ctl_ebi = 1;
+  optional uint64 bw_ctl_llcc = 2;
+  optional uint64 bw_ctl_mnoc = 3;
+  optional uint32 core_clk_rate = 4;
+  optional uint32 crtc = 5;
+  optional uint64 ib_ebi = 6;
+  optional uint64 ib_llcc = 7;
+  optional uint64 ib_mnoc = 8;
+}
+message SdeSdePerfCrtcUpdateFtraceEvent {
+  optional uint64 bw_ctl_ebi = 1;
+  optional uint64 bw_ctl_llcc = 2;
+  optional uint64 bw_ctl_mnoc = 3;
+  optional uint32 core_clk_rate = 4;
+  optional uint32 crtc = 5;
+  optional int32 params = 6;
+  optional uint64 per_pipe_ib_ebi = 7;
+  optional uint64 per_pipe_ib_llcc = 8;
+  optional uint64 per_pipe_ib_mnoc = 9;
+  optional uint32 stop_req = 10;
+  optional uint32 update_bus = 11;
+  optional uint32 update_clk = 12;
+}
+message SdeSdePerfSetQosLutsFtraceEvent {
+  optional uint32 fl = 1;
+  optional uint32 fmt = 2;
+  optional uint64 lut = 3;
+  optional uint32 lut_usage = 4;
+  optional uint32 pnum = 5;
+  optional uint32 rt = 6;
+}
+message SdeSdePerfUpdateBusFtraceEvent {
+  optional uint64 ab_quota = 1;
+  optional uint32 bus_id = 2;
+  optional int32 client = 3;
+  optional uint64 ib_quota = 4;
 }
 
 // End of protos/perfetto/trace/ftrace/sde.proto
@@ -5304,6 +5559,15 @@ message FtraceEvent {
     FastrpcDmaStatFtraceEvent fastrpc_dma_stat = 347;
     DpuTracingMarkWriteFtraceEvent dpu_tracing_mark_write = 348;
     G2dTracingMarkWriteFtraceEvent g2d_tracing_mark_write = 349;
+    MaliTracingMarkWriteFtraceEvent mali_tracing_mark_write = 350;
+    DmaHeapStatFtraceEvent dma_heap_stat = 351;
+    CpuhpPauseFtraceEvent cpuhp_pause = 352;
+    SchedPiSetprioFtraceEvent sched_pi_setprio = 353;
+    SdeSdeEvtlogFtraceEvent sde_sde_evtlog = 354;
+    SdeSdePerfCalcCrtcFtraceEvent sde_sde_perf_calc_crtc = 355;
+    SdeSdePerfCrtcUpdateFtraceEvent sde_sde_perf_crtc_update = 356;
+    SdeSdePerfSetQosLutsFtraceEvent sde_sde_perf_set_qos_luts = 357;
+    SdeSdePerfUpdateBusFtraceEvent sde_sde_perf_update_bus = 358;
   }
 }
 
@@ -5884,30 +6148,48 @@ message ChromeHistogramSample {
 
 // Begin of protos/perfetto/trace/track_event/debug_annotation.proto
 
-// Key/value annotations provided in untyped TRACE_EVENT macros. These
-// annotations are intended for debug use and are not considered a stable API
-// surface. As such, they should not be relied upon to implement (new) metrics.
+// Proto representation of untyped key/value annotations provided in TRACE_EVENT
+// macros. Users of the Perfetto SDK should prefer to use the
+// perfetto::TracedValue API to fill these protos, rather than filling them
+// manually.
 //
-// Next ID: 10.
+// Debug annotations are intended for debug use and are not considered a stable
+// API of the trace contents. Trace-based metrics that use debug annotation
+// values are prone to breakage, so please rely on typed TrackEvent fields for
+// these instead.
+//
+// DebugAnnotations support nested arrays and dictionaries. Each entry is
+// encoded as a single DebugAnnotation message. Only dictionary entries
+// set the "name" field. The TrackEvent message forms an implicit root
+// dictionary.
+//
+// Example TrackEvent with nested annotations:
+//   track_event {
+//     debug_annotations {
+//       name: "foo"
+//       dict_entries {
+//         name: "a"
+//         bool_value: true
+//       }
+//       dict_entries {
+//         name: "b"
+//         int_value: 123
+//       }
+//     }
+//     debug_annotations {
+//       name: "bar"
+//       array_values {
+//         string_value: "hello"
+//       }
+//       array_values {
+//         string_value: "world"
+//       }
+//     }
+//   }
+//
+// Next ID: 13.
 message DebugAnnotation {
-  message NestedValue {
-    enum NestedType {
-      // leaf value.
-      UNSPECIFIED = 0;
-      DICT = 1;
-      ARRAY = 2;
-    }
-    optional NestedType nested_type = 1;
-
-    repeated string dict_keys = 2;
-    repeated NestedValue dict_values = 3;
-    repeated NestedValue array_values = 4;
-    optional int64 int_value = 5;
-    optional double double_value = 6;
-    optional bool bool_value = 7;
-    optional string string_value = 8;
-  }
-
+  // Name fields are set only for dictionary entries.
   oneof name_field {
     // interned DebugAnnotationName.
     uint64 name_iid = 1;
@@ -5924,11 +6206,37 @@ message DebugAnnotation {
     // Pointers are stored in a separate type as the JSON output treats them
     // differently from other uint64 values.
     uint64 pointer_value = 7;
+
+    // Deprecated. Use dict_entries / array_values instead.
     NestedValue nested_value = 8;
 
     // Legacy instrumentation may not support conversion of nested data to
     // NestedValue yet.
     string legacy_json_value = 9;
+  }
+
+  repeated DebugAnnotation dict_entries = 11;
+  repeated DebugAnnotation array_values = 12;
+
+  // Deprecated legacy way to use nested values. Only kept for
+  // backwards-compatibility in TraceProcessor. May be removed in the future -
+  // code filling protos should use |dict_entries| and |array_values| instead.
+  message NestedValue {
+    enum NestedType {
+      // leaf value.
+      UNSPECIFIED = 0;
+      DICT = 1;
+      ARRAY = 2;
+    }
+    optional NestedType nested_type = 1;
+
+    repeated string dict_keys = 2;
+    repeated NestedValue dict_values = 3;
+    repeated NestedValue array_values = 4;
+    optional int64 int_value = 5;
+    optional double double_value = 6;
+    optional bool bool_value = 7;
+    optional string string_value = 8;
   }
 }
 
@@ -6011,7 +6319,8 @@ message ChromeApplicationStateInfo {
 // The original format was generated in JSON by the code at
 // https://cs.chromium.org/chromium/src/cc/scheduler/scheduler.cc?l=870&rcl=5e15eabc9c0eec8daf94fdf78e93f13b6e3b63dd
 //
-// TODO(nuskos): Update link once we've switched to writing this proto.
+// And is now generated as protozero:
+// https://cs.chromium.org/chromium/src/cc/scheduler/scheduler.cc?q=Scheduler::AsPro
 //
 // All non-delta-timestamps are absolute CLOCK_MONOTONIC timestamps.
 
@@ -6047,7 +6356,6 @@ message ChromeCompositorSchedulerState {
   optional bool begin_impl_frame_deadline_task = 3;
   optional bool pending_begin_frame_task = 4;
   optional bool skipped_last_frame_missed_exceeded_deadline = 5;
-  optional bool skipped_last_frame_to_reduce_latency = 6;
   optional ChromeCompositorSchedulerAction inside_action = 7;
   optional BeginImplFrameDeadlineMode deadline_mode = 8;
   optional int64 deadline_us = 9;
@@ -6059,6 +6367,8 @@ message ChromeCompositorSchedulerState {
   optional BeginFrameObserverState begin_frame_observer_state = 15;
   optional BeginFrameSourceState begin_frame_source_state = 16;
   optional CompositorTimingHistory compositor_timing_history = 17;
+
+  reserved 6;
 }
 
 // Describes the current values stored in the Chrome Compositor state machine.
@@ -6148,7 +6458,6 @@ message ChromeCompositorStateMachine {
     optional ScrollHandlerState scroll_handler_state = 32;
     optional bool critical_begin_main_frame_to_activate_is_fast = 33;
     optional bool main_thread_missed_last_deadline = 34;
-    optional bool skip_next_begin_main_frame_to_reduce_latency = 35;
     optional bool video_needs_begin_frames = 36;
     optional bool defer_begin_main_frame = 37;
     optional bool last_commit_had_no_updates = 38;
@@ -6160,11 +6469,13 @@ message ChromeCompositorStateMachine {
     optional bool processing_animation_worklets_for_active_tree = 44;
     optional bool processing_animation_worklets_for_pending_tree = 45;
     optional bool processing_paint_worklets_for_pending_tree = 46;
+
+    reserved 35;
   }
   optional MinorState minor_state = 2;
 }
 
-// Next id: 12
+// Next id: 13
 message BeginFrameArgs {
   // JSON format has a "type" field that was always just "BeginFrameArgs" we
   // drop this in the proto representation, and instead make the JSON format
@@ -6193,6 +6504,7 @@ message BeginFrameArgs {
     // remove this |source_location|.
     SourceLocation source_location = 10;
   }
+  optional int64 frames_throttled_since_last = 12;
 }
 
 // Next id: 7
@@ -6310,6 +6622,32 @@ message ChromeFrameReporter {
   // |STATE_PRESENTED_PARTIAL|), then indicates whether this frame impacts
   // smoothness.
   optional bool affects_smoothness = 5;
+
+  enum ScrollState {
+    SCROLL_NONE = 0;
+    SCROLL_MAIN_THREAD = 1;
+    SCROLL_COMPOSITOR_THREAD = 2;
+
+    // Used when it can't be determined whether a scroll is in progress or not.
+    SCROLL_UNKNOWN = 3;
+  }
+
+  // The type of active scroll.
+  optional ScrollState scroll_state = 6;
+
+  // If any main thread animation is active during this frame.
+  optional bool has_main_animation = 7;
+  // If any compositor thread animation is active during this frame.
+  optional bool has_compositor_animation = 8;
+  // If any touch-driven UX (not scroll) is active during this frame.
+  optional bool has_smooth_input_main = 9;
+
+  // Whether the frame contained any missing content (i.e. whether there was
+  // checkerboarding in the frame).
+  optional bool has_missing_content = 10;
+
+  // The id of layer_tree_host that the frame has been produced for.
+  optional uint64 layer_tree_host_id = 11;
 }
 
 // End of protos/perfetto/trace/track_event/chrome_frame_reporter.proto
@@ -6477,6 +6815,13 @@ message ChromeMojoEventInfo {
   // handle watcher, recorded when an event if notified to the watcher. The code
   // that runs within the track event belongs to the interface.
   optional string watcher_notify_interface_tag = 1;
+
+  // The hash of the IPC message that is being handled.
+  optional uint32 ipc_hash = 2;
+
+  // A static string representing the mojo interface name of the message that is
+  // being handled.
+  optional string mojo_interface_tag = 3;
 }
 
 // End of protos/perfetto/trace/track_event/chrome_mojo_event_info.proto
@@ -6756,8 +7101,6 @@ message TrackEvent {
   oneof source_location_field {
     // Non-interned field.
     SourceLocation source_location = 33;
-    // TODO(ssid): The interned source locations are not parsed by trace
-    // processor.
     // Interned field.
     uint64 source_location_iid = 34;
   }
@@ -7208,6 +7551,67 @@ message TracingServiceEvent {
 
 // End of protos/perfetto/trace/perfetto/tracing_service_event.proto
 
+// Begin of protos/perfetto/common/android_energy_consumer_descriptor.proto
+
+// Energy consumer based on aidl class:
+// android.hardware.power.stats.EnergyConsumer.
+message AndroidEnergyConsumer {
+  // Unique ID of this energy consumer.  Matches the ID in a
+  // AndroidEnergyEstimationBreakdown.
+  optional int32 energy_consumer_id = 1;
+
+  // For a group of energy consumers of the same logical type, sorting by
+  // ordinal gives their physical order. Ordinals must be consecutive integers
+  // starting from 0.
+  optional int32 ordinal = 2;
+
+  // Type of this energy consumer.
+  optional string type = 3;
+
+  // Unique name of this energy consumer. Vendor/device specific. Opaque to
+  // framework.
+  optional string name = 4;
+}
+
+message AndroidEnergyConsumerDescriptor {
+  repeated AndroidEnergyConsumer energy_consumers = 1;
+}
+
+// End of protos/perfetto/common/android_energy_consumer_descriptor.proto
+
+// Begin of protos/perfetto/trace/power/android_energy_estimation_breakdown.proto
+
+// Energy data retrieve using the ODPM(On Device Power Monitor) API.
+// This proto represents the aidl class:
+// android.hardware.power.stats.EnergyConsumerResult.
+message AndroidEnergyEstimationBreakdown {
+  // The first trace packet of each session should include a energy consumer
+  // descriptor.
+  optional AndroidEnergyConsumerDescriptor energy_consumer_descriptor = 1;
+
+  // ID of the AndroidEnergyConsumer associated with this result.  Matches
+  // the energy_consumer_id in the AndroidEnergyConsumerDescriptor that
+  // should be sent at the beginning of a trace.
+  optional int32 energy_consumer_id = 2;
+
+  // Total accumulated energy since boot in microwatt-seconds (uWs)
+  optional int64 energy_uws = 3;
+
+  message EnergyUidBreakdown {
+    // Android ID/Linux UID, the accumulated energy is attributed to.
+    optional int32 uid = 1;
+
+    // Accumulated energy since boot in microwatt-seconds (uWs).
+    optional int64 energy_uws = 2;
+  }
+  // Optional attributed energy per Android ID / Linux UID for this
+  // EnergyConsumer. Sum total of attributed energy must be less than or equal
+  // to total accumulated energy.
+  repeated EnergyUidBreakdown per_uid_breakdown = 4;
+}
+
+// End of protos/perfetto/trace/power/android_energy_estimation_breakdown.proto
+
 // Begin of protos/perfetto/trace/power/battery_counters.proto
 
 message BatteryCounters {
@@ -7218,8 +7622,9 @@ message BatteryCounters {
   optional float capacity_percent = 2;
 
   // Instantaneous battery current in microamperes(µA).
-  // Positive values indicate net current entering the battery from a charge
-  // source, negative values indicate net current discharging from the battery.
+  // Positive values indicate current drained from the battery,
+  // negative values current feeding the battery from a charge source (USB).
+  // See https://perfetto.dev/docs/data-sources/battery-counters for more.
   optional int64 current_ua = 3;
 
   // Instantaneous battery current in microamperes(µA).
@@ -7353,7 +7758,10 @@ message HeapGraphType {
 }
 
 message HeapGraphObject {
-  optional uint64 id = 1;
+  oneof identifier {
+    uint64 id = 1;
+    uint64 id_delta = 7;
+  }
 
   // Index for InternedData.types for the name of the type of this object.
   optional uint64 type_id = 2;
@@ -7410,6 +7818,58 @@ message HeapGraph {
 
 // Begin of protos/perfetto/trace/profiling/profile_packet.proto
 
+// This file contains a mixture of messages emitted by various sampling
+// profilers:
+//
+// Memory allocator profiling
+// ----------------
+// ProfilePacket:
+//   The packet emitted by heapprofd, which started off as a native heap
+//   (malloc/free) profiler, but now supports custom allocators as well. Each
+//   packet contains a preaggregated state of the heap at snapshot time, which
+//   report the total allocated/free bytes per callstack (plus other info such
+//   as the number of samples).
+// StreamingAllocation/StreamingFree:
+//   Emitted by heapprofd when configured in streaming mode (i.e. when
+//   stream_allocations = true). This is only for local testing, and doesn't
+//   report callstacks (only address time and size of each alloc/free). It can
+//   lead to enormous traces, as it contains the stream of each alloc/free call.
+//
+// Callstack sampling
+// ------------------
+// StreamingProfilePacket:
+//   The packet emitted by the chromium in-process sampling profiler, which is
+//   based on periodically sending a signal to itself, and unwinding the stack
+//   in the signal handler. Each packet contains a series of individual stack
+//   samples for a Chromium thread.
+//
+// Callstack and performance counter sampling
+// ---------------------
+// PerfSample:
+//   The packet emitted by traced_perf sampling performance profiler based on
+//   the perf_event_open syscall. Each packet represents an individual sample
+//   of a performance counter (which might be a timer), and optionally a
+//   callstack of the process that was scheduled at the time of the sample.
+//
+
+// The packet emitted by heapprofd for each heap snapshot. A snapshot can
+// involve more than one ProfilePacket if the snapshot is big (when |continued|
+// is true). The cardinality and grouping is as follows:
+// A ProfilePacket contains:
+//  - 1+ per-process heap snapshots (ProcessHeapSamples). Normally there is only
+//    one heap per process (the main malloc/free heap), but there can be more if
+//    the process is using the heapprofd API to profile custom allocators.
+//  - Globally interned strings, mappings and frames (to allow de-duplicating
+//    frames/mapping in common between different processes).
+// A ProcessHeapSamples contains:
+//  - The process and heap identifier.
+//  - A number of HeapSample, one for each callsite that had some alloc/frees.
+//  - Statistics about heapprofd internals (e.g., sampling/unwinding timings).
+// A HeapSample contains statistics about callsites:
+//  - Total number of bytes allocated and freed from that callsite.
+//  - Total number of alloc/free calls sampled.
+//  - Stats at the local maximum when dump_at_max = true.
+// See https://perfetto.dev/docs/data-sources/native-heap-profiler for more.
 message ProfilePacket {
   // The following interning tables are only used in Android version Q.
   // In newer versions, these tables are in InternedData
@@ -7548,6 +8008,8 @@ message ProfilePacket {
   optional uint64 index = 7;
 }
 
+// Packet emitted by heapprofd when stream_allocations = true. Only for local
+// testing. Doesn't report the callsite.
 message StreamingAllocation {
   // TODO(fmayer): Add callstack.
   repeated uint64 address = 1;
@@ -7558,6 +8020,8 @@ message StreamingAllocation {
   repeated uint64 sequence_number = 6;
 };
 
+// Packet emitted by heapprofd when stream_allocations = true. Only for local
+// testing. Doesn't report the callsite.
 message StreamingFree {
   // TODO(fmayer): Add callstack.
   repeated uint64 address = 1;
@@ -7565,8 +8029,9 @@ message StreamingFree {
   repeated uint64 sequence_number = 3;
 };
 
-// Message used to represent individual stack samples sampled at discrete
-// points in time, rather than aggregated over an interval.
+// Packet emitted by the chromium in-process signal-based callstack sampler.
+// Represents a series of individual stack samples (sampled at discrete points
+// in time), rather than aggregated over an interval.
 message StreamingProfilePacket {
   // Index into InternedData.callstacks
   repeated uint64 callstack_iid = 1;
@@ -7606,18 +8071,20 @@ message Profiling {
   }
 }
 
-// Individual performance sampling packet payload. Typically corresponds to a
-// stack sample on a configration-dependent counter overflow.
+// Packet emitted by the traced_perf sampling performance profiler, which
+// gathers data via the perf_event_open syscall. Each packet contains an
+// individual sample with a counter value, and optionally a
+// callstack.
 //
 // Timestamps are within the root packet. This used to use the CLOCK_BOOTTIME
 // domain, but now the default is CLOCK_MONOTONIC_RAW which is compatible with
 // more event types.
 //
 // There are several distinct views of this message:
-// * completely processed sample (callstack_iid set)
 // * indication of kernel buffer data loss (kernel_records_lost set)
 // * indication of skipped samples (sample_skipped_reason set)
 // * notable event in the sampling implementation (producer_event set)
+// * normal sample (timebase_count set, typically also callstack_iid)
 message PerfSample {
   optional uint32 cpu = 1;
   optional uint32 pid = 2;
@@ -7626,11 +8093,11 @@ message PerfSample {
   // Execution state that the process was sampled at.
   optional Profiling.CpuMode cpu_mode = 5;
 
-  // Value of the timebase counter (since the beginning).
+  // Value of the timebase counter (since the event was configured, no deltas).
   optional uint64 timebase_count = 6;
 
   // Unwound callstack. Might be partial, in which case a synthetic "error"
-  // frame is appended, and |unwind_error| is set appropriately.
+  // frame is appended, and |unwind_error| is set accordingly.
   optional uint64 callstack_iid = 4;
 
   // If set, stack unwinding was incomplete due to an error.
@@ -7674,6 +8141,13 @@ message PerfSample {
     }
   }
   optional ProducerEvent producer_event = 19;
+}
+
+// Submessage for TracePacketDefaults.
+message PerfSampleDefaults {
+  // The sampling timebase. Might not be identical to the data source config if
+  // the implementation decided to default/override some parameters.
+  optional PerfEvents.Timebase timebase = 1;
 }
 
 // End of protos/perfetto/trace/profiling/profile_packet.proto
@@ -7918,6 +8392,15 @@ message SysStats {
   // the top-level packet timestamp is the time at which
   // we begin collection.
   optional uint64 collection_end_timestamp = 9;
+
+  // Frequencies for /sys/class/devfreq/ entries in kHz.
+  message DevfreqValue {
+    optional string key = 1;
+    optional uint64 value = 2;
+  };
+
+  // One entry per device.
+  repeated DevfreqValue devfreq = 10;
 }
 
 // End of protos/perfetto/trace/sys_stats/sys_stats.proto
@@ -7937,6 +8420,12 @@ message SystemInfo {
 
   // Ticks per second - sysconf(_SC_CLK_TCK).
   optional int64 hz = 3;
+
+  // The version of traced (the same returned by `traced --version`).
+  // This is a human readable string with and its format varies depending on
+  // the build system and the repo (standalone vs AOSP).
+  // This is intended for human debugging only.
+  optional string tracing_service_version = 4;
 }
 
 // End of protos/perfetto/trace/system_info.proto
@@ -7983,8 +8472,15 @@ message TestEvent {
     repeated string str = 1;
     repeated TestPayload nested = 2;
 
+    optional string single_string = 4;
+
+    optional int32 single_int = 5;
+    repeated int32 repeated_ints = 6;
+
     // When 0 this is the bottom-most nested message.
     optional uint32 remaining_nesting_depth = 3;
+
+    repeated DebugAnnotation debug_annotations = 7;
   }
   optional TestPayload payload = 5;
 }
@@ -8005,6 +8501,9 @@ message TracePacketDefaults {
 
   // Default values for TrackEvents (e.g. default track).
   optional TrackEventDefaults track_event_defaults = 11;
+
+  // Defaults for perf profiler packets (PerfSample).
+  optional PerfSampleDefaults perf_sample_defaults = 12;
 }
 // End of protos/perfetto/trace/trace_packet_defaults.proto
 
@@ -8114,7 +8613,7 @@ message ThreadDescriptor {
 // Describes the attributes for a Chrome process. Must be paired with a
 // ProcessDescriptor in the same TrackDescriptor.
 //
-// Next id: 4.
+// Next id: 6.
 message ChromeProcessDescriptor {
   // See chromium's content::ProcessType.
   enum ProcessType {
@@ -8127,6 +8626,37 @@ message ChromeProcessDescriptor {
     PROCESS_GPU = 6;
     PROCESS_PPAPI_PLUGIN = 7;
     PROCESS_PPAPI_BROKER = 8;
+    PROCESS_SERVICE_NETWORK = 9;
+    PROCESS_SERVICE_TRACING = 10;
+    PROCESS_SERVICE_STORAGE = 11;
+    PROCESS_SERVICE_AUDIO = 12;
+    PROCESS_SERVICE_DATA_DECODER = 13;
+    PROCESS_SERVICE_UTIL_WIN = 14;
+    PROCESS_SERVICE_PROXY_RESOLVER = 15;
+    PROCESS_SERVICE_CDM = 16;
+    PROCESS_SERVICE_VIDEO_CAPTURE = 17;
+    PROCESS_SERVICE_UNZIPPER = 18;
+    PROCESS_SERVICE_MIRRORING = 19;
+    PROCESS_SERVICE_FILEPATCHER = 20;
+    PROCESS_SERVICE_TTS = 21;
+    PROCESS_SERVICE_PRINTING = 22;
+    PROCESS_SERVICE_QUARANTINE = 23;
+    PROCESS_SERVICE_CROS_LOCALSEARCH = 24;
+    PROCESS_SERVICE_CROS_ASSISTANT_AUDIO_DECODER = 25;
+    PROCESS_SERVICE_FILEUTIL = 26;
+    PROCESS_SERVICE_PRINTCOMPOSITOR = 27;
+    PROCESS_SERVICE_PAINTPREVIEW = 28;
+    PROCESS_SERVICE_SPEECHRECOGNITION = 29;
+    PROCESS_SERVICE_XRDEVICE = 30;
+    PROCESS_SERVICE_READICON = 31;
+    PROCESS_SERVICE_LANGUAGEDETECTION = 32;
+    PROCESS_SERVICE_SHARING = 33;
+    PROCESS_SERVICE_MEDIAPARSER = 34;
+    PROCESS_SERVICE_QRCODEGENERATOR = 35;
+    PROCESS_SERVICE_PROFILEIMPORT = 36;
+    PROCESS_SERVICE_IME = 37;
+    PROCESS_SERVICE_RECORDING = 38;
+    PROCESS_SERVICE_SHAPEDETECTION = 39;
   }
   optional ProcessType process_type = 1;
   optional int32 process_priority = 2;
@@ -8137,6 +8667,19 @@ message ChromeProcessDescriptor {
   // Name of the hosting app for WebView. Used to match renderer processes to
   // their hosting apps.
   optional string host_app_package_name = 4;
+
+  // The ID to link crashes to trace.
+  // Notes:
+  // * The ID is per process. So, each trace may contain many IDs, and you need
+  //   to look for the ID from crashed process to find the crash report.
+  // * Having a "chrome-trace-id" in crash doesn't necessarily mean we can
+  //   get an uploaded trace, since uploads could have failed.
+  // * On the other hand, if there was a crash during the session and trace was
+  //   uploaded, it is very likely to find a crash report with the trace ID.
+  // * This is not crash ID or trace ID. It is just a random 64-bit number
+  //   recorded in both traces and crashes. It is possible to have collisions,
+  //   though very rare.
+  optional uint64 crash_trace_id = 5;
 }
 
 // End of protos/perfetto/trace/track_event/chrome_process_descriptor.proto
@@ -8155,28 +8698,54 @@ message ChromeThreadDescriptor {
     THREAD_MAIN = 1;
     THREAD_IO = 2;
 
-    // Browser:
-    THREAD_NETWORK_SERVICE = 12;
-
-    // Scheduler:
     THREAD_POOL_BG_WORKER = 3;
     THREAD_POOL_FG_WORKER = 4;
-    THREAD_POOL_BG_BLOCKING = 6;
     THREAD_POOL_FG_BLOCKING = 5;
+    THREAD_POOL_BG_BLOCKING = 6;
     THREAD_POOL_SERVICE = 7;
 
-    // Compositor:
     THREAD_COMPOSITOR = 8;
     THREAD_VIZ_COMPOSITOR = 9;
     THREAD_COMPOSITOR_WORKER = 10;
 
-    // Renderer:
     THREAD_SERVICE_WORKER = 11;
+    THREAD_NETWORK_SERVICE = 12;
 
-    // Tracing related threads:
+    THREAD_CHILD_IO = 13;
+    THREAD_BROWSER_IO = 14;
+
+    THREAD_BROWSER_MAIN = 15;
+    THREAD_RENDERER_MAIN = 16;
+    THREAD_UTILITY_MAIN = 17;
+    THREAD_GPU_MAIN = 18;
+
+    THREAD_CACHE_BLOCKFILE = 19;
+    THREAD_MEDIA = 20;
+    THREAD_AUDIO_OUTPUTDEVICE = 21;
+    THREAD_AUDIO_INPUTDEVICE = 22;
+    THREAD_GPU_MEMORY = 23;
+    THREAD_GPU_VSYNC = 24;
+    THREAD_DXA_VIDEODECODER = 25;
+    THREAD_BROWSER_WATCHDOG = 26;
+    THREAD_WEBRTC_NETWORK = 27;
+    THREAD_WINDOW_OWNER = 28;
+    THREAD_WEBRTC_SIGNALING = 29;
+    THREAD_WEBRTC_WORKER = 30;
+    THREAD_PPAPI_MAIN = 31;
+    THREAD_GPU_WATCHDOG = 32;
+    THREAD_SWAPPER = 33;
+    THREAD_GAMEPAD_POLLING = 34;
+    THREAD_WEBCRYPTO = 35;
+    THREAD_DATABASE = 36;
+    THREAD_PROXYRESOLVER = 37;
+    THREAD_DEVTOOLSADB = 38;
+    THREAD_NETWORKCONFIGWATCHER = 39;
+    THREAD_WASAPI_RENDER = 40;
+
     THREAD_MEMORY_INFRA = 50;
     THREAD_SAMPLING_PROFILER = 51;
   };
+
   optional ThreadType thread_type = 1;
 
   // To support old UI. New UI should determine default sorting by thread_type.
@@ -8200,7 +8769,7 @@ message ChromeThreadDescriptor {
 // Values for counters that are only emitted on a single packet sequence can
 // optionally be delta-encoded, see |is_incremental|.
 //
-// Next id: 6.
+// Next id: 7.
 message CounterDescriptor {
   // Built-in counters, usually with special meaning in the client library,
   // trace processor, legacy JSON format, or UI. Trace processor will infer a
@@ -8241,6 +8810,10 @@ message CounterDescriptor {
   // Type of the counter's values. Built-in counters imply a value for this
   // field.
   optional Unit unit = 3;
+
+  // In order to use a unit not defined as a part of |Unit|, a free-form unit
+  // name can be used instead.
+  optional string unit_name = 6;
 
   // Multiplication factor of this counter's values, e.g. to supply
   // COUNTER_THREAD_TIME_NS timestamps in microseconds instead.
@@ -8344,6 +8917,45 @@ message Trigger {
 
 // End of protos/perfetto/trace/trigger.proto
 
+// Begin of protos/perfetto/trace/ui_state.proto
+
+// Common state for UIs visualizing Perfetto traces.
+// This message can be appended as a TracePacket by UIs to save the
+// visible state (e.g. scroll position/zoom state) for future opening
+// of the trace.
+// Design doc: go/trace-ui-state.
+message UiState {
+  // The start and end bounds of the viewport of the UI in nanoseconds.
+  //
+  // This is the absolute time associated to slices and other events in
+  // trace processor tables (i.e. the |ts| column of most tables)
+  optional int64 timeline_start_ts = 1;
+  optional int64 timeline_end_ts = 2;
+
+  // Indicates that the given process should be highlighted by the UI.
+  message HighlightProcess {
+    oneof selector {
+      // The pid of the process to highlight. This is useful for UIs to focus
+      // on tracks of a particular process in the trace.
+      //
+      // If more than one process in a trace has the same pid, it is UI
+      // implementation specific how the process to be focused will be
+      // chosen.
+      uint32 pid = 1;
+
+      // The command line of the process to highlight; for most Android apps,
+      // this is the package name of the app. This is useful for UIs to focus
+      // on a particular app in the trace.
+      //
+      // If more than one process hasthe same cmdline, it is UI implementation
+      // specific how the process to be focused will be chosen.
+      string cmdline = 2;
+    }
+  }
+  optional HighlightProcess highlight_process = 3;
+}
+// End of protos/perfetto/trace/ui_state.proto
+
 // Begin of protos/perfetto/trace/trace_packet.proto
 
 // TracePacket is the root object of a Perfeto trace.
@@ -8366,7 +8978,7 @@ message Trigger {
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 77.
+// Next id: 79.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -8426,6 +9038,8 @@ message TracePacket {
     GpuMemTotalEvent gpu_mem_total_event = 71;
     MemoryTrackerSnapshot memory_tracker_snapshot = 73;
     FrameTimelineEvent frame_timeline_event = 76;
+    AndroidEnergyEstimationBreakdown android_energy_estimation_breakdown = 77;
+    UiState ui_state = 78;
 
     // Only used in profile packets.
     ProfiledFrameSymbols profiled_frame_symbols = 55;

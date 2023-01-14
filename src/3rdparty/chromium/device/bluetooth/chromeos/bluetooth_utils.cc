@@ -6,14 +6,16 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/optional.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "device/base/features.h"
 
@@ -79,12 +81,6 @@ BluetoothAdapter::DeviceList FilterUnknownDevices(
 
   BluetoothAdapter::DeviceList result;
   for (BluetoothDevice* device : devices) {
-    // Always allow paired devices to appear in the UI.
-    if (device->IsPaired()) {
-      result.push_back(device);
-      continue;
-    }
-
     // Always filter out laptops, etc. There is no intended use case or
     // Bluetooth profile in this context.
     if (base::FeatureList::IsEnabled(
@@ -98,6 +94,12 @@ BluetoothAdapter::DeviceList FilterUnknownDevices(
     if (base::FeatureList::IsEnabled(
             chromeos::features::kBluetoothPhoneFilter) &&
         device->GetDeviceType() == BluetoothDeviceType::PHONE) {
+      continue;
+    }
+
+    // Allow paired devices which are not filtered above to appear in the UI.
+    if (device->IsPaired()) {
+      result.push_back(device);
       continue;
     }
 
@@ -183,6 +185,21 @@ void RecordDeviceSelectionDuration(const std::string& histogram_name,
       kMaxDeviceSelectionDuration /* max */, 50 /* buckets */);
 }
 
+std::string GetTransportName(BluetoothTransport transport) {
+  switch (transport) {
+    case BluetoothTransport::BLUETOOTH_TRANSPORT_CLASSIC:
+      return "Classic";
+    case BluetoothTransport::BLUETOOTH_TRANSPORT_LE:
+      return "BLE";
+    case BluetoothTransport::BLUETOOTH_TRANSPORT_DUAL:
+      return "Dual";
+    default:
+      // A transport type of INVALID or other is unexpected, and no success
+      // metric for it exists.
+      return "";
+  }
+}
+
 }  // namespace
 
 device::BluetoothAdapter::DeviceList FilterBluetoothDeviceList(
@@ -195,26 +212,14 @@ device::BluetoothAdapter::DeviceList FilterBluetoothDeviceList(
   return GetLimitedNumDevices(max_devices, filtered_devices);
 }
 
-void RecordPairingResult(base::Optional<ConnectionFailureReason> failure_reason,
+void RecordPairingResult(absl::optional<ConnectionFailureReason> failure_reason,
                          BluetoothTransport transport,
                          base::TimeDelta duration) {
   RecordPairingTransport(transport);
 
-  std::string transport_histogram_name;
-  switch (transport) {
-    case BluetoothTransport::BLUETOOTH_TRANSPORT_CLASSIC:
-      transport_histogram_name = "Classic";
-      break;
-    case BluetoothTransport::BLUETOOTH_TRANSPORT_LE:
-      transport_histogram_name = "BLE";
-      break;
-    case BluetoothTransport::BLUETOOTH_TRANSPORT_DUAL:
-      transport_histogram_name = "Dual";
-      break;
-    default:
-      // A transport type of INVALID or other is unexpected, and no success
-      // metric for it exists.
-      return;
+  std::string transport_name = GetTransportName(transport);
+  if (transport_name.empty()) {
+    return;
   }
 
   bool success = !failure_reason.has_value();
@@ -222,8 +227,8 @@ void RecordPairingResult(base::Optional<ConnectionFailureReason> failure_reason,
       "Bluetooth.ChromeOS.Pairing.Result";
 
   base::UmaHistogramBoolean(result_histogram_name_prefix, success);
-  base::UmaHistogramBoolean(
-      result_histogram_name_prefix + "." + transport_histogram_name, success);
+  base::UmaHistogramBoolean(result_histogram_name_prefix + "." + transport_name,
+                            success);
 
   std::string duration_histogram_name_prefix =
       "Bluetooth.ChromeOS.Pairing.Duration";
@@ -232,22 +237,20 @@ void RecordPairingResult(base::Optional<ConnectionFailureReason> failure_reason,
   std::string base_histogram_name =
       duration_histogram_name_prefix + "." + success_histogram_name;
   RecordPairingDuration(base_histogram_name, duration);
-  RecordPairingDuration(base_histogram_name + "." + transport_histogram_name,
-                        duration);
+  RecordPairingDuration(base_histogram_name + "." + transport_name, duration);
 
   if (!success) {
     base::UmaHistogramEnumeration(
         result_histogram_name_prefix + ".FailureReason", *failure_reason);
-    base::UmaHistogramEnumeration(result_histogram_name_prefix +
-                                      ".FailureReason." +
-                                      transport_histogram_name,
-                                  *failure_reason);
+    base::UmaHistogramEnumeration(
+        result_histogram_name_prefix + ".FailureReason." + transport_name,
+        *failure_reason);
   }
 }
 
 void RecordUserInitiatedReconnectionAttemptResult(
-    base::Optional<ConnectionFailureReason> failure_reason,
-    BluetoothUiSurface surface) {
+    absl::optional<ConnectionFailureReason> failure_reason,
+    UserInitiatedReconnectionUISurfaces surface) {
   bool success = !failure_reason.has_value();
   std::string base_histogram_name =
       "Bluetooth.ChromeOS.UserInitiatedReconnectionAttempt.Result";
@@ -255,7 +258,9 @@ void RecordUserInitiatedReconnectionAttemptResult(
   base::UmaHistogramBoolean(base_histogram_name, success);
 
   std::string surface_name =
-      (surface == BluetoothUiSurface::kSettings ? "Settings" : "SystemTray");
+      (surface == UserInitiatedReconnectionUISurfaces::kSettings
+           ? "Settings"
+           : "SystemTray");
   base::UmaHistogramBoolean(base_histogram_name + "." + surface_name, success);
 
   if (!success) {
@@ -268,7 +273,7 @@ void RecordUserInitiatedReconnectionAttemptResult(
 }
 
 void RecordDeviceSelectionDuration(base::TimeDelta duration,
-                                   BluetoothUiSurface surface,
+                                   DeviceSelectionUISurfaces surface,
                                    bool was_paired,
                                    BluetoothTransport transport) {
   // Throw out longtail results of the user taking longer than
@@ -283,7 +288,8 @@ void RecordDeviceSelectionDuration(base::TimeDelta duration,
   RecordDeviceSelectionDuration(base_histogram_name, duration);
 
   std::string surface_name =
-      (surface == BluetoothUiSurface::kSettings ? "Settings" : "SystemTray");
+      (surface == DeviceSelectionUISurfaces::kSettings ? "Settings"
+                                                       : "SystemTray");
   std::string surface_histogram_name = base_histogram_name + "." + surface_name;
   RecordDeviceSelectionDuration(surface_histogram_name, duration);
 
@@ -293,24 +299,73 @@ void RecordDeviceSelectionDuration(base::TimeDelta duration,
   RecordDeviceSelectionDuration(paired_histogram_name, duration);
 
   if (!was_paired) {
-    std::string transport_name;
-    switch (transport) {
-      case BLUETOOTH_TRANSPORT_CLASSIC:
-        transport_name = "Classic";
-        break;
-      case BLUETOOTH_TRANSPORT_LE:
-        transport_name = "BLE";
-        break;
-      case BLUETOOTH_TRANSPORT_DUAL:
-        transport_name = "Dual";
-        break;
-      default:
-        return;
+    std::string transport_name = GetTransportName(transport);
+    if (transport_name.empty()) {
+      return;
     }
-
     std::string transport_histogram_name =
         paired_histogram_name + "." + transport_name;
     RecordDeviceSelectionDuration(transport_histogram_name, duration);
   }
 }
+
+void RecordPoweredStateOperationResult(PoweredStateOperation operation,
+                                       bool success) {
+  std::string operation_name =
+      operation == PoweredStateOperation::kEnable ? "Enable" : "Disable";
+
+  base::UmaHistogramBoolean(base::StrCat({"Bluetooth.ChromeOS.PoweredState.",
+                                          operation_name, ".Result"}),
+                            success);
+}
+
+void RecordPoweredState(bool is_powered) {
+  base::UmaHistogramBoolean("Bluetooth.ChromeOS.PoweredState", is_powered);
+}
+
+void RecordForgetResult(ForgetResult forget_result) {
+  base::UmaHistogramEnumeration("Bluetooth.ChromeOS.Forget.Result",
+                                forget_result);
+}
+
+void RecordDisconnectResult(DisconnectResult disconnect_result,
+                            BluetoothTransport transport) {
+  std::string transport_name = GetTransportName(transport);
+
+  if (transport_name.empty()) {
+    return;
+  }
+
+  base::UmaHistogramEnumeration("Bluetooth.ChromeOS.Disconnect.Result",
+                                disconnect_result);
+  base::UmaHistogramEnumeration(
+      base::StrCat({"Bluetooth.ChromeOS.Disconnect.Result.", transport_name}),
+      disconnect_result);
+}
+
+void RecordUiSurfaceDisplayed(BluetoothUiSurface ui_surface) {
+  base::UmaHistogramEnumeration("Bluetooth.ChromeOS.UiSurfaceDisplayed",
+                                ui_surface);
+}
+
+void RecordUserInitiatedReconnectionAttemptDuration(
+    absl::optional<ConnectionFailureReason> failure_reason,
+    BluetoothTransport transport,
+    base::TimeDelta duration) {
+  bool success = !failure_reason.has_value();
+  std::string transport_name = GetTransportName(transport);
+
+  if (transport_name.empty()) {
+    return;
+  }
+  std::string success_histogram_name = success ? "Success" : "Failure";
+
+  std::string base_histogram_name = base::StrCat(
+      {"Bluetooth.ChromeOS.UserInitiatedReconnectionAttempt.Duration.",
+       success_histogram_name});
+  base::UmaHistogramTimes(base_histogram_name, duration);
+  base::UmaHistogramTimes(
+      base::StrCat({base_histogram_name, ".", transport_name}), duration);
+}
+
 }  // namespace device

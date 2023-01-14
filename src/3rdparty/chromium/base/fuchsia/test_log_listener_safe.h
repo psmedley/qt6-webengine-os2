@@ -12,21 +12,21 @@
 
 #include "base/callback.h"
 #include "base/containers/circular_deque.h"
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
 // LogListenerSafe implementation that invokes a caller-supplied callback for
 // each received message.
-class TestLogListenerSafe
+class TestLogListenerSafe final
     : public fuchsia::logger::testing::LogListenerSafe_TestBase {
  public:
   using OnLogMessageCallback =
       base::RepeatingCallback<void(const fuchsia::logger::LogMessage&)>;
 
   TestLogListenerSafe();
-  ~TestLogListenerSafe() final;
+  ~TestLogListenerSafe() override;
 
   TestLogListenerSafe(const TestLogListenerSafe&) = delete;
   TestLogListenerSafe& operator=(const TestLogListenerSafe&) = delete;
@@ -36,11 +36,11 @@ class TestLogListenerSafe
 
  private:
   // LogListenerSafe implementation.
-  void Log(fuchsia::logger::LogMessage message, LogCallback callback) final;
+  void Log(fuchsia::logger::LogMessage message, LogCallback callback) override;
   void LogMany(std::vector<fuchsia::logger::LogMessage> messages,
-               LogManyCallback callback) final;
-  void Done() final;
-  void NotImplemented_(const std::string& name) final;
+               LogManyCallback callback) override;
+  void Done() override;
+  void NotImplemented_(const std::string& name) override;
 
   OnLogMessageCallback on_log_message_;
 };
@@ -60,9 +60,9 @@ class SimpleTestLogListener {
                    std::unique_ptr<fuchsia::logger::LogFilterOptions> options);
 
   // Runs the message loop until a log message containing |expected_string| is
-  // received, and returns it. Returns |base::nullopt| if |binding_| disconnects
+  // received, and returns it. Returns |absl::nullopt| if |binding_| disconnects
   // without the |expected_string| having been logged.
-  base::Optional<fuchsia::logger::LogMessage> RunUntilMessageReceived(
+  absl::optional<fuchsia::logger::LogMessage> RunUntilMessageReceived(
       base::StringPiece expected_string);
 
  private:

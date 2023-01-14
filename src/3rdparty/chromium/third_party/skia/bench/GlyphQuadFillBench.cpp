@@ -12,8 +12,8 @@
 #include "include/gpu/GrRecordingContext.h"
 #include "src/core/SkUtils.h"
 #include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/SkGr.h"
+#include "src/gpu/text/GrStrikeCache.h"
 #include "src/gpu/text/GrTextBlob.h"
 #include "src/utils/SkUTF.h"
 
@@ -39,29 +39,25 @@ class DirectMaskGlyphVertexFillBenchmark : public Benchmark {
         size_t len = strlen(gText);
         SkGlyphRunBuilder builder;
         SkPaint paint;
-        builder.drawTextUTF8(paint, font, gText, len, {100, 100});
-        auto glyphRunList = builder.useGlyphRunList();
+        auto glyphRunList = builder.textToGlyphRunList(font, paint, gText, len, {100, 100});
         SkASSERT(!glyphRunList.empty());
-        fBlob = GrTextBlob::Make(glyphRunList, view);
         SkSurfaceProps props;
         if (canvas) { canvas->getProps(&props); }
+
         auto colorSpace = SkColorSpace::MakeSRGB();
         SkGlyphRunListPainter painter{props, kUnknown_SkColorType,
                                       colorSpace.get(), SkStrikeCache::GlobalStrikeCache()};
-
-        GrSDFTOptions options{256, 256};
+        SkMatrix drawMatrix = view;
         const SkPoint drawOrigin = glyphRunList.origin();
-        const SkPaint& drawPaint = glyphRunList.paint();
-        for (auto& glyphRun : glyphRunList) {
-            painter.processGlyphRun(
-                    glyphRun, view, drawOrigin, drawPaint, props, false, options, fBlob.get());
-        }
+        drawMatrix.preTranslate(drawOrigin.x(), drawOrigin.y());
+        GrSDFTControl control{false, props.isUseDeviceIndependentFonts(), 256, 256};
+        fBlob = GrTextBlob::Make(glyphRunList, paint, drawMatrix, control, &painter);
 
         SkASSERT(!fBlob->subRunList().isEmpty());
         GrAtlasSubRun* subRun = fBlob->subRunList().front().testingOnly_atlasSubRun();
         SkASSERT(subRun);
         subRun->testingOnly_packedGlyphIDToGrGlyph(&fCache);
-        fVertices.reset(new char[subRun->vertexStride(view) * subRun->glyphCount() * 4]);
+        fVertices.reset(new char[subRun->vertexStride(drawMatrix) * subRun->glyphCount() * 4]);
     }
 
     void onDraw(int loops, SkCanvas* canvas) override {

@@ -17,7 +17,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/observer_list.h"
 #include "base/single_thread_task_runner.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
@@ -263,7 +262,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
 
   std::string address_;
   bool classic_powered_ = false;
-  base::Optional<bool> is_present_for_testing_;
+  absl::optional<bool> is_present_for_testing_;
 
   // Function returning the state of the HostController. Can be overridden for
   // tests.

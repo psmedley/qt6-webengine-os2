@@ -12,6 +12,7 @@
 
 #include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLErrorReporter.h"
+#include "src/sksl/SkSLPool.h"
 #include "src/sksl/SkSLUtil.h"
 #include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLType.h"
@@ -27,22 +28,28 @@ class Context {
 public:
     Context(ErrorReporter& errors, const ShaderCapsClass& caps);
 
+    ~Context() {
+        SkASSERT(!Pool::IsAttached());
+    }
+
+    // Returns the current error handler
+    ErrorReporter& errors() const { return fErrors; }
+
     // The Context holds all of the built-in types.
     BuiltinTypes fTypes;
-
-    // The Context holds a reference to our error reporter.
-    ErrorReporter& fErrors;
 
     // The Context holds a reference to our shader caps bits.
     const ShaderCapsClass& fCaps;
 
+    // The Context holds a pointer to our pool of modifiers.
+    ModifiersPool* fModifiersPool = nullptr;
+
     // The Context holds a pointer to the configuration of the program being compiled.
     ProgramConfig* fConfig = nullptr;
 
-    // A sentinel expression used to mark that a variable has a value during dataflow analysis (when
-    // it could have several different values, or the analyzer is otherwise unable to assign it a
-    // specific expression)
-    const std::unique_ptr<Expression> fDefined_Expression;
+private:
+    // The Context holds a reference to our error reporter.
+    ErrorReporter& fErrors;
 };
 
 }  // namespace SkSL

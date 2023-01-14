@@ -10,6 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "content/browser/notifications/notification_database_conversions.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
@@ -56,8 +57,11 @@ void NotificationStorage::WriteNotificationData(
     return;
   }
 
+  // If Push Notification becomes usable from a 3p context then
+  // NotificationDatabaseData should be changed to use StorageKey.
   service_worker_context_->StoreRegistrationUserData(
-      data.service_worker_registration_id, url::Origin::Create(data.origin),
+      data.service_worker_registration_id,
+      blink::StorageKey(url::Origin::Create(data.origin)),
       {{CreateDataKey(data.notification_id), std::move(serialized_data)}},
       base::BindOnce(&NotificationStorage::OnWriteComplete,
                      weak_ptr_factory_.GetWeakPtr(), data,
@@ -133,10 +137,10 @@ void NotificationStorage::OnReadCompleteUpdateInteraction(
     return;
   }
 
-  url::Origin origin = url::Origin::Create(data->origin);
+  blink::StorageKey key = blink::StorageKey(url::Origin::Create(data->origin));
   std::string notification_id = data->notification_id;
   service_worker_context_->StoreRegistrationUserData(
-      service_worker_registration_id, origin,
+      service_worker_registration_id, key,
       {{CreateDataKey(notification_id), std::move(serialized_data)}},
       base::BindOnce(&NotificationStorage::OnInteractionUpdateComplete,
                      weak_ptr_factory_.GetWeakPtr(), std::move(data),

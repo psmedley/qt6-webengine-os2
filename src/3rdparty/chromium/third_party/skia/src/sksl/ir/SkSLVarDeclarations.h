@@ -8,13 +8,12 @@
 #ifndef SKSL_VARDECLARATIONS
 #define SKSL_VARDECLARATIONS
 
+#include "include/private/SkSLProgramElement.h"
+#include "include/private/SkSLStatement.h"
 #include "src/sksl/ir/SkSLExpression.h"
-#include "src/sksl/ir/SkSLProgramElement.h"
-#include "src/sksl/ir/SkSLStatement.h"
 #include "src/sksl/ir/SkSLVariable.h"
 
 namespace SkSL {
-
 
 namespace dsl {
     class DSLCore;
@@ -39,11 +38,31 @@ public:
             , fArraySize(arraySize)
             , fValue(std::move(value)) {}
 
+    ~VarDeclaration() override {
+        // Unhook this VarDeclaration from its associated Variable, since we're being deleted.
+        if (fVar) {
+            fVar->detachDeadVarDeclaration();
+        }
+    }
+
+    // Does proper error checking and type coercion; reports errors via ErrorReporter.
+    static std::unique_ptr<Statement> Convert(const Context& context,
+                                              Variable* var,
+                                              std::unique_ptr<Expression> value);
+
+    // Reports errors via ASSERT.
+    static std::unique_ptr<Statement> Make(const Context& context,
+                                           Variable* var,
+                                           const Type* baseType,
+                                           int arraySize,
+                                           std::unique_ptr<Expression> value);
     const Type& baseType() const {
         return fBaseType;
     }
 
     const Variable& var() const {
+        // This should never be called after the Variable has been deleted.
+        SkASSERT(fVar);
         return *fVar;
     }
 
@@ -63,27 +82,9 @@ public:
         return fValue;
     }
 
-    std::unique_ptr<Statement> clone() const override {
-        return std::make_unique<VarDeclaration>(&this->var(),
-                                                &this->baseType(),
-                                                fArraySize,
-                                                this->value() ? this->value()->clone() : nullptr);
-    }
+    std::unique_ptr<Statement> clone() const override;
 
-    String description() const override {
-        String result = this->var().modifiers().description() + this->baseType().description() +
-                        " " + this->var().name();
-        if (this->arraySize() > 0) {
-            result.appendf("[%d]", this->arraySize());
-        } else if (this->arraySize() == Type::kUnsizedArray){
-            result += "[]";
-        }
-        if (this->value()) {
-            result += " = " + this->value()->description();
-        }
-        result += ";";
-        return result;
-    }
+    String description() const override;
 
 private:
     const Variable* fVar;
@@ -104,8 +105,8 @@ class GlobalVarDeclaration final : public ProgramElement {
 public:
     static constexpr Kind kProgramElementKind = Kind::kGlobalVar;
 
-    GlobalVarDeclaration(int offset, std::unique_ptr<Statement> decl)
-            : INHERITED(offset, kProgramElementKind)
+    GlobalVarDeclaration(std::unique_ptr<Statement> decl)
+            : INHERITED(decl->fOffset, kProgramElementKind)
             , fDeclaration(std::move(decl)) {
         SkASSERT(this->declaration()->is<VarDeclaration>());
     }
@@ -119,7 +120,7 @@ public:
     }
 
     std::unique_ptr<ProgramElement> clone() const override {
-        return std::make_unique<GlobalVarDeclaration>(fOffset, this->declaration()->clone());
+        return std::make_unique<GlobalVarDeclaration>(this->declaration()->clone());
     }
 
     String description() const override {

@@ -2,6 +2,6 @@
 
 var<private> a : i32  = 1.0;
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
 }

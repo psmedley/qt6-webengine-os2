@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/component_export.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
@@ -20,11 +21,6 @@
 #include "components/variations/synthetic_trials.h"
 #include "components/variations/variations.mojom.h"
 #include "components/variations/variations_associated_data.h"
-
-namespace base {
-template <typename T>
-struct DefaultSingletonTraits;
-}
 
 namespace variations {
 class VariationsClient;
@@ -36,7 +32,7 @@ class VariationsClient;
 // (i) VariationsIDs associated with external experiments, which can be sent
 // only for signed-in users and (ii) VariationsIDs that can be sent in first-
 // and third-party contexts.
-struct VariationsHeaderKey {
+struct COMPONENT_EXPORT(VARIATIONS) VariationsHeaderKey {
   bool is_signed_in;
   Study_GoogleWebVisibility web_visibility;
 
@@ -47,10 +43,11 @@ struct VariationsHeaderKey {
 // A helper class for maintaining client experiments and metrics state
 // transmitted in custom HTTP request headers.
 // This class is a thread-safe singleton.
-class VariationsIdsProvider : public base::FieldTrialList::Observer,
-                              public SyntheticTrialObserver {
+class COMPONENT_EXPORT(VARIATIONS) VariationsIdsProvider
+    : public base::FieldTrialList::Observer,
+      public SyntheticTrialObserver {
  public:
-  class Observer {
+  class COMPONENT_EXPORT(VARIATIONS) Observer {
    public:
     // Called when variation ids headers are updated.
     virtual void VariationIdsHeaderUpdated() = 0;
@@ -59,7 +56,24 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
     virtual ~Observer() {}
   };
 
+  enum class Mode {
+    // Indicates the signed-in parameter supplied to GetClientDataHeaders() is
+    // honored.
+    kUseSignedInState,
+
+    // Indicates the signed-in parameter supplied to GetClientDataHeaders() is
+    // treated as true, regardless of what is supplied. This is intended for
+    // embedders (such as WebLayer) that do not have the notion of signed-in.
+    kIgnoreSignedInState,
+  };
+
+  // Creates the VariationsIdsProvider instance. This must be called before
+  // GetInstance(). Only one instance of VariationsIdsProvider may be created.
+  static VariationsIdsProvider* Create(Mode mode);
+
   static VariationsIdsProvider* GetInstance();
+
+  Mode mode() const { return mode_; }
 
   // Returns the X-Client-Data headers corresponding to |is_signed_in|: a header
   // that may be sent in first-party requests and a header that may be sent in
@@ -68,7 +82,9 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
   //
   // If |is_signed_in| is false, VariationIDs that should be sent for only
   // signed in users (i.e. GOOGLE_WEB_PROPERTIES_SIGNED_IN entries) are not
-  // included. Also, computes and caches the header if necessary.
+  // included. Also, computes and caches the header if necessary. |is_signed_in|
+  // is impacted by the Mode supplied when VariationsIdsProvider is created.
+  // See Mode for details.
   variations::mojom::VariationsHeadersPtr GetClientDataHeaders(
       bool is_signed_in);
 
@@ -98,7 +114,7 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
 
   // Sets low entropy source value that was used for client-side randomization
   // of variations.
-  void SetLowEntropySourceValue(base::Optional<int> low_entropy_source_value);
+  void SetLowEntropySourceValue(absl::optional<int> low_entropy_source_value);
 
   // Result of ForceVariationIds() call.
   enum class ForceIdsResult {
@@ -131,9 +147,9 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
   void ResetForTesting();
 
  private:
-  friend struct base::DefaultSingletonTraits<VariationsIdsProvider>;
-
   typedef std::pair<VariationID, IDCollectionKey> VariationIDEntry;
+
+  friend class ScopedVariationsIdsProvider;
 
   FRIEND_TEST_ALL_PREFIXES(VariationsIdsProviderTest, ForceVariationIds_Valid);
   FRIEND_TEST_ALL_PREFIXES(VariationsIdsProviderTest,
@@ -158,8 +174,11 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
                            GetVariationsVectorForWebPropertiesKeys);
   FRIEND_TEST_ALL_PREFIXES(VariationsIdsProviderTest, GetVariationsVectorImpl);
 
-  VariationsIdsProvider();
+  explicit VariationsIdsProvider(Mode mode);
   ~VariationsIdsProvider() override;
+
+  static void CreateInstanceForTesting(Mode mode);
+  static void DestroyInstanceForTesting();
 
   // Returns a space-separated string containing the list of current active
   // variations (as would be reported in the |variation_id| repeated field of
@@ -223,12 +242,14 @@ class VariationsIdsProvider : public base::FieldTrialList::Observer,
   std::vector<VariationID> GetVariationsVectorImpl(
       const std::set<IDCollectionKey>& key);
 
+  const Mode mode_;
+
   // Guards access to variables below.
   base::Lock lock_;
 
   // Low entropy source value from client that was used for client-side
   // randomization of variations.
-  base::Optional<int> low_entropy_source_value_;
+  absl::optional<int> low_entropy_source_value_;
 
   // Whether or not we've initialized the caches.
   bool variation_ids_cache_initialized_;

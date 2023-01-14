@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/files/file.h"
-#include "base/timer/elapsed_timer.h"
+#include "third_party/blink/renderer/platform/fonts/android/font_unique_name_lookup_android.h"
 
+#include "base/files/file.h"
+#include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
 #include "third_party/blink/public/common/font_unique_name_lookup/icu_fold_case_util.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/fonts/android/font_unique_name_lookup_android.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkTypeface.h"
@@ -123,7 +124,7 @@ void FontUniqueNameLookupAndroid::ReceiveReadOnlySharedMemoryRegion(
 
 sk_sp<SkTypeface> FontUniqueNameLookupAndroid::MatchUniqueNameFromFirmwareFonts(
     const String& font_unique_name) {
-  base::Optional<FontTableMatcher::MatchResult> match_result =
+  absl::optional<FontTableMatcher::MatchResult> match_result =
       font_table_matcher_->MatchName(font_unique_name.Utf8().c_str());
   if (!match_result)
     return nullptr;
@@ -134,6 +135,7 @@ sk_sp<SkTypeface> FontUniqueNameLookupAndroid::MatchUniqueNameFromFirmwareFonts(
 bool FontUniqueNameLookupAndroid::RequestedNameInQueryableFonts(
     const String& font_unique_name) {
   if (!queryable_fonts_) {
+    SCOPED_UMA_HISTOGRAM_TIMER("Android.FontLookup.Blink.GetTableLatency");
     Vector<String> retrieved_fonts;
     android_font_lookup_service_->GetUniqueNameLookupTable(&retrieved_fonts);
     queryable_fonts_ = std::move(retrieved_fonts);

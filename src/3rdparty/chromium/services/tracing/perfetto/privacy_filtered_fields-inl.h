@@ -171,7 +171,7 @@ constexpr int kChromeMessagePumpIndices[] = {1, 2, -1};
 constexpr MessageInfo kChromeMessagePump = {kChromeMessagePumpIndices, nullptr};
 
 // Proto Message: ChromeMojoEventInfo
-constexpr int kChromeMojoEventInfoIndices[] = {1, -1};
+constexpr int kChromeMojoEventInfoIndices[] = {1, 2, 3, -1};
 constexpr MessageInfo kChromeMojoEventInfo = {kChromeMojoEventInfoIndices,
                                               nullptr};
 
@@ -186,7 +186,7 @@ constexpr MessageInfo kChromeRendererSchedulerState = {
     kChromeRendererSchedulerStateIndices, nullptr};
 
 // Proto Message: ChromeWindowHandleEventInfo
-constexpr int kChromeWindowHandleEventInfoIndices[] = {1, 2, -1};
+constexpr int kChromeWindowHandleEventInfoIndices[] = {1, 2, 3, -1};
 constexpr MessageInfo kChromeWindowHandleEventInfo = {
     kChromeWindowHandleEventInfoIndices, nullptr};
 
@@ -200,10 +200,65 @@ constexpr int kChromeMemoryPressureNotificationIndices[] = {1, 2, -1};
 constexpr MessageInfo kChromeMemoryPressureNotification = {
     kChromeMemoryPressureNotificationIndices, nullptr};
 
+// Proto Message: ChromeTaskAnnotator
+constexpr int kChromeTaskAnnotatorIndices[] = {1, 2, -1};
+constexpr MessageInfo kChromeTaskAnnotator = {kChromeTaskAnnotatorIndices,
+                                              nullptr};
+
+// Proto Message: ChromeBrowserContext
+constexpr int kChromeBrowserContextIndices[] = {1, -1};
+constexpr MessageInfo kChromeBrowserContext = {kChromeBrowserContextIndices,
+                                               nullptr};
+
+// Proto Message: ChromeProfileDestroyer
+constexpr int kChromeProfileDestroyerIndices[] = {1, 2, 4, 5, 6, -1};
+constexpr MessageInfo kChromeProfileDestroyer = {kChromeProfileDestroyerIndices,
+                                                 nullptr};
+
+// Proto Message: ChromeTaskPostedToDisabledQueue
+constexpr int kChromeTaskPostedToDisabledQueueIndices[] = {2, 3, 4, -1};
+constexpr MessageInfo kChromeTaskPostedToDisabledQueue = {
+    kChromeTaskPostedToDisabledQueueIndices, nullptr};
+
+// Proto Message: ChromeTaskGraphRunner
+constexpr int kChromeTaskGraphRunnerIndices[] = {1, -1};
+constexpr MessageInfo kChromeTaskGraphRunner = {kChromeTaskGraphRunnerIndices,
+                                                nullptr};
+
+// Proto Message: ChromeMessagePumpForUI
+constexpr int kChromeMessagePumpForUIIndices[] = {1, -1};
+constexpr MessageInfo kChromeMessagePumpForUI = {kChromeMessagePumpForUIIndices,
+                                                 nullptr};
+
+// Proto Message: RenderFrameImplDeletion
+constexpr int kRenderFrameImplDeletionIndices[] = {1, 2, 3, 4, -1};
+constexpr MessageInfo kRenderFrameImplDeletion = {
+    kRenderFrameImplDeletionIndices, nullptr};
+
+// Proto Message: ShouldSwapBrowsingInstancesResult
+constexpr int kShouldSwapBrowsingInstancesResultIndices[] = {1, 2, -1};
+constexpr MessageInfo kShouldSwapBrowsingInstancesResult = {
+    kShouldSwapBrowsingInstancesResultIndices, nullptr};
+
+// Proto Message: FrameTreeNodeInfo
+constexpr int kFrameTreeNodeInfoIndices[] = {1, 2, 3, -1};
+constexpr MessageInfo kFrameTreeNodeInfo = {kFrameTreeNodeInfoIndices, nullptr};
+
+// Proto Message: ChromeHashedPerformanceMark
+constexpr int kChromeHashedPerformanceMarkIndices[] = {1, 3, -1};
+constexpr MessageInfo kChromeHashedPerformanceMark = {
+    kChromeHashedPerformanceMarkIndices, nullptr};
+
+// Proto Message: ResourceBundle
+constexpr int kResourceBundleIndices[] = {1, -1};
+constexpr MessageInfo kResourceBundle = {kResourceBundleIndices, nullptr};
+
 // Proto Message: TrackEvent
 constexpr int kTrackEventIndices[] = {
-    1,  2,  3,  5,  6,  9,  10, 11, 12, 16, 17, 24, 25, 26, 27,   28,
-    29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 1001, -1};
+    1,    2,    3,    5,    6,    9,    10,   11,   12,   16,   17,
+    24,   25,   26,   27,   28,   29,   30,   31,   32,   33,   34,
+    35,   36,   38,   39,   40,   41,   42,   43,   1001, 1002, 1003,
+    1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1016, -1};
 constexpr MessageInfo const* kTrackEventComplexMessages[] = {
     nullptr,
     nullptr,
@@ -235,7 +290,18 @@ constexpr MessageInfo const* kTrackEventComplexMessages[] = {
     &kChromeWindowHandleEventInfo,
     nullptr,
     &kChromeContentSettingsEventInfo,
-    &kChromeMemoryPressureNotification};
+    &kChromeMemoryPressureNotification,
+    &kChromeTaskAnnotator,
+    &kChromeBrowserContext,
+    &kChromeProfileDestroyer,
+    &kChromeTaskPostedToDisabledQueue,
+    &kChromeTaskGraphRunner,
+    &kChromeMessagePumpForUI,
+    &kRenderFrameImplDeletion,
+    &kShouldSwapBrowsingInstancesResult,
+    &kFrameTreeNodeInfo,
+    &kChromeHashedPerformanceMark,
+    &kResourceBundle};
 constexpr MessageInfo kTrackEvent = {kTrackEventIndices,
                                      kTrackEventComplexMessages};
 
@@ -290,7 +356,7 @@ constexpr MessageInfo kTraceStats = {kTraceStatsIndices,
                                      kTraceStatsComplexMessages};
 
 // Proto Message: ProcessDescriptor
-constexpr int kProcessDescriptorIndices[] = {1, 4, 5, -1};
+constexpr int kProcessDescriptorIndices[] = {1, 4, 5, 7, -1};
 constexpr MessageInfo kProcessDescriptor = {kProcessDescriptorIndices, nullptr};
 
 // Proto Message: ThreadDescriptor
@@ -302,7 +368,7 @@ constexpr int kHistogramRuleIndices[] = {1, 2, 3, -1};
 constexpr MessageInfo kHistogramRule = {kHistogramRuleIndices, nullptr};
 
 // Proto Message: NamedRule
-constexpr int kNamedRuleIndices[] = {1, -1};
+constexpr int kNamedRuleIndices[] = {1, 2, -1};
 constexpr MessageInfo kNamedRule = {kNamedRuleIndices, nullptr};
 
 // Proto Message: TriggerRule
@@ -320,9 +386,9 @@ constexpr MessageInfo kTraceMetadata = {kTraceMetadataIndices,
                                         kTraceMetadataComplexMessages};
 
 // Proto Message: ChromeMetadataPacket
-constexpr int kChromeMetadataPacketIndices[] = {1, 2, -1};
+constexpr int kChromeMetadataPacketIndices[] = {1, 2, 3, -1};
 constexpr MessageInfo const* kChromeMetadataPacketComplexMessages[] = {
-    &kTraceMetadata, nullptr};
+    &kTraceMetadata, nullptr, nullptr};
 constexpr MessageInfo kChromeMetadataPacket = {
     kChromeMetadataPacketIndices, kChromeMetadataPacketComplexMessages};
 
@@ -370,7 +436,7 @@ constexpr MessageInfo kTracePacketDefaults = {
     kTracePacketDefaultsIndices, kTracePacketDefaultsComplexMessages};
 
 // Proto Message: ChromeProcessDescriptor
-constexpr int kChromeProcessDescriptorIndices[] = {1, 2, 3, -1};
+constexpr int kChromeProcessDescriptorIndices[] = {1, 2, 3, 5, -1};
 constexpr MessageInfo kChromeProcessDescriptor = {
     kChromeProcessDescriptorIndices, nullptr};
 

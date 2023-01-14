@@ -48,6 +48,7 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
   void MoveCursorToScreenLocationInPixels(
       const gfx::Point& location_in_pixels) override;
   void OnCursorVisibilityChangedNative(bool show) override;
+  void LockMouse(Window* window) override;
 
   ui::PlatformWindow* platform_window() { return platform_window_.get(); }
   const ui::PlatformWindow* platform_window() const {
@@ -66,22 +67,25 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
   void SetPlatformWindow(std::unique_ptr<ui::PlatformWindow> window);
 
   // ui::PlatformWindowDelegate:
-  void OnBoundsChanged(const gfx::Rect& new_bounds) override;
+  void OnBoundsChanged(const BoundsChange& change) override;
   void OnDamageRect(const gfx::Rect& damaged_region) override;
   void DispatchEvent(ui::Event* event) override;
   void OnCloseRequest() override;
   void OnClosed() override;
-  void OnWindowStateChanged(ui::PlatformWindowState new_state) override;
+  void OnWindowStateChanged(ui::PlatformWindowState old_state,
+                            ui::PlatformWindowState new_state) override;
   void OnLostCapture() override;
   void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget) override;
   void OnWillDestroyAcceleratedWidget() override;
   void OnAcceleratedWidgetDestroyed() override;
   void OnActivationChanged(bool active) override;
   void OnMouseEnter() override;
+  void OnOcclusionStateChanged(
+      ui::PlatformWindowOcclusionState occlusion_state) override;
 
   // Overridden from aura::WindowTreeHost:
   bool CaptureSystemKeyEventsImpl(
-      base::Optional<base::flat_set<ui::DomCode>> dom_codes) override;
+      absl::optional<base::flat_set<ui::DomCode>> dom_codes) override;
   void ReleaseSystemKeyEventCapture() override;
   bool IsKeyLocked(ui::DomCode dom_code) override;
   base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;

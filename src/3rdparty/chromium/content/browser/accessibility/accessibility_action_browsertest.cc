@@ -5,6 +5,7 @@
 #include <string>
 
 #include "base/check.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -156,7 +157,7 @@ class AccessibilityCanvasActionBrowserTest
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, DoDefaultAction) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
       <div id="button" role="button" tabIndex=0>Click</div>
-      <p></p>
+      <p role="group"></p>
       <script>
         document.getElementById('button').addEventListener('click', () => {
           document.querySelector('p').setAttribute('aria-label', 'success');
@@ -252,14 +253,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, Scroll) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
-      <div style="width:100; height:50; overflow:scroll"
+      <div role="group" style="width:100; height:50; overflow:scroll"
           aria-label="shakespeare">
         To be or not to be, that is the question.
       </div>
       )HTML");
 
   BrowserAccessibility* target =
-      FindNode(ax::mojom::Role::kGenericContainer, "shakespeare");
+      FindNode(ax::mojom::Role::kGroup, "shakespeare");
   EXPECT_NE(target, nullptr);
 
   int y_before = target->GetIntAttribute(ax::mojom::IntAttribute::kScrollY);
@@ -429,7 +430,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, InputSetValue) {
   BrowserAccessibility* target =
       FindNode(ax::mojom::Role::kTextField, "Answer");
   ASSERT_NE(nullptr, target);
-  EXPECT_EQ(base::ASCIIToUTF16("Before"), target->GetValueForControl());
+  EXPECT_EQ(u"Before", target->GetValueForControl());
 
   AccessibilityNotificationWaiter waiter2(shell()->web_contents(),
                                           ui::kAXModeComplete,
@@ -437,7 +438,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, InputSetValue) {
   GetManager()->SetValue(*target, "After");
   waiter2.WaitForNotification();
 
-  EXPECT_EQ(base::ASCIIToUTF16("After"), target->GetValueForControl());
+  EXPECT_EQ(u"After", target->GetValueForControl());
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
@@ -448,7 +449,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
   BrowserAccessibility* target =
       FindNode(ax::mojom::Role::kTextField, "Answer");
   ASSERT_NE(nullptr, target);
-  EXPECT_EQ(base::ASCIIToUTF16("Before"), target->GetValueForControl());
+  EXPECT_EQ(u"Before", target->GetValueForControl());
 
   AccessibilityNotificationWaiter waiter2(shell()->web_contents(),
                                           ui::kAXModeComplete,
@@ -456,7 +457,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
   GetManager()->SetValue(*target, "Line1\nLine2");
   waiter2.WaitForNotification();
 
-  EXPECT_EQ(base::ASCIIToUTF16("Line1\nLine2"), target->GetValueForControl());
+  EXPECT_EQ(u"Line1\nLine2", target->GetValueForControl());
 
   // TODO(dmazzoni): On Android we use an ifdef to disable inline text boxes,
   // which contain all of the line break information.
@@ -465,7 +466,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
 #if !defined(OS_ANDROID)
   // Check that it really does contain two lines.
   BrowserAccessibility::AXPosition start_position =
-      target->CreatePositionAt(0, ax::mojom::TextAffinity::kDownstream);
+      target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
           ui::AXBoundaryBehavior::CrossBoundary);
@@ -482,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   BrowserAccessibility* target =
       FindNode(ax::mojom::Role::kGenericContainer, "Answer");
   ASSERT_NE(nullptr, target);
-  EXPECT_EQ(base::ASCIIToUTF16("Before"), target->GetValueForControl());
+  EXPECT_EQ(u"Before", target->GetValueForControl());
 
   AccessibilityNotificationWaiter waiter2(
       shell()->web_contents(), ui::kAXModeComplete,
@@ -490,7 +491,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   GetManager()->SetValue(*target, "Line1\nLine2");
   waiter2.WaitForNotification();
 
-  EXPECT_EQ(base::ASCIIToUTF16("Line1\nLine2"), target->GetValueForControl());
+  EXPECT_EQ(u"Line1\nLine2", target->GetValueForControl());
 
   // TODO(dmazzoni): On Android we use an ifdef to disable inline text boxes,
   // which contain all of the line break information.
@@ -499,7 +500,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
 #if !defined(OS_ANDROID)
   // Check that it really does contain two lines.
   BrowserAccessibility::AXPosition start_position =
-      target->CreatePositionAt(0, ax::mojom::TextAffinity::kDownstream);
+      target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
           ui::AXBoundaryBehavior::CrossBoundary);
@@ -519,8 +520,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ShowContextMenu) {
   // Create a ContextMenuInterceptor to intercept the ShowContextMenu event
   // before RenderFrameHost receives.
   auto context_menu_interceptor = std::make_unique<ContextMenuInterceptor>(
+      shell()->web_contents()->GetMainFrame(),
       ContextMenuInterceptor::ShowBehavior::kPreventShow);
-  context_menu_interceptor->Init(shell()->web_contents()->GetMainFrame());
 
   // Raise the ShowContextMenu event from the second link.
   ui::AXActionData context_menu_action;
@@ -530,7 +531,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ShowContextMenu) {
 
   blink::UntrustworthyContextMenuParams context_menu_params =
       context_menu_interceptor->get_params();
-  EXPECT_EQ(base::ASCIIToUTF16("2"), context_menu_params.link_text);
+  EXPECT_EQ(u"2", context_menu_params.link_text);
   EXPECT_EQ(ui::MenuSourceType::MENU_SOURCE_KEYBOARD,
             context_menu_params.source_type);
 }
@@ -549,8 +550,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   // Create a ContextMenuInterceptor to intercept the ShowContextMenu event
   // before RenderFrameHost receives.
   auto context_menu_interceptor = std::make_unique<ContextMenuInterceptor>(
+      shell()->web_contents()->GetMainFrame(),
       ContextMenuInterceptor::ShowBehavior::kPreventShow);
-  context_menu_interceptor->Init(shell()->web_contents()->GetMainFrame());
 
   // Raise the ShowContextMenu event from the link.
   ui::AXActionData context_menu_action;
@@ -586,8 +587,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   // Create a ContextMenuInterceptor to intercept the ShowContextMenu event
   // before RenderFrameHost receives.
   auto context_menu_interceptor = std::make_unique<ContextMenuInterceptor>(
+      shell()->web_contents()->GetMainFrame(),
       ContextMenuInterceptor::ShowBehavior::kPreventShow);
-  context_menu_interceptor->Init(shell()->web_contents()->GetMainFrame());
 
   // Raise the ShowContextMenu event from the link.
   ui::AXActionData context_menu_action;
@@ -597,7 +598,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
 
   blink::UntrustworthyContextMenuParams context_menu_params =
       context_menu_interceptor->get_params();
-  EXPECT_EQ(base::ASCIIToUTF16("Offscreen"), context_menu_params.link_text);
+  EXPECT_EQ(u"Offscreen", context_menu_params.link_text);
   EXPECT_EQ(ui::MenuSourceType::MENU_SOURCE_KEYBOARD,
             context_menu_params.source_type);
   // Expect the context menu point to be 0, 0.
@@ -620,8 +621,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   // Create a ContextMenuInterceptor to intercept the ShowContextMenu event
   // before RenderFrameHost receives.
   auto context_menu_interceptor = std::make_unique<ContextMenuInterceptor>(
+      shell()->web_contents()->GetMainFrame(),
       ContextMenuInterceptor::ShowBehavior::kPreventShow);
-  context_menu_interceptor->Init(shell()->web_contents()->GetMainFrame());
 
   // Raise the ShowContextMenu event from the link.
   ui::AXActionData context_menu_action;
@@ -631,7 +632,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
 
   blink::UntrustworthyContextMenuParams context_menu_params =
       context_menu_interceptor->get_params();
-  EXPECT_EQ(base::ASCIIToUTF16("Obscured"), context_menu_params.link_text);
+  EXPECT_EQ(u"Obscured", context_menu_params.link_text);
   EXPECT_EQ(ui::MenuSourceType::MENU_SOURCE_KEYBOARD,
             context_menu_params.source_type);
   // Expect the context menu to open on the same line as the link text. Check
@@ -787,7 +788,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, FocusLostOnDeletedNode) {
     BrowserAccessibility* node = FindNode(ax::mojom::Role::kButton, node_name);
     ASSERT_NE(nullptr, node);
 
-    EXPECT_TRUE(ExecuteScript(shell(), focus_node_script));
+    EXPECT_TRUE(ExecJs(shell(), focus_node_script));
     WaitForAccessibilityFocusChange();
 
     EXPECT_EQ(node->GetId(),
@@ -819,7 +820,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
       <html>
       <body>
         <div style='height: 5000px; width: 5000px;'></div>
-        <div aria-label='target' style='position: relative;
+        <div role='group' aria-label='target' style='position: relative;
              left: 2000px; width: 100px;'>One</div>
         <div style='height: 5000px;'></div>
       </body>
@@ -829,8 +830,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
   BrowserAccessibility* root = GetManager()->GetRoot();
   gfx::Rect doc_bounds = root->GetClippedScreenBoundsRect();
 
-  int one_third_doc_height = float{doc_bounds.height()} / 3.0;
-  int one_third_doc_width = float{doc_bounds.width()} / 3.0;
+  int one_third_doc_height = base::ClampRound(doc_bounds.height() / 3.0f);
+  int one_third_doc_width = base::ClampRound(doc_bounds.width() / 3.0f);
 
   gfx::Rect doc_top_third = doc_bounds;
   doc_top_third.set_height(one_third_doc_height);
@@ -843,7 +844,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
   doc_right_third.set_x(doc_bounds.right() - one_third_doc_width);
 
   BrowserAccessibility* target_node =
-      FindNode(ax::mojom::Role::kGenericContainer, "target");
+      FindNode(ax::mojom::Role::kGroup, "target");
   EXPECT_NE(target_node, nullptr);
 
   ScrollNodeIntoView(target_node,
@@ -851,7 +852,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
                      ax::mojom::ScrollAlignment::kScrollAlignmentClosestEdge);
   gfx::Rect bounds = target_node->GetUnclippedScreenBoundsRect();
   {
-    testing::Message message;
+    ::testing::Message message;
     message << "Expected" << bounds.ToString() << " to be within "
             << doc_bottom_third.ToString() << " and "
             << doc_right_third.ToString();
@@ -877,7 +878,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
                      ax::mojom::ScrollAlignment::kScrollAlignmentTop);
   bounds = target_node->GetUnclippedScreenBoundsRect();
   {
-    testing::Message message;
+    ::testing::Message message;
     message << "Expected" << bounds.ToString() << " to be within "
             << doc_top_third.ToString() << " and " << doc_left_third.ToString();
     EXPECT_TRUE(doc_bounds.Contains(bounds));
@@ -894,7 +895,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
                      ax::mojom::ScrollAlignment::kScrollAlignmentBottom);
   bounds = target_node->GetUnclippedScreenBoundsRect();
   {
-    testing::Message message;
+    ::testing::Message message;
     message << "Expected" << bounds.ToString() << " to be within "
             << doc_bottom_third.ToString() << " and "
             << doc_right_third.ToString();
@@ -938,7 +939,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
                      ax::mojom::ScrollAlignment::kScrollAlignmentCenter);
   bounds = target_node->GetUnclippedScreenBoundsRect();
   {
-    testing::Message message;
+    ::testing::Message message;
     message << "Expected" << bounds.ToString() << " to not be within "
             << doc_top_third.ToString() << ", " << doc_bottom_third.ToString()
             << ", " << doc_left_third.ToString() << ", and "

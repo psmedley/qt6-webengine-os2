@@ -9,6 +9,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
+#include "components/back_forward_cache/back_forward_cache_disable.h"
 #include "components/blocked_content/list_item_position.h"
 #include "components/blocked_content/popup_navigation_delegate.h"
 #include "components/blocked_content/popup_tracker.h"
@@ -51,7 +52,7 @@ void PopupBlockerTabHelper::DidFinishNavigation(
   // Clear all page actions, blocked content notifications and browser actions
   // for this tab, unless this is an same-document navigation. Also only
   // consider main frame navigations that successfully committed.
-  if (!navigation_handle->IsInMainFrame() ||
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
       !navigation_handle->HasCommitted() ||
       navigation_handle->IsSameDocument()) {
     return;
@@ -65,12 +66,10 @@ void PopupBlockerTabHelper::DidFinishNavigation(
     // With back-forward cache we can restore the page, but |blocked_popups_|
     // are lost here and can't be restored at the moment.
     // Disable bfcache here to avoid potential loss of the page state.
-    web_contents()
-        ->GetController()
-        .GetBackForwardCache()
-        .DisableForRenderFrameHost(
-            navigation_handle->GetPreviousRenderFrameHostId(),
-            "PopupBlockerTabHelper");
+    content::BackForwardCache::DisableForRenderFrameHost(
+        navigation_handle->GetPreviousRenderFrameHostId(),
+        back_forward_cache::DisabledReason(
+            back_forward_cache::DisabledReasonId::kPopupBlockerTabHelper));
   }
 }
 
@@ -123,7 +122,7 @@ void PopupBlockerTabHelper::ShowBlockedPopup(
 
   BlockedRequest* popup = it->second.get();
 
-  base::Optional<WindowOpenDisposition> updated_disposition;
+  absl::optional<WindowOpenDisposition> updated_disposition;
   if (disposition != WindowOpenDisposition::CURRENT_TAB)
     updated_disposition = disposition;
 

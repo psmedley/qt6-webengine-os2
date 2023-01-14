@@ -39,6 +39,7 @@
 #include "net/base/mime_util.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/self_deleting_url_loader_factory.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -47,6 +48,9 @@
 #include "storage/browser/file_system/file_system_operation_runner.h"
 #include "storage/browser/file_system/file_system_url.h"
 #include "storage/common/file_system/file_system_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using filesystem::mojom::DirectoryEntry;
 using storage::FileStreamReader;
@@ -108,7 +112,7 @@ class FileSystemEntryURLLoader
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override {}
+      const absl::optional<GURL>& new_url) override {}
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {}
   void PauseReadingBodyFromNet() override {}
@@ -197,8 +201,10 @@ class FileSystemEntryURLLoader
         }
       }
     }
-
-    url_ = params_.file_system_context->CrackURL(request.url);
+    // TODO(https://crbug.com/1221308): function will use StorageKey for the
+    // receiver frame/worker in future CL
+    url_ = params_.file_system_context->CrackURL(
+        request.url, blink::StorageKey(url::Origin::Create(request.url)));
     if (!url_.is_valid()) {
       const FileSystemRequestInfo request_info = {
           request.url, params_.storage_domain, params_.frame_tree_node_id};
@@ -217,7 +223,10 @@ class FileSystemEntryURLLoader
       OnClientComplete(result);
       return;
     }
-    url_ = params_.file_system_context->CrackURL(request.url);
+    // TODO(https://crbug.com/1221308): function will use StorageKey for the
+    // receiver frame/worker in future CL
+    url_ = params_.file_system_context->CrackURL(
+        request.url, blink::StorageKey(url::Origin::Create(request.url)));
     if (!url_.is_valid()) {
       OnClientComplete(net::ERR_FILE_NOT_FOUND);
       return;
@@ -291,7 +300,7 @@ class FileSystemDirectoryURLLoader : public FileSystemEntryURLLoader {
       relative_path =
           base::FilePath(FILE_PATH_LITERAL("/") + relative_path.value());
 #endif
-      const base::string16& title = relative_path.LossyDisplayName();
+      const std::u16string& title = relative_path.LossyDisplayName();
       data_.append(net::GetDirectoryListingHeader(title));
     }
 
@@ -309,7 +318,7 @@ class FileSystemDirectoryURLLoader : public FileSystemEntryURLLoader {
     const DirectoryEntry& entry = entries_[index];
     const FileSystemURL entry_url =
         params_.file_system_context->CreateCrackedFileSystemURL(
-            url_.origin(), url_.type(),
+            url_.storage_key(), url_.type(),
             url_.path().Append(base::FilePath(entry.name)));
     DCHECK(entry_url.is_valid());
     params_.file_system_context->operation_runner()->GetMetadata(
@@ -329,7 +338,7 @@ class FileSystemDirectoryURLLoader : public FileSystemEntryURLLoader {
     }
 
     const DirectoryEntry& entry = entries_[index];
-    const base::string16& name = base::FilePath(entry.name).LossyDisplayName();
+    const std::u16string& name = base::FilePath(entry.name).LossyDisplayName();
     data_.append(net::GetDirectoryListingEntry(
         name, std::string(),
         entry.type == filesystem::mojom::FsFileType::DIRECTORY, file_info.size,
@@ -433,8 +442,8 @@ class FileSystemFileURLLoader : public FileSystemEntryURLLoader {
         url_,
         FileSystemOperation::GET_METADATA_FIELD_IS_DIRECTORY |
             FileSystemOperation::GET_METADATA_FIELD_SIZE,
-        base::AdaptCallbackForRepeating(base::BindOnce(
-            &FileSystemFileURLLoader::DidGetMetadata, base::AsWeakPtr(this))));
+        base::BindOnce(&FileSystemFileURLLoader::DidGetMetadata,
+                       base::AsWeakPtr(this)));
   }
 
   void DidGetMetadata(base::File::Error error_code,
@@ -616,7 +625,6 @@ class FileSystemURLLoaderFactory
  private:
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> loader,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& request,

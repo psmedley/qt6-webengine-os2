@@ -1,7 +1,7 @@
 qt_feature("pdf-v8" PRIVATE
     LABEL "Support V8"
     PURPOSE "Enables javascript support."
-    AUTODETECT false
+    AUTODETECT FALSE
     CONDITION NOT IOS
 )
 qt_feature("pdf-xfa" PRIVATE
@@ -29,6 +29,16 @@ qt_feature("pdf-xfa-tiff" PRIVATE
     PURPOSE "Enables XFA-TIFF support."
     CONDITION QT_FEATURE_pdf_xfa
 )
+qt_feature("pdf-bitcode" PRIVATE
+    LABEL "Bitcode support"
+    PURPOSE "Enables bitcode"
+    CONDITION IOS
+)
+qt_feature("pdf-static-runtime" PRIVATE
+    LABEL "Use static runtime"
+    PURPOSE "Enables static runtime"
+    CONDITION WIN32 AND QT_FEATURE_static AND QT_FEATURE_static_runtime
+)
 qt_configure_add_summary_section(NAME "Qt PDF")
 qt_configure_add_summary_entry(ARGS "pdf-v8")
 qt_configure_add_summary_entry(ARGS "pdf-xfa")
@@ -36,4 +46,6 @@ qt_configure_add_summary_entry(ARGS "pdf-xfa-bmp")
 qt_configure_add_summary_entry(ARGS "pdf-xfa-gif")
 qt_configure_add_summary_entry(ARGS "pdf-xfa-png")
 qt_configure_add_summary_entry(ARGS "pdf-xfa-tiff")
+qt_configure_add_summary_entry(ARGS "pdf-bitcode")
+qt_configure_add_summary_entry(ARGS "pdf-static-runtime")
 qt_configure_end_summary_section()

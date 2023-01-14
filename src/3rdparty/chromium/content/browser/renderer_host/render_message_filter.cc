@@ -15,7 +15,6 @@
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/numerics/safe_math.h"
-#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -34,14 +33,12 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
-#include "content/browser/resource_context_impl.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/render_message_filter.mojom.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -78,7 +75,16 @@
 namespace content {
 namespace {
 
-const uint32_t kRenderFilteredMessageClasses[] = {FrameMsgStart};
+void GotHasGpuProcess(RenderMessageFilter::HasGpuProcessCallback callback,
+                      bool has_gpu) {
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), has_gpu));
+}
+
+void GetHasGpuProcess(RenderMessageFilter::HasGpuProcessCallback callback) {
+  GpuProcessHost::GetHasGpuProcess(
+      base::BindOnce(GotHasGpuProcess, std::move(callback)));
+}
 
 }  // namespace
 
@@ -87,10 +93,7 @@ RenderMessageFilter::RenderMessageFilter(
     BrowserContext* browser_context,
     RenderWidgetHelper* render_widget_helper,
     MediaInternals* media_internals)
-    : BrowserMessageFilter(kRenderFilteredMessageClasses,
-                           base::size(kRenderFilteredMessageClasses)),
-      BrowserAssociatedInterface<mojom::RenderMessageFilter>(this),
-      resource_context_(browser_context->GetResourceContext()),
+    : BrowserAssociatedInterface<mojom::RenderMessageFilter>(this),
       render_widget_helper_(render_widget_helper),
       render_process_id_(render_process_id),
       media_internals_(media_internals) {
@@ -108,7 +111,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 void RenderMessageFilter::OnDestruct() const {
-  const_cast<RenderMessageFilter*>(this)->resource_context_ = nullptr;
   BrowserThread::DeleteOnIOThread::Destruct(this);
 }
 
@@ -171,6 +173,11 @@ void RenderMessageFilter::OnMediaLogRecords(
 }
 
 void RenderMessageFilter::HasGpuProcess(HasGpuProcessCallback callback) {
+  if (base::FeatureList::IsEnabled(features::kProcessHostOnUI)) {
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(GetHasGpuProcess, std::move(callback)));
+    return;
+  }
   GpuProcessHost::GetHasGpuProcess(std::move(callback));
 }
 

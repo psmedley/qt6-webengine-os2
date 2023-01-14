@@ -18,6 +18,7 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/webrtc/convert_to_webrtc_video_frame_buffer.h"
 #include "third_party/blink/renderer/platform/webrtc/track_observer.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_utils.h"
@@ -28,21 +29,6 @@
 #include "third_party/webrtc/api/video/recordable_encoded_frame.h"
 #include "third_party/webrtc/rtc_base/time_utils.h"
 #include "third_party/webrtc/system_wrappers/include/clock.h"
-
-namespace WTF {
-
-// Template specializations of [1], needed to be able to pass WTF callbacks
-// that have VideoTrackAdapterSettings or gfx::Size parameters across threads.
-//
-// [1] third_party/blink/renderer/platform/wtf/cross_thread_copier.h.
-template <>
-struct CrossThreadCopier<scoped_refptr<webrtc::VideoFrameBuffer>>
-    : public CrossThreadCopierPassThrough<
-          scoped_refptr<webrtc::VideoFrameBuffer>> {
-  STATIC_ONLY(CrossThreadCopier);
-};
-
-}  // namespace WTF
 
 namespace blink {
 
@@ -68,7 +54,7 @@ class WebRtcEncodedVideoFrame : public EncodedVideoFrame {
 
   bool IsKeyFrame() const override { return is_key_frame_; }
 
-  base::Optional<media::VideoColorSpace> ColorSpace() const override {
+  absl::optional<media::VideoColorSpace> ColorSpace() const override {
     return color_space_;
   }
 
@@ -78,7 +64,7 @@ class WebRtcEncodedVideoFrame : public EncodedVideoFrame {
   rtc::scoped_refptr<const webrtc::EncodedImageBufferInterface> buffer_;
   media::VideoCodec codec_;
   bool is_key_frame_;
-  base::Optional<media::VideoColorSpace> color_space_;
+  absl::optional<media::VideoColorSpace> color_space_;
   gfx::Size resolution_;
 };
 
@@ -124,7 +110,7 @@ class MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate
   EncodedVideoFrameCB encoded_frame_callback_;
 
   // Timestamp of the first received frame.
-  base::Optional<base::TimeTicks> start_timestamp_;
+  absl::optional<base::TimeTicks> start_timestamp_;
 
   // WebRTC real time clock, needed to determine NTP offset.
   webrtc::Clock* clock_;
@@ -170,90 +156,19 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
                "Ideal Render Instant", render_time.ToInternalValue(),
                "Timestamp", elapsed_timestamp.InMicroseconds());
 
+  rtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
+      incoming_frame.video_frame_buffer();
   scoped_refptr<media::VideoFrame> video_frame;
-  scoped_refptr<webrtc::VideoFrameBuffer> buffer(
-      incoming_frame.video_frame_buffer());
-  const gfx::Size size(buffer->width(), buffer->height());
-
-  switch (buffer->type()) {
-    case webrtc::VideoFrameBuffer::Type::kNative: {
-      video_frame = static_cast<WebRtcVideoFrameAdapter*>(buffer.get())
-                        ->getMediaVideoFrame();
-      video_frame->set_timestamp(elapsed_timestamp);
-      break;
-    }
-    case webrtc::VideoFrameBuffer::Type::kI420A: {
-      const webrtc::I420ABufferInterface* yuva_buffer = buffer->GetI420A();
-      video_frame = media::VideoFrame::WrapExternalYuvaData(
-          media::PIXEL_FORMAT_I420A, size, gfx::Rect(size), size,
-          yuva_buffer->StrideY(), yuva_buffer->StrideU(),
-          yuva_buffer->StrideV(), yuva_buffer->StrideA(),
-          const_cast<uint8_t*>(yuva_buffer->DataY()),
-          const_cast<uint8_t*>(yuva_buffer->DataU()),
-          const_cast<uint8_t*>(yuva_buffer->DataV()),
-          const_cast<uint8_t*>(yuva_buffer->DataA()), elapsed_timestamp);
-      break;
-    }
-    case webrtc::VideoFrameBuffer::Type::kI420: {
-      const webrtc::I420BufferInterface* yuv_buffer = buffer->GetI420();
-      video_frame = media::VideoFrame::WrapExternalYuvData(
-          media::PIXEL_FORMAT_I420, size, gfx::Rect(size), size,
-          yuv_buffer->StrideY(), yuv_buffer->StrideU(), yuv_buffer->StrideV(),
-          const_cast<uint8_t*>(yuv_buffer->DataY()),
-          const_cast<uint8_t*>(yuv_buffer->DataU()),
-          const_cast<uint8_t*>(yuv_buffer->DataV()), elapsed_timestamp);
-      break;
-    }
-    case webrtc::VideoFrameBuffer::Type::kI444: {
-      const webrtc::I444BufferInterface* yuv_buffer = buffer->GetI444();
-      video_frame = media::VideoFrame::WrapExternalYuvData(
-          media::PIXEL_FORMAT_I444, size, gfx::Rect(size), size,
-          yuv_buffer->StrideY(), yuv_buffer->StrideU(), yuv_buffer->StrideV(),
-          const_cast<uint8_t*>(yuv_buffer->DataY()),
-          const_cast<uint8_t*>(yuv_buffer->DataU()),
-          const_cast<uint8_t*>(yuv_buffer->DataV()), elapsed_timestamp);
-      break;
-    }
-    case webrtc::VideoFrameBuffer::Type::kI010: {
-      const webrtc::I010BufferInterface* yuv_buffer = buffer->GetI010();
-      // WebRTC defines I010 data as uint16 whereas Chromium uses uint8 for all
-      // video formats, so conversion and cast is needed.
-      video_frame = media::VideoFrame::WrapExternalYuvData(
-          media::PIXEL_FORMAT_YUV420P10, size, gfx::Rect(size), size,
-          yuv_buffer->StrideY() * 2, yuv_buffer->StrideU() * 2,
-          yuv_buffer->StrideV() * 2,
-          const_cast<uint8_t*>(
-              reinterpret_cast<const uint8_t*>(yuv_buffer->DataY())),
-          const_cast<uint8_t*>(
-              reinterpret_cast<const uint8_t*>(yuv_buffer->DataU())),
-          const_cast<uint8_t*>(
-              reinterpret_cast<const uint8_t*>(yuv_buffer->DataV())),
-          elapsed_timestamp);
-      break;
-    }
-    case webrtc::VideoFrameBuffer::Type::kNV12: {
-      const webrtc::NV12BufferInterface* nv12_buffer = buffer->GetNV12();
-      video_frame = media::VideoFrame::WrapExternalYuvData(
-          media::PIXEL_FORMAT_NV12, size, gfx::Rect(size), size,
-          nv12_buffer->StrideY(), nv12_buffer->StrideUV(),
-          const_cast<uint8_t*>(nv12_buffer->DataY()),
-          const_cast<uint8_t*>(nv12_buffer->DataUV()), elapsed_timestamp);
-      break;
-    }
-    default:
-      NOTREACHED();
+  if (buffer->type() == webrtc::VideoFrameBuffer::Type::kNative) {
+    video_frame = static_cast<WebRtcVideoFrameAdapter*>(buffer.get())
+                      ->getMediaVideoFrame();
+    video_frame->set_timestamp(elapsed_timestamp);
+  } else {
+    video_frame =
+        ConvertFromMappedWebRtcVideoFrameBuffer(buffer, elapsed_timestamp);
   }
-
   if (!video_frame)
     return;
-
-  // The bind ensures that we keep a reference to the underlying buffer.
-  if (buffer->type() != webrtc::VideoFrameBuffer::Type::kNative) {
-    video_frame->AddDestructionObserver(ConvertToBaseOnceCallback(
-        CrossThreadBindOnce(base::DoNothing::Once<
-                                const scoped_refptr<rtc::RefCountInterface>&>(),
-                            buffer)));
-  }
 
   // Rotation may be explicitly set sometimes.
   if (incoming_frame.rotation() != webrtc::kVideoRotation_0) {
@@ -305,26 +220,24 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
   // Set capture time to the NTP time, which is the estimated capture time
   // converted to the local clock.
   if (incoming_frame.ntp_time_ms() > 0) {
-    const base::TimeTicks capture_time =
+    video_frame->metadata().capture_begin_time =
         base::TimeTicks() + base::TimeDelta::FromMilliseconds(
                                 incoming_frame.ntp_time_ms() + ntp_offset_);
-    video_frame->metadata().capture_begin_time = capture_time;
   }
 
   // Set receive time to arrival of last packet.
   if (!incoming_frame.packet_infos().empty()) {
-    int64_t last_packet_arrival_ms =
+    webrtc::Timestamp last_packet_arrival =
         std::max_element(
             incoming_frame.packet_infos().cbegin(),
             incoming_frame.packet_infos().cend(),
             [](const webrtc::RtpPacketInfo& a, const webrtc::RtpPacketInfo& b) {
-              return a.receive_time_ms() < b.receive_time_ms();
+              return a.receive_time() < b.receive_time();
             })
-            ->receive_time_ms();
-    const base::TimeTicks receive_time =
+            ->receive_time();
+    video_frame->metadata().receive_time =
         base::TimeTicks() +
-        base::TimeDelta::FromMilliseconds(last_packet_arrival_ms);
-    video_frame->metadata().receive_time = receive_time;
+        base::TimeDelta::FromMicroseconds(last_packet_arrival.us());
   }
 
   // Use our computed render time as estimated capture time. If timestamp_us()
@@ -377,8 +290,10 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::
 }
 
 MediaStreamRemoteVideoSource::MediaStreamRemoteVideoSource(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     std::unique_ptr<TrackObserver> observer)
-    : observer_(std::move(observer)) {
+    : MediaStreamVideoSource(std::move(task_runner)),
+      observer_(std::move(observer)) {
   // The callback will be automatically cleared when 'observer_' goes out of
   // scope and no further callbacks will occur.
   observer_->SetCallback(WTF::BindRepeating(

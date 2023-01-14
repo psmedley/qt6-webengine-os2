@@ -7,8 +7,8 @@
 import boot_data
 import common
 import emu_target
+import hashlib
 import logging
-import md5
 import os
 import platform
 import qemu_image
@@ -40,19 +40,17 @@ def GetTargetType():
 class QemuTarget(emu_target.EmuTarget):
   EMULATOR_NAME = 'qemu'
 
-  def __init__(self,
-               out_dir,
-               target_cpu,
-               system_log_file,
-               cpu_cores,
-               require_kvm,
-               ram_size_mb,
-               fuchsia_out_dir=None):
-    super(QemuTarget, self).__init__(out_dir, target_cpu, system_log_file,
-                                     fuchsia_out_dir)
+  def __init__(self, out_dir, target_cpu, system_log_file, cpu_cores,
+               require_kvm, ram_size_mb):
+    super(QemuTarget, self).__init__(out_dir, target_cpu, system_log_file)
     self._cpu_cores=cpu_cores
     self._require_kvm=require_kvm
     self._ram_size_mb=ram_size_mb
+
+  @staticmethod
+  def CreateFromArgs(args):
+    return QemuTarget(args.out_dir, args.target_cpu, args.system_log_file,
+                      args.cpu_cores, args.require_kvm, args.ram_size_mb)
 
   def _IsKvmEnabled(self):
     kvm_supported = sys.platform.startswith('linux') and \
@@ -189,7 +187,7 @@ class QemuTarget(emu_target.EmuTarget):
     return qemu_command
 
 def _ComputeFileHash(filename):
-  hasher = md5.new()
+  hasher = hashlib.md5()
   with open(filename, 'rb') as f:
     buf = f.read(4096)
     while buf:

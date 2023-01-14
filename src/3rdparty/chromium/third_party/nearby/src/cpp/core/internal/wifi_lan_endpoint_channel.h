@@ -17,7 +17,6 @@
 
 #include "core/internal/base_endpoint_channel.h"
 #include "platform/public/wifi_lan.h"
-#include "proto/connections_enums.pb.h"
 
 namespace location {
 namespace nearby {
@@ -26,8 +25,7 @@ namespace connections {
 class WifiLanEndpointChannel final : public BaseEndpointChannel {
  public:
   // Creates both outgoing and incoming WifiLan channels.
-  WifiLanEndpointChannel(const std::string& channel_name,
-                         WifiLanSocket socket);
+  WifiLanEndpointChannel(const std::string& channel_name, WifiLanSocket socket);
 
   proto::connections::Medium GetMedium() const override;
 

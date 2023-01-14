@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_RANGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_RANGE_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/abstract_range.h"
 #include "third_party/blink/renderer/core/dom/range_boundary_point.h"
@@ -65,7 +66,7 @@ class CORE_EXPORT Range final : public AbstractRange {
 
   void Dispose();
 
-  Document& OwnerDocument() const {
+  Document& OwnerDocument() const override {
     DCHECK(owner_document_);
     return *owner_document_.Get();
   }
@@ -171,6 +172,7 @@ class CORE_EXPORT Range final : public AbstractRange {
 
   static Node* CheckNodeWOffset(Node*, unsigned offset, ExceptionState&);
 
+  bool IsStaticRange() const override { return false; }
   void Trace(Visitor*) const override;
 
  private:
@@ -204,6 +206,7 @@ class CORE_EXPORT Range final : public AbstractRange {
                                                 Node* common_root,
                                                 ExceptionState&);
   void UpdateSelectionIfAddedToSelection();
+  void ScheduleVisualUpdateIfInRegisteredHighlight();
   void RemoveFromSelectionIfInDifferentRoot(Document& old_document);
 
   Member<Document> owner_document_;  // Cannot be null.

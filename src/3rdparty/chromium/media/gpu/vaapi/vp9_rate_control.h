@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/optional.h"
 
 namespace libvpx {
 struct VP9FrameParamsQpRTC;

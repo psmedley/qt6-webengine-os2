@@ -13,11 +13,8 @@
 #include "components/client_hints/common/client_hints.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
-#include "components/policy/core/common/policy_pref_names.h"
-#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/content_features.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 
 namespace client_hints {
@@ -26,13 +23,11 @@ ClientHints::ClientHints(
     content::BrowserContext* context,
     network::NetworkQualityTracker* network_quality_tracker,
     HostContentSettingsMap* settings_map,
-    const blink::UserAgentMetadata& user_agent_metadata,
-    PrefService* pref_service)
+    const blink::UserAgentMetadata& user_agent_metadata)
     : context_(context),
       network_quality_tracker_(network_quality_tracker),
       settings_map_(settings_map),
-      user_agent_metadata_(user_agent_metadata),
-      pref_service_(pref_service) {
+      user_agent_metadata_(user_agent_metadata) {
   DCHECK(context_);
   DCHECK(network_quality_tracker_);
   DCHECK(settings_map_);
@@ -46,31 +41,20 @@ network::NetworkQualityTracker* ClientHints::GetNetworkQualityTracker() {
 
 void ClientHints::GetAllowedClientHintsFromSource(
     const GURL& url,
-    blink::WebEnabledClientHints* client_hints) {
+    blink::EnabledClientHints* client_hints) {
   ContentSettingsForOneType client_hints_rules;
   settings_map_->GetSettingsForOneType(ContentSettingsType::CLIENT_HINTS,
                                        &client_hints_rules);
   client_hints::GetAllowedClientHintsFromSource(url, client_hints_rules,
                                                 client_hints);
+  for (auto hint : additional_hints_)
+    client_hints->SetIsEnabled(hint, true);
 }
 
 bool ClientHints::IsJavaScriptAllowed(const GURL& url) {
   return settings_map_->GetContentSetting(url, url,
                                           ContentSettingsType::JAVASCRIPT) !=
          CONTENT_SETTING_BLOCK;
-}
-
-bool ClientHints::UserAgentClientHintEnabled() {
-  // TODO(crbug.com/1097591): This extra path check is only here because the
-  // pref is not being registered in //weblayer.
-  bool pref_enabled = true;
-  if (pref_service_->HasPrefPath(
-          policy::policy_prefs::kUserAgentClientHintsEnabled)) {
-    pref_enabled = pref_service_->GetBoolean(
-        policy::policy_prefs::kUserAgentClientHintsEnabled);
-  }
-  return pref_enabled &&
-         base::FeatureList::IsEnabled(features::kUserAgentClientHint);
 }
 
 blink::UserAgentMetadata ClientHints::GetUserAgentMetadata() {
@@ -147,6 +131,15 @@ void ClientHints::PersistClientHints(
       100);
 
   UMA_HISTOGRAM_COUNTS_100("ClientHints.UpdateSize", client_hints.size());
+}
+
+void ClientHints::SetAdditionalClientHints(
+    const std::vector<network::mojom::WebClientHintsType>& hints) {
+  additional_hints_ = hints;
+}
+
+void ClientHints::ClearAdditionalClientHints() {
+  additional_hints_.clear();
 }
 
 }  // namespace client_hints

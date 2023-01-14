@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/webui/chromeos/system_web_dialog_delegate.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"  // nogncheck
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 
 namespace chromeos {
@@ -22,7 +23,8 @@ class InternetDetailDialog : public SystemWebDialogDelegate {
 
   // Shows an internet details dialog for |network_id|. If no NetworkState
   // exists for |network_id|, does nothing.
-  static void ShowDialog(const std::string& network_id);
+  static void ShowDialog(const std::string& network_id,
+                         gfx::NativeWindow parent = nullptr);
 
  protected:
   explicit InternetDetailDialog(const NetworkState& network);
@@ -63,5 +65,11 @@ class InternetDetailDialogUI : public ui::MojoWebDialogUI {
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::InternetDetailDialog;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_INTERNET_DETAIL_DIALOG_H_

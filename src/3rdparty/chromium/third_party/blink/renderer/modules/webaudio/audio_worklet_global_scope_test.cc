@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/messaging/message_channel.h"
@@ -91,10 +92,10 @@ class AudioWorkletGlobalScopeTest : public PageTestBase,
             mojom::blink::V8CacheOptions::kDefault,
             MakeGarbageCollected<WorkletModuleResponsesMap>(),
             mojo::NullRemote() /* browser_interface_broker */,
-            BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
+            BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
             window->GetAgentClusterID(), ukm::kInvalidSourceId,
             window->GetExecutionContextToken()),
-        base::nullopt, std::make_unique<WorkerDevToolsParams>());
+        absl::nullopt, std::make_unique<WorkerDevToolsParams>());
     return thread;
   }
 
@@ -151,8 +152,8 @@ class AudioWorkletGlobalScopeTest : public PageTestBase,
         global_scope->ScriptController()->GetScriptState();
     EXPECT_TRUE(script_state);
     KURL js_url("https://example.com/worklet.js");
-    v8::Local<v8::Module> module = ModuleTestBase::CompileModule(
-        script_state->GetIsolate(), source_code, js_url);
+    v8::Local<v8::Module> module =
+        ModuleTestBase::CompileModule(script_state, source_code, js_url);
     EXPECT_FALSE(module.IsEmpty());
     ScriptValue exception =
         ModuleRecord::Instantiate(script_state, module, js_url);
@@ -283,6 +284,10 @@ class AudioWorkletGlobalScopeTest : public PageTestBase,
         global_scope->ScriptController()->GetScriptState();
 
     ScriptState::Scope scope(script_state);
+    v8::Isolate* isolate = script_state->GetIsolate();
+    EXPECT_TRUE(isolate);
+    v8::MicrotasksScope microtasks_scope(
+        isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
 
     String source_code =
         R"JS(

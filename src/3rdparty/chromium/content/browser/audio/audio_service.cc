@@ -7,8 +7,6 @@
 #include "base/command_line.h"
 #include "base/deferred_sequenced_task_runner.h"
 #include "base/metrics/field_trial_params.h"
-#include "base/no_destructor.h"
-#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequence_local_storage_slot.h"
 #include "base/time/time.h"
@@ -28,37 +26,38 @@
 #include "services/audio/public/cpp/audio_system_to_service_adapter.h"
 #include "services/audio/service.h"
 #include "services/audio/service_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
 namespace {
 
-base::Optional<base::TimeDelta> GetFieldTrialIdleTimeout() {
+absl::optional<base::TimeDelta> GetFieldTrialIdleTimeout() {
   std::string timeout_str =
       base::GetFieldTrialParamValue("AudioService", "teardown_timeout_s");
   int timeout_s = 0;
   if (!base::StringToInt(timeout_str, &timeout_s))
-    return base::nullopt;
+    return absl::nullopt;
   return base::TimeDelta::FromSeconds(timeout_s);
 }
 
-base::Optional<base::TimeDelta> GetCommandLineIdleTimeout() {
+absl::optional<base::TimeDelta> GetCommandLineIdleTimeout() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   std::string timeout_str =
       command_line.GetSwitchValueASCII(switches::kAudioServiceQuitTimeoutMs);
   int timeout_ms = 0;
   if (!base::StringToInt(timeout_str, &timeout_ms))
-    return base::nullopt;
+    return absl::nullopt;
   return base::TimeDelta::FromMilliseconds(timeout_ms);
 }
 
-base::Optional<base::TimeDelta> GetAudioServiceProcessIdleTimeout() {
-  base::Optional<base::TimeDelta> timeout = GetCommandLineIdleTimeout();
+absl::optional<base::TimeDelta> GetAudioServiceProcessIdleTimeout() {
+  absl::optional<base::TimeDelta> timeout = GetCommandLineIdleTimeout();
   if (!timeout)
     timeout = GetFieldTrialIdleTimeout();
   if (timeout && *timeout < base::TimeDelta())
-    return base::nullopt;
+    return absl::nullopt;
   return timeout;
 }
 
@@ -82,7 +81,7 @@ void BindSystemInfoFromAnySequence(
 }
 
 void BindStreamFactoryFromAnySequence(
-    mojo::PendingReceiver<audio::mojom::StreamFactory> receiver) {
+    mojo::PendingReceiver<media::mojom::AudioStreamFactory> receiver) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,
@@ -109,10 +108,10 @@ void LaunchAudioServiceInProcess(
       base::BindOnce(
           [](media::AudioManager* audio_manager,
              mojo::PendingReceiver<audio::mojom::AudioService> receiver) {
-            static base::NoDestructor<
-                base::SequenceLocalStorageSlot<std::unique_ptr<audio::Service>>>
+            static base::SequenceLocalStorageSlot<
+                std::unique_ptr<audio::Service>>
                 service;
-            service->GetOrCreateValue() = audio::CreateEmbeddedService(
+            service.GetOrCreateValue() = audio::CreateEmbeddedService(
                 audio_manager, std::move(receiver));
           },
           BrowserMainLoop::GetAudioManager(), std::move(receiver)));
@@ -162,10 +161,10 @@ audio::mojom::AudioService& GetAudioService() {
   // any sequence, but to limit the lifetime of this Remote to the lifetime of
   // UI-thread sequence. This is to support re-creation after task environment
   // shutdown and reinitialization e.g. between unit tests.
-  static base::NoDestructor<
-      base::SequenceLocalStorageSlot<mojo::Remote<audio::mojom::AudioService>>>
+  static base::SequenceLocalStorageSlot<
+      mojo::Remote<audio::mojom::AudioService>>
       remote_slot;
-  auto& remote = remote_slot->GetOrCreateValue();
+  auto& remote = remote_slot.GetOrCreateValue();
   if (!remote)
     LaunchAudioService(&remote);
   return *remote.get();

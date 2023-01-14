@@ -19,6 +19,7 @@
 #include "net/http/http_request_headers.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "third_party/blink/public/common/features.h"
 
 namespace content {
@@ -31,7 +32,6 @@ constexpr char kSignedExchangeEnabledAcceptHeaderForPrefetch[] =
 }  // namespace
 
 PrefetchURLLoader::PrefetchURLLoader(
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     int frame_tree_node_id,
@@ -78,13 +78,13 @@ PrefetchURLLoader::PrefetchURLLoader(
       prefetched_signed_exchange_cache_adapter_ =
           std::make_unique<PrefetchedSignedExchangeCacheAdapter>(
               std::move(prefetched_signed_exchange_cache),
-              BrowserContext::GetBlobStorageContext(browser_context),
-              resource_request.url, this);
+              browser_context->GetBlobStorageContext(), resource_request.url,
+              this);
     }
   }
 
   network_loader_factory_->CreateLoaderAndStart(
-      loader_.BindNewPipeAndPassReceiver(), routing_id, request_id, options,
+      loader_.BindNewPipeAndPassReceiver(), request_id, options,
       resource_request_, client_receiver_.BindNewPipeAndPassRemote(),
       traffic_annotation);
   client_receiver_.set_disconnect_handler(base::BindOnce(
@@ -97,7 +97,7 @@ void PrefetchURLLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   DCHECK(modified_headers.IsEmpty())
       << "Redirect with modified headers was not supported yet. "
          "crbug.com/845683";
@@ -114,7 +114,7 @@ void PrefetchURLLoader::FollowRedirect(
   loader_->FollowRedirect(
       removed_headers, net::HttpRequestHeaders() /* modified_headers */,
       net::HttpRequestHeaders() /* modified_cors_exempt_headers */,
-      base::nullopt);
+      absl::nullopt);
 }
 
 void PrefetchURLLoader::SetPriority(net::RequestPriority priority,
@@ -135,6 +135,11 @@ void PrefetchURLLoader::ResumeReadingBodyFromNet() {
   // detached (for SignedExchanges), see OnReceiveResponse.
   if (loader_)
     loader_->ResumeReadingBodyFromNet();
+}
+
+void PrefetchURLLoader::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  forwarding_client_->OnReceiveEarlyHints(std::move(early_hints));
 }
 
 void PrefetchURLLoader::OnReceiveResponse(

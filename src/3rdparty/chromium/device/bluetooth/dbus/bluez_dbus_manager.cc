@@ -24,6 +24,8 @@
 #include "dbus/object_proxy.h"
 #include "device/base/features.h"
 #include "device/bluetooth/dbus/bluetooth_adapter_client.h"
+#include "device/bluetooth/dbus/bluetooth_admin_policy_client.h"
+#include "device/bluetooth/dbus/bluetooth_advertisement_monitor_manager_client.h"
 #include "device/bluetooth/dbus/bluetooth_agent_manager_client.h"
 #include "device/bluetooth/dbus/bluetooth_battery_client.h"
 #include "device/bluetooth/dbus/bluetooth_debug_manager_client.h"
@@ -58,7 +60,8 @@ BluezDBusManager::BluezDBusManager(dbus::Bus* bus,
 #endif
 
   if (!should_check_object_manager || use_dbus_fakes) {
-    client_bundle_.reset(new BluetoothDBusClientBundle(use_dbus_fakes));
+    client_bundle_ =
+        std::make_unique<BluetoothDBusClientBundle>(use_dbus_fakes);
     InitializeClients();
     object_manager_supported_ = true;
     object_manager_support_known_ = true;
@@ -98,6 +101,18 @@ void BluezDBusManager::CallWhenObjectManagerSupportIsKnown(
 BluetoothAdapterClient* bluez::BluezDBusManager::GetBluetoothAdapterClient() {
   DCHECK(object_manager_support_known_);
   return client_bundle_->bluetooth_adapter_client();
+}
+
+BluetoothAdminPolicyClient*
+bluez::BluezDBusManager::GetBluetoothAdminPolicyClient() {
+  DCHECK(object_manager_support_known_);
+  return client_bundle_->bluetooth_admin_policy_client();
+}
+
+BluetoothAdvertisementMonitorManagerClient*
+bluez::BluezDBusManager::GetBluetoothAdvertisementMonitorManagerClient() {
+  DCHECK(object_manager_support_known_);
+  return client_bundle_->bluetooth_advertisement_monitor_manager_client();
 }
 
 BluetoothLEAdvertisingManagerClient*
@@ -177,7 +192,8 @@ void BluezDBusManager::OnObjectManagerSupported(dbus::Response* response) {
   DVLOG(1) << "Bluetooth supported. Initializing clients.";
   object_manager_supported_ = true;
 
-  client_bundle_.reset(new BluetoothDBusClientBundle(false /* use_fakes */));
+  client_bundle_ =
+      std::make_unique<BluetoothDBusClientBundle>(false /* use_fakes */);
   InitializeClients();
 
   object_manager_support_known_ = true;
@@ -202,6 +218,14 @@ void BluezDBusManager::InitializeClients() {
       bluez_object_manager::kBluezObjectManagerServiceName;
   client_bundle_->bluetooth_adapter_client()->Init(GetSystemBus(),
                                                    bluetooth_service_name);
+  client_bundle_->bluetooth_admin_policy_client()->Init(GetSystemBus(),
+                                                        bluetooth_service_name);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (chromeos::features::IsBluetoothAdvertisementMonitoringEnabled()) {
+    client_bundle_->bluetooth_advertisement_monitor_manager_client()->Init(
+        GetSystemBus(), bluetooth_service_name);
+  }
+#endif
   client_bundle_->bluetooth_agent_manager_client()->Init(
       GetSystemBus(), bluetooth_service_name);
   client_bundle_->bluetooth_device_client()->Init(GetSystemBus(),
@@ -220,16 +244,10 @@ void BluezDBusManager::InitializeClients() {
       GetSystemBus(), bluetooth_service_name);
   client_bundle_->bluetooth_profile_manager_client()->Init(
       GetSystemBus(), bluetooth_service_name);
-
-  // TODO(b/145163508): update service name after migrating BT debug to bluez
   client_bundle_->bluetooth_debug_manager_client()->Init(
-      GetSystemBus(),
-      bluetooth_object_manager::kBluetoothObjectManagerServiceName);
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+      GetSystemBus(), bluetooth_service_name);
   client_bundle_->bluetooth_battery_client()->Init(GetSystemBus(),
                                                    bluetooth_service_name);
-#endif
 
   if (!alternate_bus_)
     return;
@@ -333,6 +351,19 @@ BluezDBusManagerSetter::~BluezDBusManagerSetter() = default;
 void BluezDBusManagerSetter::SetBluetoothAdapterClient(
     std::unique_ptr<BluetoothAdapterClient> client) {
   bluez::BluezDBusManager::Get()->client_bundle_->bluetooth_adapter_client_ =
+      std::move(client);
+}
+
+void BluezDBusManagerSetter::SetBluetoothAdminPolicyClient(
+    std::unique_ptr<BluetoothAdminPolicyClient> client) {
+  bluez::BluezDBusManager::Get()
+      ->client_bundle_->bluetooth_admin_policy_client_ = std::move(client);
+}
+
+void BluezDBusManagerSetter::SetBluetoothAdvertisementMonitorManagerClient(
+    std::unique_ptr<BluetoothAdvertisementMonitorManagerClient> client) {
+  bluez::BluezDBusManager::Get()
+      ->client_bundle_->bluetooth_advertisement_monitor_manager_client_ =
       std::move(client);
 }
 

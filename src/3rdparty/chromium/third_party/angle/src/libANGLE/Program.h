@@ -187,6 +187,8 @@ class ProgramBindings final : angle::NonCopyable
     const_iterator begin() const;
     const_iterator end() const;
 
+    std::map<std::string, GLuint> getStableIterationMap() const;
+
   private:
     angle::HashMap<std::string, GLuint> mBindings;
 };
@@ -206,6 +208,8 @@ class ProgramAliasedBindings final : angle::NonCopyable
     using const_iterator = angle::HashMap<std::string, ProgramBinding>::const_iterator;
     const_iterator begin() const;
     const_iterator end() const;
+
+    std::map<std::string, ProgramBinding> getStableIterationMap() const;
 
   private:
     angle::HashMap<std::string, ProgramBinding> mBindings;
@@ -337,20 +341,11 @@ class ProgramState final : angle::NonCopyable
     bool hasEarlyFragmentTestsOptimization() const { return mEarlyFramentTestsOptimization; }
     rx::SpecConstUsageBits getSpecConstUsageBits() const { return mSpecConstUsageBits; }
 
-    bool isShaderMarkedForDetach(gl::ShaderType shaderType) const
-    {
-        return mAttachedShadersMarkedForDetach[shaderType];
-    }
-
     // A Program can only either be graphics or compute, but never both, so it
     // can answer isCompute() based on which shaders it has.
     bool isCompute() const { return mExecutable->hasLinkedShaderStage(ShaderType::Compute); }
 
     const std::string &getLabel() const { return mLabel; }
-    const ShaderMap<bool> &getAttachedShadersMarkedForDetach() const
-    {
-        return mAttachedShadersMarkedForDetach;
-    }
 
     uint32_t getLocationsUsedForXfbExtension() const { return mLocationsUsedForXfbExtension; }
 
@@ -388,7 +383,6 @@ class ProgramState final : angle::NonCopyable
     sh::WorkGroupSize mComputeShaderLocalSize;
 
     ShaderMap<Shader *> mAttachedShaders;
-    ShaderMap<bool> mAttachedShadersMarkedForDetach;
 
     uint32_t mLocationsUsedForXfbExtension;
     std::vector<std::string> mTransformFeedbackVaryingNames;
@@ -480,10 +474,11 @@ class Program final : public LabeledObject, public angle::Subject, public HasAtt
         return mProgram;
     }
 
-    void attachShader(const Context *context, Shader *shader);
+    void attachShader(Shader *shader);
     void detachShader(const Context *context, Shader *shader);
     int getAttachedShadersCount() const;
 
+    // HasAttachedShaders implementation
     Shader *getAttachedShader(ShaderType shaderType) const override;
 
     void bindAttributeLocation(GLuint index, const char *name);
@@ -500,6 +495,7 @@ class Program final : public LabeledObject, public angle::Subject, public HasAtt
 
     // Peek whether there is any running linking tasks.
     bool isLinking() const;
+    bool hasLinkingState() const { return mLinkingState != nullptr; }
 
     bool isLinked() const
     {
@@ -723,22 +719,7 @@ class Program final : public LabeledObject, public angle::Subject, public HasAtt
     bool isFlaggedForDeletion() const;
 
     void validate(const Caps &caps);
-    bool validateSamplers(InfoLog *infoLog, const Caps &caps)
-    {
-        // Skip cache if we're using an infolog, so we get the full error.
-        // Also skip the cache if the sample mapping has changed, or if we haven't ever validated.
-        if (infoLog == nullptr && mCachedValidateSamplersResult.valid())
-        {
-            return mCachedValidateSamplersResult.value();
-        }
-
-        return validateSamplersImpl(infoLog, caps);
-    }
-
     bool isValidated() const;
-
-    Optional<bool> getCachedValidateSamplersResult() { return mCachedValidateSamplersResult; }
-    void setCachedValidateSamplersResult(bool result) { mCachedValidateSamplersResult = result; }
 
     const std::vector<ImageBinding> &getImageBindings() const
     {
@@ -922,8 +903,6 @@ class Program final : public LabeledObject, public angle::Subject, public HasAtt
     GLuint getSamplerUniformBinding(const VariableLocation &uniformLocation) const;
     GLuint getImageUniformBinding(const VariableLocation &uniformLocation) const;
 
-    bool validateSamplersImpl(InfoLog *infoLog, const Caps &caps);
-
     // Block until linking is finished and resolve it.
     void resolveLinkImpl(const gl::Context *context);
 
@@ -949,9 +928,6 @@ class Program final : public LabeledObject, public angle::Subject, public HasAtt
 
     ShaderProgramManager *mResourceManager;
     const ShaderProgramID mHandle;
-
-    // Cache for sampler validation
-    Optional<bool> mCachedValidateSamplersResult;
 
     DirtyBits mDirtyBits;
 };

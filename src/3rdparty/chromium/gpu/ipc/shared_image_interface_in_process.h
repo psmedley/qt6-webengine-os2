@@ -71,6 +71,7 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SharedImageInterfaceInProcess
   // the GPU channel is lost).
   Mailbox CreateSharedImage(gfx::GpuMemoryBuffer* gpu_memory_buffer,
                             GpuMemoryBufferManager* gpu_memory_buffer_manager,
+                            gfx::BufferPlane plane,
                             const gfx::ColorSpace& color_space,
                             GrSurfaceOrigin surface_origin,
                             SkAlphaType alpha_type,
@@ -161,7 +162,7 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SharedImageInterfaceInProcess
 
   // Only called on the gpu thread.
   bool MakeContextCurrent(bool needs_gl = false);
-  void LazyCreateSharedImageFactory();
+  bool LazyCreateSharedImageFactory();
   void CreateSharedImageOnGpuThread(const Mailbox& mailbox,
                                     viz::ResourceFormat format,
                                     gpu::SurfaceHandle surface_handle,
@@ -184,6 +185,7 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SharedImageInterfaceInProcess
   void CreateGMBSharedImageOnGpuThread(const Mailbox& mailbox,
                                        gfx::GpuMemoryBufferHandle handle,
                                        gfx::BufferFormat format,
+                                       gfx::BufferPlane plane,
                                        const gfx::Size& size,
                                        const gfx::ColorSpace& color_space,
                                        GrSurfaceOrigin surface_origin,
@@ -227,7 +229,6 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SharedImageInterfaceInProcess
   SharedImageManager* shared_image_manager_;
 
   // Accessed on GPU thread.
-  // TODO(weiliangc): Check whether can be removed when !UsesSync().
   MailboxManager* mailbox_manager_;
   scoped_refptr<SharedContextState> context_state_;
   // Created and only used by this SharedImageInterface.

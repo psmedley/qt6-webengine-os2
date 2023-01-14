@@ -19,14 +19,17 @@ CHROMIUM_LICENSE = (
 )
 GENERATED_FILE_MESSAGE = """// GENERATED FROM THE API DEFINITION IN
 //   %s
+// by tools/json_schema_compiler.
 // DO NOT EDIT.
 """
 GENERATED_BUNDLE_FILE_MESSAGE = """// GENERATED FROM THE API DEFINITIONS IN
 //   %s
+// by tools/json_schema_compiler.
 // DO NOT EDIT.
 """
 GENERATED_FEATURE_MESSAGE = """// GENERATED FROM THE FEATURE DEFINITIONS IN
 //   %s
+// by tools/json_schema_compiler.
 // DO NOT EDIT.
 """
 
@@ -40,32 +43,39 @@ def Classname(s):
   """
   if s == '':
     return 'EMPTY_STRING'
+
   if IsUnixName(s):
-    return CamelCase(s)
-  return '_'.join([x[0].upper() + x[1:] for x in re.split(r'\W', s)])
+    result = CamelCase(s)
+  else:
+    result = '_'.join([x[0].upper() + x[1:] for x in re.split(r'\W', s)])
 
+  # Ensure the class name follows c++ identifier rules by prepending an
+  # underscore if needed.
+  assert result
+  if result[0].isdigit():
+    result = '_' + result
+  return result
 
-def GetAsFundamentalValue(type_, src, dst):
+def GetAsFundamentalValue(type_, src):
   """Returns the C++ code for retrieving a fundamental type from a
   Value into a variable.
 
   src: Value*
-  dst: Property*
   """
   if type_.property_type == PropertyType.BOOLEAN:
-    s = '%s->GetAsBoolean(%s)'
+    s = '%s->GetIfBool()'
   elif type_.property_type == PropertyType.DOUBLE:
-    s = '%s->GetAsDouble(%s)'
+    s = '%s->GetIfDouble()'
   elif type_.property_type == PropertyType.INTEGER:
-    s = '%s->GetAsInteger(%s)'
+    s = '%s->GetIfInt()'
   elif (type_.property_type == PropertyType.STRING or
       (type_.property_type == PropertyType.FUNCTION and
            type_.is_serializable_function)):
-    s = '%s->GetAsString(%s)'
+    s = '%s->GetIfString()'
   else:
     raise ValueError('Type %s is not a fundamental value' % type_.name)
 
-  return s % (src, dst)
+  return s % src
 
 
 def GetValueType(type_):

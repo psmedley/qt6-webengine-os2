@@ -53,7 +53,7 @@ bool GpuInProcessThreadService::ShouldCreateMemoryTracker() const {
 
 std::unique_ptr<SingleTaskSequence>
 GpuInProcessThreadService::CreateSequence() {
-  return std::make_unique<SchedulerSequence>(scheduler_);
+  return std::make_unique<SchedulerSequence>(scheduler_, task_runner_);
 }
 
 void GpuInProcessThreadService::ScheduleOutOfOrderTask(base::OnceClosure task) {

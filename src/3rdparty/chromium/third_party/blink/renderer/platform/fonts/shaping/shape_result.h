@@ -32,7 +32,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_SHAPING_SHAPE_RESULT_H_
 
 #include <memory>
+
 #include "base/containers/span.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/fonts/canvas_rotation_in_vertical.h"
 #include "third_party/blink/renderer/platform/fonts/glyph.h"
 #include "third_party/blink/renderer/platform/fonts/opentype/open_type_math_stretch_data.h"
@@ -45,7 +47,7 @@
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_uchar.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 struct hb_buffer_t;
@@ -90,7 +92,7 @@ enum BreakGlyphsOption {
   BreakGlyphs,
 };
 
-// std::function is forbidden in Chromium and base::Callback is way too
+// std::function is forbidden in Chromium and base::RepeatingCallback is way too
 // expensive so we resort to a good old function pointer instead.
 typedef void (*GlyphCallback)(void* context,
                               unsigned character_index,

@@ -22,7 +22,7 @@
 
 #include "SPIRV/GlslangToSpv.h"
 #include "libshaderc_util/format.h"
-#include "libshaderc_util/io.h"
+#include "libshaderc_util/io_shaderc.h"
 #include "libshaderc_util/message.h"
 #include "libshaderc_util/resources.h"
 #include "libshaderc_util/shader_stage.h"
@@ -80,6 +80,8 @@ EShMessages GetMessageRules(shaderc_util::Compiler::TargetEnv env,
   }
   switch (env) {
     case Compiler::TargetEnv::OpenGLCompat:
+      // The compiler will have already errored out before now.
+      // But we need to handle this enum.
       break;
     case Compiler::TargetEnv::OpenGL:
       result = static_cast<EShMessages>(result | EShMsgSpvRules);
@@ -264,6 +266,9 @@ std::tuple<bool, std::vector<uint32_t>, size_t> Compiler::Compile(
   shader.setPreamble(preamble.c_str());
   shader.setEntryPoint(entry_point_name);
   shader.setAutoMapBindings(auto_bind_uniforms_);
+  if (auto_combined_image_sampler_) {
+    shader.setTextureSamplerTransformMode(EShTexSampTransUpgradeTextureRemoveSampler);
+  }
   shader.setAutoMapLocations(auto_map_locations_);
   const auto& bases = auto_binding_base_[static_cast<int>(used_shader_stage)];
   shader.setShiftImageBinding(bases[static_cast<int>(UniformKind::Image)]);
@@ -721,7 +726,9 @@ GlslangClientInfo GetGlslangClientInfo(
              << int(env);
       }
       break;
-    case Compiler::TargetEnv::OpenGLCompat:  // TODO(dneto): remove this
+    case Compiler::TargetEnv::OpenGLCompat:
+      errs << "error: OpenGL compatibility profile is not supported";
+      break;
     case Compiler::TargetEnv::OpenGL:
       result.client = glslang::EShClientOpenGL;
       if (env_version == Compiler::TargetEnvVersion::Default ||

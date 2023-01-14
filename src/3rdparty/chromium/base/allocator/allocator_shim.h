@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #include "base/allocator/buildflags.h"
-#include "base/allocator/partition_allocator/partition_alloc_features.h"
+#include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/base_export.h"
 #include "build/build_config.h"
 
@@ -69,10 +69,8 @@ struct AllocatorDispatch {
   using FreeFn = void(const AllocatorDispatch* self,
                       void* address,
                       void* context);
-  // Returns the best available estimate for the actual amount of memory
-  // consumed by the allocation |address|. If possible, this should include
-  // heap overhead or at least a decent estimate of the full cost of the
-  // allocation. If no good estimate is possible, returns zero.
+  // Returns the allocated size of user data (not including heap overhead).
+  // Can be larger than the requested size.
   using GetSizeEstimateFn = size_t(const AllocatorDispatch* self,
                                    void* address,
                                    void* context);
@@ -156,6 +154,9 @@ BASE_EXPORT void ConfigurePartitionAlloc();
 #endif  // defined(OS_WIN)
 
 #if defined(OS_APPLE)
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+void InitializeDefaultAllocatorPartitionRoot();
+#endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 // On macOS, the allocator shim needs to be turned on during runtime.
 BASE_EXPORT void InitializeAllocatorShim();
 #endif  // defined(OS_APPLE)
@@ -168,8 +169,8 @@ BASE_EXPORT void ReconfigurePartitionAllocLazyCommit();
 BASE_EXPORT void ConfigurePartitionRefCountSupport(bool enable_ref_count);
 #endif
 
-#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && PA_ALLOW_PCSCAN
-BASE_EXPORT void EnablePCScan();
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && defined(PA_ALLOW_PCSCAN)
+BASE_EXPORT void EnablePCScan(bool dcscan);
 #endif
 
 }  // namespace allocator

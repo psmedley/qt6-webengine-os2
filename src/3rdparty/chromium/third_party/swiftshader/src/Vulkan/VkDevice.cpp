@@ -18,6 +18,8 @@
 #include "VkDescriptorSetLayout.hpp"
 #include "VkFence.hpp"
 #include "VkQueue.hpp"
+#include "VkSemaphore.hpp"
+#include "VkTimelineSemaphore.hpp"
 #include "Debug/Context.hpp"
 #include "Debug/Server.hpp"
 #include "Device/Blitter.hpp"
@@ -29,9 +31,19 @@
 
 namespace {
 
-std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> now()
+using time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
+
+time_point now()
 {
 	return std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
+}
+
+const time_point getEndTimePoint(uint64_t timeout, bool &infiniteTimeout)
+{
+	const time_point start = now();
+	const uint64_t max_timeout = (LLONG_MAX - start.time_since_epoch().count());
+	infiniteTimeout = (timeout > max_timeout);
+	return start + std::chrono::nanoseconds(std::min(max_timeout, timeout));
 }
 
 }  // anonymous namespace
@@ -91,6 +103,16 @@ void Device::SamplerIndexer::remove(const SamplerState &samplerState)
 	{
 		map.erase(it);
 	}
+}
+
+const SamplerState *Device::SamplerIndexer::find(uint32_t id)
+{
+	marl::lock lock(mutex);
+
+	auto it = std::find_if(std::begin(map), std::end(map),
+	                       [&id](auto &&p) { return p.second.id == id; });
+
+	return (it != std::end(map)) ? &(it->first) : nullptr;
 }
 
 Device::Device(const VkDeviceCreateInfo *pCreateInfo, void *mem, PhysicalDevice *physicalDevice, const VkPhysicalDeviceFeatures *enabledFeatures, const std::shared_ptr<marl::Scheduler> &scheduler)
@@ -206,11 +228,8 @@ VkQueue Device::getQueue(uint32_t queueFamilyIndex, uint32_t queueIndex) const
 
 VkResult Device::waitForFences(uint32_t fenceCount, const VkFence *pFences, VkBool32 waitAll, uint64_t timeout)
 {
-	using time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
-	const time_point start = now();
-	const uint64_t max_timeout = (LLONG_MAX - start.time_since_epoch().count());
-	bool infiniteTimeout = (timeout > max_timeout);
-	const time_point end_ns = start + std::chrono::nanoseconds(std::min(max_timeout, timeout));
+	bool infiniteTimeout = false;
+	const time_point end_ns = getEndTimePoint(timeout, infiniteTimeout);
 
 	if(waitAll != VK_FALSE)  // All fences must be signaled
 	{
@@ -264,6 +283,63 @@ VkResult Device::waitForFences(uint32_t fenceCount, const VkFence *pFences, VkBo
 		{
 			return any.wait_until(end_ns) ? VK_SUCCESS : VK_TIMEOUT;
 		}
+	}
+}
+
+VkResult Device::waitForSemaphores(const VkSemaphoreWaitInfo *pWaitInfo, uint64_t timeout)
+{
+	bool infiniteTimeout = false;
+	const time_point end_ns = getEndTimePoint(timeout, infiniteTimeout);
+
+	if(pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT)
+	{
+		TimelineSemaphore any = TimelineSemaphore();
+
+		for(uint32_t i = 0; i < pWaitInfo->semaphoreCount; i++)
+		{
+			TimelineSemaphore *semaphore = DynamicCast<TimelineSemaphore>(pWaitInfo->pSemaphores[i]);
+			uint64_t waitValue = pWaitInfo->pValues[i];
+
+			if(semaphore->getCounterValue() == waitValue)
+			{
+				return VK_SUCCESS;
+			}
+
+			semaphore->addDependent(any, waitValue);
+		}
+
+		if(infiniteTimeout)
+		{
+			any.wait(1ull);
+			return VK_SUCCESS;
+		}
+		else
+		{
+			if(any.wait(1, end_ns) == VK_SUCCESS)
+			{
+				return VK_SUCCESS;
+			}
+		}
+
+		return VK_TIMEOUT;
+	}
+	else
+	{
+		ASSERT(pWaitInfo->flags == 0);
+		for(uint32_t i = 0; i < pWaitInfo->semaphoreCount; i++)
+		{
+			TimelineSemaphore *semaphore = DynamicCast<TimelineSemaphore>(pWaitInfo->pSemaphores[i]);
+			uint64_t value = pWaitInfo->pValues[i];
+			if(infiniteTimeout)
+			{
+				semaphore->wait(value);
+			}
+			else if(semaphore->wait(pWaitInfo->pValues[i], end_ns) != VK_SUCCESS)
+			{
+				return VK_TIMEOUT;
+			}
+		}
+		return VK_SUCCESS;
 	}
 }
 
@@ -327,6 +403,11 @@ uint32_t Device::indexSampler(const SamplerState &samplerState)
 void Device::removeSampler(const SamplerState &samplerState)
 {
 	samplerIndexer->remove(samplerState);
+}
+
+const SamplerState *Device::findSampler(uint32_t samplerId) const
+{
+	return samplerIndexer->find(samplerId);
 }
 
 VkResult Device::setDebugUtilsObjectName(const VkDebugUtilsObjectNameInfoEXT *pNameInfo)

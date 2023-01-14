@@ -9,22 +9,22 @@ import {assertNotReached} from 'chrome://resources/js/assert.m.js';
  *  @enum {number}
  */
 export const PrinterStatusReason = {
-  DEVICE_ERROR: 0,
-  DOOR_OPEN: 1,
-  LOW_ON_INK: 2,
-  LOW_ON_PAPER: 3,
-  NO_ERROR: 4,
-  OUT_OF_INK: 5,
-  OUT_OF_PAPER: 6,
-  OUTPUT_ALMOST_FULL: 7,
-  OUTPUT_FULL: 8,
-  PAPER_JAM: 9,
-  PAUSED: 10,
-  PRINTER_QUEUE_FULL: 11,
-  PRINTER_UNREACHABLE: 12,
-  STOPPED: 13,
-  TRAY_MISSING: 14,
-  UNKNOWN_REASON: 15,
+  UNKNOWN_REASON: 0,
+  DEVICE_ERROR: 1,
+  DOOR_OPEN: 2,
+  LOW_ON_INK: 3,
+  LOW_ON_PAPER: 4,
+  NO_ERROR: 5,
+  OUT_OF_INK: 6,
+  OUT_OF_PAPER: 7,
+  OUTPUT_ALMOST_FULL: 8,
+  OUTPUT_FULL: 9,
+  PAPER_JAM: 10,
+  PAUSED: 11,
+  PRINTER_QUEUE_FULL: 12,
+  PRINTER_UNREACHABLE: 13,
+  STOPPED: 14,
+  TRAY_MISSING: 15,
 };
 
 /**
@@ -89,34 +89,39 @@ export const ERROR_STRING_KEY_MAP = new Map([
  * responsibility is to determine which status reason is most relevant to
  * surface to the user. Any status reason with a severity of WARNING or ERROR
  * will get highest precedence since this usually means the printer is in a
- * bad state. NO_ERROR status reason is the next highest precedence so the
- * printer can be shown as available whenever possible.
+ * bad state. If there does not exist an error status reason with a high enough
+ * severity, then return NO_ERROR.
  * @param {!PrinterStatus} printerStatus
  * @return {!PrinterStatusReason} Status reason extracted from |printerStatus|.
  */
 export function getStatusReasonFromPrinterStatus(printerStatus) {
   if (!printerStatus.printerId) {
-    // TODO(crbug.com/1027400): Remove console log once bug is confirmed fix.
+    // TODO(crbug.com/1027400): Remove console.warn once bug is confirmed fix.
     console.warn('Received printer status missing printer id');
     return PrinterStatusReason.UNKNOWN_REASON;
   }
+  let statusReason = PrinterStatusReason.NO_ERROR;
+  for (const printerStatusReason of printerStatus.statusReasons) {
+    const reason = printerStatusReason.reason;
+    const severity = printerStatusReason.severity;
+    if (severity !== PrinterStatusSeverity.ERROR &&
+        severity !== PrinterStatusSeverity.WARNING) {
+      continue;
+    }
 
-  let seenNoErrorReason = false;
-  for (const statusReason of printerStatus.statusReasons) {
-    const reason = statusReason.reason;
-    const severity = statusReason.severity;
-
+    // Always prioritize an ERROR severity status, unless it's for unknown
+    // reasons.
     if (reason !== PrinterStatusReason.UNKNOWN_REASON &&
-        (severity === PrinterStatusSeverity.WARNING ||
-         severity === PrinterStatusSeverity.ERROR)) {
+        severity === PrinterStatusSeverity.ERROR) {
       return reason;
     }
 
-    seenNoErrorReason =
-        seenNoErrorReason || reason === PrinterStatusReason.NO_ERROR;
+    if (reason !== PrinterStatusReason.UNKNOWN_REASON ||
+        statusReason === PrinterStatusReason.NO_ERROR) {
+      statusReason = reason;
+    }
   }
-  return seenNoErrorReason ? PrinterStatusReason.NO_ERROR :
-                             PrinterStatusReason.UNKNOWN_REASON;
+  return statusReason;
 }
 
 /**

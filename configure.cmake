@@ -1,4 +1,3 @@
-
 if(QT_CONFIGURE_RUNNING)
     function(assertTargets)
     endfunction()
@@ -7,13 +6,16 @@ if(QT_CONFIGURE_RUNNING)
 else()
     find_package(Ninja 1.7.2)
     find_package(Gn ${QT_REPO_MODULE_VERSION} EXACT)
-    find_package(Python2 2.7.5)
+    find_program(Python3_EXECUTABLE NAMES python3 HINTS $ENV{PYTHON3_PATH})
+    if(NOT Python3_EXECUTABLE)
+        find_package(Python3 3.6)
+    endif()
     find_package(GPerf)
     find_package(BISON)
     find_package(FLEX)
     find_package(PkgConfig)
     find_package(Snappy)
-#    find_package(Nodejs 10.19)
+    find_package(Nodejs 12.0)
 endif()
 
 if(PkgConfig_FOUND)
@@ -30,7 +32,7 @@ if(PkgConfig_FOUND)
     pkg_check_modules(X11 x11)
     pkg_check_modules(XPROTO glproto)
     pkg_check_modules(GLIB glib-2.0>=2.32.0)
-    pkg_check_modules(HARFBUZZ harfbuzz>=2.4.0 harfbuzz-subset>=2.4.0)
+    pkg_check_modules(HARFBUZZ harfbuzz>=2.9.0 harfbuzz-subset>=2.9.0)
     pkg_check_modules(JPEG libjpeg IMPORTED_TARGET)
     pkg_check_modules(LIBEVENT libevent)
     pkg_check_modules(MINIZIP minizip)
@@ -48,6 +50,14 @@ if(PkgConfig_FOUND)
     pkg_check_modules(LIBPCI libpci)
 endif()
 
+if(Python3_EXECUTABLE)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import html5lib"
+        RESULT_VARIABLE html5lib_NOT_FOUND
+        OUTPUT_QUIET
+    )
+endif()
+
 #### Tests
 if(LINUX)
    check_for_ulimit()
@@ -60,11 +70,14 @@ qt_config_compile_test(re2
     CODE
 "
 #include \"re2/filtered_re2.h\"
+#include <vector>
 int main() {
     std::string s;
     re2::FilteredRE2 fre2(1);
     int id = 0;
     fre2.Add(s, {}, &id);
+    std::vector<std::string> pattern = {\"match\"};
+    fre2.Compile(&pattern);
     const RE2 &re2 = fre2.GetRE2(id);
 }"
 )
@@ -211,7 +224,7 @@ qt_feature("qtwebengine-quick-build" PRIVATE
 qt_feature("qtpdf-build" PUBLIC
     LABEL "Build Qt PDF"
     PURPOSE "Enables building the Qt Pdf modules."
-    AUTODETECT FALSE
+    CONDITION Qt6Core_VERSION VERSION_GREATER_EQUAL "6.3.0"
 )
 qt_feature("qtpdf-widgets-build" PRIVATE
     LABEL "Build QtPdfWidgets"
@@ -223,13 +236,34 @@ qt_feature("qtpdf-quick-build" PRIVATE
     PURPOSE "Enables building the QtPdfQuick module."
     CONDITION TARGET Qt::Quick AND TARGET Qt::Qml AND QT_FEATURE_qtpdf_build
 )
-qt_feature("webengine-system-ninja" PRIVATE
+
+function(qtwebengine_internal_is_file_inside_root_build_dir out_var file)
+    set(result ON)
+    if(NOT QT_CONFIGURE_RUNNING)
+        file(RELATIVE_PATH relpath "${WEBENGINE_ROOT_BUILD_DIR}" "${file}")
+        if(IS_ABSOLUTE "${relpath}" OR relpath MATCHES "^\\.\\./")
+            set(result OFF)
+        endif()
+    endif()
+    set(${out_var} ${result} PARENT_SCOPE)
+endfunction()
+
+if(Ninja_FOUND)
+    qtwebengine_internal_is_file_inside_root_build_dir(
+        Ninja_INSIDE_WEBENGINE_ROOT_BUILD_DIR "${Ninja_EXECUTABLE}")
+endif()
+qt_feature("webengine-build-ninja" PRIVATE
     LABEL "Build Ninja"
-    AUTODETECT NOT Ninja_FOUND OR Ninja_EXECUTABLE MATCHES ${WEBENGINE_ROOT_BUILD_DIR}
+    AUTODETECT NOT Ninja_FOUND OR Ninja_INSIDE_WEBENGINE_ROOT_BUILD_DIR
 )
-qt_feature("webengine-system-gn" PRIVATE
+
+if(Gn_FOUND)
+    qtwebengine_internal_is_file_inside_root_build_dir(
+        Gn_INSIDE_WEBENGINE_ROOT_BUILD_DIR "${Gn_EXECUTABLE}")
+endif()
+qt_feature("webengine-build-gn" PRIVATE
     LABEL "Build Gn"
-    AUTODETECT NOT Gn_FOUND OR Gn_EXECUTABLE MATCHES ${WEBENGINE_ROOT_BUILD_DIR}
+    AUTODETECT NOT Gn_FOUND OR Gn_INSIDE_WEBENGINE_ROOT_BUILD_DIR
 )
 # default assumed merge limit (should match the one in qt_cmdline.cmake)
 set(jumbo_merge_limit 8)
@@ -259,7 +293,7 @@ qt_feature("webengine-developer-build" PRIVATE
 )
 qt_feature("webengine-system-re2" PRIVATE
     LABEL "re2"
-    AUTODETECT UNIX AND TEST_re2
+    CONDITION UNIX AND TEST_re2
 )
 qt_feature("webengine-system-icu" PRIVATE
     LABEL "icu"
@@ -295,6 +329,12 @@ qt_feature("webengine-system-zlib" PRIVATE
     LABEL "zlib"
     CONDITION UNIX AND QT_FEATURE_system_zlib AND ZLIB_FOUND
 )
+qt_feature("webengine-qt-zlib" PRIVATE
+    LABEL "qtzlib"
+    CONDITION QT_FEATURE_static
+        AND TARGET Qt::Gui
+        AND NOT QT_FEATURE_system_zlib
+)
 qt_feature("webengine-system-minizip" PRIVATE
     LABEL "minizip"
     CONDITION UNIX AND MINIZIP_FOUND
@@ -316,17 +356,45 @@ qt_feature("webengine-system-libpng" PRIVATE
     LABEL "png"
     CONDITION UNIX AND TARGET Qt::Gui AND PNG_FOUND AND QT_FEATURE_system_png
 )
+qt_feature("webengine-qt-libpng" PRIVATE
+    LABEL "qtpng"
+    CONDITION QT_FEATURE_static
+        AND TARGET Qt::Gui
+        AND QT_FEATURE_png
+        AND NOT QT_FEATURE_system_png
+)
 qt_feature("webengine-system-libjpeg" PRIVATE
     LABEL "jpeg"
     CONDITION UNIX AND TARGET Qt::Gui AND TEST_jpeg AND QT_FEATURE_system_jpeg
+)
+qt_feature("webengine-qt-libjpeg" PRIVATE
+    LABEL "qtjpeg"
+    CONDITION QT_FEATURE_static
+        AND TARGET Qt::Gui
+        AND QT_FEATURE_jpeg
+        AND NOT QT_FEATURE_system_jpeg
 )
 qt_feature("webengine-system-harfbuzz" PRIVATE
     LABEL "harfbuzz"
     CONDITION UNIX AND TARGET Qt::Gui AND HARFBUZZ_FOUND AND QT_FEATURE_system_harfbuzz
 )
+qt_feature("webengine-qt-harfbuzz" PRIVATE
+    LABEL "qtpng"
+    CONDITION QT_FEATURE_static
+        AND TARGET Qt::Gui
+        AND QT_FEATURE_harfbuzz
+        AND NOT QT_FEATURE_system_harfbuzz
+)
 qt_feature("webengine-system-freetype" PRIVATE
     LABEL "freetype"
     CONDITION UNIX AND TARGET Qt::Gui AND TEST_freetype AND QT_FEATURE_system_freetype
+)
+qt_feature("webengine-qt-freetype" PRIVATE
+    LABEL "qtfreetype"
+    CONDITION QT_FEATURE_static
+        AND TARGET Qt::Gui
+        AND QT_FEATURE_freetype
+        AND NOT QT_FEATURE_system_freetype
 )
 qt_feature("webengine-system-libpci" PRIVATE
     LABEL "libpci"
@@ -356,18 +424,28 @@ else()
    set(WIN_ARM_64 OFF)
 endif()
 
+add_check_for_support(
+    MODULES QtWebEngine QtPdf
+    CONDITION
+        CMAKE_VERSION
+        VERSION_GREATER_EQUAL
+        ${QT_SUPPORTED_MIN_CMAKE_VERSION_FOR_BUILDING_WEBENGINE}
+    MESSAGE
+        "Build requires CMake ${QT_SUPPORTED_MIN_CMAKE_VERSION_FOR_BUILDING_WEBENGINE} or higher."
+)
+
 assertTargets(
    MODULES QtWebEngine QtPdf
    TARGETS Gui Quick Qml
 )
 add_check_for_support(
    MODULES QtWebEngine
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING) OR OS2
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR OS2
    MESSAGE "Build can be done only on Linux, Windows, OS/2 or macOS."
 )
 add_check_for_support(
    MODULES QtPdf
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR (MACOS AND NOT CMAKE_CROSSCOMPILING) OR IOS OR OS2
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS OR OS2
    MESSAGE "Build can be done only on Linux, Windows, macOS, OS/2 or iOS."
 )
 if(LINUX AND CMAKE_CROSSCOMPILING)
@@ -385,13 +463,18 @@ add_check_for_support(
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
-#   CONDITION TARGET Nodejs::Nodejs
-#   MESSAGE "node.js version 10.19 or later is required."
+   CONDITION TARGET Nodejs::Nodejs
+   MESSAGE "node.js version 12 or later is required."
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
-   CONDITION Python2_FOUND
-   MESSAGE "Python2 version 2.7.5 or later is required."
+   CONDITION Python3_EXECUTABLE
+   MESSAGE "Python version 3.6 or later is required."
+)
+add_check_for_support(
+   MODULES QtWebEngine QtPdf
+   CONDITION Python3_EXECUTABLE AND NOT html5lib_NOT_FOUND
+   MESSAGE "Python3 html5lib is missing."
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
@@ -488,8 +571,8 @@ endif()
 
 # > Qt WebEngine Build Features
 qt_configure_add_summary_section(NAME "WebEngine Repository Build Options")
-qt_configure_add_summary_entry(ARGS "webengine-system-ninja")
-qt_configure_add_summary_entry(ARGS "webengine-system-gn")
+qt_configure_add_summary_entry(ARGS "webengine-build-ninja")
+qt_configure_add_summary_entry(ARGS "webengine-build-gn")
 qt_configure_add_summary_entry(ARGS "webengine-jumbo-build")
 qt_configure_add_summary_entry(ARGS "webengine-developer-build")
 qt_configure_add_summary_section(NAME "Build QtWebEngine Modules")
@@ -524,6 +607,16 @@ if(UNIX)
     qt_configure_add_summary_entry(ARGS "webengine-system-libpci")
     qt_configure_end_summary_section()
 endif()
+
+if(QT_FEATURE_static)
+    qt_configure_add_summary_section(NAME "Qt 3rdparty libs")
+    qt_configure_add_summary_entry(ARGS "webengine-qt-freetype")
+    qt_configure_add_summary_entry(ARGS "webengine-qt-harfbuzz")
+    qt_configure_add_summary_entry(ARGS "webengine-qt-libpng")
+    qt_configure_add_summary_entry(ARGS "webengine-qt-libjpeg")
+    qt_configure_add_summary_entry(ARGS "webengine-qt-zlib")
+endif()
+
 # << Optional system libraries
 qt_configure_end_summary_section()
 # < Qt WebEngine Build Features

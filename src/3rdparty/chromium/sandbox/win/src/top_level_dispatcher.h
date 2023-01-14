@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_TOP_LEVEL_DISPATCHER_H__
-#define SANDBOX_SRC_TOP_LEVEL_DISPATCHER_H__
+#ifndef SANDBOX_WIN_SRC_TOP_LEVEL_DISPATCHER_H_
+#define SANDBOX_WIN_SRC_TOP_LEVEL_DISPATCHER_H_
 
 #include <memory>
 
@@ -43,6 +43,7 @@ class TopLevelDispatcher : public Dispatcher {
   std::unique_ptr<Dispatcher> handle_dispatcher_;
   std::unique_ptr<Dispatcher> process_mitigations_win32k_dispatcher_;
   std::unique_ptr<Dispatcher> signed_dispatcher_;
+  std::unique_ptr<Dispatcher> socket_dispatcher_;
   Dispatcher* ipc_targets_[kMaxIpcTag];
 
   DISALLOW_COPY_AND_ASSIGN(TopLevelDispatcher);
@@ -50,4 +51,4 @@ class TopLevelDispatcher : public Dispatcher {
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_TOP_LEVEL_DISPATCHER_H__
+#endif  // SANDBOX_WIN_SRC_TOP_LEVEL_DISPATCHER_H_

@@ -4,7 +4,6 @@
 
 #include "pdf/draw_utils/coordinates.h"
 
-#include <algorithm>
 #include <math.h>
 #include <algorithm>
 
@@ -13,8 +12,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_f.h"
-
-#include <algorithm>
 
 namespace chrome_pdf {
 namespace draw_utils {
@@ -86,7 +83,7 @@ PageInsetSizes GetPageInsetsForTwoUpView(
     int horizontal_separator) {
   DCHECK_LT(page_index, num_of_pages);
 
-  // Don't change |two_up_insets| if the page is on the left side and is the
+  // Don't change `two_up_insets` if the page is on the left side and is the
   // last page. In this case, the shadows on both sides should be the same size.
   PageInsetSizes two_up_insets = single_view_insets;
   if (page_index % 2 == 1)

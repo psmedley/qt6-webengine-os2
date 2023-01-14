@@ -12,8 +12,8 @@ fn Foo() -> goo {
   return a;
 }
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
   var r : i32 = Foo().s.z;
   return;
 }

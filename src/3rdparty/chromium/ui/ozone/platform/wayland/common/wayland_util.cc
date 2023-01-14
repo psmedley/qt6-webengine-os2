@@ -253,11 +253,6 @@ gfx::Size ApplyWaylandTransform(const gfx::Size& size,
   return result;
 }
 
-bool IsMenuType(ui::PlatformWindowType type) {
-  return type == ui::PlatformWindowType::kMenu ||
-         type == ui::PlatformWindowType::kPopup;
-}
-
 ui::WaylandWindow* RootWindowFromWlSurface(wl_surface* surface) {
   if (!surface)
     return nullptr;
@@ -272,12 +267,12 @@ gfx::Rect TranslateWindowBoundsToParentDIP(ui::WaylandWindow* window,
                                            ui::WaylandWindow* parent_window) {
   DCHECK(window);
   DCHECK(parent_window);
-  DCHECK_EQ(window->buffer_scale(), parent_window->buffer_scale());
+  DCHECK_EQ(window->window_scale(), parent_window->window_scale());
   DCHECK_EQ(window->ui_scale(), parent_window->ui_scale());
   return gfx::ScaleToRoundedRect(
       wl::TranslateBoundsToParentCoordinates(window->GetBounds(),
                                              parent_window->GetBounds()),
-      1.0 / window->buffer_scale());
+      1.0 / window->window_scale());
 }
 
 std::vector<gfx::Rect> CreateRectsFromSkPath(const SkPath& path) {

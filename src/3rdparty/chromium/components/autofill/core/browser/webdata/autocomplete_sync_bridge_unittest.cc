@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -24,11 +25,15 @@
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/mock_autofill_webdata_backend.h"
 #include "components/sync/base/client_tag_hash.h"
+#include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/model/client_tag_based_model_type_processor.h"
 #include "components/sync/model/data_batch.h"
 #include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/model_error.h"
+#include "components/sync/protocol/autofill_specifics.pb.h"
+#include "components/sync/protocol/entity_metadata.pb.h"
+#include "components/sync/protocol/model_type_state.pb.h"
 #include "components/sync/test/model/mock_model_type_change_processor.h"
 #include "components/sync/test/model/test_matchers.h"
 #include "components/webdata/common/web_database.h"
@@ -41,7 +46,6 @@ using base::TimeDelta;
 using base::UTF8ToUTF16;
 using sync_pb::AutofillSpecifics;
 using sync_pb::EntityMetadata;
-using sync_pb::EntitySpecifics;
 using sync_pb::ModelTypeState;
 using syncer::DataBatch;
 using syncer::EntityChange;
@@ -154,14 +158,13 @@ class AutocompleteSyncBridgeTest : public testing::Test {
   void ResetProcessor() {
     real_processor_ =
         std::make_unique<syncer::ClientTagBasedModelTypeProcessor>(
-            syncer::AUTOFILL, /*dump_stack=*/base::DoNothing(),
-            /*commit_only=*/false);
+            syncer::AUTOFILL, /*dump_stack=*/base::DoNothing());
     mock_processor_.DelegateCallsByDefaultTo(real_processor_.get());
   }
 
   void ResetBridge() {
-    bridge_.reset(new AutocompleteSyncBridge(
-        &backend_, mock_processor_.CreateForwardingProcessor()));
+    bridge_ = std::make_unique<AutocompleteSyncBridge>(
+        &backend_, mock_processor_.CreateForwardingProcessor());
   }
 
   void StartSyncing(const std::vector<AutofillSpecifics>& remote_data = {}) {

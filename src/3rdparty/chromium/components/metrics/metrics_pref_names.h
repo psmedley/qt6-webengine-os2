@@ -18,10 +18,16 @@ extern const char kMetricsInitialLogs[];
 extern const char kMetricsInitialLogsMetadata[];
 extern const char kMetricsLowEntropySource[];
 extern const char kMetricsOldLowEntropySource[];
+extern const char kMetricsPseudoLowEntropySource[];
 extern const char kMetricsMachineId[];
 extern const char kMetricsOngoingLogs[];
 extern const char kMetricsOngoingLogsMetadata[];
 extern const char kMetricsResetIds[];
+
+// Preferences for cloned installs.
+extern const char kClonedResetCount[];
+extern const char kFirstClonedResetTimestamp[];
+extern const char kLastClonedResetTimestamp[];
 
 // For finding out whether metrics and crash reporting is enabled use the
 // relevant embedder-specific subclass of MetricsServiceAccessor instead of

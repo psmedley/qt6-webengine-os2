@@ -893,12 +893,8 @@ void ShapeResult::ApplySpacingImpl(
 
       typename ShapeResultSpacing<TextContainerType>::ComputeSpacingParameters
           parameters;
-              parameters.index = run_start_index + glyph_data.character_index;
-              parameters.original_advance = glyph_data.advance;
-              parameters.advance_override =
-                  IsCanvasRotationInVerticalUpright(run->canvas_rotation_)
-                      ? run->font_data_->GetAdvanceOverrideVerticalUpright()
-                      : run->font_data_->GetAdvanceOverride();
+                parameters.index = run_start_index + glyph_data.character_index;
+                parameters.original_advance = glyph_data.advance;
       space = spacing.ComputeSpacing(parameters, offset);
       glyph_data.advance += space;
       total_space_for_run += space;
@@ -1034,7 +1030,8 @@ unsigned ShapeResult::RunInfo::LimitNumGlyphs(
       DCHECK_LE(limit_glyph_info->cluster, max_cluster);
       // Adjust |right_glyph_info| and recompute dependent variables.
       right_glyph_info = limit_glyph_info;
-      num_glyphs = right_glyph_info - left_glyph_info + 1;
+      num_glyphs =
+          base::checked_cast<unsigned>(right_glyph_info - left_glyph_info + 1);
       num_characters_ = right_glyph_info[1].cluster - start_cluster;
     }
   } else {
@@ -1063,7 +1060,8 @@ unsigned ShapeResult::RunInfo::LimitNumGlyphs(
       // Adjust |right_glyph_info| and recompute dependent variables.
       right_glyph_info = limit_glyph_info;
       start_cluster = right_glyph_info->cluster;
-      num_glyphs = right_glyph_info - left_glyph_info + 1;
+      num_glyphs =
+          base::checked_cast<unsigned>(right_glyph_info - left_glyph_info + 1);
       num_characters_ = last_cluster - right_glyph_info[1].cluster;
     }
   }
@@ -1195,8 +1193,10 @@ void ShapeResult::InsertRun(scoped_refptr<ShapeResult::RunInfo> run) {
   Vector<scoped_refptr<RunInfo>>::iterator iterator = std::lower_bound(
       runs_.begin(), runs_.end(), run->start_index_,
       HB_DIRECTION_IS_FORWARD(run->direction_) ? ltr_comparer : rtl_comparer);
-  if (iterator != runs_.end())
-    runs_.insert(iterator - runs_.begin(), std::move(run));
+  if (iterator != runs_.end()) {
+    runs_.insert(static_cast<wtf_size_t>(iterator - runs_.begin()),
+                 std::move(run));
+  }
 
   // If we didn't find an existing slot to place it, append.
   if (run)
@@ -1518,7 +1518,8 @@ scoped_refptr<ShapeResult> ShapeResult::CreateForSpaces(const Font* font,
       HB_SCRIPT_COMMON, start_index, length, length);
   result->width_ = run->width_ = width;
   for (unsigned i = 0; i < length; i++) {
-    run->glyph_data_[i] = {font_data->SpaceGlyph(), i, true, width};
+    unsigned index = blink::IsLtr(direction) ? i : length - 1 - i;
+    run->glyph_data_[i] = {font_data->SpaceGlyph(), index, true, width};
     width = 0;
   }
   result->runs_.push_back(std::move(run));

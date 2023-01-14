@@ -25,6 +25,7 @@
 #include "net/http/http_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -60,6 +61,8 @@ class SignedExchangeLoaderTest : public testing::TestWithParam<bool> {
     ~MockURLLoaderClient() override {}
 
     // network::mojom::URLLoaderClient overrides:
+    MOCK_METHOD1(OnReceiveEarlyHints,
+                 void(const network::mojom::EarlyHintsPtr));
     MOCK_METHOD1(OnReceiveResponse,
                  void(const network::mojom::URLResponseHeadPtr));
     MOCK_METHOD2(OnReceiveRedirect,
@@ -90,7 +93,7 @@ class SignedExchangeLoaderTest : public testing::TestWithParam<bool> {
                  void(const std::vector<std::string>&,
                       const net::HttpRequestHeaders&,
                       const net::HttpRequestHeaders&,
-                      const base::Optional<GURL>&));
+                      const absl::optional<GURL>&));
     MOCK_METHOD2(SetPriority,
                  void(net::RequestPriority priority,
                       int32_t intra_priority_value));
@@ -112,7 +115,6 @@ class SignedExchangeLoaderTest : public testing::TestWithParam<bool> {
 
     void CreateLoaderAndStart(
         mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-        int32_t routing_id,
         int32_t request_id,
         uint32_t options,
         const network::ResourceRequest& url_request,

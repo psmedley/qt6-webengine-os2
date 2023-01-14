@@ -8,7 +8,6 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/public/ash_interfaces.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/event_rewriter_controller.h"
 #include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/tablet_mode.h"
@@ -18,18 +17,19 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/branding_buildflags.h"
+#include "chrome/browser/ash/login/configuration_keys.h"
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #include "chrome/browser/ash/login/demo_mode/demo_setup_controller.h"
+#include "chrome/browser/ash/login/helper.h"
 #include "chrome/browser/ash/login/lock/screen_locker.h"
 #include "chrome/browser/ash/login/screens/reset_screen.h"
+#include "chrome/browser/ash/login/ui/login_display_host.h"
+#include "chrome/browser/ash/login/ui/oobe_dialog_size_utils.h"
+#include "chrome/browser/ash/login/wizard_controller.h"
+#include "chrome/browser/ash/policy/enrollment/enrollment_requisition_manager.h"
 #include "chrome/browser/ash/system/input_device_settings.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/login/configuration_keys.h"
-#include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/ui/oobe_dialog_size_utils.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/demo_setup_screen_handler.h"
@@ -54,15 +54,6 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace chromeos {
-
-namespace {
-
-void LaunchResetScreen() {
-  DCHECK(LoginDisplayHost::default_host());
-  LoginDisplayHost::default_host()->StartWizard(ResetView::kScreenId);
-}
-
-}  // namespace
 
 // Note that show_oobe_ui_ defaults to false because WizardController assumes
 // OOBE UI is not visible by default.
@@ -91,22 +82,6 @@ void CoreOobeHandler::DeclareLocalizedValues(
   builder->Add("productName", IDS_SHORT_PRODUCT_NAME);
   builder->Add("learnMore", IDS_LEARN_MORE);
 
-  // Strings for the device requisition prompt.
-  builder->Add("deviceRequisitionPromptCancel",
-               IDS_ENTERPRISE_DEVICE_REQUISITION_PROMPT_CANCEL);
-  builder->Add("deviceRequisitionPromptOk",
-               IDS_ENTERPRISE_DEVICE_REQUISITION_PROMPT_OK);
-  builder->Add("deviceRequisitionPromptText",
-               IDS_ENTERPRISE_DEVICE_REQUISITION_PROMPT_TEXT);
-  builder->Add("deviceRequisitionRemoraPromptCancel",
-               IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL);
-  builder->Add("deviceRequisitionRemoraPromptOk",
-               IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL);
-  builder->Add("deviceRequisitionRemoraPromptText",
-               IDS_ENTERPRISE_DEVICE_REQUISITION_REMORA_PROMPT_TEXT);
-  builder->Add("deviceRequisitionSharkPromptText",
-               IDS_ENTERPRISE_DEVICE_REQUISITION_SHARK_PROMPT_TEXT);
-
 
   // Strings for Asset Identifier shown in version string.
   builder->Add("assetIdLabel", IDS_OOBE_ASSET_ID_LABEL);
@@ -132,10 +107,11 @@ void CoreOobeHandler::GetAdditionalParameters(base::DictionaryValue* dict) {
                base::Value(ash::TabletMode::Get()->InTabletMode()));
   dict->SetKey("isDemoModeEnabled",
                base::Value(DemoSetupController::IsDemoModeAllowed()));
-  dict->SetKey("showTechnologyBadge",
-               base::Value(!ash::features::IsSeparateNetworkIconsEnabled()));
-  dict->SetKey("newLayoutEnabled",
-               base::Value(features::IsNewOobeLayoutEnabled()));
+  // TODO(crbug.com/1202135):: Remove along with JS part.
+  dict->SetKey("newLayoutEnabled", base::Value(true));
+  if (policy::EnrollmentRequisitionManager::IsRemoraRequisition()) {
+    dict->SetKey("flowType", base::Value("meet"));
+  }
 }
 
 void CoreOobeHandler::RegisterMessages() {
@@ -144,8 +120,6 @@ void CoreOobeHandler::RegisterMessages() {
               &CoreOobeHandler::HandleUpdateCurrentScreen);
   AddCallback("skipToLoginForTesting",
               &CoreOobeHandler::HandleSkipToLoginForTesting);
-  AddCallback("skipToUpdateForTesting",
-              &CoreOobeHandler::HandleSkipToUpdateForTesting);
   AddCallback("launchHelpApp", &CoreOobeHandler::HandleLaunchHelpApp);
   AddCallback("toggleResetScreen", &CoreOobeHandler::HandleToggleResetScreen);
   AddCallback("raiseTabKeyEvent", &CoreOobeHandler::HandleRaiseTabKeyEvent);
@@ -162,20 +136,6 @@ void CoreOobeHandler::RegisterMessages() {
   AddCallback("enableShelfButtons", &CoreOobeHandler::HandleEnableShelfButtons);
 }
 
-void CoreOobeHandler::ShowSignInError(
-    int login_attempts,
-    const std::string& error_text,
-    const std::string& help_link_text,
-    HelpAppLauncher::HelpTopic help_topic_id) {
-  LOG(ERROR) << "CoreOobeHandler::ShowSignInError: error_text=" << error_text;
-  CallJS("cr.ui.Oobe.showSignInError", login_attempts, error_text,
-         help_link_text, static_cast<int>(help_topic_id));
-}
-
-void CoreOobeHandler::ShowDeviceResetScreen() {
-  LaunchResetScreen();
-}
-
 void CoreOobeHandler::FocusReturned(bool reverse) {
   CallJS("cr.ui.Oobe.focusReturned", reverse);
 }
@@ -184,22 +144,8 @@ void CoreOobeHandler::ResetSignInUI(bool force_online) {
   CallJS("cr.ui.Oobe.resetSigninUI", force_online);
 }
 
-void CoreOobeHandler::ClearErrors() {
-  CallJS("cr.ui.Oobe.clearErrors");
-}
-
 void CoreOobeHandler::ReloadContent(const base::DictionaryValue& dictionary) {
   CallJS("cr.ui.Oobe.reloadContent", dictionary);
-}
-
-void CoreOobeHandler::ReloadEulaContent(
-    const base::DictionaryValue& dictionary) {
-  // TODO(crbug.com/1180291) - Remove once OOBE JS calls are fixed.
-  if (IsSafeToCallJavascript()) {
-    CallJS("cr.ui.Oobe.reloadEulaContent", dictionary);
-  } else {
-    LOG(ERROR) << "Silently dropping ReloadEulaContent request.";
-  }
 }
 
 void CoreOobeHandler::SetVirtualKeyboardShown(bool shown) {
@@ -272,14 +218,8 @@ void CoreOobeHandler::HandleSkipToLoginForTesting() {
     WizardController::default_controller()->SkipToLoginForTesting();
 }
 
-void CoreOobeHandler::HandleSkipToUpdateForTesting() {
-  WizardController* controller = WizardController::default_controller();
-  if (controller && controller->is_initialized())
-    controller->SkipToUpdateForTesting();
-}
-
 void CoreOobeHandler::HandleToggleResetScreen() {
-  base::OnceCallback<void(bool, base::Optional<tpm_firmware_update::Mode>)>
+  base::OnceCallback<void(bool, absl::optional<tpm_firmware_update::Mode>)>
       callback =
           base::BindOnce(&CoreOobeHandler::HandleToggleResetScreenCallback,
                          weak_ptr_factory_.GetWeakPtr());
@@ -288,7 +228,7 @@ void CoreOobeHandler::HandleToggleResetScreen() {
 
 void CoreOobeHandler::HandleToggleResetScreenCallback(
     bool is_reset_allowed,
-    base::Optional<tpm_firmware_update::Mode> tpm_firmware_update_mode) {
+    absl::optional<tpm_firmware_update::Mode> tpm_firmware_update_mode) {
   if (!is_reset_allowed)
     return;
   if (tpm_firmware_update_mode.has_value()) {
@@ -297,7 +237,8 @@ void CoreOobeHandler::HandleToggleResetScreenCallback(
         prefs::kFactoryResetTPMFirmwareUpdateMode,
         static_cast<int>(tpm_firmware_update_mode.value()));
   }
-  LaunchResetScreen();
+  DCHECK(LoginDisplayHost::default_host());
+  LoginDisplayHost::default_host()->StartWizard(ResetView::kScreenId);
 }
 
 void CoreOobeHandler::ShowOobeUI(bool show) {
@@ -384,15 +325,13 @@ void CoreOobeHandler::OnTabletModeEnded() {
 void CoreOobeHandler::UpdateClientAreaSize(const gfx::Size& size) {
   SetClientAreaSize(size.width(), size.height());
   SetShelfHeight(ash::ShelfConfig::Get()->shelf_size());
-  if (features::IsNewOobeLayoutEnabled()) {
-    const gfx::Size display_size =
-        display::Screen::GetScreen()->GetPrimaryDisplay().size();
-    const bool is_horizontal = display_size.width() > display_size.height();
-    SetOrientation(is_horizontal);
-    const gfx::Size dialog_size = CalculateOobeDialogSize(
-        size, ash::ShelfConfig::Get()->shelf_size(), is_horizontal);
-    SetDialogSize(dialog_size.width(), dialog_size.height());
-  }
+  const gfx::Size display_size =
+      display::Screen::GetScreen()->GetPrimaryDisplay().size();
+  const bool is_horizontal = display_size.width() > display_size.height();
+  SetOrientation(is_horizontal);
+  const gfx::Size dialog_size = CalculateOobeDialogSize(
+      size, ash::ShelfConfig::Get()->shelf_size(), is_horizontal);
+  SetDialogSize(dialog_size.width(), dialog_size.height());
 }
 
 void CoreOobeHandler::SetDialogPaddingMode(

@@ -135,8 +135,6 @@ void JNI_ContentChildProcessServiceDelegate_InternalInitChildProcess(
       g_child_process_surface_manager.Pointer());
   gpu::ScopedSurfaceRequestConduit::SetInstance(
       g_child_process_surface_manager.Pointer());
-
-  base::android::MemoryPressureListenerAndroid::Initialize(env);
 }
 
 }  // namespace
@@ -150,6 +148,11 @@ void JNI_ContentChildProcessServiceDelegate_InitChildProcess(
       env, obj, cpu_count, cpu_features);
 }
 
+void JNI_ContentChildProcessServiceDelegate_InitMemoryPressureListener(
+    JNIEnv* env) {
+  base::android::MemoryPressureListenerAndroid::Initialize(env);
+}
+
 void JNI_ContentChildProcessServiceDelegate_RetrieveFileDescriptorsIdsToKeys(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
@@ -161,7 +164,7 @@ void JNI_ContentChildProcessServiceDelegate_RetrieveFileDescriptorsIdsToKeys(
   std::vector<int> ids;
   std::vector<std::string> keys;
   if (!file_switch_value.empty()) {
-    base::Optional<std::map<int, std::string>> ids_to_keys_from_command_line =
+    absl::optional<std::map<int, std::string>> ids_to_keys_from_command_line =
         ParseSharedFileSwitchValue(file_switch_value);
     if (ids_to_keys_from_command_line) {
       for (auto iter : *ids_to_keys_from_command_line) {

@@ -5,17 +5,21 @@
 #ifndef UI_BASE_CLIPBOARD_CLIPBOARD_X11_H_
 #define UI_BASE_CLIPBOARD_CLIPBOARD_X11_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstdint>
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_buffer.h"
 
 namespace ui {
 
+class XClipboardHelper;
+
 class ClipboardX11 : public Clipboard {
+ public:
+  ClipboardX11(const ClipboardX11&) = delete;
+  ClipboardX11& operator=(const ClipboardX11&) = delete;
+
  private:
   friend class Clipboard;
 
@@ -25,47 +29,51 @@ class ClipboardX11 : public Clipboard {
   // Clipboard overrides:
   void OnPreShutdown() override;
   DataTransferEndpoint* GetSource(ClipboardBuffer buffer) const override;
-  uint64_t GetSequenceNumber(ClipboardBuffer buffer) const override;
+  const ClipboardSequenceNumberToken& GetSequenceNumber(
+      ClipboardBuffer buffer) const override;
   bool IsFormatAvailable(const ClipboardFormatType& format,
                          ClipboardBuffer buffer,
                          const DataTransferEndpoint* data_dst) const override;
   void Clear(ClipboardBuffer buffer) override;
   void ReadAvailableTypes(ClipboardBuffer buffer,
                           const DataTransferEndpoint* data_dst,
-                          std::vector<base::string16>* types) const override;
-  std::vector<base::string16> ReadAvailablePlatformSpecificFormatNames(
+                          std::vector<std::u16string>* types) const override;
+  std::vector<std::u16string> ReadAvailablePlatformSpecificFormatNames(
       ClipboardBuffer buffer,
       const DataTransferEndpoint* data_dst) const override;
   void ReadText(ClipboardBuffer buffer,
                 const DataTransferEndpoint* data_dst,
-                base::string16* result) const override;
+                std::u16string* result) const override;
   void ReadAsciiText(ClipboardBuffer buffer,
                      const DataTransferEndpoint* data_dst,
                      std::string* result) const override;
   void ReadHTML(ClipboardBuffer buffer,
                 const DataTransferEndpoint* data_dst,
-                base::string16* markup,
+                std::u16string* markup,
                 std::string* src_url,
                 uint32_t* fragment_start,
                 uint32_t* fragment_end) const override;
   void ReadSvg(ClipboardBuffer buffer,
                const DataTransferEndpoint* data_dst,
-               base::string16* result) const override;
+               std::u16string* result) const override;
   void ReadRTF(ClipboardBuffer buffer,
                const DataTransferEndpoint* data_dst,
                std::string* result) const override;
+  void ReadPng(ClipboardBuffer buffer,
+               const DataTransferEndpoint* data_dst,
+               ReadPngCallback callback) const override;
   void ReadImage(ClipboardBuffer buffer,
                  const DataTransferEndpoint* data_dst,
                  ReadImageCallback callback) const override;
   void ReadCustomData(ClipboardBuffer buffer,
-                      const base::string16& type,
+                      const std::u16string& type,
                       const DataTransferEndpoint* data_dst,
-                      base::string16* result) const override;
+                      std::u16string* result) const override;
   void ReadFilenames(ClipboardBuffer buffer,
                      const DataTransferEndpoint* data_dst,
                      std::vector<ui::FileInfo>* result) const override;
   void ReadBookmark(const DataTransferEndpoint* data_dst,
-                    base::string16* title,
+                    std::u16string* title,
                     std::string* url) const override;
   void ReadData(const ClipboardFormatType& format,
                 const DataTransferEndpoint* data_dst,
@@ -73,12 +81,11 @@ class ClipboardX11 : public Clipboard {
 #if defined(USE_OZONE)
   bool IsSelectionBufferAvailable() const override;
 #endif  // defined(USE_OZONE)
-  void WritePortableRepresentations(
+  void WritePortableTextRepresentation(ClipboardBuffer buffer,
+                                       const ObjectMap& objects);
+  void WritePortableAndPlatformRepresentations(
       ClipboardBuffer buffer,
       const ObjectMap& objects,
-      std::unique_ptr<DataTransferEndpoint> data_src) override;
-  void WritePlatformRepresentations(
-      ClipboardBuffer buffer,
       std::vector<Clipboard::PlatformRepresentation> platform_representations,
       std::unique_ptr<DataTransferEndpoint> data_src) override;
   void WriteText(const char* text_data, size_t text_len) override;
@@ -99,16 +106,16 @@ class ClipboardX11 : public Clipboard {
                  const char* data_data,
                  size_t data_len) override;
 
-  SkBitmap ReadImageInternal(ClipboardBuffer buffer) const;
+  std::vector<uint8_t> ReadPngInternal(ClipboardBuffer buffer) const;
+  void OnSelectionChanged(ClipboardBuffer buffer);
 
-  // TODO(dcheng): Is this still needed now that each platform clipboard has its
-  // own class derived from Clipboard?
-  class X11Details;
-  std::unique_ptr<X11Details> x11_details_;
+  std::unique_ptr<XClipboardHelper> x_clipboard_helper_;
+
+  ClipboardSequenceNumberToken clipboard_sequence_number_;
+  ClipboardSequenceNumberToken primary_sequence_number_;
+
   base::flat_map<ClipboardBuffer, std::unique_ptr<DataTransferEndpoint>>
       data_src_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClipboardX11);
 };
 
 }  // namespace ui

@@ -5,7 +5,7 @@
 # found in the LICENSE file.
 
 # Script to install everything needed to build chromium (well, ideally, anyway)
-# See https://chromium.googlesource.com/chromium/src/+/master/docs/linux/build_instructions.md
+# See https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md
 
 usage() {
   echo "Usage: $0 [--options]"
@@ -33,8 +33,7 @@ usage() {
 build_apt_package_list() {
   echo "Building apt package list." >&2
   apt-cache dumpavail | \
-    python -c '\
-      from __future__ import print_function; \
+    python3 -c '\
       import re,sys; \
       o = sys.stdin.read(); \
       p = {"i386": ":i386"}; \
@@ -103,6 +102,7 @@ fi
 
 distro_codename=$(lsb_release --codename --short)
 distro_id=$(lsb_release --id --short)
+# TODO(crbug.com/1199405): Remove 14.04 (trusty) and 16.04 (xenial).
 supported_codenames="(trusty|xenial|bionic|disco|eoan|focal|groovy)"
 supported_ids="(Debian)"
 if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
@@ -114,7 +114,7 @@ if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
       "\tUbuntu 18.04 LTS (bionic with EoL April 2028)\n" \
       "\tUbuntu 20.04 LTS (focal with Eol April 2030)\n" \
       "\tUbuntu 20.10 (groovy)\n" \
-      "\tDebian 8 (jessie) or later" >&2
+      "\tDebian 10 (buster) or later" >&2
     exit 1
   fi
 
@@ -141,7 +141,7 @@ fi
 apt_package_list=$(build_apt_package_list)
 
 # Packages needed for chromeos only
-chromeos_dev_list="libbluetooth-dev libxkbcommon-dev"
+chromeos_dev_list="libbluetooth-dev libxkbcommon-dev mesa-common-dev"
 
 if package_exists realpath; then
   chromeos_dev_list="${chromeos_dev_list} realpath"
@@ -191,7 +191,9 @@ dev_list="\
   libsqlite3-dev
   libssl-dev
   libudev-dev
+  libva-dev
   libwww-perl
+  libxshmfence-dev
   libxslt1-dev
   libxss-dev
   libxt-dev
@@ -202,8 +204,6 @@ dev_list="\
   patch
   perl
   pkg-config
-  python
-  python-dev
   python-setuptools
   rpm
   ruby
@@ -216,6 +216,12 @@ dev_list="\
   zip
   $chromeos_dev_list
 "
+
+if package_exists python-is-python2; then
+  dev_list="${dev_list} python-is-python2 python2-dev"
+else
+  dev_list="${dev_list} python python-dev"
+fi
 
 # 64-bit systems need a minimum set of 32-bit compat packages for the pre-built
 # NaCl binaries.
@@ -340,6 +346,10 @@ backwards_compatible_list="\
   ttf-mscorefonts-installer
   xfonts-mathml
 "
+if package_exists python-is-python2; then
+  backwards_compatible_list="${backwards_compatible_list} python-dev"
+fi
+
 case $distro_codename in
   trusty)
     backwards_compatible_list+=" \

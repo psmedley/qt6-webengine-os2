@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/ozone/platform/wayland/host/wayland_output.h"
 #include "ui/ozone/platform/wayland/test/mock_pointer.h"
 #include "ui/ozone/platform/wayland/test/mock_surface.h"
 #include "ui/ozone/platform/wayland/test/test_keyboard.h"
@@ -10,6 +11,8 @@
 #include "ui/ozone/test/mock_platform_window_delegate.h"
 
 namespace ui {
+
+using ::testing::Values;
 
 namespace {
 
@@ -96,6 +99,7 @@ TEST_P(WaylandWindowManagerTest, GetCurrentFocusedWindow) {
   Sync();
 
   EXPECT_FALSE(manager_->GetCurrentFocusedWindow());
+  EXPECT_FALSE(manager_->GetCurrentPointerFocusedWindow());
 
   auto* pointer = server_.seat()->pointer();
   ASSERT_TRUE(pointer);
@@ -108,12 +112,14 @@ TEST_P(WaylandWindowManagerTest, GetCurrentFocusedWindow) {
 
   EXPECT_FALSE(manager_->GetCurrentKeyboardFocusedWindow());
   EXPECT_TRUE(window1.get() == manager_->GetCurrentFocusedWindow());
+  EXPECT_TRUE(window1.get() == manager_->GetCurrentPointerFocusedWindow());
 
   wl_pointer_send_leave(pointer->resource(), 2, surface->resource());
 
   Sync();
 
   EXPECT_FALSE(manager_->GetCurrentFocusedWindow());
+  EXPECT_FALSE(manager_->GetCurrentPointerFocusedWindow());
 }
 
 TEST_P(WaylandWindowManagerTest, GetCurrentKeyboardFocusedWindow) {
@@ -184,10 +190,10 @@ TEST_P(WaylandWindowManagerTest, GetWindowsOnOutput) {
 
   Sync();
 
-  auto entered_outputs_window1 = window1->entered_outputs_ids();
+  auto entered_outputs_window1 = window1->root_surface()->entered_outputs();
   EXPECT_EQ(1u, entered_outputs_window1.size());
 
-  uint32_t output_id = *entered_outputs_window1.begin();
+  uint32_t output_id = (*entered_outputs_window1.begin())->output_id();
 
   auto windows_on_output = manager_->GetWindowsOnOutput(output_id);
   EXPECT_EQ(1u, windows_on_output.size());
@@ -229,10 +235,12 @@ TEST_P(WaylandWindowManagerTest, GetAllWindows) {
 
 INSTANTIATE_TEST_SUITE_P(XdgVersionStableTest,
                          WaylandWindowManagerTest,
-                         ::testing::Values(kXdgShellStable));
+                         Values(wl::ServerConfig{
+                             .shell_version = wl::ShellVersion::kStable}));
 
 INSTANTIATE_TEST_SUITE_P(XdgVersionV6Test,
                          WaylandWindowManagerTest,
-                         ::testing::Values(kXdgShellV6));
+                         Values(wl::ServerConfig{
+                             .shell_version = wl::ShellVersion::kV6}));
 
 }  // namespace ui

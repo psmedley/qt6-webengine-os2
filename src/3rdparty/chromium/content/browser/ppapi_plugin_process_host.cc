@@ -12,9 +12,9 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -125,6 +125,7 @@ class PpapiPluginSandboxedProcessLauncherDelegate
 
 #if defined(OS_MAC)
   bool DisclaimResponsibility() override { return true; }
+  bool EnableCpuSecurityMitigations() override { return true; }
 #endif
 
  private:
@@ -178,7 +179,7 @@ PpapiPluginProcessHost::~PpapiPluginProcessHost() {
 PpapiPluginProcessHost* PpapiPluginProcessHost::CreatePluginHost(
     const PepperPluginInfo& info,
     const base::FilePath& profile_data_directory,
-    const base::Optional<url::Origin>& origin_lock) {
+    const absl::optional<url::Origin>& origin_lock) {
   PpapiPluginProcessHost* plugin_host =
       new PpapiPluginProcessHost(info, profile_data_directory, origin_lock);
   if (plugin_host->Init(info))
@@ -230,7 +231,7 @@ void PpapiPluginProcessHost::DidDeleteOutOfProcessInstance(
 
 // static
 void PpapiPluginProcessHost::FindByName(
-    const base::string16& name,
+    const std::u16string& name,
     std::vector<PpapiPluginProcessHost*>* hosts) {
   for (PpapiPluginProcessHostIterator iter; !iter.Done(); ++iter) {
     if (iter->process_.get() && iter->process_->GetData().name == name)
@@ -258,7 +259,7 @@ void PpapiPluginProcessHost::OpenChannelToPlugin(Client* client) {
 PpapiPluginProcessHost::PpapiPluginProcessHost(
     const PepperPluginInfo& info,
     const base::FilePath& profile_data_directory,
-    const base::Optional<url::Origin>& origin_lock)
+    const absl::optional<url::Origin>& origin_lock)
     : profile_data_directory_(profile_data_directory),
       origin_lock_(origin_lock) {
   uint32_t base_permissions = info.permissions;
@@ -277,8 +278,6 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
       this, permissions_, info.name, info.path, profile_data_directory,
       false /* in_process */, false /* external_plugin */);
 
-  filter_ = new PepperMessageFilter();
-  process_->AddFilter(filter_.get());
   process_->GetHost()->AddFilter(host_impl_->message_filter().get());
 
   GetContentClient()->browser()->DidCreatePpapiPlugin(host_impl_.get());
@@ -341,6 +340,7 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
     sandbox::policy::switches::kEnableSandboxLogging,
 #endif
     switches::kPpapiStartupDialog,
+    switches::kTimeZoneForTesting,
   };
   cmd_line->CopySwitchesFrom(browser_command_line, kPluginForwardSwitches,
                              base::size(kPluginForwardSwitches));

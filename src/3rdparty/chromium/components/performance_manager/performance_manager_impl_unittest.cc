@@ -10,11 +10,12 @@
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
-#include "base/test/task_environment.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/page_node_impl.h"
 #include "components/performance_manager/graph/process_node_impl.h"
 #include "components/performance_manager/public/render_process_host_proxy.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 
@@ -43,7 +44,7 @@ class PerformanceManagerImplTest : public testing::Test {
 
  private:
   std::unique_ptr<PerformanceManagerImpl> performance_manager_;
-  base::test::TaskEnvironment task_environment_;
+  content::BrowserTaskEnvironment task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(PerformanceManagerImplTest);
 };
@@ -56,16 +57,17 @@ TEST_F(PerformanceManagerImplTest, InstantiateNodes) {
                                                 RenderProcessHostProxy());
   EXPECT_NE(nullptr, process_node.get());
   std::unique_ptr<PageNodeImpl> page_node =
-      PerformanceManagerImpl::CreatePageNode(WebContentsProxy(), std::string(),
-                                             GURL(), false, false,
-                                             base::TimeTicks::Now());
+      PerformanceManagerImpl::CreatePageNode(
+          WebContentsProxy(), std::string(), GURL(), false, false,
+          base::TimeTicks::Now(), PageNode::PageState::kActive);
   EXPECT_NE(nullptr, page_node.get());
 
   // Create a node of each type.
   std::unique_ptr<FrameNodeImpl> frame_node =
       PerformanceManagerImpl::CreateFrameNode(
-          process_node.get(), page_node.get(), nullptr, 0,
-          ++next_render_frame_id, blink::LocalFrameToken(), 0, 0);
+          process_node.get(), page_node.get(), nullptr, ++next_render_frame_id,
+          blink::LocalFrameToken(), content::BrowsingInstanceId(0),
+          content::SiteInstanceId(0));
   EXPECT_NE(nullptr, frame_node.get());
 
   PerformanceManagerImpl::DeleteNode(std::move(frame_node));
@@ -80,36 +82,42 @@ TEST_F(PerformanceManagerImplTest, BatchDeleteNodes) {
       PerformanceManagerImpl::CreateProcessNode(content::PROCESS_TYPE_RENDERER,
                                                 RenderProcessHostProxy());
   std::unique_ptr<PageNodeImpl> page_node =
-      PerformanceManagerImpl::CreatePageNode(WebContentsProxy(), std::string(),
-                                             GURL(), false, false,
-                                             base::TimeTicks::Now());
+      PerformanceManagerImpl::CreatePageNode(
+          WebContentsProxy(), std::string(), GURL(), false, false,
+          base::TimeTicks::Now(), PageNode::PageState::kActive);
 
   std::unique_ptr<FrameNodeImpl> parent1_frame =
       PerformanceManagerImpl::CreateFrameNode(
-          process_node.get(), page_node.get(), nullptr, 0,
-          ++next_render_frame_id, blink::LocalFrameToken(), 0, 0);
+          process_node.get(), page_node.get(), nullptr, ++next_render_frame_id,
+          blink::LocalFrameToken(), content::BrowsingInstanceId(0),
+          content::SiteInstanceId(0));
   std::unique_ptr<FrameNodeImpl> parent2_frame =
       PerformanceManagerImpl::CreateFrameNode(
-          process_node.get(), page_node.get(), nullptr, 1,
-          ++next_render_frame_id, blink::LocalFrameToken(), 0, 0);
+          process_node.get(), page_node.get(), nullptr, ++next_render_frame_id,
+          blink::LocalFrameToken(), content::BrowsingInstanceId(0),
+          content::SiteInstanceId(0));
 
   std::unique_ptr<FrameNodeImpl> child1_frame =
       PerformanceManagerImpl::CreateFrameNode(
-          process_node.get(), page_node.get(), parent1_frame.get(), 2,
-          ++next_render_frame_id, blink::LocalFrameToken(), 0, 0);
+          process_node.get(), page_node.get(), parent1_frame.get(),
+          ++next_render_frame_id, blink::LocalFrameToken(),
+          content::BrowsingInstanceId(0), content::SiteInstanceId(0));
   std::unique_ptr<FrameNodeImpl> child2_frame =
       PerformanceManagerImpl::CreateFrameNode(
-          process_node.get(), page_node.get(), parent2_frame.get(), 3,
-          ++next_render_frame_id, blink::LocalFrameToken(), 0, 0);
+          process_node.get(), page_node.get(), parent2_frame.get(),
+          ++next_render_frame_id, blink::LocalFrameToken(),
+          content::BrowsingInstanceId(0), content::SiteInstanceId(0));
 
   std::vector<std::unique_ptr<NodeBase>> nodes;
   for (size_t i = 0; i < 10; ++i) {
     nodes.push_back(PerformanceManagerImpl::CreateFrameNode(
-        process_node.get(), page_node.get(), child1_frame.get(), 0,
-        ++next_render_frame_id, blink::LocalFrameToken(), 0, 0));
+        process_node.get(), page_node.get(), child1_frame.get(),
+        ++next_render_frame_id, blink::LocalFrameToken(),
+        content::BrowsingInstanceId(0), content::SiteInstanceId(0)));
     nodes.push_back(PerformanceManagerImpl::CreateFrameNode(
-        process_node.get(), page_node.get(), child1_frame.get(), 1,
-        ++next_render_frame_id, blink::LocalFrameToken(), 0, 0));
+        process_node.get(), page_node.get(), child1_frame.get(),
+        ++next_render_frame_id, blink::LocalFrameToken(),
+        content::BrowsingInstanceId(0), content::SiteInstanceId(0)));
   }
 
   nodes.push_back(std::move(process_node));
@@ -125,12 +133,12 @@ TEST_F(PerformanceManagerImplTest, BatchDeleteNodes) {
 TEST_F(PerformanceManagerImplTest, CallOnGraphImpl) {
   // Create a page node for something to target.
   std::unique_ptr<PageNodeImpl> page_node =
-      PerformanceManagerImpl::CreatePageNode(WebContentsProxy(), std::string(),
-                                             GURL(), false, false,
-                                             base::TimeTicks::Now());
+      PerformanceManagerImpl::CreatePageNode(
+          WebContentsProxy(), std::string(), GURL(), false, false,
+          base::TimeTicks::Now(), PageNode::PageState::kActive);
   base::RunLoop run_loop;
   base::OnceClosure quit_closure = run_loop.QuitClosure();
-  EXPECT_FALSE(PerformanceManagerImpl::OnPMTaskRunnerForTesting());
+  EXPECT_TRUE(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   PerformanceManagerImpl::GraphImplCallback graph_callback =
       base::BindLambdaForTesting([&](GraphImpl* graph) {
         EXPECT_TRUE(PerformanceManagerImpl::OnPMTaskRunnerForTesting());
@@ -147,12 +155,12 @@ TEST_F(PerformanceManagerImplTest, CallOnGraphImpl) {
 TEST_F(PerformanceManagerImplTest, CallOnGraphAndReplyWithResult) {
   // Create a page node for something to target.
   std::unique_ptr<PageNodeImpl> page_node =
-      PerformanceManagerImpl::CreatePageNode(WebContentsProxy(), std::string(),
-                                             GURL(), false, false,
-                                             base::TimeTicks::Now());
+      PerformanceManagerImpl::CreatePageNode(
+          WebContentsProxy(), std::string(), GURL(), false, false,
+          base::TimeTicks::Now(), PageNode::PageState::kActive);
   base::RunLoop run_loop;
 
-  EXPECT_FALSE(PerformanceManagerImpl::OnPMTaskRunnerForTesting());
+  EXPECT_TRUE(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   base::OnceCallback<int(GraphImpl*)> task =
       base::BindLambdaForTesting([&](GraphImpl* graph) {
         EXPECT_TRUE(PerformanceManagerImpl::OnPMTaskRunnerForTesting());

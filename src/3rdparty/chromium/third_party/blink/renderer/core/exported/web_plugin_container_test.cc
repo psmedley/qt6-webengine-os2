@@ -168,9 +168,6 @@ class TestPluginWithEditableText : public FakeWebPlugin {
 
   bool HasSelection() const override { return true; }
   bool CanEditText() const override { return true; }
-  bool ExecuteEditCommand(const WebString& name) override {
-    return ExecuteEditCommand(name, WebString());
-  }
   bool ExecuteEditCommand(const WebString& name,
                           const WebString& value) override {
     if (name == "Cut") {
@@ -1325,7 +1322,8 @@ TEST_F(WebPluginContainerTest, ClippedRectsForShiftedIframedElement) {
       web_view->SmoothScroll(root_document_scroll_to.Width(),
                              root_document_scroll_to.Height(),
                              base::TimeDelta());
-      iframe->SetScrollOffset(iframe_scroll_to);
+      iframe->SetScrollOffset(gfx::ScrollOffset(iframe_scroll_to.Width(),
+                                                iframe_scroll_to.Height()));
       UpdateAllLifecyclePhases(web_view);
       RunPendingTasks();
 
@@ -1489,7 +1487,7 @@ TEST_F(WebPluginContainerTest, CompositedPluginCAP) {
   ASSERT_EQ(1u, display_items.size());
   ASSERT_EQ(DisplayItem::kForeignLayerPlugin, display_items[0].GetType());
   const auto& foreign_layer_display_item =
-      static_cast<const ForeignLayerDisplayItem&>(display_items[0]);
+      To<ForeignLayerDisplayItem>(display_items[0]);
   EXPECT_EQ(plugin->GetCcLayer(), foreign_layer_display_item.GetLayer());
 }
 

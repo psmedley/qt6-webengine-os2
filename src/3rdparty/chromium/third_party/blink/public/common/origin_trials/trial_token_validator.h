@@ -23,22 +23,7 @@ class URLRequest;
 namespace blink {
 
 class OriginTrialPolicy;
-enum class OriginTrialTokenStatus;
-
-struct BLINK_COMMON_EXPORT TrialTokenResult {
-  TrialTokenResult();
-  explicit TrialTokenResult(OriginTrialTokenStatus);
-  TrialTokenResult(OriginTrialTokenStatus status,
-                   std::string name,
-                   base::Time expiry,
-                   bool is_third_party);
-  ~TrialTokenResult();
-
-  OriginTrialTokenStatus status;
-  std::string feature_name;
-  base::Time expiry_time;
-  bool is_third_party = false;
-};
+class TrialTokenResult;
 
 // TrialTokenValidator checks that a page's OriginTrial token enables a certain
 // feature.
@@ -72,14 +57,37 @@ class BLINK_COMMON_EXPORT TrialTokenValidator {
                                          const url::Origin* third_party_origin,
                                          base::Time current_time) const;
 
+  // |request| must not be nullptr.
+  // NOTE: This is not currently used, but remains here for future trials.
   bool RequestEnablesFeature(const net::URLRequest* request,
                              base::StringPiece feature_name,
                              base::Time current_time) const;
 
+  // Returns whether the given response for the given URL enable the named
+  // Origin or Deprecation Trial at the given time.
+  //
+  // |response_headers| must not be nullptr.
   bool RequestEnablesFeature(const GURL& request_url,
                              const net::HttpResponseHeaders* response_headers,
                              base::StringPiece feature_name,
                              base::Time current_time) const;
+
+  // Similar to |RequestEnablesFeature()|, but for Deprecation Trials that may
+  // be enabled on insecure origins.
+  //
+  // For Origin Trials (as opposed to Deprecation Trials) or Deprecation Trials
+  // that are enabled exclusively on secure origins, use
+  // |RequestEnablesFeature()| instead.
+  //
+  // Functionally, the only difference is that this can return true even if
+  // |request_url|'s origin is not secure.
+  //
+  // |response_headers| must not be nullptr.
+  bool RequestEnablesDeprecatedFeature(
+      const GURL& request_url,
+      const net::HttpResponseHeaders* response_headers,
+      base::StringPiece feature_name,
+      base::Time current_time) const;
 
   // Returns all valid tokens in |headers|.
   std::unique_ptr<FeatureToTokensMap> GetValidTokensFromHeaders(
@@ -99,6 +107,15 @@ class BLINK_COMMON_EXPORT TrialTokenValidator {
   static void ResetOriginTrialPolicyGetter();
 
   static bool IsTrialPossibleOnOrigin(const GURL& url);
+
+ private:
+  // Helper for |RequestEnablesFeature()| and
+  // |RequestEnablesDeprecatedFeature()|.
+  bool ResponseBearsValidTokenForFeature(
+      const GURL& request_url,
+      const net::HttpResponseHeaders& response_headers,
+      base::StringPiece feature_name,
+      base::Time current_time) const;
 };  // class TrialTokenValidator
 
 }  // namespace blink

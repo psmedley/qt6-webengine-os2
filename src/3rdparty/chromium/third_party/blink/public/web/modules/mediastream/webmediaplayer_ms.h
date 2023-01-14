@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
@@ -90,6 +89,9 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
       std::unique_ptr<WebVideoFrameSubmitter> submitter_,
       WebMediaPlayer::SurfaceLayerMode surface_layer_mode);
 
+  WebMediaPlayerMS(const WebMediaPlayerMS&) = delete;
+  WebMediaPlayerMS& operator=(const WebMediaPlayerMS&) = delete;
+
   ~WebMediaPlayerMS() override;
 
   WebMediaPlayer::LoadTiming Load(LoadType load_type,
@@ -166,25 +168,25 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
 
   bool HasAvailableVideoFrame() const override;
 
+  void SetVolumeMultiplier(double multiplier) override;
+  void SuspendForFrameClosed() override;
+
   // WebMediaPlayerDelegate::Observer implementation.
   void OnFrameHidden() override;
-  void OnFrameClosed() override;
   void OnFrameShown() override;
   void OnIdleTimeout() override;
-  void OnVolumeMultiplierUpdate(double multiplier) override;
-  void OnBecamePersistentVideo(bool value) override;
 
-  void OnFirstFrameReceived(media::VideoRotation video_rotation,
+  void OnFirstFrameReceived(media::VideoTransformation video_transform,
                             bool is_opaque);
   void OnOpacityChanged(bool is_opaque);
-  void OnRotationChanged(media::VideoRotation video_rotation);
+  void OnTransformChanged(media::VideoTransformation video_transform);
 
   // WebMediaStreamObserver implementation
   void TrackAdded(const WebString& track_id) override;
   void TrackRemoved(const WebString& track_id) override;
   void ActiveStateChanged(bool is_active) override;
   int GetDelegateId() override;
-  base::Optional<viz::SurfaceId> GetSurfaceId() override;
+  absl::optional<viz::SurfaceId> GetSurfaceId() override;
 
   base::WeakPtr<WebMediaPlayer> AsWeakPtr() override;
 
@@ -243,7 +245,7 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   base::TimeDelta GetCurrentTimeInterval();
   media::PipelineStatistics GetPipelineStatistics();
 
-  base::Optional<media::mojom::MediaStreamType> GetMediaStreamType();
+  absl::optional<media::mojom::MediaStreamType> GetMediaStreamType();
 
   std::unique_ptr<MediaStreamInternalFrameWrapper> internal_frame_;
 
@@ -260,11 +262,12 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   // via the WebMediaPlayerDelegate::Observer interface after
   // registration.
   //
-  // NOTE: HTMLMediaElement is a PausableObject, and will receive a
-  // call to contextDestroyed() when Document::shutdown() is called.
-  // Document::shutdown() is called before the frame detaches (and before the
-  // frame is destroyed). RenderFrameImpl owns of |delegate_|, and is guaranteed
-  // to outlive |this|. It is therefore safe use a raw pointer directly.
+  // NOTE: HTMLMediaElement is a blink::ExecutionContextLifecycleObserver, and
+  // will receive a call to contextDestroyed() when Document::shutdown() is
+  // called. Document::shutdown() is called before the frame detaches (and
+  // before the frame is destroyed). RenderFrameImpl owns of |delegate_|, and is
+  // guaranteed to outlive |this|. It is therefore safe use a raw pointer
+  // directly.
   WebMediaPlayerDelegate* delegate_;
   int delegate_id_;
 
@@ -308,7 +311,7 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   const WebString initial_audio_output_device_id_;
 
   // The last volume received by setVolume() and the last volume multiplier from
-  // OnVolumeMultiplierUpdate().  The multiplier is typical 1.0, but may be less
+  // SetVolumeMultiplier().  The multiplier is typical 1.0, but may be less
   // if the WebMediaPlayerDelegate has requested a volume reduction
   // (ducking) for a transient sound.  Playout volume is derived by volume *
   // multiplier.
@@ -354,8 +357,6 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
 
   base::WeakPtr<WebMediaPlayerMS> weak_this_;
   base::WeakPtrFactory<WebMediaPlayerMS> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMS);
 };
 
 }  // namespace blink

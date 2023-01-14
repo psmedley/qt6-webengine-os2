@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/css/cssom/css_style_variable_reference_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -21,9 +22,10 @@ StringView FindVariableName(CSSParserTokenRange& range) {
   return range.Consume().Value();
 }
 
-CSSUnparsedSegment VariableReferenceValue(
-    const StringView& variable_name,
-    const HeapVector<CSSUnparsedSegment>& tokens) {
+V8CSSUnparsedSegment*
+VariableReferenceValue(const StringView& variable_name,
+                       const HeapVector<Member<V8CSSUnparsedSegment>>& tokens
+) {
   CSSUnparsedValue* unparsed_value;
   if (tokens.size() == 0)
     unparsed_value = nullptr;
@@ -33,18 +35,19 @@ CSSUnparsedSegment VariableReferenceValue(
   CSSStyleVariableReferenceValue* variable_reference =
       CSSStyleVariableReferenceValue::Create(variable_name.ToString(),
                                              unparsed_value);
-  return CSSUnparsedSegment::FromCSSVariableReferenceValue(variable_reference);
+  return MakeGarbageCollected<V8CSSUnparsedSegment>(variable_reference);
 }
 
-HeapVector<CSSUnparsedSegment> ParserTokenRangeToTokens(
-    CSSParserTokenRange range) {
-  HeapVector<CSSUnparsedSegment> tokens;
+HeapVector<Member<V8CSSUnparsedSegment>>
+ParserTokenRangeToTokens(CSSParserTokenRange range) {
+  HeapVector<Member<V8CSSUnparsedSegment>> tokens;
   StringBuilder builder;
   while (!range.AtEnd()) {
     if (range.Peek().FunctionId() == CSSValueID::kVar ||
         range.Peek().FunctionId() == CSSValueID::kEnv) {
       if (!builder.IsEmpty()) {
-        tokens.push_back(CSSUnparsedSegment::FromString(builder.ToString()));
+        tokens.push_back(
+            MakeGarbageCollected<V8CSSUnparsedSegment>(builder.ToString()));
         builder.Clear();
       }
       CSSParserTokenRange block = range.ConsumeBlock();
@@ -59,7 +62,8 @@ HeapVector<CSSUnparsedSegment> ParserTokenRangeToTokens(
     }
   }
   if (!builder.IsEmpty()) {
-    tokens.push_back(CSSUnparsedSegment::FromString(builder.ToString()));
+    tokens.push_back(
+        MakeGarbageCollected<V8CSSUnparsedSegment>(builder.ToString()));
   }
   return tokens;
 }
@@ -86,20 +90,18 @@ CSSUnparsedValue* CSSUnparsedValue::FromCSSVariableData(
   return CSSUnparsedValue::Create(ParserTokenRangeToTokens(value.TokenRange()));
 }
 
-void CSSUnparsedValue::AnonymousIndexedGetter(
-    unsigned index,
-    CSSUnparsedSegment& return_value,
+V8CSSUnparsedSegment* CSSUnparsedValue::AnonymousIndexedGetter(
+    uint32_t index,
     ExceptionState& exception_state) const {
   if (index < tokens_.size()) {
-    return_value = tokens_[index];
-  } else {
-    return_value = CSSUnparsedSegment();
+    return tokens_[index];
   }
+  return nullptr;
 }
 
 IndexedPropertySetterResult CSSUnparsedValue::AnonymousIndexedSetter(
-    unsigned index,
-    const CSSUnparsedSegment& segment,
+    uint32_t index,
+    V8CSSUnparsedSegment* segment,
     ExceptionState& exception_state) {
   if (index < tokens_.size()) {
     tokens_[index] = segment;
@@ -141,19 +143,22 @@ String CSSUnparsedValue::ToString() const {
     if (i) {
       input.Append("/**/");
     }
-    if (tokens_[i].IsString()) {
-      input.Append(tokens_[i].GetAsString());
-    } else if (tokens_[i].IsCSSVariableReferenceValue()) {
-      const auto* reference_value = tokens_[i].GetAsCSSVariableReferenceValue();
-      input.Append("var(");
-      input.Append(reference_value->variable());
-      if (reference_value->fallback()) {
-        input.Append(",");
-        input.Append(reference_value->fallback()->ToString());
+    switch (tokens_[i]->GetContentType()) {
+      case V8CSSUnparsedSegment::ContentType::kCSSVariableReferenceValue: {
+        const auto* reference_value =
+            tokens_[i]->GetAsCSSVariableReferenceValue();
+        input.Append("var(");
+        input.Append(reference_value->variable());
+        if (reference_value->fallback()) {
+          input.Append(",");
+          input.Append(reference_value->fallback()->ToString());
+        }
+        input.Append(")");
+        break;
       }
-      input.Append(")");
-    } else {
-      NOTREACHED();
+      case V8CSSUnparsedSegment::ContentType::kString:
+        input.Append(tokens_[i]->GetAsString());
+        break;
     }
   }
 

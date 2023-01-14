@@ -19,10 +19,10 @@
 #include <utility>
 #include <vector>
 
-#include "proto/connections/offline_wire_formats.pb.h"
-#include "platform/base/byte_array.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "platform/base/byte_array.h"
+#include "proto/connections/offline_wire_formats.pb.h"
 
 namespace location {
 namespace nearby {
@@ -43,6 +43,8 @@ constexpr std::array<Medium, 9> kMediums = {
     Medium::BLE,  Medium::WIFI_LAN,    Medium::WIFI_AWARE,
     Medium::NFC,  Medium::WIFI_DIRECT, Medium::WEB_RTC,
 };
+constexpr int kKeepAliveIntervalMillis = 1000;
+constexpr int kKeepAliveTimeoutMillis = 5000;
 
 TEST(OfflineFramesTest, CanParseMessageFromBytes) {
   OfflineFrame tx_message;
@@ -57,6 +59,8 @@ TEST(OfflineFramesTest, CanParseMessageFromBytes) {
     sub_frame->set_endpoint_name(kEndpointName);
     sub_frame->set_endpoint_info(kEndpointName);
     sub_frame->set_nonce(kNonce);
+    sub_frame->set_keep_alive_interval_millis(kKeepAliveIntervalMillis);
+    sub_frame->set_keep_alive_timeout_millis(kKeepAliveTimeoutMillis);
     auto* medium_metadata = sub_frame->mutable_medium_metadata();
 
     medium_metadata->set_supports_5_ghz(kSupports5ghz);
@@ -88,10 +92,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionRequest) {
         endpoint_name: "XYZ"
         endpoint_info: "XYZ"
         nonce: 1234
-        medium_metadata: <
-          supports_5_ghz: true
-          bssid: "FF:FF:FF:FF:FF:FF"
-        >
+        medium_metadata: < supports_5_ghz: true bssid: "FF:FF:FF:FF:FF:FF" >
         mediums: MDNS
         mediums: BLUETOOTH
         mediums: WIFI_HOTSPOT
@@ -101,12 +102,15 @@ TEST(OfflineFramesTest, CanGenerateConnectionRequest) {
         mediums: NFC
         mediums: WIFI_DIRECT
         mediums: WEB_RTC
+        keep_alive_interval_millis: 1000
+        keep_alive_timeout_millis: 5000
       >
     >)pb";
   ByteArray bytes = ForConnectionRequest(
       std::string(kEndpointId), ByteArray{std::string(kEndpointName)}, kNonce,
       kSupports5ghz, std::string(kBssid),
-      std::vector(kMediums.begin(), kMediums.end()));
+      std::vector(kMediums.begin(), kMediums.end()), kKeepAliveIntervalMillis,
+      kKeepAliveTimeoutMillis);
   auto response = FromBytes(bytes);
   ASSERT_TRUE(response.ok());
   OfflineFrame message = FromBytes(bytes).result();
@@ -119,10 +123,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionResponse) {
     version: V1
     v1: <
       type: CONNECTION_RESPONSE
-      connection_response: <
-        status: 1
-        response: REJECT
-      >
+      connection_response: < status: 1 response: REJECT >
     >)pb";
   ByteArray bytes = ForConnectionResponse(1);
   auto response = FromBytes(bytes);

@@ -6,14 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_THREADED_ICON_LOADER_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
-#include "third_party/blink/public/platform/web_size.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader_client.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
@@ -35,7 +35,7 @@ class CORE_EXPORT ThreadedIconLoader final
   // those dimensions.
   void Start(ExecutionContext* execution_context,
              const ResourceRequestHead& resource_request,
-             const base::Optional<gfx::Size>& resize_dimensions,
+             const absl::optional<gfx::Size>& resize_dimensions,
              IconCallback callback);
 
   // Stops the background task. The provided callback will not be run if
@@ -45,8 +45,8 @@ class CORE_EXPORT ThreadedIconLoader final
   // ThreadableLoaderClient interface.
   void DidReceiveData(const char* data, unsigned length) override;
   void DidFinishLoading(uint64_t resource_identifier) override;
-  void DidFail(const ResourceError& error) override;
-  void DidFailRedirectCheck() override;
+  void DidFail(uint64_t, const ResourceError& error) override;
+  void DidFailRedirectCheck(uint64_t) override;
 
   void Trace(Visitor* visitor) const override;
 
@@ -59,7 +59,7 @@ class CORE_EXPORT ThreadedIconLoader final
   // of the image data starts.
   scoped_refptr<SharedBuffer> data_;
 
-  base::Optional<gfx::Size> resize_dimensions_;
+  absl::optional<gfx::Size> resize_dimensions_;
 
   IconCallback icon_callback_;
 

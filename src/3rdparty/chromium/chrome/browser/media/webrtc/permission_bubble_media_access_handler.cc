@@ -21,6 +21,8 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/permissions/permission_manager.h"
 #include "components/permissions/permission_result.h"
+#include "components/permissions/permission_util.h"
+#include "components/permissions/permissions_client.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/webrtc/media_stream_devices_controller.h"
@@ -46,10 +48,10 @@
 
 using content::BrowserThread;
 
-using RepeatingMediaResponseCallback =
-    base::RepeatingCallback<void(const blink::MediaStreamDevices& devices,
-                                 blink::mojom::MediaStreamRequestResult result,
-                                 std::unique_ptr<content::MediaStreamUI> ui)>;
+using MediaResponseCallback =
+    base::OnceCallback<void(const blink::MediaStreamDevices& devices,
+                            blink::mojom::MediaStreamRequestResult result,
+                            std::unique_ptr<content::MediaStreamUI> ui)>;
 
 #if defined(OS_MAC)
 using system_media_permissions::SystemPermission;
@@ -109,10 +111,22 @@ void UpdatePageSpecificContentSettings(
              : content_settings::PageSpecificContentSettings::CAMERA_BLOCKED);
   }
 
+  // TODO(crbug.com/698985): Use `GetLastCommittedURL` if web_contents represent
+  // NTP.
+  GURL embedding_origin;
+  if (permissions::PermissionsClient::Get()->DoOriginsMatchNewTabPage(
+          request.security_origin,
+          web_contents->GetLastCommittedURL().GetOrigin())) {
+    embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
+  } else {
+    embedding_origin =
+        permissions::PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+  }
+
   content_settings->OnMediaStreamPermissionSet(
       PermissionManagerFactory::GetForProfile(profile)->GetCanonicalOrigin(
           ContentSettingsType::MEDIASTREAM_CAMERA, request.security_origin,
-          web_contents->GetLastCommittedURL()),
+          embedding_origin),
       microphone_camera_state, selected_audio_device, selected_video_device,
       requested_audio_device, requested_video_device);
 }
@@ -121,14 +135,13 @@ void UpdatePageSpecificContentSettings(
 
 struct PermissionBubbleMediaAccessHandler::PendingAccessRequest {
   PendingAccessRequest(const content::MediaStreamRequest& request,
-                       RepeatingMediaResponseCallback callback)
-      : request(request), callback(callback) {}
-  ~PendingAccessRequest() {}
+                       MediaResponseCallback callback)
+      : request(request), callback(std::move(callback)) {}
 
   // TODO(gbillock): make the MediaStreamDevicesController owned by
   // this object when we're using bubbles.
   content::MediaStreamRequest request;
-  RepeatingMediaResponseCallback callback;
+  MediaResponseCallback callback;
 };
 
 PermissionBubbleMediaAccessHandler::PermissionBubbleMediaAccessHandler()
@@ -158,17 +171,14 @@ bool PermissionBubbleMediaAccessHandler::CheckMediaAccessPermission(
     const GURL& security_origin,
     blink::mojom::MediaStreamType type,
     const extensions::Extension* extension) {
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host);
   Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+      Profile::FromBrowserContext(render_frame_host->GetBrowserContext());
   ContentSettingsType content_settings_type =
       type == blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE
           ? ContentSettingsType::MEDIASTREAM_MIC
           : ContentSettingsType::MEDIASTREAM_CAMERA;
 
   DCHECK(!security_origin.is_empty());
-  GURL embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
   permissions::PermissionManager* permission_manager =
       PermissionManagerFactory::GetForProfile(profile);
   return permission_manager
@@ -200,10 +210,8 @@ void PermissionBubbleMediaAccessHandler::HandleRequest(
   web_contents_collection_.StartObserving(web_contents);
 
   RequestsMap& requests_map = pending_requests_[web_contents];
-  requests_map.emplace(
-      next_request_id_++,
-      PendingAccessRequest(
-          request, base::AdaptCallbackForRepeating(std::move(callback))));
+  requests_map.emplace(next_request_id_++,
+                       PendingAccessRequest(request, std::move(callback)));
 
   // If this is the only request then show the infobar.
   if (requests_map.size() == 1)
@@ -288,7 +296,7 @@ void PermissionBubbleMediaAccessHandler::OnMediaStreamRequestResponse(
     content::MediaStreamRequest request,
     const blink::MediaStreamDevices& devices,
     blink::mojom::MediaStreamRequestResult result,
-    bool blocked_by_feature_policy,
+    bool blocked_by_permissions_policy,
     ContentSetting audio_setting,
     ContentSetting video_setting) {
   if (pending_requests_.find(web_contents) == pending_requests_.end()) {
@@ -296,10 +304,10 @@ void PermissionBubbleMediaAccessHandler::OnMediaStreamRequestResponse(
     return;
   }
 
-  // If the kill switch is, or the request was blocked because of feature
+  // If the kill switch is, or the request was blocked because of permissions
   // policy we don't update the tab context.
   if (result != blink::mojom::MediaStreamRequestResult::KILL_SWITCH_ON &&
-      !blocked_by_feature_policy) {
+      !blocked_by_permissions_policy) {
     UpdatePageSpecificContentSettings(web_contents, request, audio_setting,
                                       video_setting);
   }
@@ -403,8 +411,7 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
   }
 #endif  // defined(OS_MAC)
 
-  RepeatingMediaResponseCallback callback =
-      std::move(request_it->second.callback);
+  MediaResponseCallback callback = std::move(request_it->second.callback);
   requests_map.erase(request_it);
 
   if (!requests_map.empty()) {

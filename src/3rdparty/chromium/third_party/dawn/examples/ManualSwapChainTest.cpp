@@ -55,6 +55,7 @@
 #include "common/Log.h"
 #include "utils/ComboRenderPipelineDescriptor.h"
 #include "utils/GLFWUtils.h"
+#include "utils/ScopedAutoreleasePool.h"
 #include "utils/WGPUHelpers.h"
 
 #include <dawn/dawn_proc.h>
@@ -311,34 +312,30 @@ int main(int argc, const char* argv[]) {
     queue = device.GetQueue();
 
     // The hacky pipeline to render a triangle.
-    utils::ComboRenderPipelineDescriptor pipelineDesc(device);
-    pipelineDesc.vertexStage.module = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[builtin(vertex_index)]] var<in> VertexIndex : u32;
-        [[builtin(position)]] var<out> Position : vec4<f32>;
-        const pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
-            vec2<f32>( 0.0,  0.5),
-            vec2<f32>(-0.5, -0.5),
-            vec2<f32>( 0.5, -0.5)
-        );
-        [[stage(vertex)]] fn main() -> void {
-            Position = vec4<f32>(pos[VertexIndex], 0.0, 1.0);
-            return;
+    utils::ComboRenderPipelineDescriptor pipelineDesc;
+    pipelineDesc.vertex.module = utils::CreateShaderModule(device, R"(
+        [[stage(vertex)]] fn main([[builtin(vertex_index)]] VertexIndex : u32)
+                               -> [[builtin(position)]] vec4<f32> {
+            var pos = array<vec2<f32>, 3>(
+                vec2<f32>( 0.0,  0.5),
+                vec2<f32>(-0.5, -0.5),
+                vec2<f32>( 0.5, -0.5)
+            );
+            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
         })");
-    pipelineDesc.cFragmentStage.module = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[location(0)]] var<out> fragColor : vec4<f32>;
-        [[stage(fragment)]] fn main() -> void {
-            fragColor = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-            return;
+    pipelineDesc.cFragment.module = utils::CreateShaderModule(device, R"(
+        [[stage(fragment)]] fn main() -> [[location(0)]] vec4<f32> {
+            return vec4<f32>(1.0, 0.0, 0.0, 1.0);
         })");
-    pipelineDesc.colorStateCount = 1;
     // BGRA shouldn't be hardcoded. Consider having a map[format -> pipeline].
-    pipelineDesc.cColorStates[0].format = wgpu::TextureFormat::BGRA8Unorm;
+    pipelineDesc.cTargets[0].format = wgpu::TextureFormat::BGRA8Unorm;
     trianglePipeline = device.CreateRenderPipeline(&pipelineDesc);
 
     // Craete the first window, since the example exits when there are no windows.
     AddWindow();
 
     while (windows.size() != 0) {
+        utils::ScopedAutoreleasePool pool;
         glfwPollEvents();
 
         for (auto it = windows.begin(); it != windows.end();) {

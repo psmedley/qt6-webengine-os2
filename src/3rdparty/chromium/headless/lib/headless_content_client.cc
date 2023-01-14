@@ -14,13 +14,13 @@ HeadlessContentClient::HeadlessContentClient() = default;
 
 HeadlessContentClient::~HeadlessContentClient() = default;
 
-base::string16 HeadlessContentClient::GetLocalizedString(int message_id) {
+std::u16string HeadlessContentClient::GetLocalizedString(int message_id) {
   return l10n_util::GetStringUTF16(message_id);
 }
 
 base::StringPiece HeadlessContentClient::GetDataResource(
     int resource_id,
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
       resource_id, scale_factor);
 }

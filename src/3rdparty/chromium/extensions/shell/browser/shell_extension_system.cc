@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "components/services/app_service/public/mojom/types.mojom-shared.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -21,6 +22,7 @@
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/service_worker_manager.h"
+#include "extensions/browser/user_script_manager.h"
 #include "extensions/browser/value_store/value_store_factory_impl.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/file_util.h"
@@ -77,6 +79,7 @@ void ShellExtensionSystem::InitForRegularProfile(bool extensions_enabled) {
   quota_service_ = std::make_unique<QuotaService>();
   app_sorting_ = std::make_unique<NullAppSorting>();
   extension_loader_ = std::make_unique<ShellExtensionLoader>(browser_context_);
+  user_script_manager_ = std::make_unique<UserScriptManager>(browser_context_);
 }
 
 ExtensionService* ShellExtensionSystem::extension_service() {
@@ -96,7 +99,7 @@ ServiceWorkerManager* ShellExtensionSystem::service_worker_manager() {
 }
 
 UserScriptManager* ShellExtensionSystem::user_script_manager() {
-  return nullptr;
+  return user_script_manager_.get();
 }
 
 StateStore* ShellExtensionSystem::state_store() {

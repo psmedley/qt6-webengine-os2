@@ -35,8 +35,8 @@ namespace content {
 
 namespace {
 
-// Returns the cookie manager for the |browser_context| at the client end of the
-// mojo pipe. This will be restricted to the origin of |url|, and will apply
+// Returns the cookie manager for the `browser_context` at the client end of the
+// mojo pipe. This will be restricted to the origin of `url`, and will apply
 // policies from user and ContentBrowserClient to cookie operations.
 mojo::PendingRemote<network::mojom::RestrictedCookieManager>
 GetRestrictedCookieManagerForContext(
@@ -49,7 +49,7 @@ GetRestrictedCookieManagerForContext(
 
   url::Origin request_origin = url::Origin::Create(url);
   StoragePartition* storage_partition =
-      BrowserContext::GetDefaultStoragePartition(browser_context);
+      browser_context->GetDefaultStoragePartition();
 
   // `request_origin` cannot be used to create `isolation_info` since it
   // represents the media resource, not the frame origin. Here we use the
@@ -60,7 +60,7 @@ GetRestrictedCookieManagerForContext(
          site_for_cookies.IsFirstParty(top_frame_origin.GetURL()));
   net::IsolationInfo isolation_info = net::IsolationInfo::Create(
       net::IsolationInfo::RequestType::kOther, top_frame_origin,
-      top_frame_origin, site_for_cookies, base::nullopt);
+      top_frame_origin, site_for_cookies, absl::nullopt);
 
   mojo::PendingRemote<network::mojom::RestrictedCookieManager> pipe;
   static_cast<StoragePartitionImpl*>(storage_partition)
@@ -140,7 +140,7 @@ void MediaResourceGetterImpl::GetAuthCredentials(
   // Non-standard URLs, such as data, will not be found in HTTP auth cache
   // anyway, because they have no valid origin, so don't waste the time.
   if (!url.IsStandard()) {
-    GetAuthCredentialsCallback(std::move(callback), base::nullopt);
+    GetAuthCredentialsCallback(std::move(callback), absl::nullopt);
     return;
   }
 
@@ -149,11 +149,11 @@ void MediaResourceGetterImpl::GetAuthCredentials(
   // Can't get a NetworkIsolationKey to get credentials if the RenderFrameHost
   // has already been destroyed.
   if (!render_frame_host) {
-    GetAuthCredentialsCallback(std::move(callback), base::nullopt);
+    GetAuthCredentialsCallback(std::move(callback), absl::nullopt);
     return;
   }
 
-  BrowserContext::GetDefaultStoragePartition(browser_context_)
+  browser_context_->GetDefaultStoragePartition()
       ->GetNetworkContext()
       ->LookupServerBasicAuthCredentials(
           url, render_frame_host->GetNetworkIsolationKey(),
@@ -161,13 +161,12 @@ void MediaResourceGetterImpl::GetAuthCredentials(
                          weak_factory_.GetWeakPtr(), std::move(callback)));
 }
 
-void MediaResourceGetterImpl::GetCookies(const GURL& url,
-                                         const GURL& site_for_cookies_url,
-                                         const url::Origin& top_frame_origin,
-                                         GetCookieCB callback) {
+void MediaResourceGetterImpl::GetCookies(
+    const GURL& url,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    GetCookieCB callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  net::SiteForCookies site_for_cookies =
-      net::SiteForCookies::FromUrl(site_for_cookies_url);
 
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
@@ -193,12 +192,12 @@ void MediaResourceGetterImpl::GetCookies(const GURL& url,
 
 void MediaResourceGetterImpl::GetAuthCredentialsCallback(
     GetAuthCredentialsCB callback,
-    const base::Optional<net::AuthCredentials>& credentials) {
+    const absl::optional<net::AuthCredentials>& credentials) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (credentials)
     std::move(callback).Run(credentials->username(), credentials->password());
   else
-    std::move(callback).Run(base::string16(), base::string16());
+    std::move(callback).Run(std::u16string(), std::u16string());
 }
 
 void MediaResourceGetterImpl::GetPlatformPathFromURL(

@@ -5,6 +5,7 @@
 #include "components/search/ntp_features.h"
 
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -25,19 +26,10 @@ const base::Feature kCacheOneGoogleBar{"CacheOneGoogleBar",
 const base::Feature kDismissPromos{"DismissNtpPromos",
                                    base::FEATURE_DISABLED_BY_DEFAULT};
 
-// If enabled, the OneGooleBar is loaded in an iframe. Otherwise, it is inlined.
-const base::Feature kIframeOneGoogleBar{"IframeOneGoogleBar",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
-
 // If enabled, queries that are frequently repeated by the user (and are
 // expected to be issued again) are shown as most visited tiles.
 const base::Feature kNtpRepeatableQueries{"NtpRepeatableQueries",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
-// If enabled, the iframed OneGooleBar shows the overlays modally with a
-// backdrop.
-const base::Feature kOneGoogleBarModalOverlays{
-    "OneGoogleBarModalOverlays", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Depends on kRealbox being enabled. If enabled, the NTP "realbox" will be
 // themed like the omnibox (same background/text/selected/hover colors).
@@ -67,10 +59,6 @@ const base::Feature kDisableSearchSuggestChips{
 extern const base::Feature kNtpHandleMostVisitedNavigationExplicitly{
     "HandleMostVisitedNavigationExplicitly", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// If enabled, the WebUI new tab page will load when a new tab is created
-// instead of the local NTP.
-const base::Feature kWebUI{"NtpWebUI", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // If enabled, logo will be shown.
 const base::Feature kNtpLogo{"NtpLogo", base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -85,6 +73,12 @@ const base::Feature kNtpMiddleSlotPromo{"NtpMiddleSlotPromo",
 // If enabled, modules will be shown.
 const base::Feature kModules{"NtpModules", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// If enabled, modules will be loaded even if kModules is disabled. This is
+// useful to determine if a user would have seen modules in order to
+// counterfactually log or trigger.
+const base::Feature kNtpModulesLoad{"NtpModulesLoad",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
+
 // If enabled, recipe tasks module will be shown.
 const base::Feature kNtpRecipeTasksModule{"NtpRecipeTasksModule",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
@@ -97,78 +91,45 @@ const base::Feature kNtpShoppingTasksModule{"NtpShoppingTasksModule",
 const base::Feature kNtpChromeCartModule{"NtpChromeCartModule",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
+// If enabled, redesigned modules will be shown.
+const base::Feature kNtpModulesRedesigned{"NtpModulesRedesigned",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
 // If enabled, Google Drive module will be shown.
 const base::Feature kNtpDriveModule{"NtpDriveModule",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const char kNtpRepeatableQueriesAgeThresholdDaysParam[] =
-    "NtpRepeatableQueriesAgeThresholdDays";
-const char kNtpRepeatableQueriesRecencyHalfLifeSecondsParam[] =
-    "NtpRepeatableQueriesRecencyHalfLifeSeconds";
-const char kNtpRepeatableQueriesFrequencyExponentParam[] =
-    "NtpRepeatableQueriesFrequencyExponent";
-const char kNtpRepeatableQueriesInsertPositionParam[] =
-    "NtpRepeatableQueriesInsertPosition";
+// If enabled, Google Photos module will be shown.
+const base::Feature kNtpPhotosModule{"NtpPhotosModule",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+// If enabled, modules will be able to be reordered via dragging and dropping
+const base::Feature kNtpModulesDragAndDrop{"NtpModulesDragAndDrop",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
 const char kNtpModulesLoadTimeoutMillisecondsParam[] =
     "NtpModulesLoadTimeoutMillisecondsParam";
-const char kNtpStatefulTasksModuleDataParam[] =
-    "NtpStatefulTasksModuleDataParam";
+const char kNtpShoppingTasksModuleDataParam[] =
+    "NtpShoppingTasksModuleDataParam";
+const char kNtpRecipeTasksModuleDataParam[] = "NtpRecipeTasksModuleDataParam";
+const char kNtpShoppingTasksModuleCacheMaxAgeSParam[] =
+    "NtpShoppingTasksModuleCacheMaxAgeSParam";
+const char kNtpRecipeTasksModuleCacheMaxAgeSParam[] =
+    "NtpRecipeTasksModuleCacheMaxAgeSParam";
 const char kNtpChromeCartModuleDataParam[] = "NtpChromeCartModuleDataParam";
-
-base::Time GetLocalHistoryRepeatableQueriesAgeThreshold() {
-  const base::TimeDelta kLocalHistoryRepeatableQueriesAgeThreshold =
-      base::TimeDelta::FromDays(180);  // Six months.
-  std::string param_value = base::GetFieldTrialParamValueByFeature(
-      kNtpRepeatableQueries, kNtpRepeatableQueriesAgeThresholdDaysParam);
-
-  // If the field trial param is not found or cannot be parsed to an unsigned
-  // integer, return the default value.
-  unsigned int param_value_as_int = 0;
-  if (!base::StringToUint(param_value, &param_value_as_int)) {
-    return base::Time::Now() - kLocalHistoryRepeatableQueriesAgeThreshold;
-  }
-
-  return (base::Time::Now() - base::TimeDelta::FromDays(param_value_as_int));
-}
-
-int GetLocalHistoryRepeatableQueriesRecencyHalfLifeSeconds() {
-  const base::TimeDelta kLocalHistoryRepeatableQueriesRecencyHalfLife =
-      base::TimeDelta::FromDays(7);  // One week.
-  std::string param_value = base::GetFieldTrialParamValueByFeature(
-      kNtpRepeatableQueries, kNtpRepeatableQueriesRecencyHalfLifeSecondsParam);
-
-  // If the field trial param is not found or cannot be parsed to an unsigned
-  // integer, return the default value.
-  unsigned int param_value_as_int = 0;
-  if (!base::StringToUint(param_value, &param_value_as_int)) {
-    return kLocalHistoryRepeatableQueriesRecencyHalfLife.InSeconds();
-  }
-
-  return param_value_as_int;
-}
-
-double GetLocalHistoryRepeatableQueriesFrequencyExponent() {
-  const double kLocalHistoryRepeatableQueriesFrequencyExponent = 2.0;
-  std::string param_value = base::GetFieldTrialParamValueByFeature(
-      kNtpRepeatableQueries, kNtpRepeatableQueriesFrequencyExponentParam);
-
-  // If the field trial param is not found or cannot be parsed to an unsigned
-  // integer, return the default value.
-  double param_value_as_double = 0;
-  if (!base::StringToDouble(param_value, &param_value_as_double)) {
-    return kLocalHistoryRepeatableQueriesFrequencyExponent;
-  }
-
-  return param_value_as_double;
-}
-
-RepeatableQueriesInsertPosition GetRepeatableQueriesInsertPosition() {
-  std::string param_value = base::GetFieldTrialParamValueByFeature(
-      kNtpRepeatableQueries, kNtpRepeatableQueriesInsertPositionParam);
-  return param_value == "end" ? RepeatableQueriesInsertPosition::kEnd
-                              : RepeatableQueriesInsertPosition::kStart;
-}
+const char kNtpChromeCartModuleAbandonedCartDiscountParam[] =
+    "NtpChromeCartModuleAbandonedCartDiscountParam";
+const char NtpChromeCartModuleAbandonedCartDiscountUseUtmParam[] =
+    "NtpChromeCartModuleAbandonedCartDiscountUseUtmParam";
+const char kNtpChromeCartModuleHeuristicsImprovementParam[] =
+    "NtpChromeCartModuleHeuristicsImprovementParam";
+const char kNtpDriveModuleDataParam[] = "NtpDriveModuleDataParam";
+const char kNtpDriveModuleManagedUsersOnlyParam[] =
+    "NtpDriveModuleManagedUsersOnlyParam";
+const char kNtpDriveModuleCacheMaxAgeSParam[] =
+    "NtpDriveModuleCacheMaxAgeSParam";
+const char kNtpDriveModuleExperimentGroupParam[] =
+    "NtpDriveModuleExperimentGroupParam";
 
 base::TimeDelta GetModulesLoadTimeout() {
   std::string param_value = base::GetFieldTrialParamValueByFeature(

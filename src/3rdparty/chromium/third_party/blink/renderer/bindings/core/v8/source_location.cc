@@ -83,7 +83,7 @@ std::unique_ptr<SourceLocation> SourceLocation::FromMessage(
     v8::Local<v8::Message> message,
     ExecutionContext* execution_context) {
   v8::Local<v8::StackTrace> stack = message->GetStackTrace();
-  std::unique_ptr<v8_inspector::V8StackTrace> stack_trace = nullptr;
+  std::unique_ptr<v8_inspector::V8StackTrace> stack_trace;
   ThreadDebugger* debugger = ThreadDebugger::From(isolate);
   if (debugger)
     stack_trace = debugger->GetV8Inspector()->createStackTrace(stack);
@@ -121,7 +121,7 @@ std::unique_ptr<SourceLocation> SourceLocation::CreateFromNonEmptyV8StackTrace(
   String url = ToCoreString(stack_trace->topSourceURL());
   unsigned line_number = stack_trace->topLineNumber();
   unsigned column_number = stack_trace->topColumnNumber();
-  int script_id = stack_trace->topScriptIdAsInteger();
+  int script_id = stack_trace->topScriptId();
   return base::WrapUnique(new SourceLocation(
       url, line_number, column_number, std::move(stack_trace), script_id));
 }
@@ -170,7 +170,7 @@ void SourceLocation::ToTracedValue(TracedValue* value, const char* name) const {
   value->BeginDictionary();
   value->SetString("functionName",
                    ToCoreString(stack_trace_->topFunctionName()));
-  value->SetInteger("scriptId", stack_trace_->topScriptIdAsInteger());
+  value->SetInteger("scriptId", stack_trace_->topScriptId());
   value->SetString("url", ToCoreString(stack_trace_->topSourceURL()));
   value->SetInteger("lineNumber", stack_trace_->topLineNumber());
   value->SetInteger("columnNumber", stack_trace_->topColumnNumber());
@@ -178,7 +178,7 @@ void SourceLocation::ToTracedValue(TracedValue* value, const char* name) const {
   value->EndArray();
 }
 
-void SourceLocation::WriteIntoTracedValue(perfetto::TracedValue context) const {
+void SourceLocation::WriteIntoTrace(perfetto::TracedValue context) const {
   // TODO(altimin): Consider replacing nested dict-inside-array with just an
   // array here.
   auto array = std::move(context).WriteArray();
@@ -186,7 +186,7 @@ void SourceLocation::WriteIntoTracedValue(perfetto::TracedValue context) const {
   // TODO(altimin): Add TracedValue support to v8::StringView and remove
   // ToCoreString calls.
   dict.Add("functionName", ToCoreString(stack_trace_->topFunctionName()));
-  dict.Add("scriptId", stack_trace_->topScriptIdAsInteger());
+  dict.Add("scriptId", stack_trace_->topScriptId());
   dict.Add("url", ToCoreString(stack_trace_->topSourceURL()));
   dict.Add("lineNumber", stack_trace_->topLineNumber());
   dict.Add("columnNumber", stack_trace_->topColumnNumber());

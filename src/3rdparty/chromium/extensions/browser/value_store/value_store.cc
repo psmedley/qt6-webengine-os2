@@ -10,7 +10,7 @@
 
 // Implementation of Status.
 
-ValueStore::Status::Status() : code(OK), restore_status(RESTORE_NONE) {}
+ValueStore::Status::Status() = default;
 
 ValueStore::Status::Status(StatusCode code, const std::string& message)
     : Status(code, RESTORE_NONE, message) {}
@@ -56,12 +56,9 @@ ValueStore::ReadResult& ValueStore::ReadResult::operator=(ReadResult&& rhs) =
 
 // Implementation of WriteResult.
 
-ValueStore::WriteResult::WriteResult(
-    std::unique_ptr<ValueStoreChangeList> changes,
-    Status status)
-    : changes_(std::move(changes)), status_(std::move(status)) {
-  CHECK(changes_);
-}
+ValueStore::WriteResult::WriteResult(ValueStoreChangeList changes,
+                                     Status status)
+    : changes_(std::move(changes)), status_(std::move(status)) {}
 
 ValueStore::WriteResult::WriteResult(Status status)
     : status_(std::move(status)) {}

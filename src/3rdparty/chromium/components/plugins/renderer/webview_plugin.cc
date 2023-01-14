@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/auto_reset.h"
@@ -59,7 +60,7 @@ WebViewPlugin::WebViewPlugin(WebView* web_view,
       focused_(false),
       is_painting_(false),
       is_resizing_(false),
-      web_view_helper_(this, preferences) {}
+      web_view_helper_(this, preferences, web_view->GetRendererPreferences()) {}
 
 // static
 WebViewPlugin* WebViewPlugin::Create(WebView* web_view,
@@ -85,10 +86,8 @@ WebViewPlugin::~WebViewPlugin() {
 void WebViewPlugin::ReplayReceivedData(WebPlugin* plugin) {
   if (!response_.IsNull()) {
     plugin->DidReceiveResponse(response_);
-    size_t total_bytes = 0;
     for (auto it = data_.begin(); it != data_.end(); ++it) {
       plugin->DidReceiveData(it->c_str(), it->length());
-      total_bytes += it->length();
     }
   }
   // We need to transfer the |focused_| to new plugin after it loaded.
@@ -254,11 +253,13 @@ void WebViewPlugin::DidFinishLoading() {
 
 void WebViewPlugin::DidFailLoading(const WebURLError& error) {
   DCHECK(!error_);
-  error_.reset(new WebURLError(error));
+  error_ = std::make_unique<WebURLError>(error);
 }
 
-WebViewPlugin::WebViewHelper::WebViewHelper(WebViewPlugin* plugin,
-                                            const WebPreferences& preferences)
+WebViewPlugin::WebViewHelper::WebViewHelper(
+    WebViewPlugin* plugin,
+    const WebPreferences& parent_web_preferences,
+    const blink::RendererPreferences& parent_renderer_preferences)
     : plugin_(plugin),
       agent_group_scheduler_(
           blink::scheduler::WebThreadScheduler::MainThreadScheduler()
@@ -266,13 +267,23 @@ WebViewPlugin::WebViewHelper::WebViewHelper(WebViewPlugin* plugin,
   web_view_ =
       WebView::Create(/*client=*/this,
                       /*is_hidden=*/false,
+                      /*is_prerendering=*/false,
                       /*is_inside_portal=*/false,
                       /*compositing_enabled=*/false,
+                      /*widgets_never_composited=*/false,
                       /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
-                      *agent_group_scheduler_);
+                      *agent_group_scheduler_,
+                      /*session_storage_namespace_id=*/base::EmptyString(),
+                      /*page_base_background_color=*/absl::nullopt);
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
-  blink::WebView::ApplyWebPreferences(preferences, web_view_);
+  blink::WebView::ApplyWebPreferences(parent_web_preferences, web_view_);
+
+  // Turn off AcceptLoadDrops for this plugin webview.
+  blink::RendererPreferences renderer_preferences = parent_renderer_preferences;
+  renderer_preferences.can_accept_load_drops = false;
+  web_view_->SetRendererPreferences(renderer_preferences);
+
   WebLocalFrame* web_frame = WebLocalFrame::CreateMainFrame(
       web_view_, this, nullptr, blink::LocalFrameToken(), nullptr);
   blink::WebFrameWidget* frame_widget = web_frame->InitializeFrameWidget(
@@ -296,26 +307,30 @@ WebViewPlugin::WebViewHelper::~WebViewHelper() {
   web_view_->Close();
 }
 
-bool WebViewPlugin::WebViewHelper::AcceptsLoadDrops() {
-  return false;
-}
-
-bool WebViewPlugin::WebViewHelper::CanUpdateLayout() {
-  return true;
-}
-
-void WebViewPlugin::WebViewHelper::SetToolTipText(
-    const base::string16& tooltip_text,
+void WebViewPlugin::WebViewHelper::UpdateTooltipUnderCursor(
+    const std::u16string& tooltip_text,
     base::i18n::TextDirection hint) {
+  UpdateTooltip(tooltip_text);
+}
+
+void WebViewPlugin::WebViewHelper::UpdateTooltipFromKeyboard(
+    const std::u16string& tooltip_text,
+    base::i18n::TextDirection hint,
+    const gfx::Rect& bounds) {
+  UpdateTooltip(tooltip_text);
+}
+
+void WebViewPlugin::WebViewHelper::UpdateTooltip(
+    const std::u16string& tooltip_text) {
   if (plugin_->container_) {
     plugin_->container_->GetElement().SetAttribute(
         "title", WebString::FromUTF16(tooltip_text));
   }
 }
 
-void WebViewPlugin::WebViewHelper::DidInvalidateRect(const gfx::Rect& rect) {
+void WebViewPlugin::WebViewHelper::InvalidateContainer() {
   if (plugin_->container_)
-    plugin_->container_->InvalidateRect(rect);
+    plugin_->container_->Invalidate();
 }
 
 void WebViewPlugin::WebViewHelper::SetCursor(const ui::Cursor& cursor) {
@@ -359,6 +374,8 @@ void WebViewPlugin::WebViewHelper::DidClearWindowObject() {
 
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
   v8::Local<v8::Context> context = frame_->MainWorldScriptContext();
   DCHECK(!context.IsEmpty());
 
@@ -386,6 +403,14 @@ void WebViewPlugin::OnZoomLevelChanged() {
 void WebViewPlugin::LoadHTML(const std::string& html_data, const GURL& url) {
   auto params = std::make_unique<blink::WebNavigationParams>();
   params->url = url;
+  // The |html_data| comes from files in: chrome/renderer/resources/plugins/
+  // Executing scripts is the only capability required.
+  //
+  // WebSandboxFlags is a bit field. This removes all the capabilities, except
+  // script execution.
+  using network::mojom::WebSandboxFlags;
+  params->sandbox_flags = static_cast<WebSandboxFlags>(
+      ~static_cast<int>(WebSandboxFlags::kScripts));
   blink::WebNavigationParams::FillStaticResponse(params.get(), "text/html",
                                                  "UTF-8", html_data);
   web_view_helper_.main_frame()->CommitNavigation(std::move(params),

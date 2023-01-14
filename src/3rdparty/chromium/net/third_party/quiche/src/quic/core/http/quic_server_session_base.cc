@@ -40,9 +40,7 @@ void QuicServerSessionBase::Initialize() {
   crypto_stream_ =
       CreateQuicCryptoServerStream(crypto_config_, compressed_certs_cache_);
   QuicSpdySession::Initialize();
-  if (GetQuicRestartFlag(quic_enable_zero_rtt_for_tls_v2)) {
-    SendSettingsToCryptoStream();
-  }
+  SendSettingsToCryptoStream();
 }
 
 void QuicServerSessionBase::OnConfigNegotiated() {
@@ -50,12 +48,6 @@ void QuicServerSessionBase::OnConfigNegotiated() {
 
   if (!config()->HasReceivedConnectionOptions()) {
     return;
-  }
-
-  // Disable server push if peer sends the corresponding connection option.
-  if (!version().UsesHttp3() &&
-      ContainsQuicTag(config()->ReceivedConnectionOptions(), kQNSP)) {
-    OnSetting(spdy::SETTINGS_ENABLE_PUSH, 0);
   }
 
   // Enable bandwidth resumption if peer sent correct connection options.
@@ -173,9 +165,10 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
           bandwidth_estimate_sent_to_client_);
   const int32_t max_bw_estimate_bytes_per_second =
       BandwidthToCachedParameterBytesPerSecond(max_bandwidth_estimate);
-  QUIC_BUG_IF(max_bw_estimate_bytes_per_second < 0)
+  QUIC_BUG_IF(quic_bug_12513_1, max_bw_estimate_bytes_per_second < 0)
       << max_bw_estimate_bytes_per_second;
-  QUIC_BUG_IF(bw_estimate_bytes_per_second < 0) << bw_estimate_bytes_per_second;
+  QUIC_BUG_IF(quic_bug_10393_1, bw_estimate_bytes_per_second < 0)
+      << bw_estimate_bytes_per_second;
 
   CachedNetworkParameters cached_network_params;
   cached_network_params.set_bandwidth_estimate_bytes_per_second(
@@ -207,13 +200,15 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
 
 bool QuicServerSessionBase::ShouldCreateIncomingStream(QuicStreamId id) {
   if (!connection()->connected()) {
-    QUIC_BUG << "ShouldCreateIncomingStream called when disconnected";
+    QUIC_BUG(quic_bug_10393_2)
+        << "ShouldCreateIncomingStream called when disconnected";
     return false;
   }
 
   if (QuicUtils::IsServerInitiatedStreamId(transport_version(), id)) {
-    QUIC_BUG << "ShouldCreateIncomingStream called with server initiated "
-                "stream ID.";
+    QUIC_BUG(quic_bug_10393_3)
+        << "ShouldCreateIncomingStream called with server initiated "
+           "stream ID.";
     return false;
   }
 
@@ -229,12 +224,13 @@ bool QuicServerSessionBase::ShouldCreateIncomingStream(QuicStreamId id) {
 
 bool QuicServerSessionBase::ShouldCreateOutgoingBidirectionalStream() {
   if (!connection()->connected()) {
-    QUIC_BUG
+    QUIC_BUG(quic_bug_12513_2)
         << "ShouldCreateOutgoingBidirectionalStream called when disconnected";
     return false;
   }
   if (!crypto_stream_->encryption_established()) {
-    QUIC_BUG << "Encryption not established so no outgoing stream created.";
+    QUIC_BUG(quic_bug_10393_4)
+        << "Encryption not established so no outgoing stream created.";
     return false;
   }
 
@@ -243,12 +239,13 @@ bool QuicServerSessionBase::ShouldCreateOutgoingBidirectionalStream() {
 
 bool QuicServerSessionBase::ShouldCreateOutgoingUnidirectionalStream() {
   if (!connection()->connected()) {
-    QUIC_BUG
+    QUIC_BUG(quic_bug_12513_3)
         << "ShouldCreateOutgoingUnidirectionalStream called when disconnected";
     return false;
   }
   if (!crypto_stream_->encryption_established()) {
-    QUIC_BUG << "Encryption not established so no outgoing stream created.";
+    QUIC_BUG(quic_bug_10393_5)
+        << "Encryption not established so no outgoing stream created.";
     return false;
   }
 
@@ -283,6 +280,25 @@ void QuicServerSessionBase::SendSettingsToCryptoStream() {
                                          buffer.get() + buffer_size);
   GetMutableCryptoStream()->SetServerApplicationStateForResumption(
       std::move(serialized_settings));
+}
+
+QuicSSLConfig QuicServerSessionBase::GetSSLConfig() const {
+  QUICHE_DCHECK(crypto_config_ && crypto_config_->proof_source());
+
+  QuicSSLConfig ssl_config = QuicSpdySession::GetSSLConfig();
+  if (!GetQuicReloadableFlag(quic_tls_set_signature_algorithm_prefs) ||
+      !crypto_config_ || !crypto_config_->proof_source()) {
+    return ssl_config;
+  }
+
+  absl::InlinedVector<uint16_t, 8> signature_algorithms =
+      crypto_config_->proof_source()->SupportedTlsSignatureAlgorithms();
+  if (!signature_algorithms.empty()) {
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_tls_set_signature_algorithm_prefs, 1, 2);
+    ssl_config.signing_algorithm_prefs = std::move(signature_algorithms);
+  }
+
+  return ssl_config;
 }
 
 }  // namespace quic

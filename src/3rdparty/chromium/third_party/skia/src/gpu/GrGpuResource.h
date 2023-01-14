@@ -83,22 +83,7 @@ protected:
 
 private:
     void notifyWillBeZero(LastRemovedRef removedRef) const {
-        if (0 == this->getRefCnt() && this->hasNoCommandBufferUsages()) {
-            // At this point we better be the only thread accessing this resource.
-            // Trick out the notifyRefCntWillBeZero() call by adding back one more ref.
-            fRefCnt.fetch_add(+1, std::memory_order_relaxed);
-            static_cast<const DERIVED*>(this)->notifyRefCntWillBeZero();
-            // notifyRefCntWillBeZero() could have done anything, including re-refing this and
-            // passing on to another thread. Take away the ref-count we re-added above and see
-            // if we're back to zero.
-            // TODO: Consider making it so that refs can't be added and merge
-            //  notifyRefCntWillBeZero()/willRemoveLastRef() with notifyARefCntIsZero().
-            if (1 == fRefCnt.fetch_add(-1, std::memory_order_acq_rel)) {
-                static_cast<const DERIVED*>(this)->notifyARefCntIsZero(removedRef);
-            }
-        } else {
-            static_cast<const DERIVED*>(this)->notifyARefCntIsZero(removedRef);
-        }
+        static_cast<const DERIVED*>(this)->notifyARefCntIsZero(removedRef);
     }
 
     int32_t getRefCnt() const { return fRefCnt.load(std::memory_order_relaxed); }
@@ -139,7 +124,7 @@ public:
     /**
      * Retrieves the context that owns the object. Note that it is possible for
      * this to return NULL. When objects have been release()ed or abandon()ed
-     * they no longer have an owning context. Destroying a GrContext
+     * they no longer have an owning context. Destroying a GrDirectContext
      * automatically releases all its resources.
      */
     const GrDirectContext* getContext() const;
@@ -294,15 +279,9 @@ private:
 
     virtual size_t onGpuMemorySize() const = 0;
 
-    /**
-     * Called by GrIORef when a resource is about to lose its last ref
-     */
-    virtual void willRemoveLastRef() {}
-
     // See comments in CacheAccess and ResourcePriv.
     void setUniqueKey(const GrUniqueKey&);
     void removeUniqueKey();
-    void notifyRefCntWillBeZero() const;
     void notifyARefCntIsZero(LastRemovedRef removedRef) const;
     void removeScratchKey();
     void makeBudgeted();

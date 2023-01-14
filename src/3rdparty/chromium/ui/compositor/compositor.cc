@@ -5,7 +5,9 @@
 #include "ui/compositor/compositor.h"
 
 #include <stddef.h>
+
 #include <algorithm>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -55,6 +57,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/display/display_switches.h"
 #include "ui/gfx/icc_profile.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 
@@ -182,6 +185,14 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   settings.enable_elastic_overscroll = true;
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Rasterized tiles must be overlay candidates to be forwarded.
+  // This is very similar to the line above for Apple.
+  if (features::IsDelegatedCompositingEnabled()) {
+    settings.resource_settings.use_gpu_memory_buffer_resources = true;
+  }
+#endif
+
   settings.memory_policy.bytes_limit_when_visible = 512 * 1024 * 1024;
 
   // Used to configure ui compositor memory limit for chromeos devices.
@@ -203,16 +214,8 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   settings.disallow_non_exact_resource_reuse =
       command_line->HasSwitch(switches::kDisallowNonExactResourceReuse);
 
-  settings.enable_impl_latency_recovery =
-      features::IsImplLatencyRecoveryEnabled();
-  settings.enable_main_latency_recovery =
-      features::IsMainLatencyRecoveryEnabled();
-
-  if (command_line->HasSwitch(switches::kRunAllCompositorStagesBeforeDraw)) {
-    settings.wait_for_all_pipeline_stages_before_draw = true;
-    settings.enable_impl_latency_recovery = false;
-    settings.enable_main_latency_recovery = false;
-  }
+  settings.wait_for_all_pipeline_stages_before_draw =
+      command_line->HasSwitch(switches::kRunAllCompositorStagesBeforeDraw);
 
   if (base::FeatureList::IsEnabled(
           features::kCompositorThreadedScrollbarScrolling)) {
@@ -246,7 +249,8 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   if (base::FeatureList::IsEnabled(features::kUiCompositorScrollWithLayers) &&
       compositor_delegate) {
     input_handler_weak_ = cc::InputHandler::Create(*compositor_delegate);
-    scroll_input_handler_.reset(new ScrollInputHandler(input_handler_weak_));
+    scroll_input_handler_ =
+        std::make_unique<ScrollInputHandler>(input_handler_weak_);
   }
 
   animation_timeline_ =
@@ -368,7 +372,7 @@ cc::AnimationTimeline* Compositor::GetAnimationTimeline() const {
   return animation_timeline_.get();
 }
 
-void Compositor::SetDisplayColorMatrix(const SkMatrix44& matrix) {
+void Compositor::SetDisplayColorMatrix(const skia::Matrix44& matrix) {
   display_color_matrix_ = matrix;
   if (display_private_)
     display_private_->SetDisplayColorMatrix(gfx::Transform(matrix));
@@ -743,23 +747,49 @@ void Compositor::OnFrameTokenChanged(uint32_t frame_token,
   NOTREACHED();
 }
 
+Compositor::TrackerState::TrackerState() = default;
+Compositor::TrackerState::TrackerState(TrackerState&&) = default;
+Compositor::TrackerState& Compositor::TrackerState::operator=(TrackerState&&) =
+    default;
+Compositor::TrackerState::~TrackerState() = default;
+
 void Compositor::StartThroughputTracker(
     TrackerId tracker_id,
     ThroughputTrackerHost::ReportCallback callback) {
   DCHECK(!base::Contains(throughput_tracker_map_, tracker_id));
-  throughput_tracker_map_[tracker_id] = std::move(callback);
+
+  auto& tracker_state = throughput_tracker_map_[tracker_id];
+  tracker_state.report_callback = std::move(callback);
+
   animation_host_->StartThroughputTracking(tracker_id);
 }
 
-void Compositor::StopThroughtputTracker(TrackerId tracker_id) {
-  DCHECK(base::Contains(throughput_tracker_map_, tracker_id));
+bool Compositor::StopThroughtputTracker(TrackerId tracker_id) {
+  auto it = throughput_tracker_map_.find(tracker_id);
+  DCHECK(it != throughput_tracker_map_.end());
+
+  // Clean up if report has happened since StopThroughputTracking would
+  // not trigger report in this case.
+  if (it->second.report_attempted) {
+    throughput_tracker_map_.erase(it);
+    return false;
+  }
+
+  it->second.should_report = true;
   animation_host_->StopThroughputTracking(tracker_id);
+  return true;
 }
 
 void Compositor::CancelThroughtputTracker(TrackerId tracker_id) {
-  DCHECK(base::Contains(throughput_tracker_map_, tracker_id));
-  StopThroughtputTracker(tracker_id);
-  throughput_tracker_map_.erase(tracker_id);
+  auto it = throughput_tracker_map_.find(tracker_id);
+  DCHECK(it != throughput_tracker_map_.end());
+
+  const bool should_stop = !it->second.report_attempted;
+
+  throughput_tracker_map_.erase(it);
+
+  if (should_stop)
+    animation_host_->StopThroughputTracking(tracker_id);
 }
 
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
@@ -798,15 +828,22 @@ void Compositor::ReportMetricsForTracker(
   if (it == throughput_tracker_map_.end())
     return;
 
+  // Set `report_attempted` but not reporting if relevant ThroughputTrackers
+  // are not stopped and waiting for reports.
+  if (!it->second.should_report) {
+    it->second.report_attempted = true;
+    return;
+  }
+
   // Callback may modify `throughput_tracker_map_` so update the map first.
   // See https://crbug.com/1193382.
-  auto callback = std::move(it->second);
+  auto callback = std::move(it->second.report_callback);
   throughput_tracker_map_.erase(it);
   std::move(callback).Run(data);
 }
 
 void Compositor::SetDelegatedInkPointRenderer(
-    mojo::PendingReceiver<viz::mojom::DelegatedInkPointRenderer> receiver) {
+    mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer> receiver) {
   if (display_private_)
     display_private_->SetDelegatedInkPointRenderer(std::move(receiver));
 }

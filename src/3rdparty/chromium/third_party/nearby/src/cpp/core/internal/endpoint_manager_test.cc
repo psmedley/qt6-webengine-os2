@@ -16,7 +16,14 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
+#include <utility>
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "core/internal/client_proxy.h"
 #include "core/internal/endpoint_channel_manager.h"
 #include "core/internal/offline_frames.h"
@@ -27,11 +34,6 @@
 #include "platform/public/logging.h"
 #include "platform/public/pipe.h"
 #include "proto/connections_enums.pb.h"
-#include "gmock/gmock.h"
-#include "gtest/gtest.h"
-#include "absl/synchronization/mutex.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
 
 namespace location {
 namespace nearby {
@@ -113,7 +115,10 @@ class EndpointManagerTest : public ::testing::Test {
   }
 
   ClientProxy client_;
-  ConnectionOptions options_;
+  ConnectionOptions options_{
+      .keep_alive_interval_millis = 5000,
+      .keep_alive_timeout_millis = 30000,
+  };
   std::vector<std::unique_ptr<EndpointManager::FrameProcessor>> processors_;
   EndpointChannelManager ecm_;
   EndpointManager em_{&ecm_};
@@ -176,8 +181,9 @@ TEST_F(EndpointManagerTest, RegisterFrameProcessorWorks) {
   auto endpoint_channel = std::make_unique<MockEndpointChannel>();
   auto connect_request = std::make_unique<MockFrameProcessor>();
   ByteArray endpoint_info{"endpoint_name"};
-  auto read_data = parser::ForConnectionRequest(
-      "endpoint_id", endpoint_info, 1234, false, "", std::vector{Medium::BLE});
+  auto read_data =
+      parser::ForConnectionRequest("endpoint_id", endpoint_info, 1234, false,
+                                   "", std::vector{Medium::BLE}, 0, 0);
   EXPECT_CALL(*connect_request, OnIncomingFrame);
   EXPECT_CALL(*connect_request, OnEndpointDisconnect);
   EXPECT_CALL(*endpoint_channel, Read())

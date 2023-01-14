@@ -19,9 +19,9 @@
 #include <cstring>
 #include <ostream>
 #include <string>
+#include <type_traits>
 
 #include "absl/strings/match.h"
-#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -40,50 +40,68 @@ namespace dsp {
 namespace {
 
 constexpr int kNumSpeedTests = 50000;
+// mask_blend is applied to compound prediction values when is_inter_intra is
+// false. This implies a range far exceeding that of pixel values. The ranges
+// include kCompoundOffset in 10bpp and 12bpp.
+// see: src/dsp/convolve.cc & src/dsp/warp.cc.
+constexpr int kCompoundPredictionRange[3][2] = {
+    // 8bpp
+    {-5132, 9212},
+    // 10bpp
+    {3988, 61532},
+    // 12bpp
+    {3974, 61559},
+};
 
 const char* GetDigest8bpp(int id) {
   static const char* const kDigest[] = {
-      "2dd91daba84f0375fa4e44de367f8b46", "55db73529f0df3bf4010e992dd8a5c86",
-      "d1ca1bd7071b1424a252e8cde151b7f4", "e08984aa08f33f59457b514e3d1a3561",
-      "4867911cf8b77be85c90930ec7639394", "a64e0898a07fc5b6fa0eb4c38dbae8a0",
-      "308b60ac3b4f39abef376532dbe8d74b", "1258aecd878e6631f3dc70e79c9e45ad",
-      "b6633f1590acd24388166db11f5aac25", "0bc90f4f5f985f7f6726ca9ee5628d22",
-      "668e5cc427b3d9a9291a79ecdab8da13", "cfcbd5951477be105538ec3386b374cb",
-      "281e6ff77b4d883c399f162219d5b7c9", "65ea38314ee61e5433b087d690a770e4",
-      "abfefb8cb4860c4cbf5e8231f4a6c933", "7af7a3d74e0b5c5241d3294cd506be32",
-      "a03e5ce8414b04870fa7f49fab428e6b", "89e80848db8e70adba77129c455c481f",
-      "9415252f054e5cb357b5b3737894af22", "2dcfe14af3bdb30efa235b423e63e404",
-      "46276a31e8f7f0ad360412a98eca8487", "a36fd522feb8da32def45883a8d03b50",
-      "a82475352dc23d2e0038e2737ccaa417", "15c130c26c6ea07c70a086bc82adfff6",
-      "1dc1ba6f9dd23bc3c86ea687436987e5", "77834da899998a970aea5ccaabae89fa",
-      "429d0e3f34b32c8cbbd885f79803e388", "0e18016afda6aa3a6b1d89e6f14dd731",
-      "70246aed8008bb3cfc2eca8f4c402fa0", "7e8d35f59825cf114ed36238563ef124",
-      "2386b1b89819acef49754b19e975483b", "a0b15dbea4821a133b0ad0f9d77d9f5e",
-      "d9858411ae3c0371d9041492159e4be3", "30ecc05cd7d82841a327c2fda07af877",
-      "73da76ef0ad534e2e432ddd9891fdc08", "dadb0b3d2a706a144748367988abb10f",
-      "67b25e85ff6d41488a42b87bb99a9c3e", "7c9288b35b6f90305a53a3b87889cfd0",
-      "659e28b852dd982762d1add0286f81ef", "af5e6c65ed48a0eb7d509f7036398728",
-      "f9da3310d7dc75910483dfdd2af6ee62", "a9423b4d67bee5e7c7bc3baa7a9c017a",
-      "6b90a04333407013dd011c1af582e79f", "e658088a74bfb7cc57a2faa74a6f8689",
-      "6eedf27126eba6915035f9f701a1b992", "89116a7c6ad3f70a5b3f3105d04ad1a8",
-      "f41e5e166b049d0006d8b2cab56523b3", "3bed57a684075bbe3c25fd0c3e5520c3",
-      "85c0b21af2afb18ce948abfe3e23c85b", "bd8aaa3602d6b42438f8449f8adb52cb",
-      "1266bad904caad2c6d4047abefc2393d", "6573f2fe2a14c9ab7d5e192742388489",
-      "6b9b443f6306059fa3fe18df9de6dc48", "c9a91ee6ae8b653f552866e4073dd097",
-      "fa58938384198f7709d4871d155ba100", "033d121fc782e83ff94c31e73407d2a8",
-      "7ea268d79f7b8c75a4feeb24e892471a", "73a376bb3e07172d1e094ab8e01a7d42",
-      "13c366e0da1663fac126ea3d3876c110", "2f5eb5fcdf953c63fee2b8c75a6e5568",
-      "2054b197f002223f2d75699884279511", "67ce53e6991657a922d77cc8a23f1e07",
-      "f48e6d666435e7a917d6f90539b0d557", "21d03669d8d255e43552f8fb90724717",
-      "43dbaa1a7aaf2a01764e78e041b6763b", "a8173347ea861ecee6da54f81df73951",
-      "6b97ec4e4647a8de026d693059b855b7", "a85bf4c4b48791ac4971339877e4bc8a",
-      "04cf84d020a60ce3ce53845255ca8ec9", "ddd87035b960499b883d0aefcf96b6b2",
-      "278c5dd102474d598bf788cd66977ba9", "78b3790785811516142d417a49177c8c",
-      "7883ea9c2df0b4f5797cba31f4352678", "727004811025ac97b04940e2eaf68f94",
-      "7ffa3f97ec13dc8b6225550133a392bc", "6f5f2cb7a44aa0daea5c6b3315110591",
-      "88a59d68875fb44ec3be9d3fa293bccb", "0516e71f76b9d998794d3d63e480fa2f",
-      "193793d42f0964b4a958a68d9d7eb4ba", "4d259c7c6a95744e4ebaaa5361befb11",
-      "c090155b997dc103203bcb5a9dcc6282",
+      "4b70d5ef5ac7554b4b2660a4abe14a41", "64adb36f07e4a2c4ea4f05cfd715ff58",
+      "2cd162cebf99724a3fc22d501bd8c8e4", "c490478208374a43765900ef7115c264",
+      "b98f222eb70ef8589da2d6c839ca22b8", "54752ca05f67b5af571bc311aa4e3de3",
+      "5ae48814dd285bfca4f5ee8e339dca99", "383f3f4f47563f065d1b6068e5931a24",
+      "344b2dab7accd8bd0a255bee16207336", "0b2f6f755d1547eea7e0172f8133ea01",
+      "310dc6364fdacba186c01f0e8ac4fcb7", "c2ee4673078d34971319c77ca77b23d1",
+      "b0c9f08b73d9e5c16eaf5abdbca1fdc0", "eaad805999d949fa1e1bbbb63b4b7827",
+      "6eb2a80d212df89403efb50db7a81b08", "c30730aa799dba78a2ebd3f729af82c7",
+      "4346c2860b23f0072b6b288f14c1df36", "1cdace53543063e129a125c4084ca5d7",
+      "1ae5328e0c0f4f2bec640d1af03b2978", "3860e040fbee0c5f68f0b4af769209b3",
+      "e9480ded15d9c38ee19bf5fa816dd296", "4e17c222b64f428df29938a8120ca256",
+      "2a943bc6de9b29c8bcae189ad3bec276", "b5a6bc02c76fa61040678fb2c6c112d2",
+      "2c11bb9bd29c5577194edb77cfd1c614", "31ed1832810ae385f4ad8f57795dde1e",
+      "eb87d647839c33984dfb25bac0e7cdb3", "f652ec2b1478e35acb19cf28042ee849",
+      "0cfb18ac0cb94af1447bcac32ac20c36", "e152bbbf5ee4b40b7b41ec1f2e901aaa",
+      "f17f78fd485f7beafa8126c1cda801d7", "9f9fbee0cc9d99435efd3dff644be273",
+      "9b498843d66440c1e68dc7ab04f57d42", "2f2b0beceb31b79ccb9179991629e4b8",
+      "e06a6ebb6791529bb23fe5b0a9914220", "2b3d1ff19812a17c17b1be1f1727815e",
+      "d0bbdecec414950ed63a8a35c2bae397", "8e53906c6513058d7f17013fe0d32bf1",
+      "be0690efd31f0bf3c2adcd27ca011ed5", "c2b26243c5f147fdeadf52735aa68fb5",
+      "94bb83e774d9189c5ee04fb361855e19", "dad6441e723791a91f31a56b2136fd33",
+      "10ccac76a2debb842a0685a527b6a659", "346fb0a4914b64dda3ca0f521412b999",
+      "d7e400b855502bbb4f2b8294e207bb96", "3487503f2d73ec52f25b5e8d06c81da4",
+      "3f49c096acfcf46d44ce18b48debca7c", "8ed6a745a2b5457ac7f3ac145ce57e72",
+      "21f9dda5ef934a5ee6274b22cc22f93b", "507b60611afeb373384d9b7606f7ea46",
+      "ac766fadcdb85a47ad14a6846b9e5c36", "fde149bc2162e02bbc5fa85cc41641a5",
+      "f5f094b5742d0a920ba734b017452d24", "c90d06b0c76a0983bd1428df2a1b64b3",
+      "3649e6a6ed9f69e3f78e0b75160fb82a", "1d44b7649497e651216db50d325e3073",
+      "948fa112e90e3ca4d15f3d2f2acfab9a", "9bb54c0f7d07c0b44c44ba09379a04ff",
+      "228261ab6f098f489a8968cff1e1f7ae", "5e128db7462164f7327d1d8feeb2e4c7",
+      "9e8b97f6d9d482d5770b138bd1077747", "81563d505a4e8dd779a089abf2a28b77",
+      "b7157451de7cfa161dff1afd7f9b8622", "6a25cc0a4aaf8a315d1158dbb0ec2966",
+      "303867ee010ba51da485ee10149c6f9b", "63b64b7527d2476e9ae5139b8166e8c9",
+      "cfa93c2aeeb27a1190a445a6fee61e15", "804bcff8709665eed6830e24346101be",
+      "829947ed3e90776cda4ae82918461497", "1df10a1cb80c1a81f521e7e0f80b4f99",
+      "3c9593e42ac574f3555bb8511d438a54", "eecef71492c0626685815e646f728f79",
+      "0c43d59f456ddca2449e016ae4e34be7", "207d4ac2579f1271fc9eca8d743917b3",
+      "3c472bb0b1c891ffda19077ebb659e48", "a4ae7a0d25113bc0238fa27409f9c0dd",
+      "e8ad037ca81f46774bb01d20f46671ce", "b22741e4fe0e4062e40a2decec102ffd",
+      "c72f9e7bc0170163cb94da0faa0d3ffb", "accaf5d475d155cbd3a8c113f90718bc",
+      "2fd31e72444ea258380c16881580de81", "8a6a2a253f6f5b0ff75ba39488e6b082",
+      "c5e8159c0f3ebb7536e84ab3dadac1b3", "ef7ec20b46c7dcf16591835642bd68ef",
+      "0c3425399dc64870d726c2837666a55e", "0365029ffbfc4cedf3bf2d757ea5b9df",
+      "836aa403254af2e04d4b7a7c4db8bfc5", "7f2f3f9c91677b233795169f9a88b2b2",
+      "9fc8bbe787244dac638c367b9c611d13", "f66ef45fae8e163ab0f0f393531dad26",
+      "beb984e88b6f9b96ae6efe5da23ad16b", "1083b829ea766b1d4eb0bb96e9fb3bff",
+      "be8abad1da69e4d238a45fc02a0061cf",
   };
   return kDigest[id];
 }
@@ -91,62 +109,69 @@ const char* GetDigest8bpp(int id) {
 #if LIBGAV1_MAX_BITDEPTH >= 10
 const char* GetDigest10bpp(int id) {
   static const char* const kDigest[] = {
-      "8196b9f210352077cc679e446759da78", "efe97b629240d3684ca42ab9b5d61b34",
-      "004a82797cc5def32c1790552c540051", "307a96332b52d8cd98dad8d317986ba2",
-      "2e1a7c36304a6cfacf39a2e214970a48", "55875ec75bdb3db4afcfc2566eee8acb",
-      "b55f12d10b3cb9d71b9c67fa1815bb17", "b5413338cc13d4dd040a188093f2871f",
-      "8fc31544ea7a4dcf54875cc758d9deca", "5a2d915e31b07d07834057a48eab1526",
-      "542a39b7abf911e43bdabb26994a2c6d", "ae2dca20ce113a6465d6db29f3a0c0b4",
-      "7933aa47fc4e73e742b36f94131060c4", "0e9511aebeda0d20a5379f1f6ade758a",
-      "1eb2e41f3b2875927694353c85eb46b2", "6a2c23d4753ae26bc12ee62aec28be2d",
-      "82c9a494a6bb9a8896a1a598208a1a8b", "98b253d1062509fd6930f5116a2122d0",
-      "382eea1848495702f3c7b249d0494984", "06e261d242bbccd58bfa3af94e75ff72",
-      "42b852cd19a1017123307b00c2c7dd3f", "796f3ffb9d7be7b4af1b5b2354f078de",
-      "31e728e592eeb4186e9c296cba14431b", "958e9225425973e0efb72b5631bb7567",
-      "665f04edc9eb7ecda8b6b3815b2ce70d", "f6c7bdb0f545b6bc21c8626b3ad281d9",
-      "2a99d2843237b4648e41cd97d6dc92fa", "1b2be5dd157056fb2be2f201fbc17c32",
-      "3f2ed4d6c80df46333e8ed93bf58faf3", "864de7e1d6c9b05b6461dd425911170a",
-      "5b1c0ce6558380162e3aa5ab652694b2", "c7c612a7ad16dd9b79c37c08e1595eb5",
-      "f0b71f665cfb75dc9f39f1e4e9c3ddd6", "f5066ab69b751ea7b5cd37cb94fe4122",
-      "7e7d7675bf768658b9cfe0b70e969475", "3993328e0d01129f2e35ca5462c1614b",
-      "bcb804c07f4affa8b33950f9b3942008", "84f597dfb56e9db5953b42eaa2c22c88",
-      "c8c1c7d314c5b0c0890ca8e4c91ce055", "c26e0a0e90a969d762edcab770bed3b7",
-      "e517967d2cf4f1b0fff09d334475e2ae", "bc760a328a0a4b2d75593667adfa2a0e",
-      "b6239fdeeccc462640047cb2e2c2be96", "bc01f6a232ef9f0d9e57301779edd67f",
-      "cf6e8c1823c5498fa5589db40406a6ad", "2a9a4bd0bd84f0b85225a5b30f5eaa16",
-      "56f7bb2265dbd8a563bb269aa527c8a3", "fcbed0f0350be5a1384f95f8090d262e",
-      "f3ecf2e5747ebff65ac78ecbe7cc5e6a", "1d57d1371ad2f5f320cc4de789665f7c",
-      "e9f400fee64673b0f6313400fe449135", "5dfdc4a8376740011c777df46418b5d2",
-      "a4eb2c077300c0d8eeda028c9db3a63a", "90551259280c2b2150f018304204f072",
-      "4cbcd76496fc5b841cd164b6067b9c0b", "895964acc7b7e7d084de2266421c351b",
-      "af2e05159d369d0e3b72707f242b2845", "c7d393cef751950df3b9ed8056a9ffce",
-      "788541c0807aed47b863d47e5912555d", "163a06512f48c1b0f2535c8c50815bcc",
-      "dc5e723bab9fbfd7074a62e05b6b3c2b", "bf91200ce1bf97b4642a601adc13d700",
-      "d93fcefa6b9004baaab76d436e7ac931", "e89a2111caecc6bcf5f2b42ea0167ab4",
-      "e04a058df9b87878ca97edc1c42e76e1", "5d1f60876147edd6ed29d1fb50172464",
-      "655fb228aa410fd244c58c87fe510bec", "639a8a0a8f62d628136f5a97b3728b69",
-      "5b60f2428b092a502d6471fa09befd7f", "40601555ac945b4d37d3434b6e5619be",
-      "02be23bf1f89d5f5af02a39b98f96142", "9347a45bd54d28d8105f8183996b3505",
-      "d8429cc7b0b388981861a0fdd40289f0", "c4b7fab3b044486f663e160c07805e0a",
-      "f5f5d513b1f1c13d0abc70fc18afea48", "f236795ea30f1b8761b268734a245ba1",
-      "c7b7452ea8247a3a40248278d08953d5", "ddd6ba3c5ec56cc7a0b0161ae67001fa",
-      "94675749f2db46a8ade6f2f211db9a32", "3d165364ff96a5ef39e67a53fe3ed3be",
-      "3d1d66a9401fd7e78050724ca1fa0419",
+      "1af3cbd1616941b59e6a3f6a417b6312", "1d8b3f4b9d5d2f4ff5be8e81b7243121",
+      "e767350f150a84ac5a06dc348e815d62", "53a3a76bf2bcd5761cd15fc739a4f4e1",
+      "7597f69dc19a584280be0d67911db6a6", "e1221c172843dc6c1b345bcd370771cc",
+      "1a640c71ff9bb45505d89761f19efa8f", "e192f64322e0edb250b52f63aaa4de97",
+      "2ccbe012ca167114b14c3ba70befa960", "0f68632d7e5faddb4554ca430d1df822",
+      "8caa0061a26e142b783951d5abd7bf5d", "b01eeed3ec549e4a593100d9c5ba587a",
+      "1cce6acdbd8ca8d2546ba937584730bf", "022913e87a3c1a86aaefe2c2d4f89882",
+      "48f8ab636ba15a06731d869b603cbe58", "ba1616c990d224c20de123c3ccf19952",
+      "346a797b7cb4de10759e329f8b49e077", "d4929154275255f2d786d6fc42c7c5d3",
+      "18a6af6f36ca1ea4ab6f5a76505de040", "0c43e68414bfc02f9b20e796506f643b",
+      "9f483f543f6b1d58e23abf9337ed6fe6", "e114860c2538b63f1be4a23560420cdc",
+      "da8680798f96572c46155c7838b452c3", "20b47a27617297231843c0f2ed7b559b",
+      "16fa4a4f33a32e28c79da83dca63fd41", "76e2c1d3c323777a3c478e11e1ba6bf2",
+      "dccdfd52a71855cc4da18af52bda4c03", "121befbd6c246e85a34225241b8bcaf1",
+      "5780757555fd87ca1ff3f1b498a1d6e9", "6b0be2256285694b1edc0201608e1326",
+      "b7ef338c58d17f69426b5a99170c7295", "b92b84b5b3d01afac02fb9c092e84b06",
+      "e6ef7fea8b183f871c4306c4f49370c5", "c1bf95c05774d8471504e57a3efa66e4",
+      "bbacdbdafc625a139361ec22fe2cf003", "5fbbb2d6ca8fc6d07ca8d4105fda4a01",
+      "c1cbb295d9f00aa865d91a95e96f99b2", "1490e4f2c874a76ecc2bbf35dce446c3",
+      "c3bd73daaeec39895a8b64812773c93c", "6d385068ef3afbd821183d36851f709b",
+      "a34c52ef7f2fd04d1cd420238641ef48", "45d10029358c6835cf968a30605659ea",
+      "a72c1bb18cf9312c5713ce0de370743d", "df7368db2a7515a1c06a4c9dd9e32ebf",
+      "52782632271caccfa9a35ed7533e2052", "6f0ef9b62d2b9956a6464694b7a86b79",
+      "814dbc176f7201725a1cfd1cf668b4b9", "065ffbee984f4b9343c8acb0eb04fcbe",
+      "0915d76ce458d5164e3c90c1ce150795", "bf2b431d9bfa7a9925ea6f6509267ae9",
+      "d3df8c0c940a01b7bf3c3afb80b6dcd4", "15ab86216c9856a8427a51fe599258a3",
+      "2cb078484472c88e26b7401c9f11cf51", "7c5f68cc098c8adabc9e26f9cd549151",
+      "a8e47da1fcc91c2bc74d030892621576", "71af422ba2d86a401f8278591c0ef540",
+      "964c902bb4698ce82f4aa0a1edc80cd6", "78271c37d62af86576dab72ed59746b3",
+      "7247c3a7534a41137027e7d3f255f5ef", "8e529ab964f5f9d0f7c3ced98239cfc8",
+      "2481ed50bff6b36a3cac6dca2aca5ae5", "78a1ff18bf217d45f5170675dee26948",
+      "00fc534119c13aa7af4b818cad9218a2", "67501a83c93f2f9debfa86955bdffde5",
+      "2a512ef738e33a4d8476f72654deffb4", "f4eef28078bbc12de9cfb5bc2fef6238",
+      "b7ac3a35205a978bed587356155bae0e", "51ea101f09c4de2f754b61ab5aff1526",
+      "2bd689d7ec964ee8c8f6f0682f93f5ca", "eecac8dbdaa73b8b3c2234892c444147",
+      "cb7086f44ef70ef919086a3d200d8c13", "0abe35e3c796c2de1e550426b2b19441",
+      "0eb140561e1ea3843464a5247d8ecb18", "d908f7317f00daacbe3dd43495db64ad",
+      "d4d677c4b347de0a13ccab7bc16b8e6e", "26523c2c2df7f31896a3ae5aa24d5ada",
+      "0ebb9f816684769816b2ae0b1f94e3a4", "fd938d0577e3687b0a810e199f69f0bb",
+      "eb8fb832e72030e2aa214936ae0effe4", "56631887763f7daf6e1e73783e5ff656",
+      "590a25cc722c2aa4d885eede5ef09f20", "80944a218ed9b9b0374cde72914449eb",
+      "d9cbc2f1e0e56cdd6722310932db1981", "a88eb213b7a6767bbe639cda120a4ab6",
+      "9972ecbadfdf3ed0b3fedf435c5a804f", "01fdf7e22405a1b17a8d275b7451094f",
+      "6a7824e10406fade0d032e886bbc76b6", "76fefadd793ec3928e915d92782bc7e1",
+      "0fbd6b076752c9f5c926ca5c1df892ac", "aac9457239f07ad633fcd45c1465af2a",
+      "56823ef9a8e21c9c7441cc9ed870d648", "52f4c7a0b7177175302652cbc482f442",
+      "f4a4f4d7c8b93c0486cf3cbaa26fbc19",
   };
   return kDigest[id];
 }
 #endif  // LIBGAV1_MAX_BITDEPTH >= 10
 
 struct MaskBlendTestParam {
-  MaskBlendTestParam(int width, int height, int subsampling_x,
-                     int subsampling_y, bool is_inter_intra,
-                     bool is_wedge_inter_intra)
-      : width(width),
-        height(height),
+  MaskBlendTestParam(BlockSize block_size, int subsampling_x, int subsampling_y,
+                     bool is_inter_intra, bool is_wedge_inter_intra)
+      : block_size(block_size),
+        width(kBlockWidthPixels[block_size]),
+        height(kBlockHeightPixels[block_size]),
         subsampling_x(subsampling_x),
         subsampling_y(subsampling_y),
         is_inter_intra(is_inter_intra),
         is_wedge_inter_intra(is_wedge_inter_intra) {}
+  BlockSize block_size;
   int width;
   int height;
   int subsampling_x;
@@ -156,7 +181,7 @@ struct MaskBlendTestParam {
 };
 
 std::ostream& operator<<(std::ostream& os, const MaskBlendTestParam& param) {
-  return os << "BlockSize" << param.width << "x" << param.height
+  return os << ToString(param.block_size)
             << ", subsampling(x/y): " << param.subsampling_x << "/"
             << param.subsampling_y
             << ", is_inter_intra: " << param.is_inter_intra
@@ -164,7 +189,7 @@ std::ostream& operator<<(std::ostream& os, const MaskBlendTestParam& param) {
 }
 
 template <int bitdepth, typename Pixel>
-class MaskBlendTest : public ::testing::TestWithParam<MaskBlendTestParam>,
+class MaskBlendTest : public testing::TestWithParam<MaskBlendTestParam>,
                       public test_utils::MaxAlignedAllocable {
  public:
   MaskBlendTest() = default;
@@ -175,8 +200,8 @@ class MaskBlendTest : public ::testing::TestWithParam<MaskBlendTestParam>,
     MaskBlendInit_C();
     const dsp::Dsp* const dsp = dsp::GetDspTable(bitdepth);
     ASSERT_NE(dsp, nullptr);
-    const ::testing::TestInfo* const test_info =
-        ::testing::UnitTest::GetInstance()->current_test_info();
+    const testing::TestInfo* const test_info =
+        testing::UnitTest::GetInstance()->current_test_info();
     const absl::string_view test_case = test_info->test_suite_name();
     if (absl::StartsWith(test_case, "C/")) {
     } else if (absl::StartsWith(test_case, "NEON/")) {
@@ -202,53 +227,59 @@ class MaskBlendTest : public ::testing::TestWithParam<MaskBlendTestParam>,
  protected:
   int GetDigestIdOffset() const {
     // id is for retrieving the corresponding digest from the lookup table given
-    // the set of input parameters. id can be figured out by its width, height
-    // and an offset (id_offset).
+    // the set of input parameters. id can be figured out by the block size and
+    // an offset (id_offset).
     // For example, in kMaskBlendTestParam, this set of parameters
     // (8, 8, 0, 0, false, false) corresponds to the first entry in the
     // digest lookup table, where id == 0.
-    // (8, 8, 1, 0, false, false) corresponds to id == 13.
-    // (8, 8, 1, 1, false, false) corresponds to id == 26.
-    // (8, 8, 0, 0, true, false) corresponds to id == 39.
+    // (8, 8, 1, 0, false, false) corresponds to id == 17.
+    // (8, 8, 1, 1, false, false) corresponds to id == 34.
+    // (8, 8, 0, 0, true, false) corresponds to id == 51.
     // Id_offset denotes offset for different modes (is_inter_intra,
-    // is_wedge_inter_intra). Width and height help to figure out id:
-    // width = 8, height = 8, id = id_offset + log2(8) - 3.
-    // width = 8, height = 16, id = id_offset + log2(min(width, height) - 3 + 1.
+    // is_wedge_inter_intra).
     // ...
     if (!param_.is_inter_intra && !param_.is_wedge_inter_intra) {
-      return param_.subsampling_x * 13 + param_.subsampling_y * 13;
+      return param_.subsampling_x * 17 + param_.subsampling_y * 17;
     }
     if (param_.is_inter_intra && !param_.is_wedge_inter_intra) {
-      return 39 + param_.subsampling_x * 7 + param_.subsampling_y * 7;
+      return 51 + param_.subsampling_x * 7 + param_.subsampling_y * 7;
     }
     if (param_.is_inter_intra && param_.is_wedge_inter_intra) {
-      return 60 + param_.subsampling_x * 7 + param_.subsampling_y * 7;
+      return 72 + param_.subsampling_x * 7 + param_.subsampling_y * 7;
     }
     return 0;
   }
 
   int GetDigestId() const {
-    int id = GetDigestIdOffset();
-    if (param_.width == param_.height) {
-      return id + 3 * (FloorLog2(param_.width) - 3);
+    // Only 8x8 and larger blocks are tested.
+    int block_size_adjustment =
+        static_cast<int>(param_.block_size > kBlock16x4);
+    if (param_.is_inter_intra || param_.is_wedge_inter_intra) {
+      // 4:1/1:4 blocks are invalid for these modes.
+      block_size_adjustment += static_cast<int>(param_.block_size > kBlock8x32);
+      block_size_adjustment +=
+          static_cast<int>(param_.block_size > kBlock16x64);
+      block_size_adjustment += static_cast<int>(param_.block_size > kBlock32x8);
+      block_size_adjustment +=
+          static_cast<int>(param_.block_size > kBlock64x16);
     }
-    if (param_.width < param_.height) {
-      return id + 1 + 3 * (FloorLog2(param_.width) - 3);
-    }
-    return id + 2 + 3 * (FloorLog2(param_.height) - 3);
+    return GetDigestIdOffset() + param_.block_size - kBlock8x8 -
+           block_size_adjustment;
   }
 
   void Test(const char* digest, int num_runs);
 
  private:
+  using PredType =
+      typename std::conditional<bitdepth == 8, int16_t, uint16_t>::type;
   static constexpr int kStride = kMaxSuperBlockSizeInPixels;
   static constexpr int kDestStride = kMaxSuperBlockSizeInPixels * sizeof(Pixel);
   const MaskBlendTestParam param_ = GetParam();
-  alignas(kMaxAlignment) uint16_t
+  alignas(kMaxAlignment) PredType
       source1_[kMaxSuperBlockSizeInPixels * kMaxSuperBlockSizeInPixels] = {};
   uint8_t source1_8bpp_[kMaxSuperBlockSizeInPixels *
                         kMaxSuperBlockSizeInPixels] = {};
-  alignas(kMaxAlignment) uint16_t
+  alignas(kMaxAlignment) PredType
       source2_[kMaxSuperBlockSizeInPixels * kMaxSuperBlockSizeInPixels] = {};
   uint8_t source2_8bpp_[kMaxSuperBlockSizeInPixels *
                         kMaxSuperBlockSizeInPixels] = {};
@@ -274,29 +305,28 @@ void MaskBlendTest<bitdepth, Pixel>::Test(const char* const digest,
   // block is exactly the upper left half of the generated 16x16 block.
   libvpx_test::ACMRandom rnd(libvpx_test::ACMRandom::DeterministicSeed() +
                              GetDigestIdOffset());
-  uint16_t* src_1 = source1_;
+  PredType* src_1 = source1_;
   uint8_t* src_1_8bpp = source1_8bpp_;
-  uint16_t* src_2 = source2_;
+  PredType* src_2 = source2_;
   uint8_t* src_2_8bpp = source2_8bpp_;
   const ptrdiff_t src_2_stride = param_.is_inter_intra ? kStride : width;
   uint8_t* mask_row = mask_;
-  uint8_t round_bits[2] = {3, 7};
-  if (param_.is_inter_intra) round_bits[1] = 11;
-  const int inter_post_round_bits =
-      2 * kFilterBits - round_bits[0] - round_bits[1];
-  const int range_mask = (1 << (bitdepth + inter_post_round_bits)) - 1;
-  const int round_offset = (bitdepth == 8) ? 0 : kCompoundOffset;
+  const int range_mask = (1 << (bitdepth)) - 1;
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      src_1[x] = rnd.Rand16() & range_mask;
-      src_2[x] = rnd.Rand16() & range_mask;
+      src_1[x] = static_cast<PredType>(rnd.Rand16() & range_mask);
+      src_2[x] = static_cast<PredType>(rnd.Rand16() & range_mask);
       if (param_.is_inter_intra && bitdepth == 8) {
         src_1_8bpp[x] = src_1[x];
         src_2_8bpp[x] = src_2[x];
       }
       if (!param_.is_inter_intra) {
-        src_1[x] += round_offset;
-        src_2[x] += round_offset;
+        // Implies isCompound == true.
+        constexpr int bitdepth_index = (bitdepth - 8) >> 1;
+        const int min_val = kCompoundPredictionRange[bitdepth_index][0];
+        const int max_val = kCompoundPredictionRange[bitdepth_index][1];
+        src_1[x] = static_cast<PredType>(rnd(max_val - min_val) + min_val);
+        src_2[x] = static_cast<PredType>(rnd(max_val - min_val) + min_val);
       }
     }
     src_1 += width;
@@ -339,100 +369,112 @@ void MaskBlendTest<bitdepth, Pixel>::Test(const char* const digest,
     elapsed_time += absl::Now() - start;
   }
 
-  test_utils::CheckMd5Digest(
-      "MaskBlend",
-      absl::StrFormat("%dx%d", param_.width, param_.height).c_str(), digest,
-      dest_, sizeof(dest_), elapsed_time);
+  test_utils::CheckMd5Digest("MaskBlend", ToString(param_.block_size), digest,
+                             dest_, sizeof(dest_), elapsed_time);
 }
 
 const MaskBlendTestParam kMaskBlendTestParam[] = {
     // is_inter_intra = false, is_wedge_inter_intra = false.
     // block size range is from 8x8 to 128x128.
-    MaskBlendTestParam(8, 8, 0, 0, false, false),
-    MaskBlendTestParam(8, 16, 0, 0, false, false),
-    MaskBlendTestParam(16, 8, 0, 0, false, false),
-    MaskBlendTestParam(16, 16, 0, 0, false, false),
-    MaskBlendTestParam(16, 32, 0, 0, false, false),
-    MaskBlendTestParam(32, 16, 0, 0, false, false),
-    MaskBlendTestParam(32, 32, 0, 0, false, false),
-    MaskBlendTestParam(32, 64, 0, 0, false, false),
-    MaskBlendTestParam(64, 32, 0, 0, false, false),
-    MaskBlendTestParam(64, 64, 0, 0, false, false),
-    MaskBlendTestParam(64, 128, 0, 0, false, false),
-    MaskBlendTestParam(128, 64, 0, 0, false, false),
-    MaskBlendTestParam(128, 128, 0, 0, false, false),
-    MaskBlendTestParam(8, 8, 1, 0, false, false),
-    MaskBlendTestParam(8, 16, 1, 0, false, false),
-    MaskBlendTestParam(16, 8, 1, 0, false, false),
-    MaskBlendTestParam(16, 16, 1, 0, false, false),
-    MaskBlendTestParam(16, 32, 1, 0, false, false),
-    MaskBlendTestParam(32, 16, 1, 0, false, false),
-    MaskBlendTestParam(32, 32, 1, 0, false, false),
-    MaskBlendTestParam(32, 64, 1, 0, false, false),
-    MaskBlendTestParam(64, 32, 1, 0, false, false),
-    MaskBlendTestParam(64, 64, 1, 0, false, false),
-    MaskBlendTestParam(64, 128, 1, 0, false, false),
-    MaskBlendTestParam(128, 64, 1, 0, false, false),
-    MaskBlendTestParam(128, 128, 1, 0, false, false),
-    MaskBlendTestParam(8, 8, 1, 1, false, false),
-    MaskBlendTestParam(8, 16, 1, 1, false, false),
-    MaskBlendTestParam(16, 8, 1, 1, false, false),
-    MaskBlendTestParam(16, 16, 1, 1, false, false),
-    MaskBlendTestParam(16, 32, 1, 1, false, false),
-    MaskBlendTestParam(32, 16, 1, 1, false, false),
-    MaskBlendTestParam(32, 32, 1, 1, false, false),
-    MaskBlendTestParam(32, 64, 1, 1, false, false),
-    MaskBlendTestParam(64, 32, 1, 1, false, false),
-    MaskBlendTestParam(64, 64, 1, 1, false, false),
-    MaskBlendTestParam(64, 128, 1, 1, false, false),
-    MaskBlendTestParam(128, 64, 1, 1, false, false),
-    MaskBlendTestParam(128, 128, 1, 1, false, false),
+    MaskBlendTestParam(kBlock8x8, 0, 0, false, false),
+    MaskBlendTestParam(kBlock8x16, 0, 0, false, false),
+    MaskBlendTestParam(kBlock8x32, 0, 0, false, false),
+    MaskBlendTestParam(kBlock16x8, 0, 0, false, false),
+    MaskBlendTestParam(kBlock16x16, 0, 0, false, false),
+    MaskBlendTestParam(kBlock16x32, 0, 0, false, false),
+    MaskBlendTestParam(kBlock16x64, 0, 0, false, false),
+    MaskBlendTestParam(kBlock32x8, 0, 0, false, false),
+    MaskBlendTestParam(kBlock32x16, 0, 0, false, false),
+    MaskBlendTestParam(kBlock32x32, 0, 0, false, false),
+    MaskBlendTestParam(kBlock32x64, 0, 0, false, false),
+    MaskBlendTestParam(kBlock64x16, 0, 0, false, false),
+    MaskBlendTestParam(kBlock64x32, 0, 0, false, false),
+    MaskBlendTestParam(kBlock64x64, 0, 0, false, false),
+    MaskBlendTestParam(kBlock64x128, 0, 0, false, false),
+    MaskBlendTestParam(kBlock128x64, 0, 0, false, false),
+    MaskBlendTestParam(kBlock128x128, 0, 0, false, false),
+    MaskBlendTestParam(kBlock8x8, 1, 0, false, false),
+    MaskBlendTestParam(kBlock8x16, 1, 0, false, false),
+    MaskBlendTestParam(kBlock8x32, 1, 0, false, false),
+    MaskBlendTestParam(kBlock16x8, 1, 0, false, false),
+    MaskBlendTestParam(kBlock16x16, 1, 0, false, false),
+    MaskBlendTestParam(kBlock16x32, 1, 0, false, false),
+    MaskBlendTestParam(kBlock16x64, 1, 0, false, false),
+    MaskBlendTestParam(kBlock32x8, 1, 0, false, false),
+    MaskBlendTestParam(kBlock32x16, 1, 0, false, false),
+    MaskBlendTestParam(kBlock32x32, 1, 0, false, false),
+    MaskBlendTestParam(kBlock32x64, 1, 0, false, false),
+    MaskBlendTestParam(kBlock64x16, 1, 0, false, false),
+    MaskBlendTestParam(kBlock64x32, 1, 0, false, false),
+    MaskBlendTestParam(kBlock64x64, 1, 0, false, false),
+    MaskBlendTestParam(kBlock64x128, 1, 0, false, false),
+    MaskBlendTestParam(kBlock128x64, 1, 0, false, false),
+    MaskBlendTestParam(kBlock128x128, 1, 0, false, false),
+    MaskBlendTestParam(kBlock8x8, 1, 1, false, false),
+    MaskBlendTestParam(kBlock8x16, 1, 1, false, false),
+    MaskBlendTestParam(kBlock8x32, 1, 1, false, false),
+    MaskBlendTestParam(kBlock16x8, 1, 1, false, false),
+    MaskBlendTestParam(kBlock16x16, 1, 1, false, false),
+    MaskBlendTestParam(kBlock16x32, 1, 1, false, false),
+    MaskBlendTestParam(kBlock16x64, 1, 1, false, false),
+    MaskBlendTestParam(kBlock32x8, 1, 1, false, false),
+    MaskBlendTestParam(kBlock32x16, 1, 1, false, false),
+    MaskBlendTestParam(kBlock32x32, 1, 1, false, false),
+    MaskBlendTestParam(kBlock32x64, 1, 1, false, false),
+    MaskBlendTestParam(kBlock64x16, 1, 1, false, false),
+    MaskBlendTestParam(kBlock64x32, 1, 1, false, false),
+    MaskBlendTestParam(kBlock64x64, 1, 1, false, false),
+    MaskBlendTestParam(kBlock64x128, 1, 1, false, false),
+    MaskBlendTestParam(kBlock128x64, 1, 1, false, false),
+    MaskBlendTestParam(kBlock128x128, 1, 1, false, false),
     // is_inter_intra = true, is_wedge_inter_intra = false.
-    // block size range is from 8x8 to 32x32.
-    MaskBlendTestParam(8, 8, 0, 0, true, false),
-    MaskBlendTestParam(8, 16, 0, 0, true, false),
-    MaskBlendTestParam(16, 8, 0, 0, true, false),
-    MaskBlendTestParam(16, 16, 0, 0, true, false),
-    MaskBlendTestParam(16, 32, 0, 0, true, false),
-    MaskBlendTestParam(32, 16, 0, 0, true, false),
-    MaskBlendTestParam(32, 32, 0, 0, true, false),
-    MaskBlendTestParam(8, 8, 1, 0, true, false),
-    MaskBlendTestParam(8, 16, 1, 0, true, false),
-    MaskBlendTestParam(16, 8, 1, 0, true, false),
-    MaskBlendTestParam(16, 16, 1, 0, true, false),
-    MaskBlendTestParam(16, 32, 1, 0, true, false),
-    MaskBlendTestParam(32, 16, 1, 0, true, false),
-    MaskBlendTestParam(32, 32, 1, 0, true, false),
-    MaskBlendTestParam(8, 8, 1, 1, true, false),
-    MaskBlendTestParam(8, 16, 1, 1, true, false),
-    MaskBlendTestParam(16, 8, 1, 1, true, false),
-    MaskBlendTestParam(16, 16, 1, 1, true, false),
-    MaskBlendTestParam(16, 32, 1, 1, true, false),
-    MaskBlendTestParam(32, 16, 1, 1, true, false),
-    MaskBlendTestParam(32, 32, 1, 1, true, false),
+    // block size range is from 8x8 to 32x32 (no 4:1/1:4 blocks, Section 5.11.28
+    // Read inter intra syntax).
+    MaskBlendTestParam(kBlock8x8, 0, 0, true, false),
+    MaskBlendTestParam(kBlock8x16, 0, 0, true, false),
+    MaskBlendTestParam(kBlock16x8, 0, 0, true, false),
+    MaskBlendTestParam(kBlock16x16, 0, 0, true, false),
+    MaskBlendTestParam(kBlock16x32, 0, 0, true, false),
+    MaskBlendTestParam(kBlock32x16, 0, 0, true, false),
+    MaskBlendTestParam(kBlock32x32, 0, 0, true, false),
+    MaskBlendTestParam(kBlock8x8, 1, 0, true, false),
+    MaskBlendTestParam(kBlock8x16, 1, 0, true, false),
+    MaskBlendTestParam(kBlock16x8, 1, 0, true, false),
+    MaskBlendTestParam(kBlock16x16, 1, 0, true, false),
+    MaskBlendTestParam(kBlock16x32, 1, 0, true, false),
+    MaskBlendTestParam(kBlock32x16, 1, 0, true, false),
+    MaskBlendTestParam(kBlock32x32, 1, 0, true, false),
+    MaskBlendTestParam(kBlock8x8, 1, 1, true, false),
+    MaskBlendTestParam(kBlock8x16, 1, 1, true, false),
+    MaskBlendTestParam(kBlock16x8, 1, 1, true, false),
+    MaskBlendTestParam(kBlock16x16, 1, 1, true, false),
+    MaskBlendTestParam(kBlock16x32, 1, 1, true, false),
+    MaskBlendTestParam(kBlock32x16, 1, 1, true, false),
+    MaskBlendTestParam(kBlock32x32, 1, 1, true, false),
     // is_inter_intra = true, is_wedge_inter_intra = true.
-    // block size range is from 8x8 to 32x32.
-    MaskBlendTestParam(8, 8, 0, 0, true, true),
-    MaskBlendTestParam(8, 16, 0, 0, true, true),
-    MaskBlendTestParam(16, 8, 0, 0, true, true),
-    MaskBlendTestParam(16, 16, 0, 0, true, true),
-    MaskBlendTestParam(16, 32, 0, 0, true, true),
-    MaskBlendTestParam(32, 16, 0, 0, true, true),
-    MaskBlendTestParam(32, 32, 0, 0, true, true),
-    MaskBlendTestParam(8, 8, 1, 0, true, true),
-    MaskBlendTestParam(8, 16, 1, 0, true, true),
-    MaskBlendTestParam(16, 8, 1, 0, true, true),
-    MaskBlendTestParam(16, 16, 1, 0, true, true),
-    MaskBlendTestParam(16, 32, 1, 0, true, true),
-    MaskBlendTestParam(32, 16, 1, 0, true, true),
-    MaskBlendTestParam(32, 32, 1, 0, true, true),
-    MaskBlendTestParam(8, 8, 1, 1, true, true),
-    MaskBlendTestParam(8, 16, 1, 1, true, true),
-    MaskBlendTestParam(16, 8, 1, 1, true, true),
-    MaskBlendTestParam(16, 16, 1, 1, true, true),
-    MaskBlendTestParam(16, 32, 1, 1, true, true),
-    MaskBlendTestParam(32, 16, 1, 1, true, true),
-    MaskBlendTestParam(32, 32, 1, 1, true, true),
+    // block size range is from 8x8 to 32x32 (no 4:1/1:4 blocks, Section 5.11.28
+    // Read inter intra syntax).
+    MaskBlendTestParam(kBlock8x8, 0, 0, true, true),
+    MaskBlendTestParam(kBlock8x16, 0, 0, true, true),
+    MaskBlendTestParam(kBlock16x8, 0, 0, true, true),
+    MaskBlendTestParam(kBlock16x16, 0, 0, true, true),
+    MaskBlendTestParam(kBlock16x32, 0, 0, true, true),
+    MaskBlendTestParam(kBlock32x16, 0, 0, true, true),
+    MaskBlendTestParam(kBlock32x32, 0, 0, true, true),
+    MaskBlendTestParam(kBlock8x8, 1, 0, true, true),
+    MaskBlendTestParam(kBlock8x16, 1, 0, true, true),
+    MaskBlendTestParam(kBlock16x8, 1, 0, true, true),
+    MaskBlendTestParam(kBlock16x16, 1, 0, true, true),
+    MaskBlendTestParam(kBlock16x32, 1, 0, true, true),
+    MaskBlendTestParam(kBlock32x16, 1, 0, true, true),
+    MaskBlendTestParam(kBlock32x32, 1, 0, true, true),
+    MaskBlendTestParam(kBlock8x8, 1, 1, true, true),
+    MaskBlendTestParam(kBlock8x16, 1, 1, true, true),
+    MaskBlendTestParam(kBlock16x8, 1, 1, true, true),
+    MaskBlendTestParam(kBlock16x16, 1, 1, true, true),
+    MaskBlendTestParam(kBlock16x32, 1, 1, true, true),
+    MaskBlendTestParam(kBlock32x16, 1, 1, true, true),
+    MaskBlendTestParam(kBlock32x32, 1, 1, true, true),
 };
 
 using MaskBlendTest8bpp = MaskBlendTest<8, uint8_t>;
@@ -444,16 +486,16 @@ TEST_P(MaskBlendTest8bpp, DISABLED_Speed) {
 }
 
 INSTANTIATE_TEST_SUITE_P(C, MaskBlendTest8bpp,
-                         ::testing::ValuesIn(kMaskBlendTestParam));
+                         testing::ValuesIn(kMaskBlendTestParam));
 
 #if LIBGAV1_ENABLE_NEON
 INSTANTIATE_TEST_SUITE_P(NEON, MaskBlendTest8bpp,
-                         ::testing::ValuesIn(kMaskBlendTestParam));
+                         testing::ValuesIn(kMaskBlendTestParam));
 #endif
 
 #if LIBGAV1_ENABLE_SSE4_1
 INSTANTIATE_TEST_SUITE_P(SSE41, MaskBlendTest8bpp,
-                         ::testing::ValuesIn(kMaskBlendTestParam));
+                         testing::ValuesIn(kMaskBlendTestParam));
 #endif
 
 #if LIBGAV1_MAX_BITDEPTH >= 10
@@ -466,11 +508,15 @@ TEST_P(MaskBlendTest10bpp, DISABLED_Speed) {
 }
 
 INSTANTIATE_TEST_SUITE_P(C, MaskBlendTest10bpp,
-                         ::testing::ValuesIn(kMaskBlendTestParam));
+                         testing::ValuesIn(kMaskBlendTestParam));
 
 #if LIBGAV1_ENABLE_SSE4_1
 INSTANTIATE_TEST_SUITE_P(SSE41, MaskBlendTest10bpp,
-                         ::testing::ValuesIn(kMaskBlendTestParam));
+                         testing::ValuesIn(kMaskBlendTestParam));
+#endif
+#if LIBGAV1_ENABLE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, MaskBlendTest10bpp,
+                         testing::ValuesIn(kMaskBlendTestParam));
 #endif
 #endif  // LIBGAV1_MAX_BITDEPTH >= 10
 

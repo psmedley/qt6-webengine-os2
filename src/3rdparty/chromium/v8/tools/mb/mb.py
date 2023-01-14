@@ -27,7 +27,16 @@ import sys
 import subprocess
 import tempfile
 import traceback
-import urllib2
+
+# for py2/py3 compatibility
+try:
+  from urllib.parse import quote
+except ImportError:
+  from urllib2 import quote
+try:
+  from urllib.request import urlopen
+except ImportError:
+  from urllib2 import urlopen
 
 from collections import OrderedDict
 
@@ -42,6 +51,25 @@ try:
 except NameError:  # Python 3
   def cmp(x, y):   # pylint: disable=redefined-builtin
     return (x > y) - (x < y)
+
+
+def _v8_builder_fallback(builder, builder_group):
+  """Fallback to V8 builder names before splitting builder/tester.
+
+  This eases splitting builders and testers on release branches and
+  can be removed as soon as all builder have been split and all MB configs
+  exist on all branches.
+  """
+  builders = [builder]
+  if builder.endswith(' - builder'):
+    builders.append(builder[:-len(' - builder')])
+  elif builder.endswith(' builder'):
+    builders.append(builder[:-len(' builder')])
+
+  for builder in builders:
+    if builder in builder_group:
+      return builder_group[builder]
+  return None
 
 
 def main(args):
@@ -642,12 +670,14 @@ class MetaBuildWrapper(object):
       raise MBErr('Builder groups name "%s" not found in "%s"' %
                   (self.args.builder_group, self.args.config_file))
 
-    if not self.args.builder in self.builder_groups[self.args.builder_group]:
+    config = _v8_builder_fallback(
+        self.args.builder, self.builder_groups[self.args.builder_group])
+
+    if not config:
       raise MBErr(
         'Builder name "%s"  not found under builder_groups[%s] in "%s"' %
         (self.args.builder, self.args.builder_group, self.args.config_file))
 
-    config = self.builder_groups[self.args.builder_group][self.args.builder]
     if isinstance(config, dict):
       if self.args.phase is None:
         raise MBErr('Must specify a build --phase for %s on %s' %
@@ -869,7 +899,7 @@ class MetaBuildWrapper(object):
     return err, labels
 
   def GNCmd(self, subcommand, path, *args):
-    if self.platform == 'linux2':
+    if self.platform.startswith('linux'):
       subdir, exe = 'linux64', 'gn'
     elif self.platform == 'darwin':
       subdir, exe = 'mac', 'gn'
@@ -1109,7 +1139,7 @@ class MetaBuildWrapper(object):
 
   def CheckCompile(self, builder_group, builder):
     url_template = self.args.url_template + '/{builder}/builds/_all?as_text=1'
-    url = urllib2.quote(
+    url = quote(
             url_template.format(builder_group=builder_group, builder=builder),
             safe=':/()?=')
     try:
@@ -1201,7 +1231,7 @@ class MetaBuildWrapper(object):
 
   def Fetch(self, url):
     # This function largely exists so it can be overridden for testing.
-    f = urllib2.urlopen(url)
+    f = urlopen(url)
     contents = f.read()
     f.close()
     return contents

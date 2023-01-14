@@ -3,10 +3,10 @@ API Validation Tests for RenderPass StoreOp.
 
 Test Coverage:
   - Tests that when depthReadOnly is true, depthStoreOp must be 'store'.
-    - When depthReadOnly is true and depthStoreOp is 'clear', an error should be generated.
+    - When depthReadOnly is true and depthStoreOp is 'discard', an error should be generated.
 
   - Tests that when stencilReadOnly is true, stencilStoreOp must be 'store'.
-    - When stencilReadOnly is true and stencilStoreOp is 'clear', an error should be generated.
+    - When stencilReadOnly is true and stencilStoreOp is 'discard', an error should be generated.
 
   - Tests that the depthReadOnly value matches the stencilReadOnly value.
     - When depthReadOnly does not match stencilReadOnly, an error should be generated.
@@ -22,12 +22,12 @@ import { ValidationTest } from '../validation_test.js';
 export const g = makeTestGroup(ValidationTest);
 
 g.test('store_op_and_read_only')
-  .params([
+  .paramsSimple([
     { readonly: true, _valid: true },
-    // Using depthReadOnly=true and depthStoreOp='clear' should cause a validation error.
-    { readonly: true, depthStoreOp: 'clear', _valid: false },
-    // Using stencilReadOnly=true and stencilStoreOp='clear' should cause a validation error.
-    { readonly: true, stencilStoreOp: 'clear', _valid: false },
+    // Using depthReadOnly=true and depthStoreOp='discard' should cause a validation error.
+    { readonly: true, depthStoreOp: 'discard', _valid: false },
+    // Using stencilReadOnly=true and stencilStoreOp='discard' should cause a validation error.
+    { readonly: true, stencilStoreOp: 'discard', _valid: false },
     // Mismatched depthReadOnly and stencilReadOnly values should cause a validation error.
     { readonly: false, _valid: true },
     { readonly: false, depthReadOnly: true, _valid: false },
@@ -49,8 +49,8 @@ g.test('store_op_and_read_only')
 
     const depthAttachment = t.device.createTexture({
       format: 'depth24plus-stencil8',
-      size: { width: 1, height: 1, depth: 1 },
-      usage: GPUTextureUsage.OUTPUT_ATTACHMENT,
+      size: { width: 1, height: 1, depthOrArrayLayers: 1 },
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
     const depthAttachmentView = depthAttachment.createView();
 
@@ -58,7 +58,7 @@ g.test('store_op_and_read_only')
     const pass = encoder.beginRenderPass({
       colorAttachments: [],
       depthStencilAttachment: {
-        attachment: depthAttachmentView,
+        view: depthAttachmentView,
         depthLoadValue: 'load',
         depthStoreOp,
         depthReadOnly,

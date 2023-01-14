@@ -50,6 +50,8 @@ class DisplayMtl : public DisplayImpl
     std::string getVendorString() override;
     std::string getVersionString() override;
 
+    DeviceImpl *createDevice() override;
+
     egl::Error waitClient(const gl::Context *context) override;
     egl::Error waitNative(const gl::Context *context, EGLint engine) override;
 
@@ -82,6 +84,10 @@ class DisplayMtl : public DisplayImpl
 
     ShareGroupImpl *createShareGroup() override;
 
+    ExternalImageSiblingImpl *createExternalImageSibling(const gl::Context *context,
+                                                         EGLenum target,
+                                                         EGLClientBuffer buffer,
+                                                         const egl::AttributeMap &attribs) override;
     gl::Version getMaxSupportedESVersion() const override;
     gl::Version getMaxConformantESVersion() const override;
 
@@ -101,6 +107,11 @@ class DisplayMtl : public DisplayImpl
                                     EGLClientBuffer clientBuffer,
                                     const egl::AttributeMap &attribs) const override;
 
+    egl::Error validateImageClientBuffer(const gl::Context *context,
+                                         EGLenum target,
+                                         EGLClientBuffer clientBuffer,
+                                         const egl::AttributeMap &attribs) const override;
+
     egl::ConfigSet generateConfigs() override;
 
     gl::Caps getNativeCaps() const;
@@ -111,7 +122,7 @@ class DisplayMtl : public DisplayImpl
 
     // Check whether either of the specified iOS or Mac GPU family is supported
     bool supportsEitherGPUFamily(uint8_t iOSFamily, uint8_t macFamily) const;
-    bool supportsIOSGPUFamily(uint8_t iOSFamily) const;
+    bool supportsAppleGPUFamily(uint8_t iOSFamily) const;
     bool supportsMacGPUFamily(uint8_t macFamily) const;
     bool isAMD() const;
     bool isIntel() const;
@@ -153,6 +164,9 @@ class DisplayMtl : public DisplayImpl
 #if ANGLE_MTL_EVENT_AVAILABLE
     mtl::AutoObjCObj<MTLSharedEventListener> getOrCreateSharedEventListener();
 #endif
+
+    bool useDirectToMetalCompiler();
+
   protected:
     void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
     void generateCaps(egl::Caps *outCaps) const override;
@@ -164,6 +178,8 @@ class DisplayMtl : public DisplayImpl
     void initializeExtensions() const;
     void initializeTextureCaps() const;
     void initializeFeatures();
+    void initializeLimitations();
+    id<MTLDevice> getMetalDeviceMatchingAttribute(const egl::AttributeMap &attribs);
     angle::Result initializeShaderLibrary();
 
     mtl::AutoObjCPtr<id<MTLDevice>> mMetalDevice = nil;
@@ -188,9 +204,6 @@ class DisplayMtl : public DisplayImpl
     mutable gl::Limitations mNativeLimitations;
 
     angle::FeaturesMtl mFeatures;
-
-    // track whether we initialized (or released) glslang
-    bool mGlslangInitialized;
 };
 
 }  // namespace rx

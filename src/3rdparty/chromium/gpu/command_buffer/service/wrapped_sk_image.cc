@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "gpu/command_buffer/common/shared_image_trace_utils.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
@@ -81,7 +82,7 @@ class WrappedSkImage : public ClearTrackingSharedImageBacking {
       SkPixmap pixmap(info, shared_memory_wrapper_.GetMemory(),
                       shared_memory_wrapper_.GetStride());
       if (!context_state_->gr_context()->updateBackendTexture(
-              backend_texture_, &pixmap, /*levels=*/1, nullptr, nullptr)) {
+              backend_texture_, &pixmap, /*numLevels=*/1, nullptr, nullptr)) {
         DLOG(ERROR) << "Failed to update WrappedSkImage texture";
       }
     }
@@ -177,9 +178,10 @@ class WrappedSkImage : public ClearTrackingSharedImageBacking {
   }
 
   bool InitializeGMB(const SkImageInfo& info,
-                     SharedMemoryRegionWrapper shm_wrapper) {
-    if (Initialize(info, shm_wrapper.GetMemoryAsSpan(),
-                   shm_wrapper.GetStride())) {
+                     SharedMemoryRegionWrapper shm_wrapper,
+                     GrMipMapped mipmap) {
+    if (Initialize(info, shm_wrapper.GetMemoryAsSpan(), shm_wrapper.GetStride(),
+                   mipmap)) {
       shared_memory_wrapper_ = std::move(shm_wrapper);
       return true;
     }
@@ -193,7 +195,8 @@ class WrappedSkImage : public ClearTrackingSharedImageBacking {
   // data must be provided since updating compressed textures is not supported.
   bool Initialize(const SkImageInfo& info,
                   base::span<const uint8_t> pixels,
-                  size_t stride) {
+                  size_t stride,
+                  GrMipMapped mipmap) {
     if (context_state_->context_lost())
       return false;
 
@@ -202,29 +205,19 @@ class WrappedSkImage : public ClearTrackingSharedImageBacking {
     context_state_->MakeCurrent(nullptr);
     context_state_->set_need_context_state_reset(true);
 
-#if BUILDFLAG(ENABLE_VULKAN)
-    auto is_protected = context_state_->GrContextIsVulkan() &&
-                                context_state_->vk_context_provider()
-                                    ->GetVulkanImplementation()
-                                    ->enforce_protected_memory()
-                            ? GrProtected::kYes
-                            : GrProtected::kNo;
-#else
-    auto is_protected = GrProtected::kNo;
-#endif
-
     if (pixels.data()) {
       if (format() == viz::ResourceFormat::ETC1) {
         backend_texture_ =
             context_state_->gr_context()->createCompressedBackendTexture(
                 size().width(), size().height(), SkImage::kETC1_CompressionType,
-                pixels.data(), pixels.size(), GrMipMapped::kNo, is_protected);
+                pixels.data(), pixels.size(), GrMipMapped::kNo,
+                GrProtected::kNo);
       } else {
         if (!stride)
           stride = info.minRowBytes();
         SkPixmap pixmap(info, pixels.data(), stride);
         backend_texture_ = context_state_->gr_context()->createBackendTexture(
-            pixmap, GrRenderable::kNo, is_protected);
+            pixmap, GrRenderable::kNo, GrProtected::kNo);
       }
 
       if (!backend_texture_.isValid())
@@ -239,11 +232,11 @@ class WrappedSkImage : public ClearTrackingSharedImageBacking {
       // We don't do this on release builds because there is a slight overhead.
       backend_texture_ = context_state_->gr_context()->createBackendTexture(
           size().width(), size().height(), GetSkColorType(), SkColors::kBlue,
-          GrMipMapped::kNo, GrRenderable::kYes, is_protected);
+          mipmap, GrRenderable::kYes, GrProtected::kNo);
 #else
       backend_texture_ = context_state_->gr_context()->createBackendTexture(
-          size().width(), size().height(), GetSkColorType(), GrMipMapped::kNo,
-          GrRenderable::kYes, is_protected);
+          size().width(), size().height(), GetSkColorType(), mipmap,
+          GrRenderable::kYes, GrProtected::kNo);
 #endif
 
       if (!backend_texture_.isValid()) {
@@ -435,7 +428,9 @@ std::unique_ptr<SharedImageBacking> WrappedSkImageFactory::CreateSharedImage(
   std::unique_ptr<WrappedSkImage> texture(
       new WrappedSkImage(mailbox, format, size, color_space, surface_origin,
                          alpha_type, usage, estimated_size, context_state_));
-  if (!texture->Initialize(info, data, /*stride=*/0))
+  GrMipMapped mipmap =
+      usage & SHARED_IMAGE_USAGE_MIPMAP ? GrMipMapped::kYes : GrMipMapped::kNo;
+  if (!texture->Initialize(info, data, /*stride=*/0, mipmap))
     return nullptr;
   return texture;
 }
@@ -445,6 +440,7 @@ std::unique_ptr<SharedImageBacking> WrappedSkImageFactory::CreateSharedImage(
     int client_id,
     gfx::GpuMemoryBufferHandle handle,
     gfx::BufferFormat buffer_format,
+    gfx::BufferPlane plane,
     SurfaceHandle surface_handle,
     const gfx::Size& size,
     const gfx::ColorSpace& color_space,
@@ -453,13 +449,18 @@ std::unique_ptr<SharedImageBacking> WrappedSkImageFactory::CreateSharedImage(
     uint32_t usage) {
   DCHECK_EQ(handle.type, gfx::SHARED_MEMORY_BUFFER);
 
-  if (!gpu::IsImageSizeValidForGpuMemoryBufferFormat(size, buffer_format)) {
+  if (!gpu::IsImageSizeValidForGpuMemoryBufferFormat(size, buffer_format,
+                                                     plane)) {
     DLOG(ERROR) << "Invalid image size for format.";
     return nullptr;
   }
 
   if (gfx::NumberOfPlanesForLinearBufferFormat(buffer_format) != 1) {
     DLOG(ERROR) << "Invalid image format.";
+    return nullptr;
+  }
+  if (plane != gfx::BufferPlane::DEFAULT) {
+    DLOG(ERROR) << "Invalid plane " << gfx::BufferPlaneToString(plane);
     return nullptr;
   }
 
@@ -477,7 +478,9 @@ std::unique_ptr<SharedImageBacking> WrappedSkImageFactory::CreateSharedImage(
   std::unique_ptr<WrappedSkImage> texture(new WrappedSkImage(
       mailbox, format, size, color_space, surface_origin, alpha_type, usage,
       info.computeMinByteSize(), context_state_));
-  if (!texture->InitializeGMB(info, std::move(shm_wrapper)))
+  GrMipMapped mipmap = (usage & SHARED_IMAGE_USAGE_MIPMAP) ? GrMipMapped::kYes
+                                                           : GrMipMapped::kNo;
+  if (!texture->InitializeGMB(info, std::move(shm_wrapper), mipmap))
     return nullptr;
 
   return texture;
@@ -486,6 +489,45 @@ std::unique_ptr<SharedImageBacking> WrappedSkImageFactory::CreateSharedImage(
 bool WrappedSkImageFactory::CanImportGpuMemoryBuffer(
     gfx::GpuMemoryBufferType memory_buffer_type) {
   return memory_buffer_type == gfx::SHARED_MEMORY_BUFFER;
+}
+
+bool WrappedSkImageFactory::CanUseWrappedSkImage(
+    uint32_t usage,
+    GrContextType gr_context_type) const {
+  // Ignore for mipmap usage.
+  usage &= ~SHARED_IMAGE_USAGE_MIPMAP;
+  auto kWrappedSkImageUsage = SHARED_IMAGE_USAGE_DISPLAY |
+                              SHARED_IMAGE_USAGE_RASTER |
+                              SHARED_IMAGE_USAGE_OOP_RASTERIZATION;
+
+  if (gr_context_type != GrContextType::kGL) {
+    // For SkiaRenderer/Vulkan+Dawn use WrappedSkImage if the usage is only
+    // raster and/or display.
+    return (usage & kWrappedSkImageUsage) && !(usage & ~kWrappedSkImageUsage);
+  } else {
+    // For SkiaRenderer/GL only use WrappedSkImages for OOP-R because
+    // CopySubTexture() doesn't use Skia. https://crbug.com/984045
+    return (usage == kWrappedSkImageUsage) ||
+           (usage == SHARED_IMAGE_USAGE_DISPLAY);
+  }
+}
+
+bool WrappedSkImageFactory::IsSupported(uint32_t usage,
+                                        viz::ResourceFormat format,
+                                        bool thread_safe,
+                                        gfx::GpuMemoryBufferType gmb_type,
+                                        GrContextType gr_context_type,
+                                        bool* allow_legacy_mailbox,
+                                        bool is_pixel_used) {
+  if (!CanUseWrappedSkImage(usage, gr_context_type) || thread_safe) {
+    return false;
+  }
+  if (gmb_type != gfx::EMPTY_BUFFER && !CanImportGpuMemoryBuffer(gmb_type)) {
+    return false;
+  }
+
+  *allow_legacy_mailbox = false;
+  return true;
 }
 
 std::unique_ptr<SharedImageRepresentationSkia> WrappedSkImage::ProduceSkia(

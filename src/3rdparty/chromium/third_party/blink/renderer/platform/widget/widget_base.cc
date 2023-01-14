@@ -5,12 +5,15 @@
 #include "third_party/blink/renderer/platform/widget/widget_base.h"
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
+#include "cc/trees/paint_holding_reason.h"
 #include "cc/trees/ukm_manager.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
@@ -24,7 +27,6 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event_attribution.h"
 #include "third_party/blink/public/common/switches.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_context.mojom-blink.h"
 #include "third_party/blink/public/mojom/page/record_content_to_visible_time_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/visual_properties.mojom-blink.h"
@@ -46,6 +48,7 @@
 #include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
 #include "third_party/blink/renderer/platform/widget/widget_base_client.h"
 #include "ui/base/ime/mojom/text_input_state.mojom-blink.h"
+#include "ui/display/screen_info.h"
 #include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/presentation_feedback.h"
 
@@ -102,19 +105,19 @@ ui::TextInputMode ConvertWebTextInputMode(blink::WebTextInputMode mode) {
   return static_cast<ui::TextInputMode>(mode);
 }
 
-unsigned OrientationTypeToAngle(mojom::blink::ScreenOrientation type) {
+unsigned OrientationTypeToAngle(display::mojom::blink::ScreenOrientation type) {
   unsigned angle;
   // FIXME(ostap): This relationship between orientationType and
   // orientationAngle is temporary. The test should be able to specify
   // the angle in addition to the orientation type.
   switch (type) {
-    case mojom::blink::ScreenOrientation::kLandscapePrimary:
+    case display::mojom::blink::ScreenOrientation::kLandscapePrimary:
       angle = 90;
       break;
-    case mojom::blink::ScreenOrientation::kLandscapeSecondary:
+    case display::mojom::blink::ScreenOrientation::kLandscapeSecondary:
       angle = 270;
       break;
-    case mojom::blink::ScreenOrientation::kPortraitSecondary:
+    case display::mojom::blink::ScreenOrientation::kPortraitSecondary:
       angle = 180;
       break;
     default:
@@ -172,13 +175,12 @@ WidgetBase::~WidgetBase() {
 
 void WidgetBase::InitializeCompositing(
     scheduler::WebAgentGroupScheduler& agent_group_scheduler,
-    cc::TaskGraphRunner* task_graph_runner,
     bool for_child_local_root_frame,
-    const ScreenInfo& screen_info,
-    std::unique_ptr<cc::UkmRecorderFactory> ukm_recorder_factory,
+    const display::ScreenInfos& screen_infos,
     const cc::LayerTreeSettings* settings,
     base::WeakPtr<mojom::blink::FrameWidgetInputHandler>
         frame_widget_input_handler) {
+  DCHECK(!initialized_);
   scheduler::WebThreadScheduler* main_thread_scheduler =
       &agent_group_scheduler.GetMainThreadScheduler();
   main_thread_compositor_task_runner_ =
@@ -189,33 +191,31 @@ void WidgetBase::InitializeCompositing(
   layer_tree_view_ =
       std::make_unique<LayerTreeView>(this, main_thread_scheduler);
 
-  base::Optional<cc::LayerTreeSettings> default_settings;
+  absl::optional<cc::LayerTreeSettings> default_settings;
   if (!settings) {
+    const display::ScreenInfo& screen_info = screen_infos.current();
     default_settings = GenerateLayerTreeSettings(
         compositing_thread_scheduler, for_child_local_root_frame,
         screen_info.rect.size(), screen_info.device_scale_factor);
     settings = &default_settings.value();
   }
-  screen_info_ = screen_info;
+  screen_infos_ = screen_infos;
+  Platform* platform = Platform::Current();
   layer_tree_view_->Initialize(
       *settings, main_thread_compositor_task_runner_,
       compositing_thread_scheduler
           ? compositing_thread_scheduler->DefaultTaskRunner()
           : nullptr,
-      task_graph_runner, std::move(ukm_recorder_factory));
+      platform->GetTaskGraphRunner(), platform->GetMainThreadPipeline(),
+      platform->GetCompositorThreadPipeline());
 
   FrameWidget* frame_widget = client_->FrameWidget();
 
+  // |compositor_thread_scheduler| will be null for a popup (since it has no
+  // FrameWidget) or in tests without a compositor thread.
   scheduler::WebThreadScheduler* compositor_thread_scheduler =
-      scheduler::WebThreadScheduler::CompositorThreadScheduler();
-  scoped_refptr<base::SingleThreadTaskRunner> compositor_input_task_runner;
-  // Use the compositor thread task runner unless this is a popup or other such
-  // non-frame widgets. The |compositor_thread_scheduler| can be null in tests
-  // without a compositor thread.
-  if (frame_widget && compositor_thread_scheduler) {
-    compositor_input_task_runner =
-        compositor_thread_scheduler->DefaultTaskRunner();
-  }
+      frame_widget ? scheduler::WebThreadScheduler::CompositorThreadScheduler()
+                   : nullptr;
 
   // We only use an external input handler for frame widgets because only
   // frames use the compositor for input handling. Other kinds of widgets
@@ -224,15 +224,15 @@ void WidgetBase::InitializeCompositing(
   bool uses_input_handler = frame_widget;
   widget_input_handler_manager_ = WidgetInputHandlerManager::Create(
       weak_ptr_factory_.GetWeakPtr(), std::move(frame_widget_input_handler),
-      never_composited_, std::move(compositor_input_task_runner),
-      main_thread_scheduler, uses_input_handler);
+      never_composited_, compositor_thread_scheduler, main_thread_scheduler,
+      uses_input_handler);
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kAllowPreCommitInput))
     widget_input_handler_manager_->AllowPreCommitInput();
 
-  UpdateScreenInfo(screen_info);
+  UpdateScreenInfo(screen_infos);
 
   // If the widget is hidden, delay starting the compositor until the user
   // shows it. Otherwise start the compositor immediately. If the widget is
@@ -241,6 +241,15 @@ void WidgetBase::InitializeCompositing(
   // metrics.
   if (!is_hidden_)
     SetCompositorVisible(true);
+
+  initialized_ = true;
+}
+
+void WidgetBase::InitializeNonCompositing() {
+  DCHECK(!initialized_);
+  // WidgetBase users implicitly expect one default ScreenInfo to exist.
+  screen_infos_ = display::ScreenInfos(display::ScreenInfo());
+  initialized_ = true;
 }
 
 void WidgetBase::Shutdown() {
@@ -280,10 +289,6 @@ void WidgetBase::Shutdown() {
 
 cc::LayerTreeHost* WidgetBase::LayerTreeHost() const {
   return layer_tree_view_->layer_tree_host();
-}
-
-bool WidgetBase::IsComposited() const {
-  return !!layer_tree_view_;
 }
 
 cc::AnimationHost* WidgetBase::AnimationHost() const {
@@ -371,14 +376,15 @@ void WidgetBase::UpdateVisualProperties(
   //   See also:
   //   https://docs.google.com/document/d/1G_fR1D_0c1yke8CqDMddoKrDGr3gy5t_ImEH4hKNIII/edit#
 
-  blink::VisualProperties visual_properties = visual_properties_from_browser;
+  VisualProperties visual_properties = visual_properties_from_browser;
+  auto& screen_info = visual_properties.screen_infos.mutable_current();
+
   // Web tests can override the device scale factor in the renderer.
   if (auto scale_factor = client_->GetTestingDeviceScaleFactorOverride()) {
-    visual_properties.screen_info.device_scale_factor = scale_factor;
+    screen_info.device_scale_factor = scale_factor;
     visual_properties.compositor_viewport_pixel_rect =
-        gfx::Rect(gfx::ScaleToCeiledSize(
-            visual_properties.new_size,
-            visual_properties.screen_info.device_scale_factor));
+        gfx::Rect(gfx::ScaleToCeiledSize(visual_properties.new_size,
+                                         screen_info.device_scale_factor));
   }
 
   // Inform the rendering thread of the color space indicating the presence of
@@ -388,15 +394,14 @@ void WidgetBase::UpdateVisualProperties(
   // used. See https://crbug.com/803451 and
   // https://chromium-review.googlesource.com/c/chromium/src/+/852912/15#message-68bbd3e25c3b421a79cd028b2533629527d21fee
   Platform::Current()->SetRenderingColorSpace(
-      visual_properties.screen_info.display_color_spaces
-          .GetScreenInfoColorSpace());
+      screen_info.display_color_spaces.GetScreenInfoColorSpace());
 
   LayerTreeHost()->SetBrowserControlsParams(
       visual_properties.browser_controls_params);
 
-  LayerTreeHost()->SetVisualDeviceViewportSize(gfx::ScaleToCeiledSize(
-      visual_properties.visible_viewport_size,
-      visual_properties.screen_info.device_scale_factor));
+  LayerTreeHost()->SetVisualDeviceViewportSize(
+      gfx::ScaleToCeiledSize(visual_properties.visible_viewport_size,
+                             screen_info.device_scale_factor));
 
   client_->UpdateVisualProperties(visual_properties);
 }
@@ -481,10 +486,11 @@ void WidgetBase::OnDeferMainFrameUpdatesChanged(bool defer) {
   widget_input_handler_manager_->OnDeferMainFrameUpdatesChanged(defer);
 }
 
-void WidgetBase::OnDeferCommitsChanged(bool defer) {
+void WidgetBase::OnDeferCommitsChanged(bool defer,
+                                       cc::PaintHoldingReason reason) {
   // The input handler wants to know about the commit status for metric purposes
   // and to enable/disable input.
-  widget_input_handler_manager_->OnDeferCommitsChanged(defer);
+  widget_input_handler_manager_->OnDeferCommitsChanged(defer, reason);
 }
 
 void WidgetBase::DidBeginMainFrame() {
@@ -752,6 +758,10 @@ void WidgetBase::RunPaintBenchmark(int repeat_count,
   client_->RunPaintBenchmark(repeat_count, result);
 }
 
+void WidgetBase::ScheduleAnimationForWebTests() {
+  client_->ScheduleAnimationForWebTests();
+}
+
 void WidgetBase::SetCompositorVisible(bool visible) {
   if (never_composited_)
     return;
@@ -803,9 +813,18 @@ void WidgetBase::SetCursor(const ui::Cursor& cursor) {
   }
 }
 
-void WidgetBase::SetToolTipText(const String& tooltip_text, TextDirection dir) {
-  widget_host_->SetToolTipText(tooltip_text.IsEmpty() ? "" : tooltip_text,
-                               ToBaseTextDirection(dir));
+void WidgetBase::UpdateTooltipUnderCursor(const String& tooltip_text,
+                                          TextDirection dir) {
+  widget_host_->UpdateTooltipUnderCursor(
+      tooltip_text.IsEmpty() ? "" : tooltip_text, ToBaseTextDirection(dir));
+}
+
+void WidgetBase::UpdateTooltipFromKeyboard(const String& tooltip_text,
+                                           TextDirection dir,
+                                           const gfx::Rect& bounds) {
+  widget_host_->UpdateTooltipFromKeyboard(
+      tooltip_text.IsEmpty() ? "" : tooltip_text, ToBaseTextDirection(dir),
+      BlinkSpaceToEnclosedDIPs(bounds));
 }
 
 void WidgetBase::ShowVirtualKeyboard() {
@@ -842,8 +861,8 @@ void WidgetBase::UpdateTextInputStateInternal(bool show_virtual_keyboard,
   ui::mojom::VirtualKeyboardVisibilityRequest last_vk_visibility_request =
       ui::mojom::VirtualKeyboardVisibilityRequest::NONE;
   bool always_hide_ime = false;
-  base::Optional<gfx::Rect> control_bounds;
-  base::Optional<gfx::Rect> selection_bounds;
+  absl::optional<gfx::Rect> control_bounds;
+  absl::optional<gfx::Rect> selection_bounds;
   if (frame_widget) {
     new_info = frame_widget->TextInputInfo();
     // This will be used to decide whether or not to show VK when VK policy is
@@ -877,6 +896,7 @@ void WidgetBase::UpdateTextInputStateInternal(bool show_virtual_keyboard,
       (selection_bounds && frame_selection_bounds_ != selection_bounds)) {
     ui::mojom::blink::TextInputStatePtr params =
         ui::mojom::blink::TextInputState::New();
+    params->node_id = new_info.node_id;
     params->type = new_type;
     params->mode = new_mode;
     params->action = new_info.action;
@@ -951,7 +971,7 @@ void WidgetBase::UpdateTextInputStateInternal(bool show_virtual_keyboard,
     // https://crbug.com/912309
     // Compositing might not be initialized but input can still be dispatched
     // to non-composited widgets so LayerTreeHost may be null.
-    if (IsComposited())
+    if (layer_tree_view_)
       LayerTreeHost()->RequestForceSendMetadata();
 #endif
   }
@@ -1078,7 +1098,7 @@ bool WidgetBase::ShouldUpdateCompositionInfo(const gfx::Range& range,
     return true;
   if (bounds.size() != composition_character_bounds_.size())
     return true;
-  for (size_t i = 0; i < bounds.size(); ++i) {
+  for (wtf_size_t i = 0; i < bounds.size(); ++i) {
     if (bounds[i] != composition_character_bounds_[i])
       return true;
   }
@@ -1139,11 +1159,12 @@ void WidgetBase::UpdateSelectionBounds() {
     if (!frame_widget)
       return;
     if (frame_widget->GetSelectionBoundsInWindow(
-            &selection_focus_rect_, &selection_anchor_rect_, &focus_dir,
-            &anchor_dir, &is_anchor_first)) {
-      widget_host_->SelectionBoundsChanged(selection_anchor_rect_, anchor_dir,
-                                           selection_focus_rect_, focus_dir,
-                                           is_anchor_first);
+            &selection_focus_rect_, &selection_anchor_rect_,
+            &selection_bounding_box_, &focus_dir, &anchor_dir,
+            &is_anchor_first)) {
+      widget_host_->SelectionBoundsChanged(
+          selection_anchor_rect_, anchor_dir, selection_focus_rect_, focus_dir,
+          selection_bounding_box_, is_anchor_first);
     }
   }
   UpdateCompositionInfo(false /* not an immediate request */);
@@ -1347,8 +1368,9 @@ void WidgetBase::RequestAnimationAfterDelayTimerFired(TimerBase*) {
 void WidgetBase::UpdateSurfaceAndScreenInfo(
     const viz::LocalSurfaceId& new_local_surface_id,
     const gfx::Rect& compositor_viewport_pixel_rect,
-    const ScreenInfo& new_screen_info_param) {
-  ScreenInfo new_screen_info = new_screen_info_param;
+    const display::ScreenInfos& screen_infos) {
+  display::ScreenInfos new_screen_infos = screen_infos;
+  display::ScreenInfo& new_screen_info = new_screen_infos.mutable_current();
 
   // If there is a screen orientation override apply it.
   if (auto orientation_override = client_->ScreenOrientationOverride()) {
@@ -1357,15 +1379,18 @@ void WidgetBase::UpdateSurfaceAndScreenInfo(
         OrientationTypeToAngle(new_screen_info.orientation_type);
   }
 
-  // Same logic is used in RenderWidgetHostImpl::SynchronizeVisualProperties to
-  // detect if there is a screen orientation change.
+  // RenderWidgetHostImpl::SynchronizeVisualProperties uses similar logic to
+  // detect orientation changes on the display currently showing the widget.
+  const display::ScreenInfo& previous_screen_info = screen_infos_.current();
   bool orientation_changed =
-      screen_info_.orientation_angle != new_screen_info.orientation_angle ||
-      screen_info_.orientation_type != new_screen_info.orientation_type;
-  ScreenInfo previous_original_screen_info = client_->GetOriginalScreenInfo();
+      previous_screen_info.orientation_angle !=
+          new_screen_info.orientation_angle ||
+      previous_screen_info.orientation_type != new_screen_info.orientation_type;
+  display::ScreenInfo previous_original_screen_info =
+      client_->GetOriginalScreenInfo();
 
   local_surface_id_from_parent_ = new_local_surface_id;
-  screen_info_ = new_screen_info;
+  screen_infos_ = new_screen_infos;
 
   // Note carefully that the DSF specified in |new_screen_info| is not the
   // DSF used by the compositor during device emulation!
@@ -1377,7 +1402,8 @@ void WidgetBase::UpdateSurfaceAndScreenInfo(
   // viewport size, which is set above.
   LayerTreeHost()->SetVisualDeviceViewportIntersectionRect(
       client_->ViewportVisibleRect());
-  LayerTreeHost()->SetDisplayColorSpaces(screen_info_.display_color_spaces);
+  LayerTreeHost()->SetDisplayColorSpaces(
+      screen_infos_.current().display_color_spaces);
 
   if (orientation_changed)
     client_->OrientationChanged();
@@ -1385,33 +1411,34 @@ void WidgetBase::UpdateSurfaceAndScreenInfo(
   client_->DidUpdateSurfaceAndScreen(previous_original_screen_info);
 }
 
-void WidgetBase::UpdateScreenInfo(const ScreenInfo& new_screen_info) {
+void WidgetBase::UpdateScreenInfo(
+    const display::ScreenInfos& new_screen_infos) {
   UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
-                             CompositorViewportRect(), new_screen_info);
+                             CompositorViewportRect(), new_screen_infos);
 }
 
 void WidgetBase::UpdateCompositorViewportAndScreenInfo(
     const gfx::Rect& compositor_viewport_pixel_rect,
-    const ScreenInfo& new_screen_info) {
+    const display::ScreenInfos& new_screen_infos) {
   UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
-                             compositor_viewport_pixel_rect, new_screen_info);
+                             compositor_viewport_pixel_rect, new_screen_infos);
 }
 
 void WidgetBase::UpdateCompositorViewportRect(
     const gfx::Rect& compositor_viewport_pixel_rect) {
   UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
-                             compositor_viewport_pixel_rect, screen_info_);
+                             compositor_viewport_pixel_rect, screen_infos_);
 }
 
 void WidgetBase::UpdateSurfaceAndCompositorRect(
     const viz::LocalSurfaceId& new_local_surface_id,
     const gfx::Rect& compositor_viewport_pixel_rect) {
   UpdateSurfaceAndScreenInfo(new_local_surface_id,
-                             compositor_viewport_pixel_rect, screen_info_);
+                             compositor_viewport_pixel_rect, screen_infos_);
 }
 
-const ScreenInfo& WidgetBase::GetScreenInfo() {
-  return screen_info_;
+const display::ScreenInfo& WidgetBase::GetScreenInfo() {
+  return screen_infos_.current();
 }
 
 void WidgetBase::SetScreenRects(const gfx::Rect& widget_screen_rect,
@@ -1478,7 +1505,7 @@ bool WidgetBase::ComputePreferCompositingToLCDText() {
   // antialiasing won't have a noticeable effect on text quality.
   // Note: We should keep kHighDPIDeviceScaleFactorThreshold in
   // cc/metrics/lcd_text_metrics_reporter.cc the same as the value below.
-  if (screen_info_.device_scale_factor >= 1.5f)
+  if (screen_infos_.current().device_scale_factor >= 1.5f)
     return true;
   if (command_line.HasSwitch(switches::kEnablePreferCompositingToLCDText))
     return true;
@@ -1488,6 +1515,10 @@ bool WidgetBase::ComputePreferCompositingToLCDText() {
     return true;
   return false;
 #endif
+}
+
+void WidgetBase::CountDroppedPointerDownForEventTiming(unsigned count) {
+  client_->CountDroppedPointerDownForEventTiming(count);
 }
 
 gfx::PointF WidgetBase::DIPsToBlinkSpace(const gfx::PointF& point) {

@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/test/bind.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluez/bluetooth_adapter_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_device_bluez.h"
@@ -19,6 +20,7 @@
 #include "device/bluetooth/dbus/fake_bluetooth_device_client.h"
 #include "device/bluetooth/test/bluetooth_test_bluez.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace bluez {
 
@@ -105,9 +107,8 @@ class BluetoothServiceRecordBlueZTest : public device::BluetoothTestBlueZ {
 
     BluetoothServiceAttributeValueBlueZ service_handle0 =
         records_[0].GetAttributeValue(ids0[0]);
-    int32_t int_value;
-    EXPECT_TRUE(service_handle0.value().GetAsInteger(&int_value));
-    EXPECT_EQ(0x1337, int_value);
+    ASSERT_TRUE(service_handle0.value().is_int());
+    EXPECT_EQ(0x1337, service_handle0.value().GetInt());
 
     BluetoothServiceAttributeValueBlueZ service_class_list =
         records_[0].GetAttributeValue(ids0[1]);
@@ -121,8 +122,9 @@ class BluetoothServiceRecordBlueZTest : public device::BluetoothTestBlueZ {
 
     BluetoothServiceAttributeValueBlueZ service_handle1 =
         records_[1].GetAttributeValue(ids1[0]);
-    EXPECT_TRUE(service_handle1.value().GetAsInteger(&int_value));
-    EXPECT_EQ(0xffffffff, static_cast<uint32_t>(int_value));
+    ASSERT_TRUE(service_handle1.value().is_int());
+    EXPECT_EQ(0xffffffff,
+              static_cast<uint32_t>(service_handle1.value().GetInt()));
   }
 
  protected:
@@ -185,8 +187,16 @@ TEST_F(BluetoothServiceRecordBlueZTest, GetServiceRecords) {
       static_cast<BluetoothDeviceBlueZ*>(adapter_->GetDevice(
           bluez::FakeBluetoothDeviceClient::kPairedDeviceAddress));
   GetServiceRecords(device, false);
-  device->Connect(nullptr, GetCallback(Call::EXPECTED),
-                  GetConnectErrorCallback(Call::NOT_EXPECTED));
+  base::RunLoop run_loop;
+  device->Connect(
+      nullptr,
+      base::BindLambdaForTesting(
+          [&run_loop](absl::optional<device::BluetoothDevice::ConnectErrorCode>
+                          error_code) {
+            EXPECT_FALSE(error_code.has_value());
+            run_loop.Quit();
+          }));
+  run_loop.Run();
   GetServiceRecords(device, true);
   VerifyRecords();
 }

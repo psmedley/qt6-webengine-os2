@@ -28,6 +28,24 @@
       "use_goma": true
     }
   },
+  "Chromeos Amd64 Generic Lacros Builder Perf": {
+    "args_file": "//build/args/chromeos/amd64-generic-crostoolchain.gni",
+    "gn_args": {
+      "chromeos_is_browser_only": true,
+      "cros_host_sysroot": "//build/linux/debian_sid_amd64-sysroot",
+      "cros_v8_snapshot_sysroot": "//build/linux/debian_sid_amd64-sysroot",
+      "dcheck_always_on": false,
+      "is_cfi": true,
+      "is_chrome_branded": true,
+      "is_chromeos_device": true,
+      "is_official_build": true,
+      "ozone_platform_headless": true,
+      "symbol_level": 1,
+      "target_os": "chromeos",
+      "use_goma": true,
+      "use_thin_lto": true
+    }
+  },
   "Fuchsia Builder Perf": {
     "gn_args": {
       "ffmpeg_branding": "Chrome",
@@ -40,6 +58,7 @@
       "symbol_level": 1,
       "target_cpu": "arm64",
       "target_os": "fuchsia",
+      "test_isolate_uses_emulator": false,
       "use_goma": true
     }
   },

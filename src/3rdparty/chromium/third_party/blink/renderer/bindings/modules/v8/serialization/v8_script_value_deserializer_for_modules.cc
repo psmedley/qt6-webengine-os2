@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_transfer_token.mojom-blink.h"
 #include "third_party/blink/public/mojom/filesystem/file_system.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_crypto.h"
@@ -22,6 +23,11 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_delegate.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_delegate.h"
+#include "third_party/blink/renderer/modules/webcodecs/audio_data.h"
+#include "third_party/blink/renderer/modules/webcodecs/audio_data_attachment.h"
+#include "third_party/blink/renderer/modules/webcodecs/decoder_buffer_attachment.h"
+#include "third_party/blink/renderer/modules/webcodecs/encoded_audio_chunk.h"
+#include "third_party/blink/renderer/modules/webcodecs/encoded_video_chunk.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_attachment.h"
 
@@ -75,8 +81,14 @@ ScriptWrappable* V8ScriptValueDeserializerForModules::ReadDOMObject(
       return ReadRTCEncodedAudioFrame();
     case kRTCEncodedVideoFrameTag:
       return ReadRTCEncodedVideoFrame();
+    case kAudioDataTag:
+      return ReadAudioData();
     case kVideoFrameTag:
       return ReadVideoFrame();
+    case kEncodedAudioChunkTag:
+      return ReadEncodedAudioChunk();
+    case kEncodedVideoChunkTag:
+      return ReadEncodedVideoChunk();
     default:
       break;
   }
@@ -418,6 +430,28 @@ V8ScriptValueDeserializerForModules::ReadRTCEncodedVideoFrame() {
   return MakeGarbageCollected<RTCEncodedVideoFrame>(frames[index]);
 }
 
+AudioData* V8ScriptValueDeserializerForModules::ReadAudioData() {
+  if (!RuntimeEnabledFeatures::WebCodecsEnabled(
+          ExecutionContext::From(GetScriptState()))) {
+    return nullptr;
+  }
+
+  uint32_t index;
+  if (!ReadUint32(&index))
+    return nullptr;
+
+  const auto* attachment =
+      GetSerializedScriptValue()->GetAttachmentIfExists<AudioDataAttachment>();
+  if (!attachment)
+    return nullptr;
+
+  const auto& audio_buffers = attachment->AudioBuffers();
+  if (index >= attachment->size())
+    return nullptr;
+
+  return MakeGarbageCollected<AudioData>(audio_buffers[index]);
+}
+
 VideoFrame* V8ScriptValueDeserializerForModules::ReadVideoFrame() {
   if (!RuntimeEnabledFeatures::WebCodecsEnabled(
           ExecutionContext::From(GetScriptState()))) {
@@ -438,6 +472,54 @@ VideoFrame* V8ScriptValueDeserializerForModules::ReadVideoFrame() {
     return nullptr;
 
   return MakeGarbageCollected<VideoFrame>(handles[index]);
+}
+
+EncodedAudioChunk*
+V8ScriptValueDeserializerForModules::ReadEncodedAudioChunk() {
+  if (!RuntimeEnabledFeatures::WebCodecsEnabled(
+          ExecutionContext::From(GetScriptState()))) {
+    return nullptr;
+  }
+
+  uint32_t index;
+  if (!ReadUint32(&index))
+    return nullptr;
+
+  const auto* attachment =
+      GetSerializedScriptValue()
+          ->GetAttachmentIfExists<DecoderBufferAttachment>();
+  if (!attachment)
+    return nullptr;
+
+  const auto& buffers = attachment->Buffers();
+  if (index >= attachment->size())
+    return nullptr;
+
+  return MakeGarbageCollected<EncodedAudioChunk>(buffers[index]);
+}
+
+EncodedVideoChunk*
+V8ScriptValueDeserializerForModules::ReadEncodedVideoChunk() {
+  if (!RuntimeEnabledFeatures::WebCodecsEnabled(
+          ExecutionContext::From(GetScriptState()))) {
+    return nullptr;
+  }
+
+  uint32_t index;
+  if (!ReadUint32(&index))
+    return nullptr;
+
+  const auto* attachment =
+      GetSerializedScriptValue()
+          ->GetAttachmentIfExists<DecoderBufferAttachment>();
+  if (!attachment)
+    return nullptr;
+
+  const auto& buffers = attachment->Buffers();
+  if (index >= attachment->size())
+    return nullptr;
+
+  return MakeGarbageCollected<EncodedVideoChunk>(buffers[index]);
 }
 
 }  // namespace blink

@@ -1,34 +1,37 @@
 /****************************************************************************
 **
 ** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtPDF module of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL3$
+** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
 ** GNU Lesser General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU Lesser
 ** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
+** Foundation and appearing in the file LICENSE.LGPL3 included in the
 ** packaging of this file. Please review the following information to
 ** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
+** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 **
 ** GNU General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
+** General Public License version 2.0 or (at your option) the GNU General
+** Public license version 3 or any later version approved by the KDE Free
+** Qt Foundation. The licenses are as published by the Free Software
+** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-2.0.html and
+** https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
@@ -43,7 +46,7 @@ Q_LOGGING_CATEGORY(qLcNav, "qt.pdf.navigationstack")
 
 /*!
     \qmltype PdfNavigationStack
-    \instantiates QQuickPdfNavigationStack
+//!    \instantiates QQuickPdfNavigationStack
     \inqmlmodule QtQuick.Pdf
     \ingroup pdf
     \brief History of the destinations visited within a PDF Document.
@@ -58,6 +61,11 @@ QQuickPdfNavigationStack::QQuickPdfNavigationStack(QObject *parent)
 {
     push(0, QPointF(), 1);
 }
+
+/*!
+    \internal
+*/
+QQuickPdfNavigationStack::~QQuickPdfNavigationStack() = default;
 
 /*!
     \qmlmethod void PdfNavigationStack::forward()
@@ -164,13 +172,13 @@ qreal QQuickPdfNavigationStack::currentZoom() const
 }
 
 /*!
-    \qmlmethod void PdfNavigationStack::push(int page, point location, qreal zoom)
+    \qmlmethod void PdfNavigationStack::push(int page, point location, qreal zoom, bool emitJumped)
 
-    Adds the given destination, consisting of \a page, \a location and \a zoom,
+    Adds the given destination, consisting of \a page, \a location, and \a zoom,
     to the history of visited locations.  If \a emitJumped is \c false, the
     \l jumped() signal will not be emitted.
 
-    If forwardAvailable is \c true, calling this function represents a branch
+    If forwardAvailable() is \c true, calling this function represents a branch
     in the timeline which causes the "future" to be lost, and therefore
     forwardAvailable will change to \c false.
 */
@@ -252,10 +260,24 @@ void QQuickPdfNavigationStack::update(int page, QPointF location, qreal zoom)
         }();
 }
 
+/*!
+    \qmlproperty bool PdfNavigationStack::backAvailable
+    \readonly
+
+    Holds \c true if a \e back destination is available in the history.
+*/
+
 bool QQuickPdfNavigationStack::backAvailable() const
 {
     return m_currentHistoryIndex > 0;
 }
+
+/*!
+    \qmlproperty bool PdfNavigationStack::forwardAvailable
+    \readonly
+
+    Holds \c true if a \e forward destination is available in the history.
+*/
 
 bool QQuickPdfNavigationStack::forwardAvailable() const
 {
@@ -265,8 +287,10 @@ bool QQuickPdfNavigationStack::forwardAvailable() const
 /*!
     \qmlsignal PdfNavigationStack::jumped(int page, point location, qreal zoom)
 
-    This signal is emitted when forward(), back() or push() is called, but not
-    when update() is called.
+    This signal is emitted for the given \a page, \a location, and \a zoom,
+    It is emitted on calling forward(), back(), or push() only.
+
+    \note The signal is emitted on calling update().
 */
 
 QT_END_NAMESPACE

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "mojo/public/cpp/system/data_pipe.h"
+#include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/webtransport/incoming_stream.h"
 #include "third_party/blink/renderer/modules/webtransport/web_transport_stream.h"
@@ -16,13 +17,14 @@
 
 namespace blink {
 
+class ExceptionState;
 class ScriptState;
-class QuicTransport;
+class WebTransport;
 
 // Implementation of ReceiveStream from the standard:
 // https://wicg.github.io/web-transport/#receive-stream.
 
-class MODULES_EXPORT ReceiveStream final : public ScriptWrappable,
+class MODULES_EXPORT ReceiveStream final : public ReadableStream,
                                            public WebTransportStream {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -30,15 +32,17 @@ class MODULES_EXPORT ReceiveStream final : public ScriptWrappable,
   // ReceiveStream doesn't have a JavaScript constructor. It is only
   // constructed from C++.
   explicit ReceiveStream(ScriptState*,
-                         QuicTransport*,
+                         WebTransport*,
                          uint32_t stream_id,
                          mojo::ScopedDataPipeConsumerHandle);
 
-  void Init() { incoming_stream_->Init(); }
+  void Init(ExceptionState& exception_state) {
+    incoming_stream_->InitWithExistingReadableStream(this, exception_state);
+  }
 
   // Implementation of receive_stream.idl. As noted in the IDL file, these
   // properties are implemented on IncomingStream in the standard.
-  ReadableStream* readable() const { return incoming_stream_->Readable(); }
+  ReceiveStream* readable() { return this; }
 
   ScriptPromise readingAborted() const {
     return incoming_stream_->ReadingAborted();
@@ -59,7 +63,7 @@ class MODULES_EXPORT ReceiveStream final : public ScriptWrappable,
   void OnAbort();
 
   const Member<IncomingStream> incoming_stream_;
-  const Member<QuicTransport> quic_transport_;
+  const Member<WebTransport> web_transport_;
   const uint32_t stream_id_;
 };
 

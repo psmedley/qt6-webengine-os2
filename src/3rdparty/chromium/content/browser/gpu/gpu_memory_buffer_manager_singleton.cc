@@ -6,16 +6,20 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "build/build_config.h"
 #include "components/viz/host/gpu_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "ui/base/ui_base_features.h"
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
+#elif defined(OS_MAC)
+#include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #endif
 
 namespace content {
@@ -46,6 +50,17 @@ bool ShouldSetBufferFormatsFromGpuExtraInfo() {
 }
 #endif
 
+scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() {
+  if (!base::FeatureList::IsEnabled(features::kProcessHostOnUI))
+    return GetIOThreadTaskRunner({});
+
+#if defined(OS_MAC)
+  return ui::WindowResizeHelperMac::Get()->task_runner();
+#else
+  return GetUIThreadTaskRunner({});
+#endif
+}
+
 }  // namespace
 
 GpuMemoryBufferManagerSingleton::GpuMemoryBufferManagerSingleton(int client_id)
@@ -53,7 +68,7 @@ GpuMemoryBufferManagerSingleton::GpuMemoryBufferManagerSingleton(int client_id)
           base::BindRepeating(&content::GetGpuService),
           client_id,
           std::make_unique<gpu::GpuMemoryBufferSupport>(),
-          GetIOThreadTaskRunner({})),
+          GetTaskRunner()),
       gpu_data_manager_impl_(GpuDataManagerImpl::GetInstance()) {
   DCHECK(!g_gpu_memory_buffer_manager);
   g_gpu_memory_buffer_manager = this;

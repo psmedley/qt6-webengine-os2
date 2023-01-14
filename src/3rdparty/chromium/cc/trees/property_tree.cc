@@ -1495,7 +1495,8 @@ void ScrollTree::CollectScrollDeltas(
     CompositorCommitData* commit_data,
     ElementId inner_viewport_scroll_element_id,
     bool use_fractional_deltas,
-    const base::flat_set<ElementId>& snapped_elements) {
+    const base::flat_map<ElementId, TargetSnapAreaElementIds>&
+        snapped_elements) {
   DCHECK(!property_trees()->is_main_thread);
   TRACE_EVENT0("cc", "ScrollTree::CollectScrollDeltas");
   for (auto map_entry : synced_scroll_offset_map_) {
@@ -1504,14 +1505,9 @@ void ScrollTree::CollectScrollDeltas(
 
     ElementId id = map_entry.first;
 
-    base::Optional<TargetSnapAreaElementIds> snap_target_ids;
-    if (snapped_elements.find(id) != snapped_elements.end()) {
-      ScrollNode* scroll_node = FindNodeFromElementId(id);
-      if (scroll_node && scroll_node->snap_container_data) {
-        snap_target_ids = scroll_node->snap_container_data.value()
-                              .GetTargetSnapAreaElementIds();
-      }
-    }
+    absl::optional<TargetSnapAreaElementIds> snap_target_ids;
+    if (snapped_elements.contains(id))
+      snap_target_ids = snapped_elements.at(id);
 
     // Snap targets are set at the end of scroll offset animations (i.e when the
     // animation state is updated to FINISHED). The state can be updated after
@@ -1534,10 +1530,7 @@ void ScrollTree::CollectScrollDeltas(
   }
 }
 
-void ScrollTree::CollectScrollDeltasForTesting() {
-  LayerTreeSettings settings;
-  bool use_fractional_deltas = settings.commit_fractional_scroll_deltas;
-
+void ScrollTree::CollectScrollDeltasForTesting(bool use_fractional_deltas) {
   for (auto map_entry : synced_scroll_offset_map_) {
     PullDeltaForMainThread(map_entry.second.get(), use_fractional_deltas);
   }
@@ -1545,7 +1538,8 @@ void ScrollTree::CollectScrollDeltasForTesting() {
 
 void ScrollTree::PushScrollUpdatesFromMainThread(
     PropertyTrees* main_property_trees,
-    LayerTreeImpl* sync_tree) {
+    LayerTreeImpl* sync_tree,
+    bool use_fractional_deltas) {
   DCHECK(!property_trees()->is_main_thread);
   const ScrollOffsetMap& main_scroll_offset_map =
       main_property_trees->scroll_tree.scroll_offset_map_;
@@ -1571,6 +1565,16 @@ void ScrollTree::PushScrollUpdatesFromMainThread(
     // committed PropertyTrees.
     bool needs_scroll_update =
         synced_scroll_offset->PushMainToPending(map_entry.second);
+    // If `use_fractional_deltas` is false, then check against the rounded
+    // pending offset instead of the offset directly. This matches
+    // PullDeltaForMainThread where only an integer delta is extracted and
+    // prevents unnecessary property change in this case.
+    if (!use_fractional_deltas) {
+      gfx::ScrollOffset pending_offset = synced_scroll_offset->Current(false);
+      gfx::ScrollOffset rounded_offset = gfx::ScrollOffset(
+          roundf(pending_offset.x()), roundf(pending_offset.y()));
+      needs_scroll_update = map_entry.second != rounded_offset;
+    }
 
     // If we are committing directly to the active tree, push pending to active
     // here. If the value differs between the pending and active trees, we need
@@ -1716,13 +1720,15 @@ void ScrollTree::SetScrollCallbacks(base::WeakPtr<ScrollCallbacks> callbacks) {
   callbacks_ = std::move(callbacks);
 }
 
-void ScrollTree::NotifyDidScroll(
+void ScrollTree::NotifyDidCompositorScroll(
     ElementId scroll_element_id,
     const gfx::ScrollOffset& scroll_offset,
-    const base::Optional<TargetSnapAreaElementIds>& snap_target_ids) {
+    const absl::optional<TargetSnapAreaElementIds>& snap_target_ids) {
   DCHECK(property_trees()->is_main_thread);
-  if (callbacks_)
-    callbacks_->DidScroll(scroll_element_id, scroll_offset, snap_target_ids);
+  if (callbacks_) {
+    callbacks_->DidCompositorScroll(scroll_element_id, scroll_offset,
+                                    snap_target_ids);
+  }
 }
 
 void ScrollTree::NotifyDidChangeScrollbarsHidden(ElementId scroll_element_id,

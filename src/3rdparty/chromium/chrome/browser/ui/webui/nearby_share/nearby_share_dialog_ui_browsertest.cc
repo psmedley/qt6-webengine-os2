@@ -4,6 +4,7 @@
 
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/nearby_sharing/common/nearby_share_features.h"
+#include "chrome/browser/sharesheet/sharesheet_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/nearby_share/nearby_share_dialog_ui.h"
@@ -17,10 +18,16 @@
 
 namespace {
 
-class TestObserver : public nearby_share::NearbyShareDialogUI::Observer {
+class TestSharesheetController : public sharesheet::SharesheetController {
  public:
-  // nearby_share::NearbyShareDialogUI::Observer:
-  void OnClose() override { close_called = true; }
+  // sharesheet::SharesheetController
+  void SetBubbleSize(int width, int height) override {}
+  void CloseBubble(::sharesheet::SharesheetResult result) override {
+    // The NearbyShareDialogUI can only invoke this method with a cancellation
+    // result.
+    EXPECT_EQ(::sharesheet::SharesheetResult::kCancel, result);
+    close_called = true;
+  }
 
   bool close_called = false;
 };
@@ -32,10 +39,9 @@ class NearbyShareDialogUITest : public InProcessBrowserTest {
   }
   ~NearbyShareDialogUITest() override = default;
 
-  TestObserver observer_;
-
- private:
+ protected:
   base::test::ScopedFeatureList scoped_feature_list_;
+  TestSharesheetController sharesheet_controller_;
 };
 
 }  // namespace
@@ -60,7 +66,8 @@ IN_PROC_BROWSER_TEST_F(NearbyShareDialogUITest, RendersComponent) {
   EXPECT_EQ(1, num_nearby_share_app);
 }
 
-IN_PROC_BROWSER_TEST_F(NearbyShareDialogUITest, ObserverGetsCalledOnClose) {
+IN_PROC_BROWSER_TEST_F(NearbyShareDialogUITest,
+                       SharesheetControllerGetsCalledOnClose) {
   // First, check that navigation succeeds.
   GURL kUrl(content::GetWebUIURL(chrome::kChromeUINearbyShareHost));
   ui_test_utils::NavigateToURL(browser(), kUrl);
@@ -78,12 +85,19 @@ IN_PROC_BROWSER_TEST_F(NearbyShareDialogUITest, ObserverGetsCalledOnClose) {
       webui->GetController()->GetAs<nearby_share::NearbyShareDialogUI>();
   ASSERT_TRUE(nearby_ui);
 
-  nearby_ui->AddObserver(&observer_);
+  // Calling 'close' before a Sharesheet controller is registered via
+  // |SetSharesheetController| does not result in a crash.
   EXPECT_TRUE(content::ExecuteScript(web_contents, "chrome.send('close');"));
-  EXPECT_TRUE(observer_.close_called);
+  EXPECT_FALSE(sharesheet_controller_.close_called);
 
-  nearby_ui->RemoveObserver(&observer_);
-  observer_.close_called = false;
+  // The Sharesheet controller gets called on 'close' if it's been registered.
+  nearby_ui->SetSharesheetController(&sharesheet_controller_);
   EXPECT_TRUE(content::ExecuteScript(web_contents, "chrome.send('close');"));
-  EXPECT_FALSE(observer_.close_called);
+  EXPECT_TRUE(sharesheet_controller_.close_called);
+
+  // Any subsequent calls to 'close' do not call the Sharesheet controller,
+  // since that would result in a crash.
+  sharesheet_controller_.close_called = false;
+  EXPECT_TRUE(content::ExecuteScript(web_contents, "chrome.send('close');"));
+  EXPECT_FALSE(sharesheet_controller_.close_called);
 }

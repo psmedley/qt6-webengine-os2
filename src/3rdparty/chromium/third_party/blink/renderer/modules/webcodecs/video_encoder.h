@@ -7,12 +7,12 @@
 
 #include <memory>
 
-#include "base/optional.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_color_space.h"
 #include "media/base/video_encoder.h"
 #include "media/base/video_frame_pool.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_output_callback.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_encoded_video_chunk_output_callback.h"
 #include "third_party/blink/renderer/modules/webcodecs/encoder_base.h"
 #include "third_party/blink/renderer/modules/webcodecs/hardware_preference.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
@@ -28,6 +28,7 @@ namespace blink {
 class VideoEncoderConfig;
 class VideoEncoderInit;
 class VideoEncoderEncodeOptions;
+class WebGraphicsContext3DVideoFramePool;
 
 class MODULES_EXPORT VideoEncoderTraits {
  public:
@@ -41,6 +42,7 @@ class MODULES_EXPORT VideoEncoderTraits {
 
     media::VideoEncoder::Options options;
     String codec_string;
+    absl::optional<gfx::Size> display_size;
 
     void Trace(Visitor*) const {}
   };
@@ -48,14 +50,15 @@ class MODULES_EXPORT VideoEncoderTraits {
   using Init = VideoEncoderInit;
   using Config = VideoEncoderConfig;
   using InternalConfig = ParsedConfig;
-  using Frame = VideoFrame;
+  using Input = VideoFrame;
   using EncodeOptions = VideoEncoderEncodeOptions;
   using OutputChunk = EncodedVideoChunk;
-  using OutputCallback = V8VideoEncoderOutputCallback;
+  using OutputCallback = V8EncodedVideoChunkOutputCallback;
   using MediaEncoder = media::VideoEncoder;
 
   // Can't be a virtual method, because it's used from base ctor.
   static const char* GetNameForDevTools();
+  static const char* GetName();
 };
 
 class MODULES_EXPORT VideoEncoder final
@@ -69,6 +72,10 @@ class MODULES_EXPORT VideoEncoder final
   VideoEncoder(ScriptState*, const VideoEncoderInit*, ExceptionState&);
   ~VideoEncoder() override;
 
+  static ScriptPromise isConfigSupported(ScriptState*,
+                                         const VideoEncoderConfig*,
+                                         ExceptionState&);
+
  private:
   using Base = EncoderBase<VideoEncoderTraits>;
   using ParsedConfig = VideoEncoderTraits::ParsedConfig;
@@ -77,23 +84,22 @@ class MODULES_EXPORT VideoEncoder final
       ParsedConfig* active_config,
       uint32_t reset_count,
       media::VideoEncoderOutput output,
-      base::Optional<media::VideoEncoder::CodecDescription> codec_desc);
+      absl::optional<media::VideoEncoder::CodecDescription> codec_desc);
   void ProcessEncode(Request* request) override;
   void ProcessConfigure(Request* request) override;
   void ProcessReconfigure(Request* request) override;
-  void ProcessFlush(Request* request) override;
+  void ResetInternal() override;
 
   void UpdateEncoderLog(std::string encoder_name, bool is_hw_accelerated);
-
-  void OnReceivedGpuFactories(Request*, media::GpuVideoAcceleratorFactories*);
+  static std::unique_ptr<media::VideoEncoder> CreateSoftwareVideoEncoder(
+      VideoEncoder* self,
+      media::VideoCodec codec);
 
   ParsedConfig* ParseConfig(const VideoEncoderConfig*,
                             ExceptionState&) override;
   bool VerifyCodecSupport(ParsedConfig*, ExceptionState&) override;
-  VideoFrame* CloneFrame(VideoFrame*, ExecutionContext*) override;
 
-  void CreateAndInitializeEncoderWithoutAcceleration(Request* request);
-  void CreateAndInitializeEncoderOnEncoderSupportKnown(
+  void ContinueConfigureWithGpuFactories(
       Request* request,
       media::GpuVideoAcceleratorFactories* gpu_factories);
   std::unique_ptr<media::VideoEncoder> CreateMediaVideoEncoder(
@@ -105,6 +111,11 @@ class MODULES_EXPORT VideoEncoder final
       scoped_refptr<media::VideoFrame> txt_frame);
 
   media::VideoFramePool readback_frame_pool_;
+  std::unique_ptr<WebGraphicsContext3DVideoFramePool> accelerated_frame_pool_;
+
+  // The number of encoding requests currently handled by |media_encoder_|
+  // Should not exceed |kMaxActiveEncodes|.
+  int active_encodes_ = 0;
 };
 
 }  // namespace blink

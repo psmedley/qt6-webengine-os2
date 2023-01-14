@@ -22,8 +22,8 @@ TEST(CallbackHelpersTest, IsBaseCallback) {
   static_assert(base::IsBaseCallback<base::OnceClosure&&>::value, "");
   static_assert(base::IsBaseCallback<const base::RepeatingClosure&>::value, "");
 
-  // Check that base::Callbacks with a given RunType and references to them are
-  // considered base::Callbacks.
+  // Check that base::{Once, Repeating}Callbacks with a given RunType and
+  // references to them are considered base::{Once, Repeating}Callbacks.
   static_assert(base::IsBaseCallback<base::OnceCallback<int(int)>>::value, "");
   static_assert(base::IsBaseCallback<base::RepeatingCallback<int(int)>>::value,
                 "");
@@ -33,13 +33,13 @@ TEST(CallbackHelpersTest, IsBaseCallback) {
       base::IsBaseCallback<const base::RepeatingCallback<int(int)>&>::value,
       "");
 
-  // Check that POD types are not considered base::Callbacks.
+  // Check that POD types are not considered base::{Once, Repeating}Callbacks.
   static_assert(!base::IsBaseCallback<bool>::value, "");
   static_assert(!base::IsBaseCallback<int>::value, "");
   static_assert(!base::IsBaseCallback<double>::value, "");
 
   // Check that the closely related std::function is not considered a
-  // base::Callback.
+  // base::{Once, Repeating}Callback.
   static_assert(!base::IsBaseCallback<std::function<void()>>::value, "");
   static_assert(!base::IsBaseCallback<const std::function<void()>&>::value, "");
   static_assert(!base::IsBaseCallback<std::function<void()>&&>::value, "");
@@ -76,12 +76,9 @@ TEST(CallbackHelpersTest, IsOnceCallback) {
   static_assert(!base::IsOnceCallback<const std::function<void()>&>::value, "");
   static_assert(!base::IsOnceCallback<std::function<void()>&&>::value, "");
 
-  // Check that the result of BindOnce is a OnceCallback, but not if it's
-  // wrapped in AdaptCallbackForRepeating.
+  // Check that the result of BindOnce is a OnceCallback.
   auto cb = base::BindOnce([](int* count) { ++*count; });
   static_assert(base::IsOnceCallback<decltype(cb)>::value, "");
-  auto wrapped = base::AdaptCallbackForRepeating(std::move(cb));
-  static_assert(!base::IsOnceCallback<decltype(wrapped)>::value, "");
 }
 
 void Increment(int* value) {
@@ -179,19 +176,18 @@ TEST(CallbackHelpersTest, ScopedClosureRunnerMoveAssignment) {
   EXPECT_EQ(1, run_count_2);
 }
 
-TEST(CallbackHelpersTest, AdaptCallbackForRepeating) {
-  int count = 0;
-  base::OnceCallback<void(int*)> cb =
-      base::BindOnce([](int* count) { ++*count; });
+TEST(CallbackHelpersTest, SplitOnceCallback_EmptyCallback) {
+  base::OnceCallback<void(int*)> cb = base::NullCallback();
+  EXPECT_FALSE(cb);
 
-  base::RepeatingCallback<void(int*)> wrapped =
-      base::AdaptCallbackForRepeating(std::move(cb));
+  auto split = base::SplitOnceCallback(std::move(cb));
 
-  EXPECT_EQ(0, count);
-  wrapped.Run(&count);
-  EXPECT_EQ(1, count);
-  wrapped.Run(&count);
-  EXPECT_EQ(1, count);
+  static_assert(std::is_same<decltype(split),
+                             std::pair<base::OnceCallback<void(int*)>,
+                                       base::OnceCallback<void(int*)>>>::value,
+                "");
+  EXPECT_FALSE(split.first);
+  EXPECT_FALSE(split.second);
 }
 
 TEST(CallbackHelpersTest, SplitOnceCallback_FirstCallback) {
@@ -231,9 +227,43 @@ TEST(CallbackHelpersTest, SplitOnceCallback_SecondCallback) {
   std::move(split.second).Run(&count);
   EXPECT_EQ(1, count);
 
-#if GTEST_HAS_DEATH_TEST
   EXPECT_CHECK_DEATH(std::move(split.first).Run(&count));
-#endif  // GTEST_HAS_DEATH_TEST
+}
+
+TEST(CallbackHelpersTest, SplitSplitOnceCallback_FirstSplit) {
+  int count = 0;
+  base::OnceCallback<void(int*)> cb =
+      base::BindOnce([](int* count) { ++*count; });
+
+  auto split = base::SplitOnceCallback(std::move(cb));
+  base::OnceCallback<void(int*)> cb1 = std::move(split.first);
+  split = base::SplitOnceCallback(std::move(split.second));
+  base::OnceCallback<void(int*)> cb2 = std::move(split.first);
+  base::OnceCallback<void(int*)> cb3 = std::move(split.second);
+
+  EXPECT_EQ(0, count);
+  std::move(cb1).Run(&count);
+  EXPECT_EQ(1, count);
+
+  EXPECT_CHECK_DEATH(std::move(cb3).Run(&count));
+}
+
+TEST(CallbackHelpersTest, SplitSplitOnceCallback_SecondSplit) {
+  int count = 0;
+  base::OnceCallback<void(int*)> cb =
+      base::BindOnce([](int* count) { ++*count; });
+
+  auto split = base::SplitOnceCallback(std::move(cb));
+  base::OnceCallback<void(int*)> cb1 = std::move(split.first);
+  split = base::SplitOnceCallback(std::move(split.second));
+  base::OnceCallback<void(int*)> cb2 = std::move(split.first);
+  base::OnceCallback<void(int*)> cb3 = std::move(split.second);
+
+  EXPECT_EQ(0, count);
+  std::move(cb2).Run(&count);
+  EXPECT_EQ(1, count);
+
+  EXPECT_CHECK_DEATH(std::move(cb1).Run(&count));
 }
 
 }  // namespace

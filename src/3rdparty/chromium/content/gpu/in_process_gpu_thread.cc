@@ -94,7 +94,7 @@ public:
 
         if (base::FeatureList::IsEnabled(features::kGpuUseDisplayThreadPriority))
           options.priority = base::ThreadPriority::DISPLAY;
-        thread_->StartWithOptions(options);
+        thread_->StartWithOptions(std::move(options));
     }
 
     ~Controller() override {

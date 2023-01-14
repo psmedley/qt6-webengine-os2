@@ -13,15 +13,16 @@
 #include <utility>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
 #include "ui/accessibility/ax_base_export.h"
 #include "ui/accessibility/ax_enums.mojom-forward.h"
-#include "ui/accessibility/ax_node_text_styles.h"
 #include "ui/accessibility/ax_relative_bounds.h"
+#include "ui/accessibility/ax_text_attributes.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace ui {
+
+class AXTreeID;
 
 // Defines the type used for AXNode IDs.
 using AXNodeID = int32_t;
@@ -69,7 +70,7 @@ struct AX_BASE_EXPORT AXNodeData {
   // need to distinguish between the default value and a missing attribute),
   // and another that returns the default value for that type if the
   // attribute is not present. In addition, strings can be returned as
-  // either std::string or base::string16, for convenience.
+  // either std::string or std::u16string, for convenience.
 
   bool HasBoolAttribute(ax::mojom::BoolAttribute attribute) const;
   bool GetBoolAttribute(ax::mojom::BoolAttribute attribute) const;
@@ -90,10 +91,10 @@ struct AX_BASE_EXPORT AXNodeData {
   bool GetStringAttribute(ax::mojom::StringAttribute attribute,
                           std::string* value) const;
 
-  bool GetString16Attribute(ax::mojom::StringAttribute attribute,
-                            base::string16* value) const;
-  base::string16 GetString16Attribute(
+  std::u16string GetString16Attribute(
       ax::mojom::StringAttribute attribute) const;
+  bool GetString16Attribute(ax::mojom::StringAttribute attribute,
+                            std::u16string* value) const;
 
   bool HasIntListAttribute(ax::mojom::IntListAttribute attribute) const;
   const std::vector<int32_t>& GetIntListAttribute(
@@ -107,8 +108,8 @@ struct AX_BASE_EXPORT AXNodeData {
   bool GetStringListAttribute(ax::mojom::StringListAttribute attribute,
                               std::vector<std::string>* value) const;
 
-  bool GetHtmlAttribute(const char* attribute, base::string16* value) const;
   bool GetHtmlAttribute(const char* attribute, std::string* value) const;
+  bool GetHtmlAttribute(const char* attribute, std::u16string* value) const;
 
   //
   // Setting accessibility attributes.
@@ -118,11 +119,14 @@ struct AX_BASE_EXPORT AXNodeData {
   // have wanted or what existing code already assumes.
   //
 
-  void AddStringAttribute(ax::mojom::StringAttribute attribute,
-                          const std::string& value);
+  void AddBoolAttribute(ax::mojom::BoolAttribute attribute, bool value);
+  void AddChildTreeId(const ui::AXTreeID& tree_id);
   void AddIntAttribute(ax::mojom::IntAttribute attribute, int32_t value);
   void AddFloatAttribute(ax::mojom::FloatAttribute attribute, float value);
-  void AddBoolAttribute(ax::mojom::BoolAttribute attribute, bool value);
+  // This method cannot be used to set kChildTreeId due to a common
+  // misuse of base::UnguessableToken serialization. Use AddChildTreeId instead.
+  void AddStringAttribute(ax::mojom::StringAttribute attribute,
+                          const std::string& value);
   void AddIntListAttribute(ax::mojom::IntListAttribute attribute,
                            const std::vector<int32_t>& value);
   void AddStringListAttribute(ax::mojom::StringListAttribute attribute,
@@ -132,17 +136,18 @@ struct AX_BASE_EXPORT AXNodeData {
   // Removing accessibility attributes.
   //
 
-  void RemoveStringAttribute(ax::mojom::StringAttribute attribute);
+  void RemoveBoolAttribute(ax::mojom::BoolAttribute attribute);
   void RemoveIntAttribute(ax::mojom::IntAttribute attribute);
   void RemoveFloatAttribute(ax::mojom::FloatAttribute attribute);
-  void RemoveBoolAttribute(ax::mojom::BoolAttribute attribute);
+  void RemoveStringAttribute(ax::mojom::StringAttribute attribute);
   void RemoveIntListAttribute(ax::mojom::IntListAttribute attribute);
   void RemoveStringListAttribute(ax::mojom::StringListAttribute attribute);
 
   //
-  // Text styles.
+  // Text attributes, such as spelling markers and style information.
   //
-  AXNodeTextStyles GetTextStyles() const;
+
+  AXTextAttributes GetTextAttributes() const;
 
   //
   // Convenience functions.
@@ -151,18 +156,18 @@ struct AX_BASE_EXPORT AXNodeData {
   // Adds the name attribute or replaces it if already present. Also sets the
   // NameFrom attribute if not already set.
   void SetName(const std::string& name);
-  void SetName(const base::string16& name);
+  void SetName(const std::u16string& name);
 
   // Allows nameless objects to pass accessibility checks.
   void SetNameExplicitlyEmpty();
 
   // Adds the description attribute or replaces it if already present.
   void SetDescription(const std::string& description);
-  void SetDescription(const base::string16& description);
+  void SetDescription(const std::u16string& description);
 
   // Adds the value attribute or replaces it if already present.
   void SetValue(const std::string& value);
-  void SetValue(const base::string16& value);
+  void SetValue(const std::u16string& value);
 
   // Returns true if the given enum bit is 1.
   bool HasState(ax::mojom::State state) const;
@@ -213,6 +218,10 @@ struct AX_BASE_EXPORT AXNodeData {
   // clicked, such as a text field or a native HTML list box.
   bool IsActivatable() const;
 
+  // Helper to determine if the data belongs to a node that is at the root of an
+  // ARIA live region that is active, i.e. its status is not set to "off".
+  bool IsActiveLiveRegionRoot() const;
+
   // Helper to determine if the data belongs to a node that is a native button
   // or ARIA role="button" in a pressed state.
   bool IsButtonPressed() const;
@@ -220,6 +229,10 @@ struct AX_BASE_EXPORT AXNodeData {
   // Helper to determine if the data belongs to a node that can respond to
   // clicks.
   bool IsClickable() const;
+
+  // Helper to determine if the data belongs to a node that is part of an active
+  // ARIA live region, and for which live announcements should be made.
+  bool IsContainedInActiveLiveRegion() const;
 
   // Helper to determine if the object is selectable.
   bool IsSelectable() const;
@@ -255,13 +268,20 @@ struct AX_BASE_EXPORT AXNodeData {
   // This data belongs to a text field that is used for entering passwords.
   bool IsPasswordField() const;
 
-  // This data belongs to a text field that doesn't accept rich text content,
-  // such as text with special formatting or styling.
-  bool IsPlainTextField() const;
+  // This data belongs to an atomic text field. An atomic text field does not
+  // expose its internal implementation to assistive software, appearing as a
+  // single leaf node in the accessibility tree. Examples include: An <input> or
+  // a <textarea> on the Web, a text field in a PDF form, a Views-based text
+  // field, or a native Android one.
+  bool IsAtomicTextField() const;
 
-  // This data belongs to a text field that accepts rich text content, such as
-  // text with special formatting or styling.
-  bool IsRichTextField() const;
+  // This data belongs to a text field whose value is exposed both on the field
+  // itself as well as on descendant nodes which are expose to platform
+  // accessibility APIs. A non-native text field also exposes stylistic and
+  // document marker information on descendant nodes. Examples include fields
+  // created using the CSS "user-modify" property, or the "contenteditable"
+  // attribute.
+  bool IsNonAtomicTextField() const;
 
   // Helper to determine if |GetRestriction| is either ReadOnly or Disabled.
   // By default, all nodes that can't be edited are readonly.

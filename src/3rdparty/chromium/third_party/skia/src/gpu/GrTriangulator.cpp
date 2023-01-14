@@ -126,7 +126,15 @@ static inline void round(SkPoint* p) {
 }
 
 static inline SkScalar double_to_clamped_scalar(double d) {
-    return SkDoubleToScalar(std::min((double) SK_ScalarMax, std::max(d, (double) -SK_ScalarMax)));
+    // Clamps large values to what's finitely representable when cast back to a float.
+    static const double kMaxLimit = (double) SK_ScalarMax;
+    // It's not perfect, but a using a value larger than float_min helps protect from denormalized
+    // values and ill-conditions in intermediate calculations on coordinates.
+    static const double kNearZeroLimit = 16 * (double) std::numeric_limits<float>::min();
+    if (std::abs(d) < kNearZeroLimit) {
+        d = 0.f;
+    }
+    return SkDoubleToScalar(std::max(-kMaxLimit, std::min(d, kMaxLimit)));
 }
 
 bool GrTriangulator::Line::intersect(const Line& other, SkPoint* point) const {
@@ -137,44 +145,142 @@ bool GrTriangulator::Line::intersect(const Line& other, SkPoint* point) const {
     double scale = 1.0 / denom;
     point->fX = double_to_clamped_scalar((fB * other.fC - other.fB * fC) * scale);
     point->fY = double_to_clamped_scalar((other.fA * fC - fA * other.fC) * scale);
-    round(point);
+     round(point);
     return point->isFinite();
 }
 
-bool GrTriangulator::Edge::intersect(const Edge& other, SkPoint* p, uint8_t* alpha) const {
-    TESS_LOG("intersecting %g -> %g with %g -> %g\n",
-             fTop->fID, fBottom->fID, other.fTop->fID, other.fBottom->fID);
-    if (fTop == other.fTop || fBottom == other.fBottom) {
+// If the edge's vertices differ by many orders of magnitude, the computed line equation can have
+// significant error in its distance and intersection tests. To avoid this, we recursively subdivide
+// long edges and effectively perform a binary search to perform a more accurate intersection test.
+static bool edge_line_needs_recursion(const SkPoint& p0, const SkPoint& p1) {
+    // ilogbf(0) returns an implementation-defined constant, but we are choosing to saturate
+    // negative exponents to 0 for comparisons sake. We're only trying to recurse on lines with
+    // very large coordinates.
+    int expDiffX = std::abs((std::abs(p0.fX) < 1.f ? 0 : std::ilogbf(p0.fX)) -
+                            (std::abs(p1.fX) < 1.f ? 0 : std::ilogbf(p1.fX)));
+    int expDiffY = std::abs((std::abs(p0.fY) < 1.f ? 0 : std::ilogbf(p0.fY)) -
+                            (std::abs(p1.fY) < 1.f ? 0 : std::ilogbf(p1.fY)));
+    // Differ by more than 2^20, or roughly a factor of one million.
+    return expDiffX > 20 || expDiffY > 20;
+}
+
+static bool recursive_edge_intersect(const Line& u, SkPoint u0, SkPoint u1,
+                                     const Line& v, SkPoint v0, SkPoint v1,
+                                     SkPoint* p, double* s, double* t) {
+    // First check if the bounding boxes of [u0,u1] intersects [v0,v1]. If they do not, then the
+    // two line segments cannot intersect in their domain (even if the lines themselves might).
+    // - don't use SkRect::intersect since the vertices aren't sorted and horiz/vertical lines
+    //   appear as empty rects, which then never "intersect" according to SkRect.
+    if (std::min(u0.fX, u1.fX) > std::max(v0.fX, v1.fX) ||
+        std::max(u0.fX, u1.fX) < std::min(v0.fX, v1.fX) ||
+        std::min(u0.fY, u1.fY) > std::max(v0.fY, v1.fY) ||
+        std::max(u0.fY, u1.fY) < std::min(v0.fY, v1.fY)) {
         return false;
     }
-    double denom = fLine.fA * other.fLine.fB - fLine.fB * other.fLine.fA;
+
+    // Compute intersection based on current segment vertices; if an intersection is found but the
+    // vertices differ too much in magnitude, we recurse using the midpoint of the segment to
+    // reject false positives. We don't currently try to avoid false negatives (e.g. large magnitude
+    // line reports no intersection but there is one).
+    double denom = u.fA * v.fB - u.fB * v.fA;
     if (denom == 0.0) {
         return false;
     }
-    double dx = static_cast<double>(other.fTop->fPoint.fX) - fTop->fPoint.fX;
-    double dy = static_cast<double>(other.fTop->fPoint.fY) - fTop->fPoint.fY;
-    double sNumer = dy * other.fLine.fB + dx * other.fLine.fA;
-    double tNumer = dy * fLine.fB + dx * fLine.fA;
+    double dx = static_cast<double>(v0.fX) - u0.fX;
+    double dy = static_cast<double>(v0.fY) - u0.fY;
+    double sNumer = dy * v.fB + dx * v.fA;
+    double tNumer = dy * u.fB + dx * u.fA;
     // If (sNumer / denom) or (tNumer / denom) is not in [0..1], exit early.
     // This saves us doing the divide below unless absolutely necessary.
     if (denom > 0.0 ? (sNumer < 0.0 || sNumer > denom || tNumer < 0.0 || tNumer > denom)
                     : (sNumer > 0.0 || sNumer < denom || tNumer > 0.0 || tNumer < denom)) {
         return false;
     }
-    double s = sNumer / denom;
-    SkASSERT(s >= 0.0 && s <= 1.0);
-    p->fX = SkDoubleToScalar(fTop->fPoint.fX - s * fLine.fB);
-    p->fY = SkDoubleToScalar(fTop->fPoint.fY + s * fLine.fA);
+
+    *s = sNumer / denom;
+    *t = tNumer / denom;
+    SkASSERT(*s >= 0.0 && *s <= 1.0 && *t >= 0.0 && *t <= 1.0);
+
+    const bool uNeedsSplit = edge_line_needs_recursion(u0, u1);
+    const bool vNeedsSplit = edge_line_needs_recursion(v0, v1);
+    if (!uNeedsSplit && !vNeedsSplit) {
+        p->fX = double_to_clamped_scalar(u0.fX - (*s) * u.fB);
+        p->fY = double_to_clamped_scalar(u0.fY + (*s) * u.fA);
+        return true;
+    } else {
+        double sScale = 1.0, sShift = 0.0;
+        double tScale = 1.0, tShift = 0.0;
+
+        if (uNeedsSplit) {
+            SkPoint uM = {(float) (0.5 * u0.fX + 0.5 * u1.fX),
+                          (float) (0.5 * u0.fY + 0.5 * u1.fY)};
+            sScale = 0.5;
+            if (*s >= 0.5) {
+                u1 = uM;
+                sShift = 0.5;
+            } else {
+                u0 = uM;
+            }
+        }
+        if (vNeedsSplit) {
+            SkPoint vM = {(float) (0.5 * v0.fX + 0.5 * v1.fX),
+                          (float) (0.5 * v0.fY + 0.5 * v1.fY)};
+            tScale = 0.5;
+            if (*t >= 0.5) {
+                v1 = vM;
+                tShift = 0.5;
+            } else {
+                v0 = vM;
+            }
+        }
+
+        // Just recompute both lines, even if only one was split; we're already in a slow path.
+        if (recursive_edge_intersect(Line(u0, u1), u0, u1, Line(v0, v1), v0, v1, p, s, t)) {
+            // Adjust s and t back to full range
+            *s = sScale * (*s) + sShift;
+            *t = tScale * (*t) + tShift;
+            return true;
+        } else {
+            // False positive
+            return false;
+        }
+    }
+}
+
+bool GrTriangulator::Edge::intersect(const Edge& other, SkPoint* p, uint8_t* alpha) const {
+    TESS_LOG("intersecting %g -> %g with %g -> %g\n",
+             fTop->fID, fBottom->fID, other.fTop->fID, other.fBottom->fID);
+    if (fTop == other.fTop || fBottom == other.fBottom ||
+        fTop == other.fBottom || fBottom == other.fTop) {
+        // If the two edges share a vertex by construction, they have already been split and
+        // shouldn't be considered "intersecting" anymore.
+        return false;
+    }
+
+    double s, t; // needed to interpolate vertex alpha
+    const bool intersects = recursive_edge_intersect(
+            fLine, fTop->fPoint, fBottom->fPoint,
+            other.fLine, other.fTop->fPoint, other.fBottom->fPoint,
+            p, &s, &t);
+    if (!intersects) {
+        return false;
+    }
+
     if (alpha) {
-        if (fType == EdgeType::kConnector) {
-            *alpha = (1.0 - s) * fTop->fAlpha + s * fBottom->fAlpha;
-        } else if (other.fType == EdgeType::kConnector) {
-            double t = tNumer / denom;
-            *alpha = (1.0 - t) * other.fTop->fAlpha + t * other.fBottom->fAlpha;
+        if (fType == EdgeType::kInner || other.fType == EdgeType::kInner) {
+            // If the intersection is on any interior edge, it needs to stay fully opaque or later
+            // triangulation could leech transparency into the inner fill region.
+            *alpha = 255;
         } else if (fType == EdgeType::kOuter && other.fType == EdgeType::kOuter) {
+            // Trivially, the intersection will be fully transparent since since it is by
+            // construction on the outer edge.
             *alpha = 0;
         } else {
-            *alpha = 255;
+            // Could be two connectors crossing, or a connector crossing an outer edge.
+            // Take the max interpolated alpha
+            SkASSERT(fType == EdgeType::kConnector || other.fType == EdgeType::kConnector);
+            *alpha = std::max((1.0 - s) * fTop->fAlpha + s * fBottom->fAlpha,
+                              (1.0 - t) * other.fTop->fAlpha + t * other.fBottom->fAlpha);
         }
     }
     return true;
@@ -267,6 +373,22 @@ void* GrTriangulator::emitTriangle(Vertex* prev, Vertex* curr, Vertex* next, int
     return emit_triangle(prev, curr, next, fEmitCoverage, data);
 }
 
+GrTriangulator::Poly::Poly(Vertex* v, int winding)
+        : fFirstVertex(v)
+        , fWinding(winding)
+        , fHead(nullptr)
+        , fTail(nullptr)
+        , fNext(nullptr)
+        , fPartner(nullptr)
+        , fCount(0)
+{
+#if TRIANGULATOR_LOGGING
+    static int gID = 0;
+    fID = gID++;
+    TESS_LOG("*** created Poly %d\n", fID);
+#endif
+}
+
 Poly* GrTriangulator::Poly::addEdge(Edge* e, Side side, SkArenaAlloc* alloc) {
     TESS_LOG("addEdge (%g -> %g) to poly %d, %s side\n",
              e->fTop->fID, e->fBottom->fID, fID, side == kLeft_Side ? "left" : "right");
@@ -312,7 +434,7 @@ void* GrTriangulator::emitPoly(const Poly* poly, void *data) const {
     if (poly->fCount < 3) {
         return data;
     }
-    TESS_LOG("emit() %d, size %d\n", fID, fCount);
+    TESS_LOG("emit() %d, size %d\n", poly->fID, poly->fCount);
     for (MonotonePoly* m = poly->fHead; m != nullptr; m = m->fNext) {
         data = this->emitMonotonePoly(m, data);
     }
@@ -882,22 +1004,21 @@ Vertex* GrTriangulator::makeSortedVertex(const SkPoint& p, uint8_t alpha, Vertex
     return v;
 }
 
-// If an edge's top and bottom points differ only by 1/2 machine epsilon in the primary
-// sort criterion, it may not be possible to split correctly, since there is no point which is
-// below the top and above the bottom. This function detects that case.
-static bool nearly_flat(const Comparator& c, Edge* edge) {
-    SkPoint diff = edge->fBottom->fPoint - edge->fTop->fPoint;
-    float primaryDiff = c.fDirection == Comparator::Direction::kHorizontal ? diff.fX : diff.fY;
-    return fabs(primaryDiff) < std::numeric_limits<float>::epsilon() && primaryDiff != 0.0f;
-}
-
+// Clamps x and y coordinates independently, so the returned point will lie within the bounding
+// box formed by the corners of 'min' and 'max' (although min/max here refer to the ordering
+// imposed by 'c').
 static SkPoint clamp(SkPoint p, SkPoint min, SkPoint max, const Comparator& c) {
-    if (c.sweep_lt(p, min)) {
-        return min;
-    } else if (c.sweep_lt(max, p)) {
-        return max;
+    if (c.fDirection == Comparator::Direction::kHorizontal) {
+        // With horizontal sorting, we know min.x <= max.x, but there's no relation between
+        // Y components unless min.x == max.x.
+        return {SkTPin(p.fX, min.fX, max.fX),
+                min.fY < max.fY ? SkTPin(p.fY, min.fY, max.fY)
+                                : SkTPin(p.fY, max.fY, min.fY)};
     } else {
-        return p;
+        // And with vertical sorting, we know Y's relation but not necessarily X's.
+        return {min.fX < max.fX ? SkTPin(p.fX, min.fX, max.fX)
+                                : SkTPin(p.fX, max.fX, min.fX),
+                SkTPin(p.fY, min.fY, max.fY)};
     }
 }
 
@@ -938,19 +1059,20 @@ bool GrTriangulator::checkForIntersection(Edge* left, Edge* right, EdgeList* act
         while (top && c.sweep_lt(p, top->fPoint)) {
             top = top->fPrev;
         }
-        if (!nearly_flat(c, left)) {
-            p = clamp(p, left->fTop->fPoint, left->fBottom->fPoint, c);
-        }
-        if (!nearly_flat(c, right)) {
-            p = clamp(p, right->fTop->fPoint, right->fBottom->fPoint, c);
-        }
-        if (p == left->fTop->fPoint) {
+
+        // Always clamp the intersection to lie between the vertices of each segment, since
+        // in theory that's where the intersection is, but in reality, floating point error may
+        // have computed an intersection beyond a vertex's component(s).
+        p = clamp(p, left->fTop->fPoint, left->fBottom->fPoint, c);
+        p = clamp(p, right->fTop->fPoint, right->fBottom->fPoint, c);
+
+        if (coincident(p, left->fTop->fPoint)) {
             v = left->fTop;
-        } else if (p == left->fBottom->fPoint) {
+        } else if (coincident(p, left->fBottom->fPoint)) {
             v = left->fBottom;
-        } else if (p == right->fTop->fPoint) {
+        } else if (coincident(p, right->fTop->fPoint)) {
             v = right->fTop;
-        } else if (p == right->fBottom->fPoint) {
+        } else if (coincident(p, right->fBottom->fPoint)) {
             v = right->fBottom;
         } else {
             v = this->makeSortedVertex(p, alpha, mesh, top, c);
@@ -973,10 +1095,14 @@ void GrTriangulator::sanitizeContours(VertexList* contours, int contourCnt) cons
     for (VertexList* contour = contours; contourCnt > 0; --contourCnt, ++contour) {
         SkASSERT(contour->fHead);
         Vertex* prev = contour->fTail;
+        prev->fPoint.fX = double_to_clamped_scalar((double) prev->fPoint.fX);
+        prev->fPoint.fY = double_to_clamped_scalar((double) prev->fPoint.fY);
         if (fRoundVerticesToQuarterPixel) {
             round(&prev->fPoint);
         }
         for (Vertex* v = contour->fHead; v;) {
+            v->fPoint.fX = double_to_clamped_scalar((double) v->fPoint.fX);
+            v->fPoint.fY = double_to_clamped_scalar((double) v->fPoint.fY);
             if (fRoundVerticesToQuarterPixel) {
                 round(&v->fPoint);
             }
@@ -1370,8 +1496,14 @@ Poly* GrTriangulator::contoursToPolys(VertexList* contours, int contourCnt) cons
                                                           : Comparator::Direction::kVertical);
     VertexList mesh;
     this->contoursToMesh(contours, contourCnt, &mesh, c);
+    TESS_LOG("\ninitial mesh:\n");
+    DUMP_MESH(mesh);
     SortMesh(&mesh, c);
+    TESS_LOG("\nsorted mesh:\n");
+    DUMP_MESH(mesh);
     this->mergeCoincidentVertices(&mesh, c);
+    TESS_LOG("\nsorted+merged mesh:\n");
+    DUMP_MESH(mesh);
     this->simplify(&mesh, c);
     TESS_LOG("\nsimplified mesh:\n");
     DUMP_MESH(mesh);
@@ -1475,41 +1607,5 @@ int GrTriangulator::polysToTriangles(Poly* polys, GrEagerVertexAllocator* vertex
                                        / vertexStride);
     SkASSERT(actualCount <= count);
     vertexAllocator->unlock(actualCount);
-    return actualCount;
-}
-
-int GrTriangulator::PathToVertices(const SkPath& path, SkScalar tolerance, const SkRect& clipBounds,
-                                   WindingVertex** verts) {
-    SkArenaAlloc alloc(kArenaDefaultChunkSize);
-    GrTriangulator triangulator(path, &alloc);
-    bool isLinear;
-    Poly* polys = triangulator.pathToPolys(tolerance, clipBounds, &isLinear);
-    int64_t count64 = CountPoints(polys, path.getFillType());
-    if (0 == count64 || count64 > SK_MaxS32) {
-        *verts = nullptr;
-        return 0;
-    }
-    int count = count64;
-
-    *verts = new WindingVertex[count];
-    WindingVertex* vertsEnd = *verts;
-    SkPoint* points = new SkPoint[count];
-    SkPoint* pointsEnd = points;
-    for (Poly* poly = polys; poly; poly = poly->fNext) {
-        if (apply_fill_type(path.getFillType(), poly)) {
-            SkPoint* start = pointsEnd;
-            pointsEnd = static_cast<SkPoint*>(triangulator.emitPoly(poly, pointsEnd));
-            while (start != pointsEnd) {
-                vertsEnd->fPos = *start;
-                vertsEnd->fWinding = poly->fWinding;
-                ++start;
-                ++vertsEnd;
-            }
-        }
-    }
-    int actualCount = static_cast<int>(vertsEnd - *verts);
-    SkASSERT(actualCount <= count);
-    SkASSERT(pointsEnd - points == actualCount);
-    delete[] points;
     return actualCount;
 }

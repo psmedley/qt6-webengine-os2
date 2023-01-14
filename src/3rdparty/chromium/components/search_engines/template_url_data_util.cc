@@ -28,14 +28,14 @@ base::StringPiece ToStringPiece(const char* str) {
 std::unique_ptr<TemplateURLData> TemplateURLDataFromDictionary(
     const base::DictionaryValue& dict) {
   std::string search_url;
-  base::string16 keyword;
-  base::string16 short_name;
+  std::u16string keyword;
+  std::u16string short_name;
   dict.GetString(DefaultSearchManager::kURL, &search_url);
   dict.GetString(DefaultSearchManager::kKeyword, &keyword);
   dict.GetString(DefaultSearchManager::kShortName, &short_name);
   // Check required TemplateURLData fields first.
   if (search_url.empty() || keyword.empty() || short_name.empty())
-    return std::unique_ptr<TemplateURLData>();
+    return nullptr;
 
   auto result = std::make_unique<TemplateURLData>();
   result->SetKeyword(keyword);
@@ -101,19 +101,18 @@ std::unique_ptr<TemplateURLData> TemplateURLDataFromDictionary(
 
   const base::ListValue* alternate_urls = nullptr;
   if (dict.GetList(DefaultSearchManager::kAlternateURLs, &alternate_urls)) {
-    for (const auto& it : *alternate_urls) {
-      std::string alternate_url;
-      if (it.GetAsString(&alternate_url))
-        result->alternate_urls.push_back(std::move(alternate_url));
+    for (const auto& it : alternate_urls->GetList()) {
+      if (it.is_string())
+        result->alternate_urls.push_back(it.GetString());
     }
   }
 
   const base::ListValue* encodings = nullptr;
   if (dict.GetList(DefaultSearchManager::kInputEncodings, &encodings)) {
-    for (const auto& it : *encodings) {
+    for (const auto& it : encodings->GetList()) {
       std::string encoding;
-      if (it.GetAsString(&encoding))
-        result->input_encodings.push_back(std::move(encoding));
+      if (it.is_string())
+        result->input_encodings.push_back(it.GetString());
     }
   }
 
@@ -121,6 +120,8 @@ std::unique_ptr<TemplateURLData> TemplateURLDataFromDictionary(
                   &result->created_by_policy);
   dict.GetBoolean(DefaultSearchManager::kCreatedFromPlayAPI,
                   &result->created_from_play_api);
+  dict.GetBoolean(DefaultSearchManager::kPreconnectToSearchUrl,
+                  &result->preconnect_to_search_url);
   return result;
 }
 
@@ -169,22 +170,24 @@ std::unique_ptr<base::DictionaryValue> TemplateURLDataToDictionary(
       base::NumberToString(data.last_visited.ToInternalValue()));
   url_dict->SetInteger(DefaultSearchManager::kUsageCount, data.usage_count);
 
-  auto alternate_urls = std::make_unique<base::ListValue>();
+  base::ListValue alternate_urls;
   for (const auto& alternate_url : data.alternate_urls)
-    alternate_urls->AppendString(alternate_url);
+    alternate_urls.AppendString(alternate_url);
 
-  url_dict->Set(DefaultSearchManager::kAlternateURLs,
-                std::move(alternate_urls));
+  url_dict->SetKey(DefaultSearchManager::kAlternateURLs,
+                   std::move(alternate_urls));
 
-  auto encodings = std::make_unique<base::ListValue>();
+  base::ListValue encodings;
   for (const auto& input_encoding : data.input_encodings)
-    encodings->AppendString(input_encoding);
-  url_dict->Set(DefaultSearchManager::kInputEncodings, std::move(encodings));
+    encodings.AppendString(input_encoding);
+  url_dict->SetKey(DefaultSearchManager::kInputEncodings, std::move(encodings));
 
   url_dict->SetBoolean(DefaultSearchManager::kCreatedByPolicy,
                        data.created_by_policy);
   url_dict->SetBoolean(DefaultSearchManager::kCreatedFromPlayAPI,
                        data.created_from_play_api);
+  url_dict->SetBoolean(DefaultSearchManager::kPreconnectToSearchUrl,
+                       data.preconnect_to_search_url);
   return url_dict;
 }
 
@@ -206,13 +209,14 @@ std::unique_ptr<TemplateURLData> TemplateURLDataFromPrepopulatedEngine(
       ToStringPiece(engine.suggest_url_post_params),
       ToStringPiece(engine.image_url_post_params),
       ToStringPiece(engine.favicon_url), ToStringPiece(engine.encoding),
-      alternate_urls, engine.id);
+      alternate_urls,
+      ToStringPiece(engine.preconnect_to_search_url) == "ALLOWED", engine.id);
 }
 
 std::unique_ptr<TemplateURLData> TemplateURLDataFromOverrideDictionary(
     const base::DictionaryValue& engine) {
-  base::string16 name;
-  base::string16 keyword;
+  std::u16string name;
+  std::u16string keyword;
   std::string search_url;
   std::string favicon_url;
   std::string encoding;
@@ -234,6 +238,7 @@ std::unique_ptr<TemplateURLData> TemplateURLDataFromOverrideDictionary(
     std::string search_url_post_params;
     std::string suggest_url_post_params;
     std::string image_url_post_params;
+    std::string preconnect_to_search_url;
     base::ListValue empty_list;
     const base::ListValue* alternate_urls = &empty_list;
     engine.GetString("suggest_url", &suggest_url);
@@ -246,11 +251,12 @@ std::unique_ptr<TemplateURLData> TemplateURLDataFromOverrideDictionary(
     engine.GetString("suggest_url_post_params", &suggest_url_post_params);
     engine.GetString("image_url_post_params", &image_url_post_params);
     engine.GetList("alternate_urls", &alternate_urls);
+    engine.GetString("preconnect_to_search_url", &preconnect_to_search_url);
     return std::make_unique<TemplateURLData>(
         name, keyword, search_url, suggest_url, image_url, new_tab_url,
         contextual_search_url, logo_url, doodle_url, search_url_post_params,
         suggest_url_post_params, image_url_post_params, favicon_url, encoding,
-        *alternate_urls, id);
+        *alternate_urls, preconnect_to_search_url.compare("ALLOWED") == 0, id);
   }
-  return std::unique_ptr<TemplateURLData>();
+  return nullptr;
 }

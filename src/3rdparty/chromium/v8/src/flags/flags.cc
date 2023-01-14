@@ -16,11 +16,16 @@
 #include "src/base/platform/platform.h"
 #include "src/codegen/cpu-features.h"
 #include "src/logging/counters.h"
+#include "src/logging/tracing-flags.h"
+#include "src/tracing/tracing-category-observer.h"
 #include "src/utils/allocation.h"
 #include "src/utils/memcopy.h"
 #include "src/utils/ostreams.h"
 #include "src/utils/utils.h"
+
+#if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-limits.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
 namespace internal {
@@ -424,7 +429,7 @@ static const char* Type2String(Flag::FlagType type) {
   UNREACHABLE();
 }
 
-std::ostream& operator<<(std::ostream& os, const Flag& flag) {  // NOLINT
+std::ostream& operator<<(std::ostream& os, const Flag& flag) {
   switch (flag.type()) {
     case Flag::TYPE_BOOL:
       os << (flag.bool_variable() ? "true" : "false");
@@ -725,7 +730,7 @@ int FlagList::SetFlagsFromString(const char* str, size_t len) {
   }
 
   // allocate argument array
-  ScopedVector<char*> argv(argc);
+  base::ScopedVector<char*> argv(argc);
 
   // split the flags string into arguments
   argc = 1;  // be compatible with SetFlagsFromCommandLine()

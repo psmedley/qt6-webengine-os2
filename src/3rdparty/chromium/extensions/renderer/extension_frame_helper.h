@@ -11,21 +11,19 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "extensions/common/mojom/frame.mojom.h"
-#include "extensions/common/view_type.h"
-#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "extensions/common/mojom/view_type.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "v8/include/v8.h"
 
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_TabConnectionInfo;
-
-namespace base {
-class ListValue;
-}
 
 namespace extensions {
 
@@ -46,12 +44,12 @@ class ExtensionFrameHelper
 
   // Returns a list of extension RenderFrames that match the given filter
   // criteria. A |browser_window_id| of extension_misc::kUnknownWindowId
-  // specifies "all", as does a |view_type| of VIEW_TYPE_INVALID.
+  // specifies "all", as does a |view_type| of mojom::ViewType::kInvalid.
   static std::vector<content::RenderFrame*> GetExtensionFrames(
       const std::string& extension_id,
       int browser_window_id,
       int tab_id,
-      ViewType view_type);
+      mojom::ViewType view_type);
   // Same as above, but returns a v8::Array of the v8 global objects for those
   // frames, and only includes main frames. Note: This only returns contexts
   // that are accessible by |context|, and |context| must be the current
@@ -61,7 +59,7 @@ class ExtensionFrameHelper
                                               const std::string& extension_id,
                                               int browser_window_id,
                                               int tab_id,
-                                              ViewType view_type);
+                                              mojom::ViewType view_type);
 
   // Returns the main frame of the extension's background page, or null if there
   // isn't one in this process.
@@ -92,7 +90,7 @@ class ExtensionFrameHelper
   // deleted.
   static bool IsContextForEventPage(const ScriptContext* context);
 
-  ViewType view_type() const { return view_type_; }
+  mojom::ViewType view_type() const { return view_type_; }
   int tab_id() const { return tab_id_; }
   int browser_window_id() const { return browser_window_id_; }
   bool did_create_current_document_element() const {
@@ -104,6 +102,22 @@ class ExtensionFrameHelper
   void SetSpatialNavigationEnabled(bool enabled) override;
   void SetTabId(int32_t id) override;
   void AppWindowClosed(bool send_onclosed) override;
+  void NotifyRenderViewType(mojom::ViewType view_type) override;
+  void MessageInvoke(const std::string& extension_id,
+                     const std::string& module_name,
+                     const std::string& function_name,
+                     const base::Value args) override;
+
+  void ExecuteCode(mojom::ExecuteCodeParamsPtr param,
+                   ExecuteCodeCallback callback) override;
+
+  void ExecuteDeclarativeScript(int32_t tab_id,
+                                const std::string& extension_id,
+                                const std::string& script_id,
+                                const GURL& url) override;
+
+  void set_did_create_script_context() { did_create_script_context_ = true; }
+  bool did_create_script_context() const { return did_create_script_context_; }
 
   // Called when the document element has been inserted in this frame. This
   // method may invoke untrusted JavaScript code that invalidate the frame and
@@ -128,6 +142,8 @@ class ExtensionFrameHelper
 
   // Schedule a callback, to be run at the next RunScriptsAtDocumentIdle call.
   void ScheduleAtDocumentIdle(base::OnceClosure callback);
+
+  mojom::LocalFrameHost* GetLocalFrameHost();
 
  private:
   void BindLocalFrame(
@@ -162,18 +178,9 @@ class ExtensionFrameHelper
                                        const PortId& id,
                                        const std::string& error_message);
   void OnUpdateBrowserWindowId(int browser_window_id);
-  void OnNotifyRendererViewType(ViewType view_type);
-  void OnExtensionResponse(int request_id,
-                           bool success,
-                           const base::ListValue& response,
-                           const std::string& error);
-  void OnExtensionMessageInvoke(const std::string& extension_id,
-                                const std::string& module_name,
-                                const std::string& function_name,
-                                const base::ListValue& args);
 
   // Type of view associated with the RenderFrame.
-  ViewType view_type_ = VIEW_TYPE_INVALID;
+  mojom::ViewType view_type_ = mojom::ViewType::kInvalid;
 
   // The id of the tab the render frame is attached to.
   int tab_id_ = -1;
@@ -207,7 +214,11 @@ class ExtensionFrameHelper
   // navigation happens, it is either the initial one or a reload.
   bool has_started_first_navigation_ = false;
 
-  mojo::AssociatedReceiverSet<mojom::LocalFrame> local_frame_receivers_;
+  bool did_create_script_context_ = false;
+
+  mojo::AssociatedRemote<mojom::LocalFrameHost> local_frame_host_remote_;
+
+  mojo::AssociatedReceiver<mojom::LocalFrame> local_frame_receiver_{this};
 
   base::WeakPtrFactory<ExtensionFrameHelper> weak_ptr_factory_{this};
 

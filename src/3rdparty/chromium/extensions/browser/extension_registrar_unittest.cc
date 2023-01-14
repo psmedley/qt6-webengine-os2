@@ -8,10 +8,10 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/test/test_notification_tracker.h"
+#include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extensions_test.h"
@@ -23,6 +23,7 @@
 #include "extensions/common/extension_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
 
@@ -161,8 +162,9 @@ class ExtensionRegistrarTest : public ExtensionsTest {
   // Adds the extension as blocklisted and verifies the result.
   void AddBlocklistedExtension() {
     SCOPED_TRACE("AddBlocklistedExtension");
-    ExtensionPrefs::Get(browser_context())
-        ->SetExtensionBlocklistState(extension_->id(), BLOCKLISTED_MALWARE);
+    blocklist_prefs::SetSafeBrowsingExtensionBlocklistState(
+        extension_->id(), BitMapBlocklistState::BLOCKLISTED_MALWARE,
+        ExtensionPrefs::Get(browser_context()));
     registrar_->AddExtension(extension_);
     ExpectInSet(ExtensionRegistry::BLOCKLISTED);
     EXPECT_FALSE(IsExtensionReady());
@@ -387,7 +389,7 @@ class ExtensionRegistrarTest : public ExtensionsTest {
   content::TestNotificationTracker notification_tracker_;
 
   // Initialized in SetUp().
-  base::Optional<ExtensionRegistrar> registrar_;
+  absl::optional<ExtensionRegistrar> registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionRegistrarTest);
 };

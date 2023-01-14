@@ -9,8 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/optional.h"
-#include "base/strings/string16.h"
+#include "base/containers/contains.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_constants.h"
@@ -43,6 +42,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension_builder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
 
@@ -174,18 +174,15 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsQueryTitle) {
   const tab_groups::TabGroupColorId color = tab_groups::TabGroupColorId::kGrey;
 
   tab_groups::TabGroupId group1 = tab_strip_model->AddToNewGroup({0});
-  tab_groups::TabGroupVisualData visual_data1(
-      base::ASCIIToUTF16("Sample title"), color);
+  tab_groups::TabGroupVisualData visual_data1(u"Sample title", color);
   tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
 
   tab_groups::TabGroupId group2 = tab_strip_model->AddToNewGroup({1});
-  tab_groups::TabGroupVisualData visual_data2(
-      base::ASCIIToUTF16("Sample title suffixed"), color);
+  tab_groups::TabGroupVisualData visual_data2(u"Sample title suffixed", color);
   tab_group_model->GetTabGroup(group2)->SetVisualData(visual_data2);
 
   tab_groups::TabGroupId group3 = tab_strip_model->AddToNewGroup({2});
-  tab_groups::TabGroupVisualData visual_data3(
-      base::ASCIIToUTF16("Prefixed Sample title"), color);
+  tab_groups::TabGroupVisualData visual_data3(u"Prefixed Sample title", color);
   tab_group_model->GetTabGroup(group3)->SetVisualData(visual_data3);
 
   // Query by title and verify results.
@@ -212,17 +209,17 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsQueryColor) {
   // Create 3 groups with different colors.
   tab_groups::TabGroupId group1 = tab_strip_model->AddToNewGroup({0});
   tab_groups::TabGroupVisualData visual_data1(
-      base::string16(), tab_groups::TabGroupColorId::kGrey);
+      std::u16string(), tab_groups::TabGroupColorId::kGrey);
   tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
 
   tab_groups::TabGroupId group2 = tab_strip_model->AddToNewGroup({1});
   tab_groups::TabGroupVisualData visual_data2(
-      base::string16(), tab_groups::TabGroupColorId::kRed);
+      std::u16string(), tab_groups::TabGroupColorId::kRed);
   tab_group_model->GetTabGroup(group2)->SetVisualData(visual_data2);
 
   tab_groups::TabGroupId group3 = tab_strip_model->AddToNewGroup({2});
   tab_groups::TabGroupVisualData visual_data3(
-      base::string16(), tab_groups::TabGroupColorId::kBlue);
+      std::u16string(), tab_groups::TabGroupColorId::kBlue);
   tab_group_model->GetTabGroup(group3)->SetVisualData(visual_data3);
 
   // Query by color and verify results.
@@ -249,7 +246,7 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsGetSuccess) {
   // Create a group.
   tab_groups::TabGroupId group = tab_strip_model->AddToNewGroup({0, 1, 2});
   tab_groups::TabGroupVisualData visual_data(
-      base::ASCIIToUTF16("Title"), tab_groups::TabGroupColorId::kBlue);
+      u"Title", tab_groups::TabGroupColorId::kBlue);
   tab_group_model->GetTabGroup(group)->SetVisualData(visual_data);
   int group_id = tab_groups_util::GetGroupId(group);
 
@@ -292,7 +289,7 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsUpdateSuccess) {
   // Create a group.
   tab_groups::TabGroupId group = tab_strip_model->AddToNewGroup({0, 1, 2});
   tab_groups::TabGroupVisualData visual_data(
-      base::ASCIIToUTF16("Initial title"), tab_groups::TabGroupColorId::kBlue);
+      u"Initial title", tab_groups::TabGroupColorId::kBlue);
   tab_group_model->GetTabGroup(group)->SetVisualData(visual_data);
   int group_id = tab_groups_util::GetGroupId(group);
 
@@ -308,7 +305,7 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsUpdateSuccess) {
   // Verify the new group metadata.
   const tab_groups::TabGroupVisualData* new_visual_data =
       tab_group_model->GetTabGroup(group)->visual_data();
-  EXPECT_EQ(new_visual_data->title(), base::ASCIIToUTF16("New title"));
+  EXPECT_EQ(new_visual_data->title(), u"New title");
   EXPECT_EQ(new_visual_data->color(), tab_groups::TabGroupColorId::kRed);
 }
 
@@ -509,7 +506,7 @@ TEST_F(TabGroupsApiUnitTest, TabGroupsOnUpdated) {
 
   TestEventRouterObserver event_observer(EventRouter::Get(browser_context()));
 
-  tab_groups::TabGroupVisualData visual_data(base::ASCIIToUTF16("Title"),
+  tab_groups::TabGroupVisualData visual_data(u"Title",
                                              tab_groups::TabGroupColorId::kRed);
   tab_strip_model->group_model()->GetTabGroup(group)->SetVisualData(
       visual_data);
@@ -553,17 +550,31 @@ TEST_F(TabGroupsApiUnitTest, IsTabStripEditable) {
   const std::string args =
       base::StringPrintf(R"([%d, {"index": %d}])", group_id, 1);
 
-  // Succeed moving group in normal case.
+  EXPECT_TRUE(browser_window()->IsTabStripEditable());
+
+  // Succeed moving group when tab strip is editable.
   {
     auto function = base::MakeRefCounted<TabGroupsMoveFunction>();
     function->set_extension(extension);
-    ASSERT_TRUE(extension_function_test_utils::RunFunction(
+    EXPECT_TRUE(extension_function_test_utils::RunFunction(
         function.get(), args, browser(), api_test_utils::NONE));
+  }
+
+  // Make tab strip uneditable.
+  browser_window()->SetIsTabStripEditable(false);
+  EXPECT_FALSE(browser_window()->IsTabStripEditable());
+
+  // Succeed querying group when tab strip is not editable.
+  {
+    const char* query_args = R"([{"title": "Sample title"}])";
+    auto function = base::MakeRefCounted<TabGroupsQueryFunction>();
+    function->set_extension(extension);
+    EXPECT_TRUE(extension_function_test_utils::RunFunction(
+        function.get(), query_args, browser(), api_test_utils::NONE));
   }
 
   // Gracefully cancel group tab drag if tab strip isn't editable.
   {
-    browser_window()->SetIsTabStripEditable(false);
     auto function = base::MakeRefCounted<TabGroupsMoveFunction>();
     function->set_extension(extension);
     std::string error =

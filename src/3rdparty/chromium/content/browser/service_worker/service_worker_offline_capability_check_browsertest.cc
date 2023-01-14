@@ -8,7 +8,6 @@
 #include "base/guid.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/test/bind.h"
@@ -25,8 +24,11 @@
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -63,7 +65,7 @@ class FetchEventTestHelper {
     for (const FetchEventDispatchParamAndExpectedResult&
              param_and_expected_result : test_inputs) {
       fetch_event_dispatches_.push_back(
-          FetchEventDispatch{param_and_expected_result, base::nullopt});
+          FetchEventDispatch{param_and_expected_result, absl::nullopt});
     }
   }
 
@@ -102,7 +104,7 @@ class FetchEventTestHelper {
  private:
   struct FetchEventDispatch {
     FetchEventDispatchParamAndExpectedResult param_and_expected_result;
-    base::Optional<FetchResult> fetch_result;
+    absl::optional<FetchResult> fetch_result;
     std::unique_ptr<ServiceWorkerFetchDispatcher> fetch_dispatcher;
   };
 
@@ -204,8 +206,10 @@ class ServiceWorkerOfflineCapabilityCheckBrowserTest
   void SetUpOnMainThread() override {
     ASSERT_TRUE(embedded_test_server()->Start());
 
-    StoragePartition* partition = BrowserContext::GetDefaultStoragePartition(
-        shell()->web_contents()->GetBrowserContext());
+    StoragePartition* partition = shell()
+                                      ->web_contents()
+                                      ->GetBrowserContext()
+                                      ->GetDefaultStoragePartition();
     wrapper_ = static_cast<ServiceWorkerContextWrapper*>(
         partition->GetServiceWorkerContext());
   }
@@ -227,8 +231,10 @@ class ServiceWorkerOfflineCapabilityCheckBrowserTest
   void SetupFetchEventDispatchTargetVersionOnCoreThread(
       base::OnceClosure done) {
     DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+    GURL url = embedded_test_server()->GetURL("/service_worker/");
+    blink::StorageKey key = blink::StorageKey(url::Origin::Create(url));
     wrapper()->context()->registry()->FindRegistrationForScope(
-        embedded_test_server()->GetURL("/service_worker/"),
+        embedded_test_server()->GetURL("/service_worker/"), key,
         base::BindOnce(&ServiceWorkerOfflineCapabilityCheckBrowserTest::
                            DidFindRegistration,
                        base::Unretained(this), std::move(done)));
@@ -270,13 +276,14 @@ class ServiceWorkerOfflineCapabilityCheckBrowserTest
   void CheckOfflineCapabilityOnCoreThread(
       const std::string& path,
       ServiceWorkerContext::CheckOfflineCapabilityCallback callback) {
-    wrapper()->CheckOfflineCapability(embedded_test_server()->GetURL(path),
-                                      std::move(callback));
+    GURL url = embedded_test_server()->GetURL(path);
+    wrapper()->CheckOfflineCapability(
+        url, blink::StorageKey(url::Origin::Create(url)), std::move(callback));
   }
 
   OfflineCapability CheckOfflineCapability(const std::string& path) {
     base::RunLoop fetch_run_loop;
-    base::Optional<OfflineCapability> out_offline_capability;
+    absl::optional<OfflineCapability> out_offline_capability;
     RunOrPostTaskOnThread(
         FROM_HERE, ServiceWorkerContext::GetCoreThreadId(),
         base::BindOnce(

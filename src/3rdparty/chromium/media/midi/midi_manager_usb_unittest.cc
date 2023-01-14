@@ -10,8 +10,8 @@
 #include <string>
 #include <utility>
 
+#include "base/cxx17_backports.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
@@ -239,7 +239,7 @@ class MidiManagerUsbTest : public ::testing::Test {
 
  protected:
   void Initialize() {
-    client_.reset(new FakeMidiManagerClient(&logger_));
+    client_ = std::make_unique<FakeMidiManagerClient>(&logger_);
     service_->StartSession(client_.get());
   }
 

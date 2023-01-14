@@ -22,8 +22,6 @@
 namespace v8 {
 namespace internal {
 
-using compiler::Node;
-
 // Tail calls the regular expression interpreter.
 // static
 void Builtins::Generate_RegExpInterpreterTrampoline(MacroAssembler* masm) {
@@ -55,8 +53,10 @@ TNode<RawPtrT> RegExpBuiltinsAssembler::LoadCodeObjectEntry(TNode<Code> code) {
   TNode<Int32T> builtin_index =
       LoadObjectField<Int32T>(code, Code::kBuiltinIndexOffset);
   {
-    GotoIfNot(Word32Equal(builtin_index, Int32Constant(Builtins::kNoBuiltinId)),
-              &if_code_is_off_heap);
+    GotoIfNot(
+        Word32Equal(builtin_index,
+                    Int32Constant(static_cast<int>(Builtin::kNoBuiltinId))),
+        &if_code_is_off_heap);
     var_result = ReinterpretCast<RawPtrT>(
         IntPtrAdd(BitcastTaggedToWord(code),
                   IntPtrConstant(Code::kHeaderSize - kHeapObjectTag)));
@@ -228,7 +228,7 @@ TNode<JSRegExpResult> RegExpBuiltinsAssembler::ConstructNewResultFromMatchInfo(
   // to avoid an unnecessary write barrier storing the first result.
 
   TNode<String> first =
-      CAST(CallBuiltin(Builtins::kSubString, context, string, start, end));
+      CAST(CallBuiltin(Builtin::kSubString, context, string, start, end));
 
   // Load flags and check if the result object needs to have indices.
   const TNode<Smi> flags =
@@ -271,7 +271,7 @@ TNode<JSRegExpResult> RegExpBuiltinsAssembler::ConstructNewResultFromMatchInfo(
         CAST(UnsafeLoadFixedArrayElement(match_info, from_cursor_plus1));
 
     TNode<String> capture =
-        CAST(CallBuiltin(Builtins::kSubString, context, string, start, end));
+        CAST(CallBuiltin(Builtin::kSubString, context, string, start, end));
     UnsafeStoreFixedArrayElement(result_elements, to_cursor, capture);
     Goto(&next_iter);
 
@@ -325,9 +325,8 @@ TNode<JSRegExpResult> RegExpBuiltinsAssembler::ConstructNewResultFromMatchInfo(
     TNode<NativeContext> native_context = LoadNativeContext(context);
     TNode<Map> map = LoadSlowObjectWithNullPrototypeMap(native_context);
     TNode<HeapObject> properties;
-    if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-      // AllocateOrderedNameDictionary always uses kAllowLargeObjectAllocation.
-      properties = AllocateOrderedNameDictionary(num_properties);
+    if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
+      properties = AllocateSwissNameDictionary(num_properties);
     } else {
       properties =
           AllocateNameDictionary(num_properties, kAllowLargeObjectAllocation);
@@ -366,28 +365,18 @@ TNode<JSRegExpResult> RegExpBuiltinsAssembler::ConstructNewResultFromMatchInfo(
       // - Receiver is extensible
       // - Receiver has no interceptors
       Label add_dictionary_property_slow(this, Label::kDeferred);
-      if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-        // TODO(v8:11167) remove once OrderedNameDictionary supported.
-        CallRuntime(Runtime::kAddDictionaryProperty, context, group_object,
-                    name, capture);
-      } else {
-        Add<NameDictionary>(CAST(properties), name, capture,
-                            &add_dictionary_property_slow);
-      }
+      Add<PropertyDictionary>(CAST(properties), name, capture,
+                              &add_dictionary_property_slow);
 
       var_i = i_plus_2;
       Branch(IntPtrGreaterThanOrEqual(var_i.value(), names_length),
              &maybe_build_indices, &loop);
 
-      if (!V8_DICT_MODE_PROTOTYPES_BOOL) {
-        // TODO(v8:11167) make unconditional  once OrderedNameDictionary
-        // supported.
-        BIND(&add_dictionary_property_slow);
-        // If the dictionary needs resizing, the above Add call will jump here
-        // before making any changes. This shouldn't happen because we allocated
-        // the dictionary with enough space above.
-        Unreachable();
-      }
+      BIND(&add_dictionary_property_slow);
+      // If the dictionary needs resizing, the above Add call will jump here
+      // before making any changes. This shouldn't happen because we allocated
+      // the dictionary with enough space above.
+      Unreachable();
     }
   }
 
@@ -564,7 +553,8 @@ TNode<HeapObject> RegExpBuiltinsAssembler::RegExpExecInternal(
 #endif
 
   GotoIf(TaggedIsSmi(var_code.value()), &runtime);
-  TNode<Code> code = CAST(var_code.value());
+  // TODO(v8:11880): avoid roundtrips between cdc and code.
+  TNode<Code> code = FromCodeT(CAST(var_code.value()));
 
   Label if_success(this), if_exception(this, Label::kDeferred);
   {
@@ -636,6 +626,7 @@ TNode<HeapObject> RegExpBuiltinsAssembler::RegExpExecInternal(
     MachineType arg9_type = type_tagged;
     TNode<JSRegExp> arg9 = regexp;
 
+    // TODO(v8:11880): avoid roundtrips between cdc and code.
     TNode<RawPtrT> code_entry = LoadCodeObjectEntry(code);
 
     // AIX uses function descriptors on CFunction calls. code_entry in this case
@@ -778,7 +769,7 @@ TNode<HeapObject> RegExpBuiltinsAssembler::RegExpExecInternal(
   {
     // TODO(jgruber): A call with 4 args stresses register allocation, this
     // should probably just be inlined.
-    var_result = CAST(CallBuiltin(Builtins::kRegExpExecAtom, context, regexp,
+    var_result = CAST(CallBuiltin(Builtin::kRegExpExecAtom, context, regexp,
                                   string, last_index, match_info));
     Goto(&out);
   }
@@ -866,7 +857,8 @@ void RegExpBuiltinsAssembler::BranchIfFastRegExp(
 
   PrototypeCheckAssembler prototype_check_assembler(
       state(), prototype_check_flags, native_context, initial_proto_initial_map,
-      Vector<DescriptorIndexNameValue>(properties_to_check, property_count));
+      base::Vector<DescriptorIndexNameValue>(properties_to_check,
+                                             property_count));
 
   TNode<HeapObject> prototype = LoadMapPrototype(map);
   prototype_check_assembler.CheckAndBranch(prototype, if_isunmodified,
@@ -974,7 +966,7 @@ TF_BUILTIN(RegExpExecAtom, RegExpBuiltinsAssembler) {
                                      IntPtrConstant(0)));
 
   const TNode<Smi> match_from =
-      CAST(CallBuiltin(Builtins::kStringIndexOf, context, subject_string,
+      CAST(CallBuiltin(Builtin::kStringIndexOf, context, subject_string,
                        needle_string, last_index));
 
   Label if_failure(this), if_success(this);
@@ -1027,6 +1019,12 @@ TF_BUILTIN(RegExpExecInternal, RegExpBuiltinsAssembler) {
 TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
                                                    TNode<Object> regexp,
                                                    bool is_fastpath) {
+  TVARIABLE(String, result);
+  Label runtime(this, Label::kDeferred), done(this, &result);
+  if (is_fastpath) {
+    GotoIfForceSlowPath(&runtime);
+  }
+
   Isolate* isolate = this->isolate();
 
   const TNode<IntPtrT> int_one = IntPtrConstant(1);
@@ -1087,6 +1085,7 @@ TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
     CASE_FOR_FLAG("dotAll", JSRegExp::kDotAll);
     CASE_FOR_FLAG("unicode", JSRegExp::kUnicode);
     CASE_FOR_FLAG("sticky", JSRegExp::kSticky);
+    CASE_FOR_FLAG("hasIndices", JSRegExp::kHasIndices);
 #undef CASE_FOR_FLAG
 
 #define CASE_FOR_FLAG(NAME, V8_FLAG_EXTERN_REF, FLAG)                      \
@@ -1109,10 +1108,6 @@ TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
   } while (false)
 
     CASE_FOR_FLAG(
-        "hasIndices",
-        ExternalReference::address_of_harmony_regexp_match_indices_flag(),
-        JSRegExp::kHasIndices);
-    CASE_FOR_FLAG(
         "linear",
         ExternalReference::address_of_enable_experimental_regexp_engine(),
         JSRegExp::kLinear);
@@ -1123,7 +1118,7 @@ TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
   // corresponding char for each set flag.
 
   {
-    const TNode<String> result = AllocateSeqOneByteString(var_length.value());
+    const TNode<String> string = AllocateSeqOneByteString(var_length.value());
 
     TVARIABLE(IntPtrT, var_offset,
               IntPtrConstant(SeqOneByteString::kHeaderSize - kHeapObjectTag));
@@ -1133,7 +1128,7 @@ TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
     Label next(this);                                          \
     GotoIfNot(IsSetWord(var_flags.value(), FLAG), &next);      \
     const TNode<Int32T> value = Int32Constant(CHAR);           \
-    StoreNoWriteBarrier(MachineRepresentation::kWord8, result, \
+    StoreNoWriteBarrier(MachineRepresentation::kWord8, string, \
                         var_offset.value(), value);            \
     var_offset = IntPtrAdd(var_offset.value(), int_one);       \
     Goto(&next);                                               \
@@ -1150,7 +1145,26 @@ TNode<String> RegExpBuiltinsAssembler::FlagsGetter(TNode<Context> context,
     CASE_FOR_FLAG(JSRegExp::kSticky, 'y');
 #undef CASE_FOR_FLAG
 
-    return result;
+    if (is_fastpath) {
+#ifdef V8_ENABLE_FORCE_SLOW_PATH
+      result = string;
+      Goto(&done);
+
+      BIND(&runtime);
+      {
+        result =
+            CAST(CallRuntime(Runtime::kRegExpStringFromFlags, context, regexp));
+        Goto(&done);
+      }
+
+      BIND(&done);
+      return result.value();
+#else
+      return string;
+#endif
+    } else {
+      return string;
+    }
   }
 }
 
@@ -1388,7 +1402,6 @@ TNode<BoolT> RegExpBuiltinsAssembler::SlowFlagGetter(TNode<Context> context,
       break;
     case JSRegExp::kDotAll:
       UNREACHABLE();  // Never called for dotAll.
-      break;
     case JSRegExp::kSticky:
       name = isolate()->factory()->sticky_string();
       break;
@@ -1576,7 +1589,7 @@ TNode<JSArray> RegExpBuiltinsAssembler::RegExpPrototypeSplitBody(
           native_context, Context::REGEXP_LAST_MATCH_INFO_INDEX);
 
       const TNode<Object> match_indices =
-          CallBuiltin(Builtins::kRegExpExecInternal, context, regexp, string,
+          CallBuiltin(Builtin::kRegExpExecInternal, context, regexp, string,
                       SmiZero(), last_match_info);
 
       Label return_singleton_array(this);
@@ -1670,7 +1683,7 @@ TNode<JSArray> RegExpBuiltinsAssembler::RegExpPrototypeSplitBody(
     {
       const TNode<Smi> from = last_matched_until;
       const TNode<Smi> to = match_from;
-      array.Push(CallBuiltin(Builtins::kSubString, context, string, from, to));
+      array.Push(CallBuiltin(Builtin::kSubString, context, string, from, to));
       GotoIf(WordEqual(array.length(), int_limit), &out);
     }
 
@@ -1706,7 +1719,7 @@ TNode<JSArray> RegExpBuiltinsAssembler::RegExpPrototypeSplitBody(
         BIND(&select_capture);
         {
           var_value =
-              CallBuiltin(Builtins::kSubString, context, string, from, to);
+              CallBuiltin(Builtin::kSubString, context, string, from, to);
           Goto(&store_value);
         }
 
@@ -1741,7 +1754,7 @@ TNode<JSArray> RegExpBuiltinsAssembler::RegExpPrototypeSplitBody(
   {
     const TNode<Smi> from = var_last_matched_until.value();
     const TNode<Smi> to = string_length;
-    array.Push(CallBuiltin(Builtins::kSubString, context, string, from, to));
+    array.Push(CallBuiltin(Builtin::kSubString, context, string, from, to));
     Goto(&out);
   }
 

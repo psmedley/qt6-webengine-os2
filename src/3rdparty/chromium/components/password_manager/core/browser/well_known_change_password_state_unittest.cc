@@ -16,6 +16,7 @@
 #include "net/base/load_flags.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
@@ -239,7 +240,7 @@ TEST_P(WellKnownChangePasswordStateTest,
 
   syncer::TestSyncService test_sync_service;
   test_sync_service.SetFirstSetupComplete(true);
-  test_sync_service.SetIsUsingSecondaryPassphrase(false);
+  test_sync_service.SetIsUsingExplicitPassphrase(false);
   AffiliationServiceImpl affiliation_service(&test_sync_service,
                                              test_shared_loader_factory());
   affiliation_service.SetFetcherFactoryForTesting(

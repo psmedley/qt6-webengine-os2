@@ -36,13 +36,12 @@
 #include <memory>
 
 #include "base/callback_helpers.h"
-#include "base/macros.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/page_state/page_state.mojom-blink.h"
+#include "third_party/blink/public/mojom/page_state/page_state.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
-#include "third_party/blink/public/platform/web_url_loader.h"
 #include "third_party/blink/public/web/web_document_loader.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/public/web/web_navigation_type.h"
@@ -50,19 +49,20 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/loader/history_item.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
+#include "third_party/blink/renderer/platform/loader/fetch/loader_freeze_mode.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
-class ContentSecurityPolicy;
 class DocumentLoader;
-class LocalFrame;
+class FetchClientSettingsObject;
 class Frame;
+class LocalFrame;
 class LocalFrameClient;
 class ProgressTracker;
 class ResourceRequest;
@@ -79,9 +79,11 @@ class CORE_EXPORT FrameLoader final {
 
  public:
   explicit FrameLoader(LocalFrame*);
+  FrameLoader(const FrameLoader&) = delete;
+  FrameLoader& operator=(const FrameLoader&) = delete;
   ~FrameLoader();
 
-  void Init();
+  void Init(std::unique_ptr<PolicyContainer> policy_container);
 
   ResourceRequest ResourceRequestForReload(
       WebFrameLoadType,
@@ -133,12 +135,12 @@ class CORE_EXPORT FrameLoader final {
 
   DocumentLoader* GetDocumentLoader() const { return document_loader_.Get(); }
 
-  void SetDefersLoading(WebURLLoader::DeferType defer);
+  void SetDefersLoading(LoaderFreezeMode mode);
 
   void DidExplicitOpen();
 
   String UserAgent() const;
-  base::Optional<blink::UserAgentMetadata> UserAgentMetadata() const;
+  absl::optional<blink::UserAgentMetadata> UserAgentMetadata() const;
 
   void DispatchDidClearWindowObjectInMainWorld();
   void DispatchDidClearDocumentOfWindowObject();
@@ -181,7 +183,7 @@ class CORE_EXPORT FrameLoader final {
   // events and abort XHR requests. Returns true if the frame is ready to
   // receive the next document commit, or false otherwise.
   bool DetachDocument(SecurityOrigin* committing_origin,
-                      base::Optional<Document::UnloadEventTiming>*);
+                      absl::optional<Document::UnloadEventTiming>*);
 
   bool ShouldClose(bool is_reload = false);
 
@@ -194,7 +196,7 @@ class CORE_EXPORT FrameLoader final {
   // If the dispatch of the unload event is not due to a commit, both parameters
   // should be null.
   void DispatchUnloadEvent(SecurityOrigin* committing_origin,
-                           base::Optional<Document::UnloadEventTiming>*);
+                           absl::optional<Document::UnloadEventTiming>*);
 
   bool AllowPlugins();
 
@@ -205,8 +207,6 @@ class CORE_EXPORT FrameLoader final {
   bool HasProvisionalNavigation() const {
     return committing_navigation_ || client_navigation_.get();
   }
-
-  bool MaybeRenderFallbackContent();
 
   // Like ClearClientNavigation, but also notifies the client to actually cancel
   // the navigation.
@@ -227,15 +227,13 @@ class CORE_EXPORT FrameLoader final {
 
   static bool NeedsHistoryItemRestore(WebFrameLoadType type);
 
-  void WriteIntoTracedValue(perfetto::TracedValue context) const;
+  void WriteIntoTrace(perfetto::TracedValue context) const;
 
  private:
   bool AllowRequestForThisFrame(const FrameLoadRequest&);
-  WebFrameLoadType DetermineFrameLoadType(const KURL& url,
-                                          const AtomicString& http_method,
-                                          bool has_origin_window,
-                                          const KURL& failing_url,
-                                          WebFrameLoadType);
+  WebFrameLoadType HandleInitialEmptyDocumentReplacementIfNeeded(
+      const KURL& url,
+      WebFrameLoadType);
 
   bool ShouldPerformFragmentNavigation(bool is_form_submission,
                                        const String& http_method,
@@ -260,22 +258,9 @@ class CORE_EXPORT FrameLoader final {
 
   // Commits the given |document_loader|.
   void CommitDocumentLoader(DocumentLoader* document_loader,
-                            const base::Optional<Document::UnloadEventTiming>&,
+                            const absl::optional<Document::UnloadEventTiming>&,
                             HistoryItem* previous_history_item,
                             CommitReason);
-
-  // Creates CSP for the initial empty document. They are inherited from the
-  // owner document (parent or opener).
-  ContentSecurityPolicy* CreateCSPForInitialEmptyDocument() const;
-
-  // Creates CSP based on |response| and checks that they allow loading |url|.
-  // Returns nullptr if the check fails.
-  ContentSecurityPolicy* CreateCSP(
-      const KURL& url,
-      const ResourceResponse& response,
-      const base::Optional<WebOriginPolicy>& origin_policy,
-      ContentSecurityPolicy* initiator_csp,
-      CommitReason);
 
   LocalFrameClient* Client() const;
 
@@ -312,16 +297,9 @@ class CORE_EXPORT FrameLoader final {
 
   WebScopedVirtualTimePauser virtual_time_pauser_;
 
-  // The CSP of the latest document that has initiated a navigation in this
-  // frame. TODO(arthursonzogni): This looks fragile. The FrameLoader might be
-  // confused by several navigations submitted in a row.
-  Member<ContentSecurityPolicy> last_origin_window_csp_;
-
   // The origins for which a legacy TLS version warning has been printed. The
   // size of this set is capped, after which no more warnings are printed.
   HashSet<String> tls_version_warning_origins_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameLoader);
 };
 
 }  // namespace blink

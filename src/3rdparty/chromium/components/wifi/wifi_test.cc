@@ -19,7 +19,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
 #include "base/task/single_thread_task_executor.h"
@@ -191,7 +190,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
   if (parsed_command_line.HasSwitch("connect")) {
     if (!network_guid.empty()) {
       std::string error;
-      if (!properties->empty()) {
+      if (!properties->DictEmpty()) {
         VLOG(0) << "Using connect properties: " << *properties;
         wifi_service_->SetProperties(network_guid, std::move(properties),
                                      &error);

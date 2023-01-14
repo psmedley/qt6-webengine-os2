@@ -9,14 +9,14 @@
 #include "src/gpu/glsl/GrGLSLProgramBuilder.h"
 #include "src/gpu/glsl/GrGLSLVarying.h"
 
-void GrGLSLVaryingHandler::addPassThroughAttribute(const GrGeometryProcessor::Attribute& input,
+void GrGLSLVaryingHandler::addPassThroughAttribute(const GrShaderVar& vsVar,
                                                    const char* output,
                                                    Interpolation interpolation) {
-    SkASSERT(input.isInitialized());
-    SkASSERT(!fProgramBuilder->primitiveProcessor().willUseGeoShader());
-    GrGLSLVarying v(input.gpuType());
-    this->addVarying(input.name(), &v, interpolation);
-    fProgramBuilder->fVS.codeAppendf("%s = %s;", v.vsOut(), input.name());
+    SkASSERT(vsVar.getType() != kVoid_GrSLType);
+    SkASSERT(!fProgramBuilder->geometryProcessor().willUseGeoShader());
+    GrGLSLVarying v(vsVar.getType());
+    this->addVarying(vsVar.c_str(), &v, interpolation);
+    fProgramBuilder->fVS.codeAppendf("%s = %s;", v.vsOut(), vsVar.c_str());
     fProgramBuilder->fFS.codeAppendf("%s = %s;", output, v.fsIn());
 }
 
@@ -40,7 +40,7 @@ static bool use_flat_interpolation(GrGLSLVaryingHandler::Interpolation interpola
 void GrGLSLVaryingHandler::addVarying(const char* name, GrGLSLVarying* varying,
                                       Interpolation interpolation) {
     SkASSERT(GrSLTypeIsFloatType(varying->type()) || Interpolation::kMustBeFlat == interpolation);
-    bool willUseGeoShader = fProgramBuilder->primitiveProcessor().willUseGeoShader();
+    bool willUseGeoShader = fProgramBuilder->geometryProcessor().willUseGeoShader();
     VaryingInfo& v = fVaryings.push_back();
 
     SkASSERT(varying);
@@ -93,7 +93,7 @@ void GrGLSLVaryingHandler::setNoPerspective() {
     if (const char* extension = caps.noperspectiveInterpolationExtensionString()) {
         int bit = 1 << GrGLSLShaderBuilder::kNoPerspectiveInterpolation_GLSLPrivateFeature;
         fProgramBuilder->fVS.addFeature(bit, extension);
-        if (fProgramBuilder->primitiveProcessor().willUseGeoShader()) {
+        if (fProgramBuilder->geometryProcessor().willUseGeoShader()) {
             fProgramBuilder->fGS.addFeature(bit, extension);
         }
         fProgramBuilder->fFS.addFeature(bit, extension);

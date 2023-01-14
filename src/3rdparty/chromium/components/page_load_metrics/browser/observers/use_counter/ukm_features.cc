@@ -46,7 +46,7 @@ UseCounterPageLoadMetricsObserver::GetAllowedUkmFeatures() {
           WebFeature::kXMLHttpRequestSynchronousInWorker,
           WebFeature::kPaymentHandler,
           WebFeature::kPaymentRequestShowWithoutGesture,
-          WebFeature::kHTMLImports,
+          WebFeature::kPaymentRequestShowWithoutGestureOrToken,
           WebFeature::kCredentialManagerCreatePublicKeyCredential,
           WebFeature::kCredentialManagerGetPublicKeyCredential,
           WebFeature::kCredentialManagerMakePublicKeyCredentialSuccess,
@@ -192,7 +192,29 @@ UseCounterPageLoadMetricsObserver::GetAllowedUkmFeatures() {
           WebFeature::kRTCPeerConnectionUsingComplexUnifiedPlan,
           WebFeature::kWebPImage,
           WebFeature::kAVIFImage,
+          WebFeature::kGetDisplayMedia,
+          WebFeature::kLaxAllowingUnsafeCookies,
+          WebFeature::kOpenWebDatabaseThirdPartyContext,
+          WebFeature::kOversrollBehaviorOnViewportBreaks,
           WebFeature::kPaymentRequestCSPViolation,
+          WebFeature::kRequestedFileSystemPersistentThirdPartyContext,
+          WebFeature::kPrefixedStorageInfoThirdPartyContext,
+          WebFeature::
+              kCrossBrowsingContextGroupMainFrameNulledNonEmptyNameAccessed,
+          WebFeature::kControlledWorkerWillBeUncontrolled,
+          WebFeature::kUsbDeviceOpen,
+          WebFeature::kWebBluetoothRemoteServerConnect,
+          WebFeature::kSerialRequestPort,
+          WebFeature::kSerialPortOpen,
+          WebFeature::kHidRequestDevice,
+          WebFeature::kHidDeviceOpen,
+          WebFeature::kCrossOriginWasmModuleSharing,
+          WebFeature::kControlledNonBlobURLWorkerWillBeUncontrolled,
+          WebFeature::kSameSiteCookieInclusionChangedByCrossSiteRedirect,
+          WebFeature::
+              kBlobStoreAccessAcrossAgentClustersInResolveAsURLLoaderFactory,
+          WebFeature::kBlobStoreAccessAcrossAgentClustersInResolveForNavigation,
+          WebFeature::kReadOrWriteWebDatabaseThirdPartyContext,
       }));
   return *opt_in_features;
 }

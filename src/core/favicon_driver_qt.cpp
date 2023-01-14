@@ -48,17 +48,19 @@
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
-#include "third_party/blink/public/common/manifest/manifest.h"
+#include "content/public/browser/page.h"
+#include "content/public/browser/render_frame_host.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 
 namespace QtWebEngineCore {
 
 namespace {
 
 void ExtractManifestIcons(FaviconDriverQt::ManifestDownloadCallback callback,
-                          const GURL &manifest_url, const blink::Manifest &manifest)
+                          const GURL &manifest_url, blink::mojom::ManifestPtr manifest)
 {
     std::vector<favicon::FaviconURL> candidates;
-    for (const auto &icon : manifest.icons) {
+    for (const auto &icon : manifest->icons) {
         candidates.emplace_back(icon.src, favicon_base::IconType::kWebManifestIcon, icon.sizes);
     }
     std::move(callback).Run(candidates);
@@ -186,7 +188,7 @@ int FaviconDriverQt::DownloadImage(const GURL &url, int max_image_size,
 
 void FaviconDriverQt::DownloadManifest(const GURL &url, ManifestDownloadCallback callback)
 {
-    web_contents()->GetManifest(base::BindOnce(&ExtractManifestIcons, std::move(callback)));
+    web_contents()->GetMainFrame()->GetPage().GetManifest(base::BindOnce(&ExtractManifestIcons, std::move(callback)));
 }
 
 bool FaviconDriverQt::IsOffTheRecord()
@@ -256,22 +258,21 @@ void FaviconDriverQt::DidUpdateFaviconURL(
 
     // We update |m_faviconUrls| even if the list is believed to be partial
     // (checked below), because callers of our getter favicon_urls() expect so.
-    std::vector<blink::mojom::FaviconURL> faviconUrls;
+    std::vector<blink::mojom::FaviconURLPtr> faviconUrls;
     for (const auto &candidate : candidates)
-        faviconUrls.push_back(*candidate);
-    m_faviconUrls = faviconUrls;
+        faviconUrls.push_back(candidate.Clone());
+    m_faviconUrls = std::move(faviconUrls);
 
     if (!m_documentOnLoadCompleted)
         return;
 
     OnUpdateCandidates(entry->GetURL(),
-                       favicon::FaviconURLsFromContentFaviconURLs(
-                               m_faviconUrls.value_or(std::vector<blink::mojom::FaviconURL>())),
+                       favicon::FaviconURLsFromContentFaviconURLs(candidates),
                        m_manifestUrl);
 }
 
 void FaviconDriverQt::DidUpdateWebManifestURL(content::RenderFrameHost *target_frame,
-                                              const base::Optional<GURL> &manifest_url)
+                                              const GURL &manifest_url)
 {
     Q_UNUSED(target_frame);
 
@@ -281,7 +282,7 @@ void FaviconDriverQt::DidUpdateWebManifestURL(content::RenderFrameHost *target_f
     if (!entry || !m_documentOnLoadCompleted)
         return;
 
-    m_manifestUrl = manifest_url.value_or(GURL());
+    m_manifestUrl = manifest_url;
 
     // On regular page loads, DidUpdateManifestURL() is guaranteed to be called
     // before DidUpdateFaviconURL(). However, a page can update the favicons via
@@ -299,15 +300,15 @@ void FaviconDriverQt::DidStartNavigation(content::NavigationHandle *navigation_h
         return;
 
     m_faviconUrls.reset();
-    m_completedHandlersCount = 0;
-    m_latestFavicon = FaviconStatusQt();
 
     if (!navigation_handle->IsSameDocument()) {
+        m_completedHandlersCount = 0;
+        m_latestFavicon = FaviconStatusQt();
         m_documentOnLoadCompleted = false;
         m_manifestUrl = GURL();
-    }
 
-    m_viewClient->iconChanged(QUrl());
+        m_viewClient->iconChanged(QUrl());
+    }
 
     content::ReloadType reload_type = navigation_handle->GetReloadType();
     if (reload_type == content::ReloadType::NONE || IsOffTheRecord())
@@ -340,7 +341,7 @@ void FaviconDriverQt::DidFinishNavigation(content::NavigationHandle *navigation_
     FetchFavicon(url, navigation_handle->IsSameDocument());
 }
 
-void FaviconDriverQt::DocumentOnLoadCompletedInMainFrame()
+void FaviconDriverQt::DocumentOnLoadCompletedInMainFrame(content::RenderFrameHost * /*render_frame_host*/)
 {
     m_documentOnLoadCompleted = true;
 }

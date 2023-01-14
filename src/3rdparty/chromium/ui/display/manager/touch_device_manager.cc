@@ -29,39 +29,6 @@ using DeviceList = std::vector<ui::TouchscreenDevice>;
 constexpr char kFallbackTouchDeviceName[] = "fallback_touch_device_name";
 constexpr char kFallbackTouchDevicePhys[] = "fallback_touch_device_phys";
 
-base::FilePath GetDisplaySysPath(const ManagedDisplayInfo* display) {
-  std::vector<base::FilePath::StringType> components;
-  display->sys_path().GetComponents(&components);
-  base::FilePath path_thus_far;
-
-  for (const auto& component : components) {
-    if (path_thus_far.empty()) {
-      path_thus_far = base::FilePath(component);
-    } else {
-      path_thus_far = path_thus_far.Append(component);
-    }
-
-    // Newer versions of the EVDI kernel driver include a symlink to the USB
-    // device in the sysfs EVDI directory (e.g.
-    // /sys/devices/platform/evdi.0/device) for EVDI displays that are USB. If
-    // that symlink exists, read it, and use that path as the sysfs path for the
-    // display when calculating the association score to match it with a
-    // corresponding USB touch device. If the symlink doesn't exist, use the
-    // normal sysfs path.
-    if (base::StartsWith(component, "evdi", base::CompareCase::SENSITIVE)) {
-      base::FilePath usb_device_path;
-      if (base::ReadSymbolicLink(path_thus_far.Append("device"),
-                                 &usb_device_path)) {
-        return base::MakeAbsoluteFilePath(
-            path_thus_far.Append(usb_device_path));
-      }
-      break;
-    }
-  }
-
-  return display->sys_path();
-}
-
 // Returns true if |path| is likely a USB device.
 bool IsDeviceConnectedViaUsb(const base::FilePath& path) {
   std::vector<base::FilePath::StringType> components;
@@ -89,7 +56,7 @@ int GetUsbAssociationScore(const ManagedDisplayInfo* display,
                            const ui::TouchscreenDevice& device) {
   // If the devices are not both connected via USB, then there cannot be a USB
   // association score.
-  if (!IsDeviceConnectedViaUsb(GetDisplaySysPath(display)) ||
+  if (!IsDeviceConnectedViaUsb(display->sys_path()) ||
       !IsDeviceConnectedViaUsb(device.sys_path))
     return 0;
 
@@ -97,7 +64,7 @@ int GetUsbAssociationScore(const ManagedDisplayInfo* display,
   // sysfs paths have in common.
   std::vector<base::FilePath::StringType> display_components;
   std::vector<base::FilePath::StringType> device_components;
-  GetDisplaySysPath(display).GetComponents(&display_components);
+  display->sys_path().GetComponents(&display_components);
   device.sys_path.GetComponents(&device_components);
 
   std::size_t largest_idx = 0;
@@ -288,7 +255,7 @@ bool TouchCalibrationData::CalibrationPointPairCompare(
   return pair_1.first < pair_2.first;
 }
 
-TouchCalibrationData::TouchCalibrationData() {}
+TouchCalibrationData::TouchCalibrationData() = default;
 
 TouchCalibrationData::TouchCalibrationData(
     const TouchCalibrationData::CalibrationPointPairQuad& point_pairs,
@@ -296,9 +263,10 @@ TouchCalibrationData::TouchCalibrationData(
     : point_pairs(point_pairs), bounds(bounds) {}
 
 TouchCalibrationData::TouchCalibrationData(
-    const TouchCalibrationData& calibration_data)
-    : point_pairs(calibration_data.point_pairs),
-      bounds(calibration_data.bounds) {}
+    const TouchCalibrationData& calibration_data) = default;
+
+TouchCalibrationData& TouchCalibrationData::operator=(
+    const TouchCalibrationData& calibration_data) = default;
 
 bool TouchCalibrationData::operator==(const TouchCalibrationData& other) const {
   if (bounds != other.bounds)
@@ -351,8 +319,7 @@ void TouchDeviceManager::AssociateTouchscreens(
     for (const ManagedDisplayInfo* display : displays) {
       VLOG(2) << "Received display " << display->name()
               << " (size: " << display->GetNativeModeSize().ToString() << ", "
-              << "sys_path: " << GetDisplaySysPath(display).LossyDisplayName()
-              << ")";
+              << "sys_path: " << display->sys_path().LossyDisplayName() << ")";
     }
     for (const ui::TouchscreenDevice& device : devices) {
       VLOG(2) << "Received device " << device.name

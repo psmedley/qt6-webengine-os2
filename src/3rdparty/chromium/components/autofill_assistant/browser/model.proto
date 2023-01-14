@@ -83,7 +83,11 @@ message LoginOptionList {
   repeated LoginOptionProto values = 1;
 }
 
-// Next: 29
+// Can be used to indicate the presence of a field, without the ambiguity that
+// a boolean field would have.
+message Empty {}
+
+// Next: 34
 enum ProcessedActionStatusProto {
   UNKNOWN_ACTION_STATUS = 0;
 
@@ -194,10 +198,6 @@ enum ProcessedActionStatusProto {
   // ProcessedActionStatusProto.AutofillErrorInfoProto contains more details.
   AUTOFILL_INCOMPLETE = 24;
 
-  // Evaluating a selector required considering too many candidates. Please
-  // generate more specific selectors. See SelectorProto::ProximityFilter.
-  TOO_MANY_CANDIDATES = 25;
-
   // Evaluating the element did report an unexpected mismatch in either value
   // or text.
   ELEMENT_MISMATCH = 26;
@@ -210,7 +210,28 @@ enum ProcessedActionStatusProto {
   // used.
   CLIENT_ID_RESOLUTION_FAILED = 28;
 
-  reserved 15, 23;
+  // The target element's frame was not in the same domain or subdomain as the
+  // password's origin.
+  PASSWORD_ORIGIN_MISMATCH = 29;
+
+  // Selecting an option failed because more than one option matched.
+  TOO_MANY_OPTION_VALUES_FOUND = 30;
+
+  // The action's target did not fit the action. E.g. a |SelectOption| being
+  // called on any element other than <select>.
+  INVALID_TARGET = 31;
+
+  // The element has no or only an empty box model. This can mean the element
+  // is not rendered (display: none) or simply empty.
+  ELEMENT_POSITION_NOT_FOUND = 33;
+
+  // The requested client memory key was not available.
+  CLIENT_MEMORY_KEY_NOT_AVAILABLE = 34;
+
+  // The requested value expression resulted in an empty string.
+  EMPTY_VALUE_EXPRESSION_RESULT = 35;
+
+  reserved 15, 23, 25, 32;
 }
 
 // A message to describe a chip.
@@ -354,8 +375,13 @@ message DateTimeProto {
 }
 
 message AutofillCreditCardProto {
-  // The GUID of the card.
-  optional string guid = 1;
+  oneof identifier {
+    // The GUID of the card.
+    string guid = 1;
+    // The currently selected credit card. Only works if a card was selected in
+    // a previous |CollectUserData| action.
+    Empty selected_credit_card = 2;
+  }
 }
 
 message CreditCardResponseProto {
@@ -363,8 +389,13 @@ message CreditCardResponseProto {
 }
 
 message AutofillProfileProto {
-  // The GUID of the profile.
-  optional string guid = 1;
+  oneof identifier {
+    // The GUID of the profile.
+    string guid = 1;
+    // The selected profile for the given profile name. Only works if a profile
+    // was selected in a previous |CollectUserData| action.
+    string selected_profile_name = 2;
+  }
 }
 
 message LoginOptionProto {

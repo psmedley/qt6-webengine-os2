@@ -267,7 +267,7 @@ std::vector<RasterTestConfig> const kTestCasesMultiThread = {
     {viz::RendererType::kSkiaGL, TestRasterType::kOneCopy},
 #endif  // BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
 #if BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
-    // TODO(sgilhuly): Switch this to one copy raster once is is supported for
+    // TODO(rivr): Switch this to one copy raster once is is supported for
     // Vulkan in these tests.
     {viz::RendererType::kSkiaVk, TestRasterType::kOop},
 #endif  // BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
@@ -283,6 +283,10 @@ INSTANTIATE_TEST_SUITE_P(All,
                          LayerTreeHostTilesTestPartialInvalidationMultiThread,
                          ::testing::ValuesIn(kTestCasesMultiThread),
                          ::testing::PrintToStringParamName());
+
+// kTestCasesMultiThread is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostTilesTestPartialInvalidationMultiThread);
 
 #if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(THREAD_SANITIZER)
 // Flaky on Linux TSAN. https://crbug.com/707711

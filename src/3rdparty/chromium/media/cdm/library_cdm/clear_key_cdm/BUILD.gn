@@ -23,9 +23,6 @@ loadable_module("clear_key_cdm") {
     "clear_key_persistent_session_cdm.h",
   ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   defines = [ "CDM_IMPLEMENTATION" ]
 
   deps = [
@@ -38,6 +35,11 @@ loadable_module("clear_key_cdm") {
     "//third_party/libyuv",
     "//url",
   ]
+
+  if (!enable_library_cdms) {
+    # cdm_type_conversion is not included via //media.
+    deps += [ "//media/cdm:cdm_type_conversion" ]
+  }
 
   # TODO(xhwang): Convert this to use media::FFmpegAudioDecoder.
   if (media_use_ffmpeg) {

@@ -48,9 +48,9 @@ void WebRtcSignalingMessenger::StopReceivingMessages() {
   env.UnregisterWebRtcSignalingMessenger(self_id_);
 }
 
-const std::string WebRtcMedium::GetDefaultCountryCode() {
-  return "US";
-}
+WebRtcMedium::~WebRtcMedium() { single_thread_executor_.Shutdown(); }
+
+const std::string WebRtcMedium::GetDefaultCountryCode() { return "US"; }
 
 void WebRtcMedium::CreatePeerConnection(
     webrtc::PeerConnectionObserver* observer, PeerConnectionCallback callback) {
@@ -72,9 +72,17 @@ void WebRtcMedium::CreatePeerConnection(
       webrtc::CreateDefaultTaskQueueFactory();
   factory_dependencies.signaling_thread = signaling_thread.release();
 
-  callback(webrtc::CreateModularPeerConnectionFactory(
-               std::move(factory_dependencies))
-               ->CreatePeerConnection(rtc_config, std::move(dependencies)));
+  rtc::scoped_refptr<webrtc::PeerConnectionInterface> peer_connection =
+      webrtc::CreateModularPeerConnectionFactory(
+          std::move(factory_dependencies))
+          ->CreatePeerConnection(rtc_config, std::move(dependencies));
+
+  single_thread_executor_.Execute(
+      [&env, callback = std::move(callback),
+       peer_connection = std::move(peer_connection)]() {
+        absl::SleepFor(env.GetPeerConnectionLatency());
+        callback(peer_connection);
+      });
 }
 
 std::unique_ptr<api::WebRtcSignalingMessenger>

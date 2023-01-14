@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -47,7 +48,7 @@ class MessagePumpLibeventTest : public testing::Test {
 
   void SetUp() override {
     Thread::Options options(MessagePumpType::IO, 0);
-    ASSERT_TRUE(io_thread_.StartWithOptions(options));
+    ASSERT_TRUE(io_thread_.StartWithOptions(std::move(options)));
     int ret = pipe(pipefds_);
     ASSERT_EQ(0, ret);
   }
@@ -227,7 +228,7 @@ void WriteFDWrapper(const int fd,
                     const char* buf,
                     int size,
                     WaitableEvent* event) {
-  ASSERT_TRUE(WriteFileDescriptor(fd, buf, size));
+  ASSERT_TRUE(WriteFileDescriptor(fd, StringPiece(buf, size)));
 }
 
 // Tests that MessagePumpLibevent quits immediately when it is quit from

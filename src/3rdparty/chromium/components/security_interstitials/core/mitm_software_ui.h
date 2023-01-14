@@ -25,13 +25,12 @@ class MITMSoftwareUI {
                  ControllerClient* controller_);
   ~MITMSoftwareUI();
 
-  void PopulateStringsForHTML(base::DictionaryValue* load_time_data);
+  void PopulateStringsForHTML(base::Value* load_time_data);
   void HandleCommand(SecurityInterstitialCommand command);
 
  protected:
-  void PopulateEnterpriseUserStringsForHTML(
-      base::DictionaryValue* load_time_data);
-  void PopulateAtHomeUserStringsForHTML(base::DictionaryValue* load_time_data);
+  void PopulateEnterpriseUserStringsForHTML(base::Value* load_time_data);
+  void PopulateAtHomeUserStringsForHTML(base::Value* load_time_data);
 
  private:
   const GURL request_url_;
@@ -46,4 +45,4 @@ class MITMSoftwareUI {
 
 }  // namespace security_interstitials
 
-#endif  // COMPONENTS_SECURITY_INTERSTITIALS_CORE_MITM_SOFTWARE_UI_H
+#endif  // COMPONENTS_SECURITY_INTERSTITIALS_CORE_MITM_SOFTWARE_UI_H_

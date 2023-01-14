@@ -6,12 +6,15 @@
 
 #include <stdint.h>
 
+#include <string>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/containers/flat_map.h"
-#include "base/strings/string16.h"
+#include "base/strings/strcat.h"
+#include "content/browser/conversions/conversion_host.h"
 #include "content/browser/renderer_host/navigation_controller_impl.h"
 #include "content/browser/renderer_host/navigation_entry_impl.h"
 #include "content/public/android/content_jni_headers/NavigationControllerImpl_jni.h"
@@ -19,9 +22,12 @@
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/resource_request_body_android.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/data_url.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "url/android/gurl_android.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -93,7 +99,7 @@ class MapData : public base::SupportsUserData::Data {
     return map_data;
   }
 
-  base::flat_map<std::string, base::string16>& map() { return map_; }
+  base::flat_map<std::string, std::u16string>& map() { return map_; }
 
   // base::SupportsUserData::Data:
   std::unique_ptr<Data> Clone() override {
@@ -103,7 +109,7 @@ class MapData : public base::SupportsUserData::Data {
   }
 
  private:
-  base::flat_map<std::string, base::string16> map_;
+  base::flat_map<std::string, std::u16string> map_;
 
   DISALLOW_COPY_AND_ASSIGN(MapData);
 };
@@ -146,7 +152,7 @@ jboolean NavigationControllerAndroid::CanGoToOffset(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     jint offset) {
-  return navigation_controller_->CanGoToOffset(offset);
+  return navigation_controller_->CanGoToOffsetWithSkipping(offset);
 }
 
 void NavigationControllerAndroid::GoBack(JNIEnv* env,
@@ -162,7 +168,7 @@ void NavigationControllerAndroid::GoForward(JNIEnv* env,
 void NavigationControllerAndroid::GoToOffset(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj,
                                              jint offset) {
-  navigation_controller_->GoToOffset(offset);
+  navigation_controller_->GoToOffsetWithSkipping(offset);
 }
 
 jboolean NavigationControllerAndroid::IsInitialNavigation(
@@ -237,7 +243,16 @@ void NavigationControllerAndroid::LoadUrl(
     const JavaParamRef<jstring>& data_url_as_string,
     jboolean can_load_local_resources,
     jboolean is_renderer_initiated,
-    jboolean should_replace_current_entry) {
+    jboolean should_replace_current_entry,
+    const JavaParamRef<jobject>& j_initiator_origin,
+    jboolean has_user_gesture,
+    jboolean should_clear_history_list,
+    jlong input_start,
+    const JavaParamRef<jstring>& source_package_name,
+    const JavaParamRef<jstring>& attribution_source_event_id,
+    const JavaParamRef<jstring>& attribution_destination,
+    const JavaParamRef<jstring>& attribution_report_to,
+    jlong attribution_expiry) {
   DCHECK(url);
   NavigationController::LoadURLParams params(
       GURL(ConvertJavaStringToUTF8(env, url)));
@@ -251,6 +266,8 @@ void NavigationControllerAndroid::LoadUrl(
   params.can_load_local_resources = can_load_local_resources;
   params.is_renderer_initiated = is_renderer_initiated;
   params.should_replace_current_entry = should_replace_current_entry;
+  params.has_user_gesture = has_user_gesture;
+  params.should_clear_history_list = should_clear_history_list;
 
   if (extra_headers)
     params.extra_headers = ConvertJavaStringToUTF8(env, extra_headers);
@@ -289,6 +306,29 @@ void NavigationControllerAndroid::LoadUrl(
     params.referrer =
         Referrer(GURL(ConvertJavaStringToUTF8(env, j_referrer_url)),
                  Referrer::ConvertToPolicy(referrer_policy));
+  }
+
+  if (j_initiator_origin) {
+    params.initiator_origin = url::Origin::FromJavaObject(j_initiator_origin);
+  }
+
+  if (input_start != 0)
+    params.input_start = base::TimeTicks::FromUptimeMillis(input_start);
+
+  if (source_package_name) {
+    DCHECK(!params.initiator_origin);
+    // At the moment, source package name is only used for attribution.
+    DCHECK(attribution_source_event_id);
+    params.initiator_origin = OriginFromPackageName(
+        ConvertJavaStringToUTF8(env, source_package_name));
+
+    params.impression = ConversionHost::ParseImpressionFromApp(
+        ConvertJavaStringToUTF8(env, attribution_source_event_id),
+        ConvertJavaStringToUTF8(env, attribution_destination),
+        attribution_report_to
+            ? ConvertJavaStringToUTF8(env, attribution_report_to)
+            : "",
+        attribution_expiry);
   }
 
   navigation_controller_->LoadURLWithParams(params);
@@ -446,7 +486,7 @@ ScopedJavaLocalRef<jstring> NavigationControllerAndroid::GetEntryExtraData(
       MapData::Get(navigation_controller_->GetEntryAtIndex(index));
   auto iter = map_data->map().find(key);
   return ConvertUTF16ToJavaString(
-      env, iter == map_data->map().end() ? base::string16() : iter->second);
+      env, iter == map_data->map().end() ? std::u16string() : iter->second);
 }
 
 void NavigationControllerAndroid::SetEntryExtraData(
@@ -459,7 +499,7 @@ void NavigationControllerAndroid::SetEntryExtraData(
     return;
 
   std::string key = base::android::ConvertJavaStringToUTF8(env, jkey);
-  base::string16 value = base::android::ConvertJavaStringToUTF16(env, jvalue);
+  std::u16string value = base::android::ConvertJavaStringToUTF16(env, jvalue);
   MapData* map_data =
       MapData::Get(navigation_controller_->GetEntryAtIndex(index));
   map_data->map()[key] = value;
@@ -470,6 +510,13 @@ jboolean NavigationControllerAndroid::IsEntryMarkedToBeSkipped(
     const base::android::JavaParamRef<jobject>& obj,
     jint index) {
   return navigation_controller_->IsEntryMarkedToBeSkipped(index);
+}
+
+// static
+url::Origin NavigationControllerAndroid::OriginFromPackageName(
+    const std::string& package) {
+  return url::Origin::Create(
+      GURL(base::StrCat({content::kAndroidAppScheme, ":", package})));
 }
 
 }  // namespace content

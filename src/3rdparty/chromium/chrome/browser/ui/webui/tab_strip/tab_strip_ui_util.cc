@@ -26,16 +26,16 @@
 
 namespace tab_strip_ui {
 
-base::Optional<tab_groups::TabGroupId> GetTabGroupIdFromString(
+absl::optional<tab_groups::TabGroupId> GetTabGroupIdFromString(
     TabGroupModel* tab_group_model,
     std::string group_id_string) {
   for (tab_groups::TabGroupId candidate : tab_group_model->ListTabGroups()) {
     if (candidate.ToString() == group_id_string) {
-      return base::Optional<tab_groups::TabGroupId>{candidate};
+      return absl::optional<tab_groups::TabGroupId>{candidate};
     }
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 Browser* GetBrowserWithGroupId(Profile* profile, std::string group_id_string) {
@@ -44,7 +44,7 @@ Browser* GetBrowserWithGroupId(Profile* profile, std::string group_id_string) {
       continue;
     }
 
-    base::Optional<tab_groups::TabGroupId> group_id = GetTabGroupIdFromString(
+    absl::optional<tab_groups::TabGroupId> group_id = GetTabGroupIdFromString(
         browser->tab_strip_model()->group_model(), group_id_string);
     if (group_id.has_value()) {
       return browser;
@@ -58,13 +58,14 @@ void MoveTabAcrossWindows(Browser* source_browser,
                           int from_index,
                           Browser* target_browser,
                           int to_index,
-                          base::Optional<tab_groups::TabGroupId> to_group_id) {
+                          absl::optional<tab_groups::TabGroupId> to_group_id) {
   bool was_active =
       source_browser->tab_strip_model()->active_index() == from_index;
   bool was_pinned = source_browser->tab_strip_model()->IsTabPinned(from_index);
 
   std::unique_ptr<content::WebContents> detached_contents =
-      source_browser->tab_strip_model()->DetachWebContentsAt(from_index);
+      source_browser->tab_strip_model()->DetachWebContentsAtForInsertion(
+          from_index);
 
   int add_types = TabStripModel::ADD_NONE;
   if (was_active) {
@@ -80,7 +81,7 @@ void MoveTabAcrossWindows(Browser* source_browser,
 
 bool IsDraggedTab(const ui::OSExchangeData& drop_data) {
   base::Pickle pickle;
-  drop_data.GetPickledData(ui::ClipboardFormatType::GetWebCustomDataType(),
+  drop_data.GetPickledData(ui::ClipboardFormatType::WebCustomDataType(),
                            &pickle);
   base::PickleIterator iter(pickle);
 
@@ -105,11 +106,11 @@ bool IsDraggedTab(const ui::OSExchangeData& drop_data) {
 bool DropTabsInNewBrowser(Browser* new_browser,
                           const ui::OSExchangeData& drop_data) {
   base::Pickle pickle;
-  drop_data.GetPickledData(ui::ClipboardFormatType::GetWebCustomDataType(),
+  drop_data.GetPickledData(ui::ClipboardFormatType::WebCustomDataType(),
                            &pickle);
 
-  base::string16 tab_id_str;
-  base::string16 group_id_str;
+  std::u16string tab_id_str;
+  std::u16string group_id_str;
   ui::ReadCustomDataForType(pickle.data(), pickle.size(),
                             base::ASCIIToUTF16(kWebUITabIdDataType),
                             &tab_id_str);
@@ -124,7 +125,7 @@ bool DropTabsInNewBrowser(Browser* new_browser,
 
   Browser* source_browser = nullptr;
   gfx::Range tab_indices_to_move;
-  base::Optional<tab_groups::TabGroupId> source_group_id;
+  absl::optional<tab_groups::TabGroupId> source_group_id;
 
   // TODO(https://crbug.com/1069869): de-duplicate with
   // TabStripUIHandler::HandleMoveTab and

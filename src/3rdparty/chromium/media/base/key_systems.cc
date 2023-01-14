@@ -9,10 +9,10 @@
 #include <memory>
 #include <unordered_map>
 
+#include "base/cxx17_backports.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -162,17 +162,13 @@ class ClearKeyProperties : public KeySystemProperties {
 
   EmeConfigRule GetRobustnessConfigRule(
       EmeMediaType media_type,
-      const std::string& requested_robustness) const override {
+      const std::string& requested_robustness,
+      const bool* /*hw_secure_requirement*/) const override {
     return requested_robustness.empty() ? EmeConfigRule::SUPPORTED
                                         : EmeConfigRule::NOT_SUPPORTED;
   }
 
   EmeSessionTypeSupport GetPersistentLicenseSessionSupport() const override {
-    return EmeSessionTypeSupport::NOT_SUPPORTED;
-  }
-
-  EmeSessionTypeSupport GetPersistentUsageRecordSessionSupport()
-      const override {
     return EmeSessionTypeSupport::NOT_SUPPORTED;
   }
 
@@ -224,7 +220,7 @@ static bool IsPotentiallySupportedKeySystem(const std::string& key_system) {
 
   // Chromecast defines behaviors for Cast clients within its reverse domain.
   const char kChromecastRoot[] = "com.chromecast";
-  if (IsChildKeySystemOf(key_system, kChromecastRoot))
+  if (IsSubKeySystemOf(key_system, kChromecastRoot))
     return true;
 
   // Implementations that do not have a specification or appropriate glue code
@@ -269,12 +265,10 @@ class KeySystemsImpl : public KeySystems {
   EmeConfigRule GetRobustnessConfigRule(
       const std::string& key_system,
       EmeMediaType media_type,
-      const std::string& requested_robustness) const override;
+      const std::string& requested_robustness,
+      const bool* hw_secure_requirement) const override;
 
   EmeSessionTypeSupport GetPersistentLicenseSessionSupport(
-      const std::string& key_system) const override;
-
-  EmeSessionTypeSupport GetPersistentUsageRecordSessionSupport(
       const std::string& key_system) const override;
 
   EmeFeatureSupport GetPersistentStateSupport(
@@ -471,8 +465,6 @@ void KeySystemsImpl::AddSupportedKeySystems(
     DCHECK(!properties->GetKeySystemName().empty());
     DCHECK(properties->GetPersistentLicenseSessionSupport() !=
            EmeSessionTypeSupport::INVALID);
-    DCHECK(properties->GetPersistentUsageRecordSessionSupport() !=
-           EmeSessionTypeSupport::INVALID);
     DCHECK(properties->GetPersistentStateSupport() !=
            EmeFeatureSupport::INVALID);
     DCHECK(properties->GetDistinctiveIdentifierSupport() !=
@@ -491,8 +483,6 @@ void KeySystemsImpl::AddSupportedKeySystems(
         EmeFeatureSupport::NOT_SUPPORTED) {
       DCHECK(properties->GetPersistentLicenseSessionSupport() ==
              EmeSessionTypeSupport::NOT_SUPPORTED);
-      DCHECK(properties->GetPersistentUsageRecordSessionSupport() ==
-             EmeSessionTypeSupport::NOT_SUPPORTED);
     }
 
     // If distinctive identifiers are not supported, then no other features can
@@ -500,8 +490,6 @@ void KeySystemsImpl::AddSupportedKeySystems(
     if (properties->GetDistinctiveIdentifierSupport() ==
         EmeFeatureSupport::NOT_SUPPORTED) {
       DCHECK(properties->GetPersistentLicenseSessionSupport() !=
-             EmeSessionTypeSupport::SUPPORTED_WITH_IDENTIFIER);
-      DCHECK(properties->GetPersistentUsageRecordSessionSupport() !=
              EmeSessionTypeSupport::SUPPORTED_WITH_IDENTIFIER);
     }
 
@@ -725,7 +713,8 @@ EmeConfigRule KeySystemsImpl::GetContentTypeConfigRule(
 EmeConfigRule KeySystemsImpl::GetRobustnessConfigRule(
     const std::string& key_system,
     EmeMediaType media_type,
-    const std::string& requested_robustness) const {
+    const std::string& requested_robustness,
+    const bool* hw_secure_requirement) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   auto key_system_iter = key_system_properties_map_.find(key_system);
@@ -733,8 +722,8 @@ EmeConfigRule KeySystemsImpl::GetRobustnessConfigRule(
     NOTREACHED();
     return EmeConfigRule::NOT_SUPPORTED;
   }
-  return key_system_iter->second->GetRobustnessConfigRule(media_type,
-                                                          requested_robustness);
+  return key_system_iter->second->GetRobustnessConfigRule(
+      media_type, requested_robustness, hw_secure_requirement);
 }
 
 EmeSessionTypeSupport KeySystemsImpl::GetPersistentLicenseSessionSupport(
@@ -747,18 +736,6 @@ EmeSessionTypeSupport KeySystemsImpl::GetPersistentLicenseSessionSupport(
     return EmeSessionTypeSupport::INVALID;
   }
   return key_system_iter->second->GetPersistentLicenseSessionSupport();
-}
-
-EmeSessionTypeSupport KeySystemsImpl::GetPersistentUsageRecordSessionSupport(
-    const std::string& key_system) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  auto key_system_iter = key_system_properties_map_.find(key_system);
-  if (key_system_iter == key_system_properties_map_.end()) {
-    NOTREACHED();
-    return EmeSessionTypeSupport::INVALID;
-  }
-  return key_system_iter->second->GetPersistentUsageRecordSessionSupport();
 }
 
 EmeFeatureSupport KeySystemsImpl::GetPersistentStateSupport(

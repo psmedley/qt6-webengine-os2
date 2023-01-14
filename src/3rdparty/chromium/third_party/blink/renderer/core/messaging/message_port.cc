@@ -28,7 +28,10 @@
 
 #include <memory>
 
+#include "base/trace_event/trace_event.h"
 #include "mojo/public/cpp/base/big_buffer_mojom_traits.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
+#include "third_party/blink/public/mojom/messaging/transferable_message.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
@@ -52,7 +55,11 @@
 namespace blink {
 
 MessagePort::MessagePort(ExecutionContext& execution_context)
-    : ExecutionContextLifecycleObserver(&execution_context),
+    : ExecutionContextLifecycleObserver(execution_context.IsContextDestroyed()
+                                            ? nullptr
+                                            : &execution_context),
+      // Ports in a destroyed context start out in a closed state.
+      closed_(execution_context.IsContextDestroyed()),
       task_runner_(execution_context.GetTaskRunner(TaskType::kPostedMessage)) {}
 
 MessagePort::~MessagePort() {
@@ -119,7 +126,7 @@ void MessagePort::postMessage(ScriptState* script_state,
   if (msg.message->IsLockedToAgentCluster()) {
     msg.locked_agent_cluster_id = GetExecutionContext()->GetAgentClusterID();
   } else {
-    msg.locked_agent_cluster_id = base::nullopt;
+    msg.locked_agent_cluster_id = absl::nullopt;
   }
 
   mojo::Message mojo_message =
@@ -144,7 +151,7 @@ void MessagePort::start() {
     return;
 
   started_ = true;
-  connector_->ResumeIncomingMethodCallProcessing();
+  connector_->StartReceiving(task_runner_);
 }
 
 void MessagePort::close() {
@@ -164,11 +171,21 @@ void MessagePort::Entangle(MessagePortDescriptor port) {
   DCHECK(port.IsValid());
   DCHECK(!connector_);
 
+  // If the context was already destroyed, there is no reason to actually
+  // entangle the port and create a Connector. No messages will ever be able to
+  // be sent or received anyway, as StartReceiving will never be called.
+  if (!GetExecutionContext())
+    return;
+
   port_ = std::move(port);
   connector_ = std::make_unique<mojo::Connector>(
       port_.TakeHandleToEntangle(GetExecutionContext()),
-      mojo::Connector::SINGLE_THREADED_SEND, task_runner_);
-  connector_->PauseIncomingMethodCallProcessing();
+      mojo::Connector::SINGLE_THREADED_SEND);
+  // The raw `this` is safe despite `this` being a garbage collected object
+  // because we make sure that:
+  // 1. This object will not be garbage collected while it is connected and
+  //    the execution context is not destroyed, and
+  // 2. when the execution context is destroyed, the connector_ is reset.
   connector_->set_incoming_receiver(this);
   connector_->set_connection_error_handler(
       WTF::Bind(&MessagePort::close, WrapWeakPersistent(this)));

@@ -27,11 +27,11 @@
 #include <memory>
 #include "base/auto_reset.h"
 #include "base/callback.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "net/base/schemeful_site.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
@@ -84,7 +84,6 @@ enum class ResourceType : uint8_t {
   kXSLStyleSheet,
   kLinkPrefetch,
   kTextTrack,
-  kImportResource,
   kAudio,
   kVideo,
   kManifest,
@@ -146,6 +145,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
     kScriptTypeDoesNotMatch,
   };
 
+  Resource(const Resource&) = delete;
+  Resource& operator=(const Resource&) = delete;
   ~Resource() override;
 
   void Trace(Visitor*) const override;
@@ -271,6 +272,10 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   // The default implementation does nothing. Subclasses interested in the data
   // should implement the resource-specific behavior.
   virtual void SetSerializedCachedMetadata(mojo_base::BigBuffer data);
+
+  // Gets whether the serialized cached metadata must contain a hash of the
+  // source text. For resources other than ScriptResource, this is always false.
+  virtual bool CodeCacheHashRequired() const;
 
   AtomicString HttpContentType() const;
 
@@ -503,7 +508,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   ResourceType type_;
   ResourceStatus status_;
 
-  base::Optional<ResourceError> error_;
+  absl::optional<ResourceError> error_;
 
   base::TimeTicks load_response_end_;
 
@@ -559,8 +564,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   // TODO(crbug.com/1127971): Remove this once the decision is made to partition
   // the cache using either Network Isolation Key or scoped to per-document.
   std::set<net::SchemefulSite> existing_top_frame_sites_in_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(Resource);
 };
 
 class ResourceFactory {
@@ -602,4 +605,4 @@ class NonTextResourceFactory : public ResourceFactory {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_H_

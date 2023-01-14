@@ -18,8 +18,9 @@
 #include "quic/core/quic_packet_writer.h"
 #include "quic/core/quic_packets.h"
 #include "quic/core/quic_session.h"
-#include "quic/platform/api/quic_containers.h"
+#include "quic/core/quic_types.h"
 #include "quic/platform/api/quic_flags.h"
+#include "common/quiche_linked_hash_map.h"
 
 namespace quic {
 
@@ -118,11 +119,14 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
   // connection_id. Sending of the public reset packet is throttled by using
   // exponential back off. QUICHE_DCHECKs for the connection_id to be in time
   // wait state. virtual to override in tests.
+  // TODO(fayang): change ProcessPacket and SendPublicReset to take
+  // ReceivedPacketInfo.
   virtual void ProcessPacket(
       const QuicSocketAddress& self_address,
       const QuicSocketAddress& peer_address,
       QuicConnectionId connection_id,
       PacketHeaderFormat header_format,
+      size_t received_packet_length,
       std::unique_ptr<QuicPerPacketContext> packet_context);
 
   // Called by the dispatcher when the underlying socket becomes writable again,
@@ -164,6 +168,7 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
       const QuicSocketAddress& peer_address,
       QuicConnectionId connection_id,
       bool ietf_quic,
+      size_t received_packet_length,
       std::unique_ptr<QuicPerPacketContext> packet_context);
 
   // Called to send |packet|.
@@ -182,7 +187,7 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
 
   // Returns a stateless reset token which will be included in the public reset
   // packet.
-  virtual QuicUint128 GetStatelessResetToken(
+  virtual StatelessResetToken GetStatelessResetToken(
       QuicConnectionId connection_id) const;
 
   // Internal structure to store pending termination packets.
@@ -219,7 +224,7 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
   virtual bool SendOrQueuePacket(std::unique_ptr<QueuedPacket> packet,
                                  const QuicPerPacketContext* packet_context);
 
-  const QuicCircularDeque<std::unique_ptr<QueuedPacket>>&
+  const quiche::QuicheCircularDeque<std::unique_ptr<QueuedPacket>>&
   pending_packets_queue() const {
     return pending_packets_queue_;
   }
@@ -257,7 +262,8 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
       QuicTime::Delta /*srtt*/) const {}
 
   std::unique_ptr<QuicEncryptedPacket> BuildIetfStatelessResetPacket(
-      QuicConnectionId connection_id);
+      QuicConnectionId connection_id,
+      size_t received_packet_length);
 
   // A map from a recently closed connection_id to the number of packets
   // received after the termination of the connection bound to the
@@ -279,10 +285,11 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
     TimeWaitConnectionInfo info;
   };
 
-  // QuicLinkedHashMap allows lookup by ConnectionId and traversal in add order.
-  using ConnectionIdMap = QuicLinkedHashMap<QuicConnectionId,
-                                            ConnectionIdData,
-                                            QuicConnectionIdHash>;
+  // QuicheLinkedHashMap allows lookup by ConnectionId
+  // and traversal in add order.
+  using ConnectionIdMap = quiche::QuicheLinkedHashMap<QuicConnectionId,
+                                                      ConnectionIdData,
+                                                      QuicConnectionIdHash>;
   // Do not use find/emplace/erase on this map directly. Use
   // FindConnectionIdDataInMap, AddConnectionIdDateToMap,
   // RemoveConnectionDataFromMap instead.
@@ -312,7 +319,8 @@ class QUIC_NO_EXPORT QuicTimeWaitListManager
 
   // Pending termination packets that need to be sent out to the peer when we
   // are given a chance to write by the dispatcher.
-  QuicCircularDeque<std::unique_ptr<QueuedPacket>> pending_packets_queue_;
+  quiche::QuicheCircularDeque<std::unique_ptr<QueuedPacket>>
+      pending_packets_queue_;
 
   // Time period for which connection_ids should remain in time wait state.
   const QuicTime::Delta time_wait_period_;

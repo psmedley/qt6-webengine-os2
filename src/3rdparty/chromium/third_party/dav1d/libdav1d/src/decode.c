@@ -2629,7 +2629,7 @@ int dav1d_decode_tile_sbrow(Dav1dTileContext *const t) {
         }
     }
 
-    if (f->n_tc > 1 && IS_INTER_OR_SWITCH(f->frame_hdr)) {
+    if (f->seq_hdr->ref_frame_mvs && f->n_tc > 1 && IS_INTER_OR_SWITCH(f->frame_hdr)) {
         dav1d_refmvs_save_tmvs(&t->rt,
                                ts->tiling.col_start >> 1, ts->tiling.col_end >> 1,
                                t->by >> 1, (t->by + sb_step) >> 1);
@@ -3114,7 +3114,7 @@ int dav1d_decode_frame(Dav1dFrameContext *const f) {
                         t->ts = &f->ts[tile_row * f->frame_hdr->tiling.cols + tile_col];
                         if (dav1d_decode_tile_sbrow(t)) goto error;
                     }
-                    if (f->frame_thread.pass <= 1 && IS_INTER_OR_SWITCH(f->frame_hdr)) {
+                    if (f->seq_hdr->ref_frame_mvs && f->frame_thread.pass <= 1 && IS_INTER_OR_SWITCH(f->frame_hdr)) {
                         dav1d_refmvs_save_tmvs(&t->rt, 0, f->bw >> 1, t->by >> 1, by_end);
                     }
 
@@ -3316,8 +3316,10 @@ int dav1d_submit_frame(Dav1dContext *const c) {
         if (out_delayed->p.data[0]) {
             const unsigned progress = atomic_load_explicit(&out_delayed->progress[1],
                                                            memory_order_relaxed);
-            if (out_delayed->visible && progress != FRAME_ERROR)
+            if (out_delayed->visible && progress != FRAME_ERROR) {
                 dav1d_picture_ref(&c->out, &out_delayed->p);
+                c->event_flags |= dav1d_picture_get_event_flags(out_delayed);
+            }
             dav1d_thread_picture_unref(out_delayed);
         }
     } else {
@@ -3487,8 +3489,10 @@ int dav1d_submit_frame(Dav1dContext *const c) {
 
     // move f->cur into output queue
     if (c->n_fc == 1) {
-        if (f->frame_hdr->show_frame)
+        if (f->frame_hdr->show_frame) {
             dav1d_picture_ref(&c->out, &f->sr_cur.p);
+            c->event_flags |= dav1d_picture_get_event_flags(&f->sr_cur);
+        }
     } else {
         dav1d_thread_picture_ref(out_delayed, &f->sr_cur);
     }

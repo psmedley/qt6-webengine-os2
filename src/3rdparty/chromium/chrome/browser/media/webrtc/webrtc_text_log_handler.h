@@ -14,6 +14,7 @@
 #include "base/sequence_checker.h"
 #include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #include "net/base/network_interfaces.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace chrome {
 namespace mojom {
@@ -113,10 +114,10 @@ class WebRtcTextLogHandler {
 
   void OnGetNetworkInterfaceList(
       GenericDoneCallback callback,
-      const base::Optional<net::NetworkInterfaceList>& networks);
+      const absl::optional<net::NetworkInterfaceList>& networks);
   void OnGetNetworkInterfaceListFinish(
       GenericDoneCallback callback,
-      const base::Optional<net::NetworkInterfaceList>& networks,
+      const absl::optional<net::NetworkInterfaceList>& networks,
       const std::string& linux_distro);
 
   SEQUENCE_CHECKER(sequence_checker_);

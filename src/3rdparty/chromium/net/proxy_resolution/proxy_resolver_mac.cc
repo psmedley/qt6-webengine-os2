@@ -6,6 +6,8 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
+#include <memory>
+
 #include "base/check.h"
 #include "base/lazy_instance.h"
 #include "base/mac/foundation_util.h"
@@ -17,6 +19,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/proxy_server.h"
 #include "net/proxy_resolution/proxy_info.h"
+#include "net/proxy_resolution/proxy_list.h"
 #include "net/proxy_resolution/proxy_resolver.h"
 #include "url/gurl.h"
 
@@ -306,11 +309,7 @@ int ProxyResolverMac::GetProxyForURL(
       base::mac::CFCastStrict<CFArrayRef>(result));
   DCHECK(proxy_array_ref != NULL);
 
-  // This string will be an ordered list of <proxy-uri> entries, separated by
-  // semi-colons. It is the format that ProxyInfo::UseNamedProxy() expects.
-  //    proxy-uri = [<proxy-scheme>"://"]<proxy-host>":"<proxy-port>
-  // (This also includes entries for direct connection, as "direct://").
-  std::string proxy_uri_list;
+  ProxyList proxy_list;
 
   CFIndex proxy_array_count = CFArrayGetCount(proxy_array_ref.get());
   for (CFIndex i = 0; i < proxy_array_count; ++i) {
@@ -342,13 +341,11 @@ int ProxyResolverMac::GetProxyForURL(
     if (!proxy_server.is_valid())
       continue;
 
-    if (!proxy_uri_list.empty())
-      proxy_uri_list += ";";
-    proxy_uri_list += proxy_server.ToURI();
+    proxy_list.AddProxyServer(proxy_server);
   }
 
-  if (!proxy_uri_list.empty())
-    results->UseNamedProxy(proxy_uri_list);
+  if (!proxy_list.IsEmpty())
+    results->UseProxyList(proxy_list);
   // Else do nothing (results is already guaranteed to be in the default state).
 
   return OK;
@@ -365,7 +362,7 @@ int ProxyResolverFactoryMac::CreateProxyResolver(
     std::unique_ptr<ProxyResolver>* resolver,
     CompletionOnceCallback callback,
     std::unique_ptr<Request>* request) {
-  resolver->reset(new ProxyResolverMac(pac_script));
+  *resolver = std::make_unique<ProxyResolverMac>(pac_script);
   return OK;
 }
 

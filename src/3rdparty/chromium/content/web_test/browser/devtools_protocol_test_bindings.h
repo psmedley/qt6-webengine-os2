@@ -6,7 +6,6 @@
 #define CONTENT_WEB_TEST_BROWSER_DEVTOOLS_PROTOCOL_TEST_BINDINGS_H_
 
 #include <memory>
-#include <string>
 
 #include "build/build_config.h"
 #include "content/public/browser/devtools_agent_host_client.h"
@@ -36,7 +35,7 @@ class DevToolsProtocolTestBindings : public WebContentsObserver,
   void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override;
   void WebContentsDestroyed() override;
 
-  void HandleMessageFromTest(const std::string& message);
+  void HandleMessageFromTest(base::Value);
 
   scoped_refptr<DevToolsAgentHost> agent_host_;
 #if !defined(OS_ANDROID)

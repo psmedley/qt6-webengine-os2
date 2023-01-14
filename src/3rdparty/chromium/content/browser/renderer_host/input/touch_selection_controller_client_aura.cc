@@ -430,6 +430,10 @@ TouchSelectionControllerClientAura::InternalClient::CreateDrawable() {
 // process, there is nothing to do here.
 void TouchSelectionControllerClientAura::InternalClient::DidScroll() {}
 
+const char* TouchSelectionControllerClientAura::GetType() {
+  return "TouchSelectionControllerClientAura";
+}
+
 bool TouchSelectionControllerClientAura::IsCommandIdEnabled(
     int command_id) const {
   bool editable = rwhva_->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE;
@@ -441,7 +445,7 @@ bool TouchSelectionControllerClientAura::IsCommandIdEnabled(
     case ui::TouchEditable::kCopy:
       return readable && has_selection;
     case ui::TouchEditable::kPaste: {
-      base::string16 result;
+      std::u16string result;
       ui::DataTransferEndpoint data_dst = ui::DataTransferEndpoint(
           ui::EndpointType::kDefault, /*notify_if_restricted=*/false);
       ui::Clipboard::GetForCurrentThread()->ReadText(
@@ -496,7 +500,7 @@ bool TouchSelectionControllerClientAura::ShouldShowQuickMenu() {
          !handle_drag_in_progress_ && IsQuickMenuAvailable();
 }
 
-base::string16 TouchSelectionControllerClientAura::GetSelectedText() {
+std::u16string TouchSelectionControllerClientAura::GetSelectedText() {
   return rwhva_->GetSelectedText();
 }
 

@@ -14,6 +14,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/ui/base/window_state_type.h"
 #include "components/exo/display.h"
+#include "components/exo/shell_surface_util.h"
 #include "components/exo/wayland/serial_tracker.h"
 #include "components/exo/wayland/server_util.h"
 #include "components/exo/wayland/wayland_positioner.h"
@@ -216,6 +217,16 @@ class WaylandToplevel : public aura::WindowObserver {
       return;
     }
 
+    if (this == parent) {
+      // Some apps e.g. crbug/1210235 try to be their own parent. Ignore them.
+      auto* app_id = GetShellApplicationId(
+          shell_surface_data_->shell_surface->host_window());
+      LOG(WARNING)
+          << "Client attempts to add itself as a transient parent: app_id="
+          << app_id;
+      return;
+    }
+
     // This is a no-op if parent is not mapped.
     if (parent->shell_surface_data_ &&
         parent->shell_surface_data_->shell_surface->GetWidget())
@@ -223,7 +234,7 @@ class WaylandToplevel : public aura::WindowObserver {
           parent->shell_surface_data_->shell_surface.get());
   }
 
-  void SetTitle(const base::string16& title) {
+  void SetTitle(const std::u16string& title) {
     if (shell_surface_data_)
       shell_surface_data_->shell_surface->SetTitle(title);
   }
@@ -333,7 +344,7 @@ void xdg_toplevel_v6_set_title(wl_client* client,
                                wl_resource* resource,
                                const char* title) {
   GetUserDataAs<WaylandToplevel>(resource)->SetTitle(
-      base::string16(base::UTF8ToUTF16(title)));
+      std::u16string(base::UTF8ToUTF16(title)));
 }
 
 void xdg_toplevel_v6_set_app_id(wl_client* client,

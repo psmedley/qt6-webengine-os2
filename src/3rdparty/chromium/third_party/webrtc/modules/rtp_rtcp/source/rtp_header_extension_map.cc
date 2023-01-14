@@ -34,6 +34,7 @@ constexpr ExtensionInfo CreateExtensionInfo() {
 constexpr ExtensionInfo kExtensions[] = {
     CreateExtensionInfo<TransmissionOffset>(),
     CreateExtensionInfo<AudioLevel>(),
+    CreateExtensionInfo<CsrcAudioLevel>(),
     CreateExtensionInfo<AbsoluteSendTime>(),
     CreateExtensionInfo<AbsoluteCaptureTimeExtension>(),
     CreateExtensionInfo<VideoOrientation>(),
@@ -50,6 +51,7 @@ constexpr ExtensionInfo kExtensions[] = {
     CreateExtensionInfo<RtpDependencyDescriptorExtension>(),
     CreateExtensionInfo<ColorSpaceExtension>(),
     CreateExtensionInfo<InbandComfortNoiseExtension>(),
+    CreateExtensionInfo<VideoFrameTrackingIdExtension>(),
 };
 
 // Because of kRtpExtensionNone, NumberOfExtension is 1 bigger than the actual
@@ -143,7 +145,7 @@ bool RtpHeaderExtensionMap::Register(int id,
   }
 
   if (registered_type !=
-      kInvalidType) {  // |id| used by another extension type.
+      kInvalidType) {  // `id` used by another extension type.
     RTC_LOG(LS_WARNING) << "Failed to register extension uri:'" << uri
                         << "', id:" << id
                         << ". Id already in use by extension type "

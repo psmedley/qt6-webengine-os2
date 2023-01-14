@@ -4,18 +4,19 @@
 
 #include "services/network/first_party_sets/first_party_set_parser.h"
 
-#include <iterator>
-#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
-#include "base/optional.h"
+#include "base/path_service.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/schemeful_site.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -25,7 +26,7 @@ namespace {
 
 // Ensures that the string represents an origin that is non-opaque and HTTPS.
 // Returns the registered domain.
-base::Optional<net::SchemefulSite> Canonicalize(base::StringPiece origin_string,
+absl::optional<net::SchemefulSite> Canonicalize(base::StringPiece origin_string,
                                                 bool emit_errors) {
   const url::Origin origin(url::Origin::Create(GURL(origin_string)));
   if (origin.opaque()) {
@@ -33,23 +34,23 @@ base::Optional<net::SchemefulSite> Canonicalize(base::StringPiece origin_string,
       LOG(ERROR) << "First-Party Set origin " << origin_string
                  << " is not valid; ignoring.";
     }
-    return base::nullopt;
+    return absl::nullopt;
   }
   if (origin.scheme() != "https") {
     if (emit_errors) {
       LOG(ERROR) << "First-Party Set origin " << origin_string
                  << " is not HTTPS; ignoring.";
     }
-    return base::nullopt;
+    return absl::nullopt;
   }
-  base::Optional<net::SchemefulSite> site =
+  absl::optional<net::SchemefulSite> site =
       net::SchemefulSite::CreateIfHasRegisterableDomain(origin);
   if (!site.has_value()) {
     if (emit_errors) {
       LOG(ERROR) << "First-Party Set origin" << origin_string
                  << " does not have a valid registered domain; ignoring.";
     }
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   return site;
@@ -60,7 +61,7 @@ const char kFirstPartySetMembersField[] = "members";
 
 // Parses a single First-Party Set into a map from member to owner (including an
 // entry owner -> owner). Note that this is intended for use *only* on sets that
-// were preloaded via the component updater, so this does not check assertions
+// were received via the Component Updater, so this does not check assertions
 // or versions. It rejects sets which are non-disjoint with
 // previously-encountered sets (i.e. sets which have non-empty intersections
 // with `elements`), and singleton sets (i.e. sets must have an owner and at
@@ -70,10 +71,9 @@ const char kFirstPartySetMembersField[] = "members";
 // and augments `elements` to include the elements of the set that was parsed.
 //
 // Returns true if parsing and validation were successful, false otherwise.
-bool ParsePreloadedSet(
-    const base::Value& value,
-    base::flat_map<net::SchemefulSite, net::SchemefulSite>& map,
-    base::flat_set<net::SchemefulSite>& elements) {
+bool ParseSet(const base::Value& value,
+              base::flat_map<net::SchemefulSite, net::SchemefulSite>& map,
+              base::flat_set<net::SchemefulSite>& elements) {
   if (!value.is_dict())
     return false;
 
@@ -83,7 +83,7 @@ bool ParsePreloadedSet(
   if (!maybe_owner)
     return false;
 
-  base::Optional<net::SchemefulSite> canonical_owner =
+  absl::optional<net::SchemefulSite> canonical_owner =
       Canonicalize(std::move(*maybe_owner), false /* emit_errors */);
   if (!canonical_owner.has_value())
     return false;
@@ -107,7 +107,7 @@ bool ParsePreloadedSet(
     // another set.
     if (!item.is_string())
       return false;
-    base::Optional<net::SchemefulSite> member =
+    absl::optional<net::SchemefulSite> member =
         Canonicalize(item.GetString(), false /* emit_errors */);
     if (!member.has_value() || elements.contains(*member))
       return false;
@@ -119,28 +119,89 @@ bool ParsePreloadedSet(
 
 }  // namespace
 
-base::Optional<net::SchemefulSite>
+base::flat_map<net::SchemefulSite, net::SchemefulSite>
+FirstPartySetParser::DeserializeFirstPartySets(base::StringPiece value) {
+  if (value.empty())
+    return {};
+
+  std::unique_ptr<base::Value> value_deserialized =
+      JSONStringValueDeserializer(value).Deserialize(
+          nullptr /* error_code */, nullptr /* error_message */);
+  if (!value_deserialized || !value_deserialized->is_dict())
+    return {};
+
+  base::flat_map<net::SchemefulSite, net::SchemefulSite> map;
+  base::flat_set<net::SchemefulSite> owner_set;
+  base::flat_set<net::SchemefulSite> member_set;
+  for (const auto item : value_deserialized->DictItems()) {
+    if (!item.second.is_string())
+      return {};
+    const absl::optional<net::SchemefulSite> maybe_member =
+        Canonicalize(item.first, true /* emit_errors */);
+    const absl::optional<net::SchemefulSite> maybe_owner =
+        Canonicalize(item.second.GetString(), true /* emit_errors */);
+    if (!maybe_member.has_value() || !maybe_owner.has_value())
+      return {};
+
+    // Skip the owner entry here and add it later explicitly to prevent the
+    // singleton sets.
+    if (*maybe_member == *maybe_owner) {
+      continue;
+    }
+    if (!owner_set.contains(maybe_owner)) {
+      map.emplace(*maybe_owner, *maybe_owner);
+    }
+    // Check disjointness. Note that we are relying on the JSON Parser to
+    // eliminate the possibility of a site being used as a key more than once,
+    // so we don't have to check for that explicitly.
+    if (owner_set.contains(*maybe_member) ||
+        member_set.contains(*maybe_owner)) {
+      return {};
+    }
+    owner_set.insert(*maybe_owner);
+    member_set.insert(*maybe_member);
+    map.emplace(std::move(*maybe_member), std::move(*maybe_owner));
+  }
+  return map;
+}
+
+std::string FirstPartySetParser::SerializeFirstPartySets(
+    const base::flat_map<net::SchemefulSite, net::SchemefulSite>& sets) {
+  base::DictionaryValue dict;
+  for (const auto& it : sets) {
+    std::string maybe_member = it.first.Serialize();
+    std::string owner = it.second.Serialize();
+    if (maybe_member != owner) {
+      dict.SetKey(std::move(maybe_member), base::Value(std::move(owner)));
+    }
+  }
+  std::string dict_serialized;
+  JSONStringValueSerializer(&dict_serialized).Serialize(dict);
+
+  return dict_serialized;
+}
+
+absl::optional<net::SchemefulSite>
 FirstPartySetParser::CanonicalizeRegisteredDomain(
     const base::StringPiece origin_string,
     bool emit_errors) {
   return Canonicalize(origin_string, emit_errors);
 }
 
-std::unique_ptr<base::flat_map<net::SchemefulSite, net::SchemefulSite>>
-FirstPartySetParser::ParsePreloadedSets(base::StringPiece raw_sets) {
-  base::Optional<base::Value> maybe_value = base::JSONReader::Read(
+base::flat_map<net::SchemefulSite, net::SchemefulSite>
+FirstPartySetParser::ParseSetsFromComponentUpdater(base::StringPiece raw_sets) {
+  absl::optional<base::Value> maybe_value = base::JSONReader::Read(
       raw_sets, base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS);
   if (!maybe_value.has_value())
-    return nullptr;
+    return {};
   if (!maybe_value->is_list())
-    return nullptr;
+    return {};
 
-  auto map = std::make_unique<
-      base::flat_map<net::SchemefulSite, net::SchemefulSite>>();
+  base::flat_map<net::SchemefulSite, net::SchemefulSite> map;
   base::flat_set<net::SchemefulSite> elements;
   for (const auto& value : maybe_value->GetList()) {
-    if (!ParsePreloadedSet(value, *map, elements))
-      return nullptr;
+    if (!ParseSet(value, map, elements))
+      return {};
   }
 
   return map;

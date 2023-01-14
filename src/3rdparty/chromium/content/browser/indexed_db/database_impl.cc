@@ -41,18 +41,18 @@ const char kTransactionAlreadyExists[] = "Transaction already exists";
 }  // namespace
 
 DatabaseImpl::DatabaseImpl(std::unique_ptr<IndexedDBConnection> connection,
-                           const url::Origin& origin,
+                           const blink::StorageKey& storage_key,
                            IndexedDBDispatcherHost* dispatcher_host,
                            scoped_refptr<base::SequencedTaskRunner> idb_runner)
     : dispatcher_host_(dispatcher_host),
       indexed_db_context_(dispatcher_host->context()),
       connection_(std::move(connection)),
-      origin_(origin),
+      storage_key_(storage_key),
       idb_runner_(std::move(idb_runner)) {
   DCHECK(idb_runner_->RunsTasksInCurrentSequence());
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(connection_);
-  indexed_db_context_->ConnectionOpened(origin_, connection_.get());
+  indexed_db_context_->ConnectionOpened(storage_key_, connection_.get());
 }
 
 DatabaseImpl::~DatabaseImpl() {
@@ -62,16 +62,16 @@ DatabaseImpl::~DatabaseImpl() {
     status = connection_->AbortTransactionsAndClose(
         IndexedDBConnection::CloseErrorHandling::kAbortAllReturnLastError);
   }
-  indexed_db_context_->ConnectionClosed(origin_, connection_.get());
+  indexed_db_context_->ConnectionClosed(storage_key_, connection_.get());
   if (!status.ok()) {
     indexed_db_context_->GetIDBFactory()->OnDatabaseError(
-        origin_, status, "Error during rollbacks.");
+        storage_key_, status, "Error during rollbacks.");
   }
 }
 
 void DatabaseImpl::RenameObjectStore(int64_t transaction_id,
                                      int64_t object_store_id,
-                                     const base::string16& new_name) {
+                                     const std::u16string& new_name) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!connection_->IsConnected())
     return;
@@ -88,9 +88,11 @@ void DatabaseImpl::RenameObjectStore(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "RenameObjectStore was called after committing or aborting the "
-        "transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -132,7 +134,7 @@ void DatabaseImpl::CreateTransaction(
   connection_->database()->RegisterAndScheduleTransaction(transaction);
 
   dispatcher_host_->CreateAndBindTransactionImpl(
-      std::move(transaction_receiver), origin_, transaction->AsWeakPtr());
+      std::move(transaction_receiver), storage_key_, transaction->AsWeakPtr());
 }
 
 void DatabaseImpl::Close() {
@@ -145,7 +147,7 @@ void DatabaseImpl::Close() {
 
   if (!status.ok()) {
     indexed_db_context_->GetIDBFactory()->OnDatabaseError(
-        origin_, status, "Error during rollbacks.");
+        storage_key_, status, "Error during rollbacks.");
   }
 }
 
@@ -183,8 +185,11 @@ void DatabaseImpl::Get(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "Get was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -239,8 +244,11 @@ void DatabaseImpl::GetAll(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "GetAll was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -284,8 +292,11 @@ void DatabaseImpl::SetIndexKeys(
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "SetIndexKeys was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -316,9 +327,11 @@ void DatabaseImpl::SetIndexesReady(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "SetIndexesReady was called after committing or aborting the "
-        "transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -360,8 +373,11 @@ void DatabaseImpl::OpenCursor(
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "OpenCursor was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -392,7 +408,7 @@ void DatabaseImpl::OpenCursor(
   transaction->ScheduleTask(
       BindWeakOperation(&IndexedDBDatabase::OpenCursorOperation,
                         connection_->database()->AsWeakPtr(), std::move(params),
-                        origin_, dispatcher_host_->AsWeakPtr()));
+                        storage_key_, dispatcher_host_->AsWeakPtr()));
 }
 
 void DatabaseImpl::Count(
@@ -404,7 +420,7 @@ void DatabaseImpl::Count(
         pending_callbacks) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto callbacks = base::MakeRefCounted<IndexedDBCallbacks>(
-      dispatcher_host_->AsWeakPtr(), origin_, std::move(pending_callbacks),
+      dispatcher_host_->AsWeakPtr(), storage_key_, std::move(pending_callbacks),
       idb_runner_);
   if (!connection_->IsConnected())
     return;
@@ -415,8 +431,11 @@ void DatabaseImpl::Count(
     return;
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "Count was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -435,7 +454,7 @@ void DatabaseImpl::DeleteRange(
         pending_callbacks) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto callbacks = base::MakeRefCounted<IndexedDBCallbacks>(
-      dispatcher_host_->AsWeakPtr(), origin_, std::move(pending_callbacks),
+      dispatcher_host_->AsWeakPtr(), storage_key_, std::move(pending_callbacks),
       idb_runner_);
   if (!connection_->IsConnected())
     return;
@@ -446,8 +465,11 @@ void DatabaseImpl::DeleteRange(
     return;
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "DeleteRange was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -464,7 +486,7 @@ void DatabaseImpl::GetKeyGeneratorCurrentNumber(
         pending_callbacks) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto callbacks = base::MakeRefCounted<IndexedDBCallbacks>(
-      dispatcher_host_->AsWeakPtr(), origin_, std::move(pending_callbacks),
+      dispatcher_host_->AsWeakPtr(), storage_key_, std::move(pending_callbacks),
       idb_runner_);
   if (!connection_->IsConnected())
     return;
@@ -475,9 +497,11 @@ void DatabaseImpl::GetKeyGeneratorCurrentNumber(
     return;
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "GetKeyGeneratorCurrentNumber was called after committing or aborting "
-        "the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -494,7 +518,7 @@ void DatabaseImpl::Clear(
         pending_callbacks) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto callbacks = base::MakeRefCounted<IndexedDBCallbacks>(
-      dispatcher_host_->AsWeakPtr(), origin_, std::move(pending_callbacks),
+      dispatcher_host_->AsWeakPtr(), storage_key_, std::move(pending_callbacks),
       idb_runner_);
   if (!connection_->IsConnected())
     return;
@@ -505,8 +529,11 @@ void DatabaseImpl::Clear(
     return;
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "Clear was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -518,7 +545,7 @@ void DatabaseImpl::Clear(
 void DatabaseImpl::CreateIndex(int64_t transaction_id,
                                int64_t object_store_id,
                                int64_t index_id,
-                               const base::string16& name,
+                               const std::u16string& name,
                                const IndexedDBKeyPath& key_path,
                                bool unique,
                                bool multi_entry) {
@@ -538,8 +565,11 @@ void DatabaseImpl::CreateIndex(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "CreateIndex was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -569,8 +599,11 @@ void DatabaseImpl::DeleteIndex(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "DeleteIndex was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 
@@ -582,7 +615,7 @@ void DatabaseImpl::DeleteIndex(int64_t transaction_id,
 void DatabaseImpl::RenameIndex(int64_t transaction_id,
                                int64_t object_store_id,
                                int64_t index_id,
-                               const base::string16& new_name) {
+                               const std::u16string& new_name) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!connection_->IsConnected())
     return;
@@ -599,8 +632,11 @@ void DatabaseImpl::RenameIndex(int64_t transaction_id,
   }
 
   if (!transaction->IsAcceptingRequests()) {
-    mojo::ReportBadMessage(
-        "RenameIndex was called after committing or aborting the transaction");
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
     return;
   }
 

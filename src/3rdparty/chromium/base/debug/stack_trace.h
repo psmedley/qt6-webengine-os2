@@ -84,6 +84,10 @@ class BASE_EXPORT StackTrace {
   StackTrace(const _CONTEXT* context);
 #endif
 
+  // Returns true if this current test environment is expected to have
+  // symbolized frames when printing a stack trace.
+  static bool WillSymbolizeToStreamForTesting();
+
   // Copying and assignment are allowed with the default functions.
 
   // Gets an array of instruction pointer values. |*count| will be set to the

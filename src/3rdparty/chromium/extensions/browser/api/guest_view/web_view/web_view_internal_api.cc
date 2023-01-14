@@ -15,6 +15,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/crash/core/common/crash_key.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_frame_host.h"
@@ -27,9 +29,11 @@
 #include "extensions/common/api/web_view_internal.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/script_constants.h"
 #include "extensions/common/user_script.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using content::WebContents;
 using extensions::ExtensionResource;
@@ -84,17 +88,21 @@ uint32_t MaskForKey(const char* key) {
   return 0;
 }
 
-HostID GenerateHostIDFromEmbedder(const extensions::Extension* extension,
-                                  content::WebContents* web_contents) {
-  if (extension)
-    return HostID(HostID::EXTENSIONS, extension->id());
+extensions::mojom::HostID GenerateHostIDFromEmbedder(
+    const extensions::Extension* extension,
+    content::WebContents* web_contents) {
+  if (extension) {
+    return extensions::mojom::HostID(
+        extensions::mojom::HostID::HostType::kExtensions, extension->id());
+  }
 
   if (web_contents && web_contents->GetWebUI()) {
     const GURL& url = web_contents->GetSiteInstance()->GetSiteURL();
-    return HostID(HostID::WEBUI, url.spec());
+    return extensions::mojom::HostID(
+        extensions::mojom::HostID::HostType::kWebUi, url.spec());
   }
   NOTREACHED();
-  return HostID();
+  return extensions::mojom::HostID();
 }
 
 // Creates content script files when parsing InjectionItems of "js" or "css"
@@ -141,7 +149,7 @@ std::unique_ptr<extensions::UserScript> ParseContentScript(
     std::string* error) {
   // matches (required):
   if (script_value.matches.empty())
-    return std::unique_ptr<extensions::UserScript>();
+    return nullptr;
 
   std::unique_ptr<extensions::UserScript> script(new extensions::UserScript());
 
@@ -154,7 +162,7 @@ std::unique_ptr<extensions::UserScript> ParseContentScript(
     URLPattern pattern(UserScript::ValidUserScriptSchemes(allowed_everywhere));
     if (pattern.Parse(match) != URLPattern::ParseResult::kSuccess) {
       *error = errors::kInvalidMatches;
-      return std::unique_ptr<extensions::UserScript>();
+      return nullptr;
     }
     script->add_url_pattern(pattern);
   }
@@ -169,24 +177,25 @@ std::unique_ptr<extensions::UserScript> ParseContentScript(
 
       if (pattern.Parse(exclude_match) != URLPattern::ParseResult::kSuccess) {
         *error = errors::kInvalidExcludeMatches;
-        return std::unique_ptr<extensions::UserScript>();
+        return nullptr;
       }
       script->add_exclude_url_pattern(pattern);
     }
   }
   // run_at:
   if (script_value.run_at) {
-    UserScript::RunLocation run_at = UserScript::UNDEFINED;
+    extensions::mojom::RunLocation run_at =
+        extensions::mojom::RunLocation::kUndefined;
     switch (script_value.run_at) {
       case extensions::api::extension_types::RUN_AT_NONE:
       case extensions::api::extension_types::RUN_AT_DOCUMENT_IDLE:
-        run_at = UserScript::DOCUMENT_IDLE;
+        run_at = extensions::mojom::RunLocation::kDocumentIdle;
         break;
       case extensions::api::extension_types::RUN_AT_DOCUMENT_START:
-        run_at = UserScript::DOCUMENT_START;
+        run_at = extensions::mojom::RunLocation::kDocumentStart;
         break;
       case extensions::api::extension_types::RUN_AT_DOCUMENT_END:
-        run_at = UserScript::DOCUMENT_END;
+        run_at = extensions::mojom::RunLocation::kDocumentEnd;
         break;
     }
     // The default for run_at is RUN_AT_DOCUMENT_IDLE.
@@ -236,12 +245,12 @@ std::unique_ptr<extensions::UserScript> ParseContentScript(
 std::unique_ptr<extensions::UserScriptList> ParseContentScripts(
     const std::vector<ContentScriptDetails>& content_script_list,
     const extensions::Extension* extension,
-    const HostID& host_id,
+    const extensions::mojom::HostID& host_id,
     bool incognito_enabled,
     const GURL& owner_base_url,
     std::string* error) {
   if (content_script_list.empty())
-    return std::unique_ptr<extensions::UserScriptList>();
+    return nullptr;
 
   std::unique_ptr<extensions::UserScriptList> result(
       new extensions::UserScriptList());
@@ -251,13 +260,13 @@ std::unique_ptr<extensions::UserScriptList> ParseContentScripts(
     if (!names.insert(name).second) {
       // The name was already in the list.
       *error = kDuplicatedContentScriptNamesError;
-      return std::unique_ptr<extensions::UserScriptList>();
+      return nullptr;
     }
 
     std::unique_ptr<extensions::UserScript> script =
         ParseContentScript(script_value, extension, owner_base_url, error);
     if (!script)
-      return std::unique_ptr<extensions::UserScriptList>();
+      return nullptr;
     script->set_id(UserScript::GenerateUserScriptID());
     script->set_name(name);
     script->set_incognito_enabled(incognito_enabled);
@@ -276,8 +285,11 @@ bool WebViewInternalExtensionFunction::PreRunValidation(std::string* error) {
   if (!ExtensionFunction::PreRunValidation(error))
     return false;
 
-  int instance_id = 0;
-  EXTENSION_FUNCTION_PRERUN_VALIDATE(args_->GetInteger(0, &instance_id));
+  const auto& list = args_->GetList();
+  EXTENSION_FUNCTION_PRERUN_VALIDATE(list.size() >= 1);
+  const auto& instance_id_value = list[0];
+  EXTENSION_FUNCTION_PRERUN_VALIDATE(instance_id_value.is_int());
+  int instance_id = instance_id_value.GetInt();
   // TODO(780728): Remove crash key once the cause of the kill is known.
   static crash_reporter::CrashKeyString<128> name_key("webview-function");
   crash_reporter::ScopedCrashKeyString name_key_scope(&name_key, name());
@@ -321,9 +333,25 @@ WebViewInternalCaptureVisibleRegionFunction::Run() {
 
   return RespondNow(Error(GetErrorMessage(capture_result)));
 }
-bool WebViewInternalCaptureVisibleRegionFunction::IsScreenshotEnabled(
+
+void WebViewInternalCaptureVisibleRegionFunction::GetQuotaLimitHeuristics(
+    QuotaLimitHeuristics* heuristics) const {
+  constexpr base::TimeDelta kSecond = base::TimeDelta::FromSeconds(1);
+  QuotaLimitHeuristic::Config limit = {
+      web_view_internal::MAX_CAPTURE_VISIBLE_REGION_CALLS_PER_SECOND, kSecond};
+
+  heuristics->push_back(std::make_unique<QuotaService::TimedLimit>(
+      limit, std::make_unique<QuotaLimitHeuristic::SingletonBucketMapper>(),
+      "MAX_CAPTURE_VISIBLE_REGION_CALLS_PER_SECOND"));
+}
+
+WebContentsCaptureClient::ScreenshotAccess
+WebViewInternalCaptureVisibleRegionFunction::GetScreenshotAccess(
     content::WebContents* web_contents) const {
-  return !ExtensionsBrowserClient::Get()->IsScreenshotRestricted(web_contents);
+  if (ExtensionsBrowserClient::Get()->IsScreenshotRestricted(web_contents))
+    return ScreenshotAccess::kDisabledByDlp;
+
+  return ScreenshotAccess::kEnabled;
 }
 
 bool WebViewInternalCaptureVisibleRegionFunction::ClientAllowsTransparency() {
@@ -332,8 +360,28 @@ bool WebViewInternalCaptureVisibleRegionFunction::ClientAllowsTransparency() {
 
 void WebViewInternalCaptureVisibleRegionFunction::OnCaptureSuccess(
     const SkBitmap& bitmap) {
+  base::ThreadPool::PostTask(
+      FROM_HERE, {base::TaskPriority::USER_VISIBLE},
+      base::BindOnce(&WebViewInternalCaptureVisibleRegionFunction::
+                         EncodeBitmapOnWorkerThread,
+                     this, base::ThreadTaskRunnerHandle::Get(), bitmap));
+}
+
+void WebViewInternalCaptureVisibleRegionFunction::EncodeBitmapOnWorkerThread(
+    scoped_refptr<base::TaskRunner> reply_task_runner,
+    const SkBitmap& bitmap) {
   std::string base64_result;
-  if (!EncodeBitmap(bitmap, &base64_result)) {
+  bool success = EncodeBitmap(bitmap, &base64_result);
+  reply_task_runner->PostTask(
+      FROM_HERE, base::BindOnce(&WebViewInternalCaptureVisibleRegionFunction::
+                                    OnBitmapEncodedOnUIThread,
+                                this, success, std::move(base64_result)));
+}
+
+void WebViewInternalCaptureVisibleRegionFunction::OnBitmapEncodedOnUIThread(
+    bool success,
+    std::string base64_result) {
+  if (!success) {
     OnCaptureFailure(FAILURE_REASON_ENCODING_FAILED);
     return;
   }
@@ -360,6 +408,7 @@ std::string WebViewInternalCaptureVisibleRegionFunction::GetErrorMessage(
       reason_description = "view is invisible";
       break;
     case FAILURE_REASON_SCREEN_SHOTS_DISABLED:
+    case FAILURE_REASON_SCREEN_SHOTS_DISABLED_BY_DLP:
       reason_description = "screenshot has been disabled";
       break;
     case OK:
@@ -390,18 +439,23 @@ ExecuteCodeFunction::InitResult WebViewInternalExecuteCodeFunction::Init() {
   if (init_result_)
     return init_result_.value();
 
-  if (!args_->GetInteger(0, &guest_instance_id_) || !guest_instance_id_)
+  const auto& list = args_->GetList();
+  if (list.size() < 3)
     return set_init_result(VALIDATION_FAILURE);
 
-  std::string src;
-  if (!args_->GetString(1, &src))
+  guest_instance_id_ = list[0].GetIfInt().value_or(0);
+  if (guest_instance_id_ == 0)
+    return set_init_result(VALIDATION_FAILURE);
+
+  const std::string* src = list[1].GetIfString();
+  if (!src)
     return set_init_result(VALIDATION_FAILURE);
 
   // Set |guest_src_| here, but do not return false if it is invalid.
   // Instead, let it continue with the normal page load sequence,
   // which will result in the usual LOAD_ABORT event in the case where
   // the URL is invalid.
-  guest_src_ = GURL(src);
+  guest_src_ = GURL(*src);
 
   base::DictionaryValue* details_value = NULL;
   if (!args_->GetDictionary(2, &details_value))
@@ -413,14 +467,16 @@ ExecuteCodeFunction::InitResult WebViewInternalExecuteCodeFunction::Init() {
   details_ = std::move(details);
 
   if (extension()) {
-    set_host_id(HostID(HostID::EXTENSIONS, extension()->id()));
+    set_host_id(extensions::mojom::HostID(
+        extensions::mojom::HostID::HostType::kExtensions, extension()->id()));
     return set_init_result(SUCCESS);
   }
 
   WebContents* web_contents = GetSenderWebContents();
   if (web_contents && web_contents->GetWebUI()) {
     const GURL& url = render_frame_host()->GetSiteInstance()->GetSiteURL();
-    set_host_id(HostID(HostID::WEBUI, url.spec()));
+    set_host_id(extensions::mojom::HostID(
+        extensions::mojom::HostID::HostType::kWebUi, url.spec()));
     return set_init_result(SUCCESS);
   }
   return set_init_result_error("");  // TODO(lazyboy): error?
@@ -462,7 +518,7 @@ bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
     WebUIURLFetcher::WebUILoadFileCallback callback) {
   WebViewGuest* guest =
       WebViewGuest::From(source_process_id(), guest_instance_id_);
-  if (!guest || host_id().type() != HostID::WEBUI)
+  if (!guest || host_id().type != mojom::HostID::HostType::kWebUi)
     return false;
 
   GURL owner_base_url(guest->GetOwnerSiteURL().GetWithEmptyPath());
@@ -475,14 +531,30 @@ bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
   return true;
 }
 
+void WebViewInternalExecuteCodeFunction::DidLoadFileForWebUI(
+    const std::string& file,
+    bool success,
+    std::unique_ptr<std::string> data) {
+  std::vector<std::unique_ptr<std::string>> data_list;
+  absl::optional<std::string> error;
+  if (success) {
+    DCHECK(data);
+    data_list.push_back(std::move(data));
+  } else {
+    error = base::StringPrintf("Failed to load file '%s'.", file.c_str());
+  }
+
+  DidLoadAndLocalizeFile(file, std::move(data_list), std::move(error));
+}
+
 bool WebViewInternalExecuteCodeFunction::LoadFile(const std::string& file,
                                                   std::string* error) {
   if (!extension()) {
     if (LoadFileForWebUI(
             *details_->file,
             base::BindOnce(
-                &WebViewInternalExecuteCodeFunction::DidLoadAndLocalizeFile,
-                this, file)))
+                &WebViewInternalExecuteCodeFunction::DidLoadFileForWebUI, this,
+                file)))
       return true;
 
     *error = ErrorUtils::FormatErrorMessage(kLoadFileError, file);
@@ -521,7 +593,8 @@ WebViewInternalAddContentScriptsFunction::Run() {
   GURL owner_base_url(
       render_frame_host()->GetSiteInstance()->GetSiteURL().GetWithEmptyPath());
   content::WebContents* sender_web_contents = GetSenderWebContents();
-  HostID host_id = GenerateHostIDFromEmbedder(extension(), sender_web_contents);
+  extensions::mojom::HostID host_id =
+      GenerateHostIDFromEmbedder(extension(), sender_web_contents);
   bool incognito_enabled = browser_context()->IsOffTheRecord();
 
   std::string error;
@@ -563,7 +636,8 @@ WebViewInternalRemoveContentScriptsFunction::Run() {
   DCHECK(manager);
 
   content::WebContents* sender_web_contents = GetSenderWebContents();
-  HostID host_id = GenerateHostIDFromEmbedder(extension(), sender_web_contents);
+  extensions::mojom::HostID host_id =
+      GenerateHostIDFromEmbedder(extension(), sender_web_contents);
 
   std::vector<std::string> script_name_list;
   if (params->script_name_list)
@@ -727,7 +801,7 @@ ExtensionFunction::ResponseAction WebViewInternalFindFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   // Convert the std::string search_text to string16.
-  base::string16 search_text;
+  std::u16string search_text;
   base::UTF8ToUTF16(
       params->search_text.c_str(), params->search_text.length(), &search_text);
 
@@ -1007,12 +1081,11 @@ uint32_t WebViewInternalClearDataFunction::GetRemovalMask() {
   uint32_t remove_mask = 0;
   for (base::DictionaryValue::Iterator i(*data_to_remove); !i.IsAtEnd();
        i.Advance()) {
-    bool selected = false;
-    if (!i.value().GetAsBoolean(&selected)) {
+    if (!i.value().is_bool()) {
       bad_message_ = true;
       return 0;
     }
-    if (selected)
+    if (i.value().GetBool())
       remove_mask |= MaskForKey(i.key().c_str());
   }
 

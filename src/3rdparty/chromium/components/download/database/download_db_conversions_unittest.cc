@@ -4,12 +4,13 @@
 
 #include "components/download/database/download_db_conversions.h"
 
-#include "base/optional.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/download/public/common/download_features.h"
 #include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_url_parameters.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace download {
 
@@ -50,8 +51,16 @@ InProgressInfo CreateInProgressInfo() {
       std::make_pair<std::string, std::string>("123", "456"));
   info.request_headers.emplace_back(
       std::make_pair<std::string, std::string>("ABC", "def"));
-  info.download_schedule = base::make_optional<DownloadSchedule>(
-      false /*only_on_wifi*/, base::nullopt);
+  info.download_schedule = absl::make_optional<DownloadSchedule>(
+      false /*only_on_wifi*/, absl::nullopt);
+  info.credentials_mode = ::network::mojom::CredentialsMode::kOmit;
+  return info;
+}
+
+InProgressInfo CreateInProgressInfoWithRerouteInfo(
+    DownloadItemRerouteInfo reroute_info) {
+  InProgressInfo info = CreateInProgressInfo();
+  info.reroute_info = std::move(reroute_info);
   return info;
 }
 
@@ -160,6 +169,19 @@ TEST_F(DownloadDBConversionsTest, InProgressInfo) {
   EXPECT_EQ(info, InProgressInfoFromProto(InProgressInfoToProto(info)));
 }
 
+TEST_F(DownloadDBConversionsTest, RerouteInfo) {
+  DownloadItemRerouteInfo reroute_info;
+  reroute_info.set_service_provider(
+      enterprise_connectors::FileSystemServiceProvider::BOX);
+  reroute_info.mutable_box()->set_file_id("12345");
+
+  // InProgressInfo with valid fields.
+  InProgressInfo info = CreateInProgressInfoWithRerouteInfo(reroute_info);
+  EXPECT_EQ(info, InProgressInfoFromProto(InProgressInfoToProto(info)));
+  EXPECT_EQ(reroute_info.SerializeAsString(),
+            info.reroute_info.SerializeAsString());
+}
+
 TEST_F(DownloadDBConversionsTest, UkmInfo) {
   UkmInfo info(DownloadSource::FROM_RENDERER, 100);
   EXPECT_EQ(info, UkmInfoFromProto(UkmInfoToProto(info)));
@@ -183,7 +205,7 @@ TEST_F(DownloadDBConversionsTest, DownloadDBEntry) {
 
 TEST_F(DownloadDBConversionsTest, DownloadSchedule) {
   const bool kOnlyOnWifi = true;
-  DownloadSchedule download_schedule(kOnlyOnWifi, base::nullopt /*start_time*/);
+  DownloadSchedule download_schedule(kOnlyOnWifi, absl::nullopt /*start_time*/);
   // InProgressInfo.metered is used to set DownloadSchedule.only_on_wifi.
   auto persisted_download_schedule = DownloadScheduleFromProto(
       DownloadScheduleToProto(download_schedule), !kOnlyOnWifi);

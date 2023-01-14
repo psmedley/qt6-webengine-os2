@@ -9,11 +9,9 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_simple_task_runner.h"
@@ -37,10 +35,13 @@
 #include "mojo/public/cpp/system/functions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/notifications/notification_constants.h"
 #include "third_party/blink/public/common/notifications/notification_resources.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 using ::testing::Return;
@@ -141,15 +142,16 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
         notification_context_.get(), &browser_context_,
         embedded_worker_helper_->context_wrapper(),
         url::Origin::Create(GURL(kTestOrigin)),
+        /*document_url=*/GURL(),
         notification_service_remote_.BindNewPipeAndPassReceiver());
 
     // Provide a mock permission manager to the |browser_context_|.
     browser_context_.SetPermissionControllerDelegate(
         std::make_unique<testing::NiceMock<MockPermissionManager>>());
 
-    mojo::SetDefaultProcessErrorHandler(base::AdaptCallbackForRepeating(
-        base::BindOnce(&BlinkNotificationServiceImplTest::OnMojoError,
-                       base::Unretained(this))));
+    mojo::SetDefaultProcessErrorHandler(
+        base::BindRepeating(&BlinkNotificationServiceImplTest::OnMojoError,
+                            base::Unretained(this)));
   }
 
   void TearDown() override {
@@ -169,15 +171,18 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
     blink::mojom::ServiceWorkerRegistrationOptions options;
     options.scope = GURL(kTestOrigin);
 
+    blink::StorageKey key(url::Origin::Create(GURL(kTestOrigin)));
+
     {
       base::RunLoop run_loop;
       embedded_worker_helper_->context()->RegisterServiceWorker(
-          GURL(kTestServiceWorkerUrl), options,
+          GURL(kTestServiceWorkerUrl), key, options,
           blink::mojom::FetchClientSettingsObject::New(),
           base::BindOnce(
               &BlinkNotificationServiceImplTest::DidRegisterServiceWorker,
               base::Unretained(this), &service_worker_registration_id,
-              run_loop.QuitClosure()));
+              run_loop.QuitClosure()),
+          /*requesting_frame_id=*/GlobalRenderFrameHostId());
       run_loop.Run();
     }
 
@@ -189,8 +194,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
     {
       base::RunLoop run_loop;
       embedded_worker_helper_->context()->registry()->FindRegistrationForId(
-          service_worker_registration_id,
-          url::Origin::Create(GURL(kTestOrigin)),
+          service_worker_registration_id, key,
           base::BindOnce(&BlinkNotificationServiceImplTest::
                              DidFindServiceWorkerRegistration,
                          base::Unretained(this), service_worker_registration,
@@ -276,7 +280,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
     if (success) {
       get_notification_resources_ = notification_resources;
     } else {
-      get_notification_resources_ = base::nullopt;
+      get_notification_resources_ = absl::nullopt;
     }
     std::move(quit_closure).Run();
   }
@@ -360,23 +364,21 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
     base::RunLoop run_loop;
     notification_context_->ReadAllNotificationDataForServiceWorkerRegistration(
         GURL(kTestOrigin), service_worker_registration_id,
-        base::AdaptCallbackForRepeating(
-            base::BindOnce(&BlinkNotificationServiceImplTest::
-                               DidGetNotificationDataFromContext,
-                           base::Unretained(this), run_loop.QuitClosure())));
+        base::BindOnce(&BlinkNotificationServiceImplTest::
+                           DidGetNotificationDataFromContext,
+                       base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     return get_notifications_data_;
   }
 
-  base::Optional<blink::NotificationResources>
+  absl::optional<blink::NotificationResources>
   GetNotificationResourcesFromContextSync(const std::string& notification_id) {
     base::RunLoop run_loop;
     notification_context_->ReadNotificationResources(
         notification_id, GURL(kTestOrigin),
-        base::AdaptCallbackForRepeating(
-            base::BindOnce(&BlinkNotificationServiceImplTest::
-                               DidGetNotificationResourcesFromContext,
-                           base::Unretained(this), run_loop.QuitClosure())));
+        base::BindOnce(&BlinkNotificationServiceImplTest::
+                           DidGetNotificationResourcesFromContext,
+                       base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     return get_notification_resources_;
   }
@@ -400,9 +402,9 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
     notification_context_->ReadNotificationDataAndRecordInteraction(
         notification_id, GURL(kTestOrigin),
         PlatformNotificationContext::Interaction::NONE,
-        base::AdaptCallbackForRepeating(base::BindOnce(
+        base::BindOnce(
             &BlinkNotificationServiceImplTest::DidReadNotificationData,
-            base::Unretained(this), run_loop.QuitClosure())));
+            base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     return read_notification_data_callback_result_;
   }
@@ -454,7 +456,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
 
   std::vector<NotificationDatabaseData> get_notifications_data_;
 
-  base::Optional<blink::NotificationResources> get_notification_resources_;
+  absl::optional<blink::NotificationResources> get_notification_resources_;
 
   bool read_notification_data_callback_result_ = false;
 

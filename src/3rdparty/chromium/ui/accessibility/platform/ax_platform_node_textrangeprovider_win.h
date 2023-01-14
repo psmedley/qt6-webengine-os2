@@ -109,7 +109,7 @@ class AX_EXPORT __declspec(uuid("3071e40d-a10d-45ff-a59f-6e8e1138e2c1"))
 
   IFACEMETHODIMP ExpandToEnclosingUnitImpl(TextUnit unit);
 
-  base::string16 GetString(int max_count,
+  std::u16string GetString(int max_count,
                            size_t* appended_newlines_count = nullptr);
   AXPlatformNodeWin* owner() const;
   const AXPositionInstance& start() const { return endpoints_.GetStart(); }
@@ -178,7 +178,7 @@ class AX_EXPORT __declspec(uuid("3071e40d-a10d-45ff-a59f-6e8e1138e2c1"))
   void RemoveFocusFromPreviousSelectionIfNeeded(
       const AXNodeRange& new_selection);
   AXPlatformNodeWin* GetLowestAccessibleCommonPlatformNode() const;
-  bool HasCaretOrSelectionInPlainTextField(
+  bool HasCaretOrSelectionInAtomicTextField(
       const AXPositionInstance& position) const;
 
   void SetStart(AXPositionInstance start);

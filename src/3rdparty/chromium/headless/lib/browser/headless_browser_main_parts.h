@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/files/file_path.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
@@ -17,6 +16,14 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #endif
+
+#if defined(HEADLESS_USE_POLICY)
+#include "headless/lib/browser/policy/headless_browser_policy_connector.h"
+#endif
+
+namespace device {
+class GeolocationManager;
+}  // namespace device
 
 namespace headless {
 
@@ -30,25 +37,42 @@ class HeadlessBrowserMainParts : public content::BrowserMainParts {
   ~HeadlessBrowserMainParts() override;
 
   // content::BrowserMainParts implementation:
-  void PreMainMessageLoopRun() override;
-  void PreDefaultMainMessageLoopRun(base::OnceClosure quit_closure) override;
-  bool MainMessageLoopRun(int* result_code) override;
+  int PreMainMessageLoopRun() override;
+  void WillRunMainMessageLoop(
+      std::unique_ptr<base::RunLoop>& run_loop) override;
   void PostMainMessageLoopRun() override;
 #if defined(OS_MAC)
-  void PreMainMessageLoopStart() override;
+  void PreCreateMainMessageLoop() override;
 #endif
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
-  void PostMainMessageLoopStart() override;
+  void PostCreateMainMessageLoop() override;
 #endif
   void QuitMainMessageLoop();
 
+#if defined(OS_MAC)
+  device::GeolocationManager* GetGeolocationManager();
+#endif
+
+#if defined(HEADLESS_USE_PREFS)
+  PrefService* GetPrefs() { return local_state_.get(); }
+#endif
+
+#if defined(HEADLESS_USE_POLICY)
+  policy::PolicyService* GetPolicyService();
+#endif
+
  private:
+  void MaybeStartLocalDevToolsHttpHandler();
 #if defined(HEADLESS_USE_PREFS)
   void CreatePrefService();
 #endif
 
   const content::MainFunctionParams parameters_;  // For running browser tests.
   HeadlessBrowserImpl* browser_;  // Not owned.
+
+#if defined(HEADLESS_USE_POLICY)
+  std::unique_ptr<policy::HeadlessBrowserPolicyConnector> policy_connector_;
+#endif
 
 #if defined(HEADLESS_USE_PREFS)
   std::unique_ptr<PrefService> local_state_;
@@ -57,6 +81,9 @@ class HeadlessBrowserMainParts : public content::BrowserMainParts {
   bool run_message_loop_ = true;
   bool devtools_http_handler_started_ = false;
   base::OnceClosure quit_main_message_loop_;
+#if defined(OS_MAC)
+  std::unique_ptr<device::GeolocationManager> geolocation_manager_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(HeadlessBrowserMainParts);
 };

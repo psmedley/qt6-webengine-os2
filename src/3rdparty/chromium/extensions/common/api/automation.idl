@@ -24,11 +24,13 @@
     blur,
     busyChanged,
     checkedStateChanged,
+    checkedStateDescriptionChanged,
     childrenChanged,
     classNameChanged,
     clicked,
     collapsed,
     controlsChanged,
+    detailsChanged,
     describedByChanged,
     descriptionChanged,
     documentSelectionChanged,
@@ -136,7 +138,6 @@
     abbr,
     alert,
     alertDialog,
-    anchor,
     application,
     article,
     audio,
@@ -242,9 +243,7 @@
     heading,
     iframe,
     iframePresentational,
-    ignored,
     image,
-    imageMap,
     imeCandidate,
     inlineTextBox,
     inputTime,
@@ -285,7 +284,6 @@
     popUpButton,
     portal,
     pre,
-    presentational,
     progressIndicator,
     radioButton,
     radioGroup,
@@ -376,6 +374,7 @@
     internalInvalidateTree,
     loadInlineTextBoxes,
     replaceSelectedText,
+    resumeMedia,
     scrollBackward,
     scrollDown,
     scrollForward,
@@ -391,7 +390,10 @@
     setValue,
     showContextMenu,
     signalEndOfTest,
-    showTooltip
+    showTooltip,
+    startDuckingMedia,
+    stopDuckingMedia,
+    suspendMedia
   };
 
   // Possible changes to the automation tree. For any given atomic change
@@ -448,10 +450,12 @@
   };
 
   enum DescriptionFromType {
-    uninitialized,
-    attribute,
-    contents,
+    ariaDescription,
+    buttonLabel,
     relatedElement,
+    rubyAnnotation,
+    summary,
+    tableCaption,
     title
   };
 
@@ -461,14 +465,26 @@
     readOnly
   };
 
-  // Indicates the availability and type of interactive popup element
+  // Availability and types for an interactive popup element.
   enum HasPopup {
+    false,
     true,
     menu,
     listbox,
     tree,
     grid,
     dialog
+  };
+
+  // Indicates the ARIA-current state.
+  enum AriaCurrentState {
+    false,
+    true,
+    page,
+    step,
+    location,
+    date,
+    time
   };
 
   // Describes possible actions when performing a do default action.
@@ -569,6 +585,7 @@ enum IntentTextBoundaryType {
   pageStartOrEnd,
   paragraphEnd,
   paragraphStart,
+  paragraphStartSkippingEmptyParagraphs,
   paragraphStartOrEnd,
   sentenceEnd,
   sentenceStart,
@@ -1038,9 +1055,6 @@ enum SortDirectionType {
     // text element; -1 if no selection.
     long? textSelEnd;
 
-    // The input type, like email or number.
-    DOMString? textInputType;
-
     // An array of Marker objects for this node.
     Marker[]? markers;
 
@@ -1222,14 +1236,8 @@ enum SortDirectionType {
     // The detected language code for this subtree.
     DOMString? detectedLanguage;
 
-    // Indicates the availability and type of interactive popup element
-    // true - the popup is a menu
-    // menu - the popup is a menu
-    // listbox - the popup is a listbox
-    // tree - the popup is a tree
-    // grid - the popup is a grid
-    // dialog - the popup is a dialog
-    DOMString? hasPopup;
+    // Indicates the availability and type of an interactive popup element.
+    HasPopup? hasPopup;
 
     // Input restriction, if any, such as readonly or disabled:
     // undefined - enabled control or other object that is not disabled
@@ -1280,8 +1288,17 @@ enum SortDirectionType {
     // Indicates the font family.
     DOMString fontFamily;
 
-    // Indicates whether this is a root of an editable subtree.
-    boolean editableRoot;
+    // Indicates whether the object functions as a text field which exposes its
+    // descendants. Use cases include the root of a content-editable region, an
+    // ARIA textbox which isn't currently editable and which has interactive
+    // descendants, and a <body> element that has "design-mode" set to "on".
+    boolean nonAtomicTextFieldRoot;
+
+    // Indicates aria-current state.
+    AriaCurrentState? ariaCurrentState;
+
+    // The application id for a tree rooted at this node.
+    DOMString? appId;
 
     //
     // Walking the tree.

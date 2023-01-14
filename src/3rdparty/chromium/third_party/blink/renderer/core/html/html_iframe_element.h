@@ -26,7 +26,7 @@
 
 #include "services/network/public/mojom/trust_tokens.mojom-blink-forward.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
@@ -48,13 +48,13 @@ class CORE_EXPORT HTMLIFrameElement final
   ~HTMLIFrameElement() override;
 
   DOMTokenList* sandbox() const;
-  // Support JS introspection of frame policy (e.g. feature policy)
+  // Support JS introspection of frame policy (e.g. permissions policy)
   DOMFeaturePolicy* featurePolicy();
 
   // Returns attributes that should be checked against Trusted Types
   const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
-  ParsedFeaturePolicy ConstructContainerPolicy() const override;
+  ParsedPermissionsPolicy ConstructContainerPolicy() const override;
   DocumentPolicyFeatureState ConstructRequiredPolicy() const override;
 
   mojom::blink::FrameOwnerElementType OwnerType() const final {
@@ -87,7 +87,7 @@ class CORE_EXPORT HTMLIFrameElement final
   // FrameOwner overrides:
   bool AllowFullscreen() const override { return allow_fullscreen_; }
   bool AllowPaymentRequest() const override { return allow_payment_request_; }
-  AtomicString RequiredCsp() const override { return required_csp_; }
+  void DidChangeAttributes() override;
 
   AtomicString name_;
   AtomicString required_csp_;
@@ -100,6 +100,7 @@ class CORE_EXPORT HTMLIFrameElement final
   bool allow_fullscreen_;
   bool allow_payment_request_;
   bool collapsed_by_client_;
+  bool anonymous_ = false;
   Member<HTMLIFrameElementSandbox> sandbox_;
   Member<DOMFeaturePolicy> policy_;
 

@@ -6,12 +6,15 @@
 
 #include "fxjs/xfa/cfxjse_formcalc_context.h"
 
+#include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 
 #include <algorithm>
-#include <cctype>
+#include <sstream>
 #include <utility>
 
+#include "core/fxcrt/cfx_datetime.h"
 #include "core/fxcrt/cfx_widetextbuf.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_random.h"
@@ -22,8 +25,8 @@
 #include "fxjs/xfa/cfxjse_value.h"
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/check.h"
+#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/optional.h"
-#include "third_party/base/stl_util.h"
 #include "xfa/fgas/crt/cfgas_decimal.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/fm2js/cxfa_fmparser.h"
@@ -326,37 +329,34 @@ void AlternateDateTimeSymbols(WideString* pPattern,
   }
 }
 
-std::pair<bool, uint32_t> PatternStringType(ByteStringView bsPattern) {
+std::pair<bool, CXFA_LocaleValue::ValueType> PatternStringType(
+    ByteStringView bsPattern) {
   WideString wsPattern = WideString::FromUTF8(bsPattern);
   if (L"datetime" == wsPattern.First(8))
-    return {true, XFA_VT_DATETIME};
+    return {true, CXFA_LocaleValue::ValueType::kDateTime};
   if (L"date" == wsPattern.First(4)) {
     auto pos = wsPattern.Find(L"time");
-    uint32_t type =
-        pos.has_value() && pos.value() != 0 ? XFA_VT_DATETIME : XFA_VT_DATE;
-    return {true, type};
+    if (pos.has_value() && pos.value() != 0)
+      return {true, CXFA_LocaleValue::ValueType::kDateTime};
+    return {true, CXFA_LocaleValue::ValueType::kDate};
   }
   if (L"time" == wsPattern.First(4))
-    return {true, XFA_VT_TIME};
+    return {true, CXFA_LocaleValue::ValueType::kTime};
   if (L"text" == wsPattern.First(4))
-    return {true, XFA_VT_TEXT};
+    return {true, CXFA_LocaleValue::ValueType::kText};
   if (L"num" == wsPattern.First(3)) {
-    uint32_t type;
-    if (L"integer" == wsPattern.Substr(4, 7)) {
-      type = XFA_VT_INTEGER;
-    } else if (L"decimal" == wsPattern.Substr(4, 7)) {
-      type = XFA_VT_DECIMAL;
-    } else if (L"currency" == wsPattern.Substr(4, 8)) {
-      type = XFA_VT_FLOAT;
-    } else if (L"percent" == wsPattern.Substr(4, 7)) {
-      type = XFA_VT_FLOAT;
-    } else {
-      type = XFA_VT_FLOAT;
-    }
-    return {true, type};
+    if (L"integer" == wsPattern.Substr(4, 7))
+      return {true, CXFA_LocaleValue::ValueType::kInteger};
+    if (L"decimal" == wsPattern.Substr(4, 7))
+      return {true, CXFA_LocaleValue::ValueType::kDecimal};
+    if (L"currency" == wsPattern.Substr(4, 8))
+      return {true, CXFA_LocaleValue::ValueType::kFloat};
+    if (L"percent" == wsPattern.Substr(4, 7))
+      return {true, CXFA_LocaleValue::ValueType::kFloat};
+    return {true, CXFA_LocaleValue::ValueType::kFloat};
   }
 
-  uint32_t type = XFA_VT_NULL;
+  CXFA_LocaleValue::ValueType type = CXFA_LocaleValue::ValueType::kNull;
   wsPattern.MakeLower();
   const wchar_t* pData = wsPattern.c_str();
   int32_t iLength = wsPattern.GetLength();
@@ -375,11 +375,11 @@ std::pair<bool, uint32_t> PatternStringType(ByteStringView bsPattern) {
     }
 
     if (wsPatternChar == 'h' || wsPatternChar == 'k')
-      return {false, XFA_VT_TIME};
+      return {false, CXFA_LocaleValue::ValueType::kTime};
     if (wsPatternChar == 'x' || wsPatternChar == 'o' || wsPatternChar == '0')
-      return {false, XFA_VT_TEXT};
+      return {false, CXFA_LocaleValue::ValueType::kText};
     if (wsPatternChar == 'v' || wsPatternChar == '8' || wsPatternChar == '$')
-      return {false, XFA_VT_FLOAT};
+      return {false, CXFA_LocaleValue::ValueType::kFloat};
     if (wsPatternChar == 'y' || wsPatternChar == 'j') {
       iIndex++;
       wchar_t timePatternChar;
@@ -391,24 +391,21 @@ std::pair<bool, uint32_t> PatternStringType(ByteStringView bsPattern) {
           continue;
         }
         if (!bSingleQuotation && timePatternChar == 't')
-          return {false, XFA_VT_DATETIME};
+          return {false, CXFA_LocaleValue::ValueType::kDateTime};
         iIndex++;
       }
-      return {false, XFA_VT_DATE};
+      return {false, CXFA_LocaleValue::ValueType::kDate};
     }
 
     if (wsPatternChar == 'a') {
-      type = XFA_VT_TEXT;
+      type = CXFA_LocaleValue::ValueType::kText;
     } else if (wsPatternChar == 'z' || wsPatternChar == 's' ||
                wsPatternChar == 'e' || wsPatternChar == ',' ||
                wsPatternChar == '.') {
-      type = XFA_VT_FLOAT;
+      type = CXFA_LocaleValue::ValueType::kFloat;
     }
     iIndex++;
   }
-
-  if (type == XFA_VT_NULL)
-    type = XFA_VT_TEXT | XFA_VT_FLOAT;
   return {false, type};
 }
 
@@ -472,7 +469,7 @@ bool IsWhitespace(char c) {
 }
 
 bool IsPartOfNumber(char ch) {
-  return std::isdigit(ch) || ch == '-' || ch == '.';
+  return isdigit(ch) || ch == '-' || ch == '.';
 }
 
 bool IsPartOfNumberW(wchar_t ch) {
@@ -520,7 +517,7 @@ bool IsIsoDateFormat(pdfium::span<const char> pData,
   char szYear[5];
   szYear[4] = '\0';
   for (int32_t i = 0; i < 4; ++i) {
-    if (!std::isdigit(pData[i]))
+    if (!isdigit(pData[i]))
       return false;
 
     szYear[i] = pData[i];
@@ -533,7 +530,7 @@ bool IsIsoDateFormat(pdfium::span<const char> pData,
   iStyle = pData[4] == '-' ? 1 : 0;
 
   size_t iPosOff = iStyle == 0 ? 4 : 5;
-  if (!std::isdigit(pData[iPosOff]) || !std::isdigit(pData[iPosOff + 1]))
+  if (!isdigit(pData[iPosOff]) || !isdigit(pData[iPosOff + 1]))
     return false;
 
   char szBuffer[3] = {};
@@ -552,7 +549,7 @@ bool IsIsoDateFormat(pdfium::span<const char> pData,
     if (pData.size() == 7)
       return true;
   }
-  if (!std::isdigit(pData[iPosOff]) || !std::isdigit(pData[iPosOff + 1]))
+  if (!isdigit(pData[iPosOff]) || !isdigit(pData[iPosOff + 1]))
     return false;
 
   szBuffer[0] = pData[iPosOff];
@@ -598,7 +595,7 @@ bool IsIsoTimeFormat(pdfium::span<const char> pData,
   size_t iZone = 0;
   size_t i = 0;
   while (i < pData.size()) {
-    if (!std::isdigit(pData[i]) && pData[i] != ':') {
+    if (!isdigit(pData[i]) && pData[i] != ':') {
       iZone = i;
       break;
     }
@@ -611,11 +608,11 @@ bool IsIsoTimeFormat(pdfium::span<const char> pData,
   size_t iPos = 0;
   size_t iIndex = 0;
   while (iIndex < iZone) {
-    if (!std::isdigit(pData[iIndex]))
+    if (!isdigit(pData[iIndex]))
       return false;
 
     szBuffer[0] = pData[iIndex];
-    if (!std::isdigit(pData[iIndex + 1]))
+    if (!isdigit(pData[iIndex + 1]))
       return false;
 
     szBuffer[1] = pData[iIndex + 1];
@@ -657,7 +654,7 @@ bool IsIsoTimeFormat(pdfium::span<const char> pData,
     char szMilliSeconds[kSubSecondLength + 1];
     for (int j = 0; j < kSubSecondLength; ++j) {
       char c = pData[iIndex + j];
-      if (!std::isdigit(c))
+      if (!isdigit(c))
         return false;
       szMilliSeconds[j] = c;
     }
@@ -685,11 +682,11 @@ bool IsIsoTimeFormat(pdfium::span<const char> pData,
   }
   iPos = 0;
   while (iIndex < pData.size()) {
-    if (!std::isdigit(pData[iIndex]))
+    if (!isdigit(pData[iIndex]))
       return false;
 
     szBuffer[0] = pData[iIndex];
-    if (!std::isdigit(pData[iIndex + 1]))
+    if (!isdigit(pData[iIndex + 1]))
       return false;
 
     szBuffer[1] = pData[iIndex + 1];
@@ -1173,20 +1170,17 @@ WideString EncodeXML(const ByteString& bsXML) {
 }
 
 ByteString TrillionUS(ByteStringView bsData) {
-  static const ByteStringView pUnits[] = {"zero",  "one",  "two", "three",
-                                          "four",  "five", "six", "seven",
-                                          "eight", "nine"};
-  static const ByteStringView pCapUnits[] = {"Zero",  "One",  "Two", "Three",
-                                             "Four",  "Five", "Six", "Seven",
-                                             "Eight", "Nine"};
-  static const ByteStringView pTens[] = {
+  static const char kUnits[][6] = {"zero", "one", "two",   "three", "four",
+                                   "five", "six", "seven", "eight", "nine"};
+  static const char kCapUnits[][6] = {"Zero", "One", "Two",   "Three", "Four",
+                                      "Five", "Six", "Seven", "Eight", "Nine"};
+  static const char kTens[][10] = {
       "Ten",     "Eleven",  "Twelve",    "Thirteen", "Fourteen",
       "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"};
-  static const ByteStringView pLastTens[] = {"Twenty", "Thirty", "Forty",
-                                             "Fifty",  "Sixty",  "Seventy",
-                                             "Eighty", "Ninety"};
-  static const ByteStringView pComm[] = {" Hundred ", " Thousand ", " Million ",
-                                         " Billion ", "Trillion"};
+  static const char kLastTens[][8] = {"Twenty", "Thirty",  "Forty",  "Fifty",
+                                      "Sixty",  "Seventy", "Eighty", "Ninety"};
+  static const char kComm[][11] = {" Hundred ", " Thousand ", " Million ",
+                                   " Billion ", "Trillion"};
   const char* pData = bsData.unterminated_c_str();
   int32_t iLength = bsData.GetLength();
   int32_t iComm = 0;
@@ -1207,66 +1201,66 @@ ByteString TrillionUS(ByteStringView bsData) {
   int32_t iIndex = 0;
   if (iFirstCount == 3) {
     if (pData[iIndex] != '0') {
-      strBuf << pCapUnits[pData[iIndex] - '0'];
-      strBuf << pComm[0];
+      strBuf << kCapUnits[pData[iIndex] - '0'];
+      strBuf << kComm[0];
     }
     if (pData[iIndex + 1] == '0') {
-      strBuf << pCapUnits[pData[iIndex + 2] - '0'];
+      strBuf << kCapUnits[pData[iIndex + 2] - '0'];
     } else {
       if (pData[iIndex + 1] > '1') {
-        strBuf << pLastTens[pData[iIndex + 1] - '2'];
+        strBuf << kLastTens[pData[iIndex + 1] - '2'];
         strBuf << "-";
-        strBuf << pUnits[pData[iIndex + 2] - '0'];
+        strBuf << kUnits[pData[iIndex + 2] - '0'];
       } else if (pData[iIndex + 1] == '1') {
-        strBuf << pTens[pData[iIndex + 2] - '0'];
+        strBuf << kTens[pData[iIndex + 2] - '0'];
       } else if (pData[iIndex + 1] == '0') {
-        strBuf << pCapUnits[pData[iIndex + 2] - '0'];
+        strBuf << kCapUnits[pData[iIndex + 2] - '0'];
       }
     }
     iIndex += 3;
   } else if (iFirstCount == 2) {
     if (pData[iIndex] == '0') {
-      strBuf << pCapUnits[pData[iIndex + 1] - '0'];
+      strBuf << kCapUnits[pData[iIndex + 1] - '0'];
     } else {
       if (pData[iIndex] > '1') {
-        strBuf << pLastTens[pData[iIndex] - '2'];
+        strBuf << kLastTens[pData[iIndex] - '2'];
         strBuf << "-";
-        strBuf << pUnits[pData[iIndex + 1] - '0'];
+        strBuf << kUnits[pData[iIndex + 1] - '0'];
       } else if (pData[iIndex] == '1') {
-        strBuf << pTens[pData[iIndex + 1] - '0'];
+        strBuf << kTens[pData[iIndex + 1] - '0'];
       } else if (pData[iIndex] == '0') {
-        strBuf << pCapUnits[pData[iIndex + 1] - '0'];
+        strBuf << kCapUnits[pData[iIndex + 1] - '0'];
       }
     }
     iIndex += 2;
   } else if (iFirstCount == 1) {
-    strBuf << pCapUnits[pData[iIndex] - '0'];
+    strBuf << kCapUnits[pData[iIndex] - '0'];
     ++iIndex;
   }
   if (iLength > 3 && iFirstCount > 0) {
-    strBuf << pComm[iComm];
+    strBuf << kComm[iComm];
     --iComm;
   }
   while (iIndex < iLength) {
     if (pData[iIndex] != '0') {
-      strBuf << pCapUnits[pData[iIndex] - '0'];
-      strBuf << pComm[0];
+      strBuf << kCapUnits[pData[iIndex] - '0'];
+      strBuf << kComm[0];
     }
     if (pData[iIndex + 1] == '0') {
-      strBuf << pCapUnits[pData[iIndex + 2] - '0'];
+      strBuf << kCapUnits[pData[iIndex + 2] - '0'];
     } else {
       if (pData[iIndex + 1] > '1') {
-        strBuf << pLastTens[pData[iIndex + 1] - '2'];
+        strBuf << kLastTens[pData[iIndex + 1] - '2'];
         strBuf << "-";
-        strBuf << pUnits[pData[iIndex + 2] - '0'];
+        strBuf << kUnits[pData[iIndex + 2] - '0'];
       } else if (pData[iIndex + 1] == '1') {
-        strBuf << pTens[pData[iIndex + 2] - '0'];
+        strBuf << kTens[pData[iIndex + 2] - '0'];
       } else if (pData[iIndex + 1] == '0') {
-        strBuf << pCapUnits[pData[iIndex + 2] - '0'];
+        strBuf << kCapUnits[pData[iIndex + 2] - '0'];
       }
     }
     if (iIndex < iLength - 3) {
-      strBuf << pComm[iComm];
+      strBuf << kComm[iComm];
       --iComm;
     }
     iIndex += 3;
@@ -1559,12 +1553,13 @@ v8::Local<v8::Value> GetObjectForName(CFXJSE_HostObject* pHostObject,
     return v8::Local<v8::Value>();
 
   CFXJSE_Engine* pScriptContext = pDoc->GetScriptContext();
-  uint32_t dwFlags = XFA_RESOLVENODE_Children | XFA_RESOLVENODE_Properties |
-                     XFA_RESOLVENODE_Siblings | XFA_RESOLVENODE_Parent;
   Optional<CFXJSE_Engine::ResolveResult> maybeResult =
       pScriptContext->ResolveObjects(
           pScriptContext->GetThisObject(),
-          WideString::FromUTF8(bsAccessorName).AsStringView(), dwFlags);
+          WideString::FromUTF8(bsAccessorName).AsStringView(),
+          Mask<XFA_ResolveFlag>{
+              XFA_ResolveFlag::kChildren, XFA_ResolveFlag::kProperties,
+              XFA_ResolveFlag::kSiblings, XFA_ResolveFlag::kParent});
   if (!maybeResult.has_value() ||
       maybeResult.value().type != CFXJSE_Engine::ResolveResult::Type::kNodes ||
       maybeResult.value().objects.empty()) {
@@ -1588,11 +1583,11 @@ Optional<CFXJSE_Engine::ResolveResult> ResolveObjects(
   WideString wsSomExpression = WideString::FromUTF8(bsSomExp);
   CFXJSE_Engine* pScriptContext = pDoc->GetScriptContext();
   CXFA_Object* pNode = nullptr;
-  uint32_t dFlags = 0UL;
+  Mask<XFA_ResolveFlag> dwFlags;
   if (bDotAccessor) {
     if (fxv8::IsNull(pRefValue)) {
       pNode = pScriptContext->GetThisObject();
-      dFlags = XFA_RESOLVENODE_Siblings | XFA_RESOLVENODE_Parent;
+      dwFlags = {XFA_ResolveFlag::kSiblings, XFA_ResolveFlag::kParent};
     } else {
       pNode = CFXJSE_Engine::ToObject(pIsolate, pRefValue);
       if (!pNode)
@@ -1603,27 +1598,28 @@ Optional<CFXJSE_Engine::ResolveResult> ResolveObjects(
         if (CXFA_Node* pXFANode = pNode->AsNode()) {
           Optional<WideString> ret =
               pXFANode->JSObject()->TryAttribute(XFA_Attribute::Name, false);
-          if (ret)
-            wsName = *ret;
+          if (ret.has_value())
+            wsName = ret.value();
         }
         if (wsName.IsEmpty())
           wsName = L"#" + WideString::FromASCII(pNode->GetClassName());
 
         wsSomExpression = wsName + wsSomExpression;
-        dFlags = XFA_RESOLVENODE_Siblings;
+        dwFlags = XFA_ResolveFlag::kSiblings;
       } else {
-        dFlags = (bsSomExp == "*")
-                     ? (XFA_RESOLVENODE_Children)
-                     : (XFA_RESOLVENODE_Children | XFA_RESOLVENODE_Attributes |
-                        XFA_RESOLVENODE_Properties);
+        dwFlags = (bsSomExp == "*")
+                      ? Mask<XFA_ResolveFlag>{XFA_ResolveFlag::kChildren}
+                      : Mask<XFA_ResolveFlag>{XFA_ResolveFlag::kChildren,
+                                              XFA_ResolveFlag::kAttributes,
+                                              XFA_ResolveFlag::kProperties};
       }
     }
   } else {
     pNode = CFXJSE_Engine::ToObject(pIsolate, pRefValue);
-    dFlags = XFA_RESOLVENODE_AnyChild;
+    dwFlags = XFA_ResolveFlag::kAnyChild;
   }
   return pScriptContext->ResolveObjects(pNode, wsSomExpression.AsStringView(),
-                                        dFlags);
+                                        dwFlags);
 }
 
 std::vector<v8::Local<v8::Value>> ParseResolveResult(
@@ -2053,7 +2049,7 @@ void CFXJSE_FormCalcContext::IsoTime2Num(
   }
   bsArg = bsArg.Last(bsArg.GetLength() - (pos.value() + 1));
 
-  CXFA_LocaleValue timeValue(XFA_VT_TIME,
+  CXFA_LocaleValue timeValue(CXFA_LocaleValue::ValueType::kTime,
                              WideString::FromUTF8(bsArg.AsStringView()), pMgr);
   if (!timeValue.IsValid()) {
     info.GetReturnValue().Set(0);
@@ -2069,7 +2065,7 @@ void CFXJSE_FormCalcContext::IsoTime2Num(
   // TODO(dsinclair): See if there is other time conversion code in pdfium and
   //   consolidate.
   int32_t mins = hour * 60 + min;
-  mins -= (pMgr->GetDefLocale()->GetTimeZone().tzHour * 60);
+  mins -= pMgr->GetDefLocale()->GetTimeZoneInMinutes();
   while (mins > 1440)
     mins -= 1440;
   while (mins < 0)
@@ -2469,7 +2465,7 @@ void CFXJSE_FormCalcContext::Time2Num(
     wsFormat = WideString::FromUTF8(bsFormat.AsStringView());
   }
   wsFormat = L"time{" + wsFormat + L"}";
-  CXFA_LocaleValue localeValue(XFA_VT_TIME,
+  CXFA_LocaleValue localeValue(CXFA_LocaleValue::ValueType::kTime,
                                WideString::FromUTF8(bsTime.AsStringView()),
                                wsFormat, pLocale, pMgr);
   if (!localeValue.IsValid()) {
@@ -2479,22 +2475,21 @@ void CFXJSE_FormCalcContext::Time2Num(
 
   CFX_DateTime uniTime = localeValue.GetTime();
   int32_t hour = uniTime.GetHour();
-  int32_t min = uniTime.GetMinute();
-  int32_t second = uniTime.GetSecond();
-  int32_t milSecond = uniTime.GetMillisecond();
-  int32_t mins = hour * 60 + min;
+  int32_t minute = uniTime.GetMinute();
+  const int32_t second = uniTime.GetSecond();
+  const int32_t millisecond = uniTime.GetMillisecond();
 
-  mins -= (CXFA_TimeZoneProvider().GetTimeZone().tzHour * 60);
-  while (mins > 1440)
-    mins -= 1440;
+  constexpr int kMinutesInDay = 24 * 60;
+  int32_t minutes_with_tz =
+      hour * 60 + minute - CXFA_TimeZoneProvider().GetTimeZoneInMinutes();
+  minutes_with_tz %= kMinutesInDay;
+  if (minutes_with_tz < 0)
+    minutes_with_tz += kMinutesInDay;
 
-  while (mins < 0)
-    mins += 1440;
-
-  hour = mins / 60;
-  min = mins % 60;
-  info.GetReturnValue().Set(hour * 3600000 + min * 60000 + second * 1000 +
-                            milSecond + 1);
+  hour = minutes_with_tz / 60;
+  minute = minutes_with_tz % 60;
+  info.GetReturnValue().Set(hour * 3600000 + minute * 60000 + second * 1000 +
+                            millisecond + 1);
 }
 
 // static
@@ -2550,9 +2545,10 @@ ByteString CFXJSE_FormCalcContext::Local2IsoDate(CFXJSE_HostObject* pThis,
     return ByteString();
 
   WideString wsFormat = FormatFromString(pLocale, bsFormat);
-  CFX_DateTime dt = CXFA_LocaleValue(XFA_VT_DATE, WideString::FromUTF8(bsDate),
-                                     wsFormat, pLocale, pMgr)
-                        .GetDate();
+  CFX_DateTime dt =
+      CXFA_LocaleValue(CXFA_LocaleValue::ValueType::kDate,
+                       WideString::FromUTF8(bsDate), wsFormat, pLocale, pMgr)
+          .GetDate();
 
   return ByteString::Format("%4d-%02d-%02d", dt.GetYear(), dt.GetMonth(),
                             dt.GetDay());
@@ -2574,8 +2570,9 @@ ByteString CFXJSE_FormCalcContext::IsoDate2Local(CFXJSE_HostObject* pThis,
 
   WideString wsFormat = FormatFromString(pLocale, bsFormat);
   WideString wsRet;
-  CXFA_LocaleValue(XFA_VT_DATE, WideString::FromUTF8(bsDate), pMgr)
-      .FormatPatterns(wsRet, wsFormat, pLocale, XFA_VALUEPICTURE_Display);
+  CXFA_LocaleValue(CXFA_LocaleValue::ValueType::kDate,
+                   WideString::FromUTF8(bsDate), pMgr)
+      .FormatPatterns(wsRet, wsFormat, pLocale, XFA_ValuePicture::kDisplay);
   return wsRet.ToUTF8();
 }
 
@@ -2595,10 +2592,11 @@ ByteString CFXJSE_FormCalcContext::IsoTime2Local(CFXJSE_HostObject* pThis,
 
   WideString wsFormat = {
       L"time{", FormatFromString(pLocale, bsFormat).AsStringView(), L"}"};
-  CXFA_LocaleValue widgetValue(XFA_VT_TIME, WideString::FromUTF8(bsTime), pMgr);
+  CXFA_LocaleValue widgetValue(CXFA_LocaleValue::ValueType::kTime,
+                               WideString::FromUTF8(bsTime), pMgr);
   WideString wsRet;
   widgetValue.FormatPatterns(wsRet, wsFormat, pLocale,
-                             XFA_VALUEPICTURE_Display);
+                             XFA_ValuePicture::kDisplay);
   return wsRet.ToUTF8();
 }
 
@@ -3065,8 +3063,8 @@ void CFXJSE_FormCalcContext::Rate(
     return;
   }
 
-  info.GetReturnValue().Set(
-      FXSYS_pow((float)(nFuture / nPresent), (float)(1 / nTotalNumber)) - 1);
+  info.GetReturnValue().Set(powf(nFuture / nPresent, 1.0f / nTotalNumber) -
+                            1.0f);
 }
 
 // static
@@ -3527,7 +3525,7 @@ void CFXJSE_FormCalcContext::UnitValue(
       ++uVal;
 
     while (uVal < bsUnitTemp.GetLength()) {
-      if (!std::isdigit(pChar[uVal]) && pChar[uVal] != '.')
+      if (!isdigit(pChar[uVal]) && pChar[uVal] != '.')
         break;
       ++uVal;
     }
@@ -3786,12 +3784,12 @@ void CFXJSE_FormCalcContext::Format(
   WideString wsPattern = WideString::FromUTF8(bsPattern.AsStringView());
   WideString wsValue = WideString::FromUTF8(bsValue.AsStringView());
   bool bPatternIsString;
-  uint32_t dwPatternType;
+  CXFA_LocaleValue::ValueType dwPatternType;
   std::tie(bPatternIsString, dwPatternType) =
       PatternStringType(bsPattern.AsStringView());
   if (!bPatternIsString) {
     switch (dwPatternType) {
-      case XFA_VT_DATETIME: {
+      case CXFA_LocaleValue::ValueType::kDateTime: {
         auto iTChar = wsPattern.Find(L'T');
         if (!iTChar.has_value()) {
           info.GetReturnValue().SetEmptyString();
@@ -3805,28 +3803,28 @@ void CFXJSE_FormCalcContext::Format(
             wsPattern.Last(wsPattern.GetLength() - (iTChar.value() + 1)) + L"}";
         wsPattern = wsDatePattern + wsTimePattern;
       } break;
-      case XFA_VT_DATE: {
+      case CXFA_LocaleValue::ValueType::kDate: {
         wsPattern = L"date{" + wsPattern + L"}";
       } break;
-      case XFA_VT_TIME: {
+      case CXFA_LocaleValue::ValueType::kTime: {
         wsPattern = L"time{" + wsPattern + L"}";
       } break;
-      case XFA_VT_TEXT: {
+      case CXFA_LocaleValue::ValueType::kText: {
         wsPattern = L"text{" + wsPattern + L"}";
       } break;
-      case XFA_VT_FLOAT: {
+      case CXFA_LocaleValue::ValueType::kFloat: {
         wsPattern = L"num{" + wsPattern + L"}";
       } break;
       default: {
         WideString wsTestPattern = L"num{" + wsPattern + L"}";
-        CXFA_LocaleValue tempLocaleValue(XFA_VT_FLOAT, wsValue, wsTestPattern,
-                                         pLocale, pMgr);
+        CXFA_LocaleValue tempLocaleValue(CXFA_LocaleValue::ValueType::kFloat,
+                                         wsValue, wsTestPattern, pLocale, pMgr);
         if (tempLocaleValue.IsValid()) {
           wsPattern = std::move(wsTestPattern);
-          dwPatternType = XFA_VT_FLOAT;
+          dwPatternType = CXFA_LocaleValue::ValueType::kFloat;
         } else {
           wsPattern = L"text{" + wsPattern + L"}";
-          dwPatternType = XFA_VT_TEXT;
+          dwPatternType = CXFA_LocaleValue::ValueType::kText;
         }
       } break;
     }
@@ -3835,7 +3833,7 @@ void CFXJSE_FormCalcContext::Format(
                                pMgr);
   WideString wsRet;
   if (!localeValue.FormatPatterns(wsRet, wsPattern, pLocale,
-                                  XFA_VALUEPICTURE_Display)) {
+                                  XFA_ValuePicture::kDisplay)) {
     info.GetReturnValue().SetEmptyString();
     return;
   }
@@ -3963,7 +3961,7 @@ void CFXJSE_FormCalcContext::Parse(
   WideString wsPattern = WideString::FromUTF8(bsPattern.AsStringView());
   WideString wsValue = WideString::FromUTF8(bsValue.AsStringView());
   bool bPatternIsString;
-  uint32_t dwPatternType;
+  CXFA_LocaleValue::ValueType dwPatternType;
   std::tie(bPatternIsString, dwPatternType) =
       PatternStringType(bsPattern.AsStringView());
   if (bPatternIsString) {
@@ -3980,7 +3978,7 @@ void CFXJSE_FormCalcContext::Parse(
   }
 
   switch (dwPatternType) {
-    case XFA_VT_DATETIME: {
+    case CXFA_LocaleValue::ValueType::kDateTime: {
       auto iTChar = wsPattern.Find(L'T');
       if (!iTChar.has_value()) {
         info.GetReturnValue().SetEmptyString();
@@ -4003,7 +4001,7 @@ void CFXJSE_FormCalcContext::Parse(
           fxv8::NewStringHelper(info.GetIsolate(), result.AsStringView()));
       return;
     }
-    case XFA_VT_DATE: {
+    case CXFA_LocaleValue::ValueType::kDate: {
       wsPattern = L"date{" + wsPattern + L"}";
       CXFA_LocaleValue localeValue(dwPatternType, wsValue, wsPattern, pLocale,
                                    pMgr);
@@ -4016,7 +4014,7 @@ void CFXJSE_FormCalcContext::Parse(
           fxv8::NewStringHelper(info.GetIsolate(), result.AsStringView()));
       return;
     }
-    case XFA_VT_TIME: {
+    case CXFA_LocaleValue::ValueType::kTime: {
       wsPattern = L"time{" + wsPattern + L"}";
       CXFA_LocaleValue localeValue(dwPatternType, wsValue, wsPattern, pLocale,
                                    pMgr);
@@ -4029,10 +4027,10 @@ void CFXJSE_FormCalcContext::Parse(
           fxv8::NewStringHelper(info.GetIsolate(), result.AsStringView()));
       return;
     }
-    case XFA_VT_TEXT: {
+    case CXFA_LocaleValue::ValueType::kText: {
       wsPattern = L"text{" + wsPattern + L"}";
-      CXFA_LocaleValue localeValue(XFA_VT_TEXT, wsValue, wsPattern, pLocale,
-                                   pMgr);
+      CXFA_LocaleValue localeValue(CXFA_LocaleValue::ValueType::kText, wsValue,
+                                   wsPattern, pLocale, pMgr);
       if (!localeValue.IsValid()) {
         info.GetReturnValue().SetEmptyString();
         return;
@@ -4042,10 +4040,10 @@ void CFXJSE_FormCalcContext::Parse(
           fxv8::NewStringHelper(info.GetIsolate(), result.AsStringView()));
       return;
     }
-    case XFA_VT_FLOAT: {
+    case CXFA_LocaleValue::ValueType::kFloat: {
       wsPattern = L"num{" + wsPattern + L"}";
-      CXFA_LocaleValue localeValue(XFA_VT_FLOAT, wsValue, wsPattern, pLocale,
-                                   pMgr);
+      CXFA_LocaleValue localeValue(CXFA_LocaleValue::ValueType::kFloat, wsValue,
+                                   wsPattern, pLocale, pMgr);
       if (!localeValue.IsValid()) {
         info.GetReturnValue().SetEmptyString();
         return;
@@ -4056,8 +4054,8 @@ void CFXJSE_FormCalcContext::Parse(
     default: {
       {
         WideString wsTestPattern = L"num{" + wsPattern + L"}";
-        CXFA_LocaleValue localeValue(XFA_VT_FLOAT, wsValue, wsTestPattern,
-                                     pLocale, pMgr);
+        CXFA_LocaleValue localeValue(CXFA_LocaleValue::ValueType::kFloat,
+                                     wsValue, wsTestPattern, pLocale, pMgr);
         if (localeValue.IsValid()) {
           info.GetReturnValue().Set(localeValue.GetDoubleNum());
           return;
@@ -4066,8 +4064,8 @@ void CFXJSE_FormCalcContext::Parse(
 
       {
         WideString wsTestPattern = L"text{" + wsPattern + L"}";
-        CXFA_LocaleValue localeValue(XFA_VT_TEXT, wsValue, wsTestPattern,
-                                     pLocale, pMgr);
+        CXFA_LocaleValue localeValue(CXFA_LocaleValue::ValueType::kText,
+                                     wsValue, wsTestPattern, pLocale, pMgr);
         if (localeValue.IsValid()) {
           auto result = localeValue.GetValue().ToUTF8();
           info.GetReturnValue().Set(
@@ -4487,8 +4485,7 @@ void CFXJSE_FormCalcContext::WordNum(
     bsLocale = ValueToUTF8String(info.GetIsolate(), localeValue);
   }
 
-  if (std::isnan(fNumber) || fNumber < 0.0f ||
-      fNumber > 922337203685477550.0f) {
+  if (isnan(fNumber) || fNumber < 0.0f || fNumber > 922337203685477550.0f) {
     info.GetReturnValue().Set(fxv8::NewStringHelper(info.GetIsolate(), "*"));
     return;
   }
@@ -4512,7 +4509,7 @@ void CFXJSE_FormCalcContext::Get(
   if (!pDoc)
     return;
 
-  IXFA_AppProvider* pAppProvider = pDoc->GetNotify()->GetAppProvider();
+  CXFA_FFApp::CallbackIface* pAppProvider = pDoc->GetNotify()->GetAppProvider();
   if (!pAppProvider)
     return;
 
@@ -4545,7 +4542,7 @@ void CFXJSE_FormCalcContext::Post(
   if (!pDoc)
     return;
 
-  IXFA_AppProvider* pAppProvider = pDoc->GetNotify()->GetAppProvider();
+  CXFA_FFApp::CallbackIface* pAppProvider = pDoc->GetNotify()->GetAppProvider();
   if (!pAppProvider)
     return;
 
@@ -4602,7 +4599,7 @@ void CFXJSE_FormCalcContext::Put(
   if (!pDoc)
     return;
 
-  IXFA_AppProvider* pAppProvider = pDoc->GetNotify()->GetAppProvider();
+  CXFA_FFApp::CallbackIface* pAppProvider = pDoc->GetNotify()->GetAppProvider();
   if (!pAppProvider)
     return;
 
@@ -5314,8 +5311,7 @@ Optional<CFX_WideTextBuf> CFXJSE_FormCalcContext::Translate(
 CFXJSE_FormCalcContext::CFXJSE_FormCalcContext(v8::Isolate* pIsolate,
                                                CFXJSE_Context* pScriptContext,
                                                CXFA_Document* pDoc)
-    : m_pIsolate(pIsolate),
-      m_pDocument(pDoc) {
+    : m_pIsolate(pIsolate), m_pDocument(pDoc) {
   m_Value.Reset(
       m_pIsolate,
       NewBoundV8Object(

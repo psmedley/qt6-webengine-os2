@@ -37,9 +37,10 @@ class METRICS_EXPORT SourceIdObj {
     // the associated tab is still alive and the number of sources are within
     // the max threshold.
     NAVIGATION_ID = 1,
-    // Source ID used by AppLaunchEventLogger::Log. A new source of this type
-    // and associated events are expected to be recorded within the same report
-    // interval; it will not be kept in memory between different reports.
+    // Source ID used by AppLaunchEventLogger::Log and
+    // AppPlatformMetrics::GetSourceId. They will be kept in memory as long as
+    // the associated app is still running and the number of sources are within
+    // the max threshold.
     APP_ID = 2,
     // Source ID for background events that don't have an open tab but the
     // associated URL is still present in the browsing history. A new source of
@@ -66,16 +67,19 @@ class METRICS_EXPORT SourceIdObj {
     // shared workers and service workers). Shared workers and service workers
     // can be connected to multiple clients (e.g. documents or other workers).
     WORKER_ID = 7,
-    kMaxValue = WORKER_ID,
+    // Source ID type for metrics that doesn't need to be associated with a
+    // specific URL. Metrics with this type will be whitelisted and always
+    // recorded. A source ID of this type can be obtained with NoURLSourceId().
+    NO_URL_ID = 8,
+
+    kMaxValue = NO_URL_ID,
   };
 
   // Default constructor has the invalid value.
   constexpr SourceIdObj() : value_(kInvalidSourceId) {}
 
-  constexpr SourceIdObj& operator=(SourceIdObj other) {
-    value_ = other.value_;
-    return *this;
-  }
+  constexpr SourceIdObj(const SourceIdObj& other) = default;
+  constexpr SourceIdObj& operator=(const SourceIdObj& other) = default;
 
   // Allow identity comparisons.
   constexpr bool operator==(SourceIdObj other) const {
@@ -118,6 +122,9 @@ METRICS_EXPORT SourceId AssignNewSourceId();
 // Utility for converting other unique ids to source ids.
 METRICS_EXPORT SourceId ConvertToSourceId(int64_t other_id,
                                           SourceIdType id_type);
+
+// Utility for getting source ID with NO_URL_ID type.
+METRICS_EXPORT SourceId NoURLSourceId();
 
 // Get the SourceIdType of the SourceId object.
 METRICS_EXPORT SourceIdType GetSourceIdType(SourceId source_id);

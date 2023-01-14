@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <functional>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -65,10 +66,6 @@ FFmpegAudioDecoder::~FFmpegAudioDecoder() {
     ReleaseFFmpegResources();
 }
 
-std::string FFmpegAudioDecoder::GetDisplayName() const {
-  return "FFmpegAudioDecoder";
-}
-
 AudioDecoderType FFmpegAudioDecoder::GetDecoderType() const {
   return AudioDecoderType::kFFmpeg;
 }
@@ -98,8 +95,6 @@ void FFmpegAudioDecoder::Initialize(const AudioDecoderConfig& config,
                  .WithData("profile", config.profile()));
     return;
   }
-
-  FFmpegGlue::InitializeFFmpeg();
 
   if (!ConfigureDecoder(config)) {
     av_sample_format_ = 0;
@@ -172,26 +167,27 @@ void FFmpegAudioDecoder::DecodeBuffer(const DecoderBuffer& buffer,
 }
 
 bool FFmpegAudioDecoder::FFmpegDecode(const DecoderBuffer& buffer) {
-  AVPacket packet;
-  av_init_packet(&packet);
+  AVPacket* packet = av_packet_alloc();
   if (buffer.end_of_stream()) {
-    packet.data = NULL;
-    packet.size = 0;
+    packet->data = NULL;
+    packet->size = 0;
   } else {
-    packet.data = const_cast<uint8_t*>(buffer.data());
-    packet.size = buffer.data_size();
+    packet->data = const_cast<uint8_t*>(buffer.data());
+    packet->size = buffer.data_size();
 
-    DCHECK(packet.data);
-    DCHECK_GT(packet.size, 0);
+    DCHECK(packet->data);
+    DCHECK_GT(packet->size, 0);
   }
 
   bool decoded_frame_this_loop = false;
   // base::Unretained and std::cref are safe to use with the callback given
   // to DecodePacket() since that callback is only used the function call.
-  switch (decoding_loop_->DecodePacket(
-      &packet, base::BindRepeating(&FFmpegAudioDecoder::OnNewFrame,
-                                   base::Unretained(this), std::cref(buffer),
-                                   &decoded_frame_this_loop))) {
+  FFmpegDecodingLoop::DecodeStatus decode_status = decoding_loop_->DecodePacket(
+      packet, base::BindRepeating(&FFmpegAudioDecoder::OnNewFrame,
+                                  base::Unretained(this), std::cref(buffer),
+                                  &decoded_frame_this_loop));
+  av_packet_free(&packet);
+  switch (decode_status) {
     case FFmpegDecodingLoop::DecodeStatus::kSendPacketFailed:
       MEDIA_LOG(ERROR, media_log_)
           << "Failed to send audio packet for decoding: "
@@ -207,7 +203,7 @@ bool FFmpegAudioDecoder::FFmpegDecode(const DecoderBuffer& buffer) {
           << "end of stream AVPackets correctly.";
 
       MEDIA_LOG(DEBUG, media_log_)
-          << GetDisplayName() << " failed to decode an audio buffer: "
+          << GetDecoderType() << " failed to decode an audio buffer: "
           << AVErrorToString(decoding_loop_->last_averror_code()) << ", at "
           << buffer.AsHumanReadableString();
       break;
@@ -335,7 +331,7 @@ bool FFmpegAudioDecoder::ConfigureDecoder(const AudioDecoderConfig& config) {
     }
   }
 
-  AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
+  const AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
   if (!codec ||
       avcodec_open2(codec_context_.get(), codec, &codec_options) < 0) {
     DLOG(ERROR) << "Could not initialize audio decoder: "
@@ -360,7 +356,8 @@ bool FFmpegAudioDecoder::ConfigureDecoder(const AudioDecoderConfig& config) {
     return false;
   }
 
-  decoding_loop_.reset(new FFmpegDecodingLoop(codec_context_.get(), true));
+  decoding_loop_ =
+      std::make_unique<FFmpegDecodingLoop>(codec_context_.get(), true);
   ResetTimestampState(config);
   return true;
 }
@@ -369,9 +366,8 @@ void FFmpegAudioDecoder::ResetTimestampState(const AudioDecoderConfig& config) {
   // Opus codec delay is handled by ffmpeg.
   const int codec_delay =
       config.codec() == kCodecOpus ? 0 : config.codec_delay();
-  discard_helper_.reset(new AudioDiscardHelper(config.samples_per_second(),
-                                               codec_delay,
-                                               config.codec() == kCodecVorbis));
+  discard_helper_ = std::make_unique<AudioDiscardHelper>(
+      config.samples_per_second(), codec_delay, config.codec() == kCodecVorbis);
   discard_helper_->Reset(codec_delay);
 }
 

@@ -1,49 +1,53 @@
 /****************************************************************************
 **
 ** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtPDF module of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL3$
+** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
 ** GNU Lesser General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU Lesser
 ** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
+** Foundation and appearing in the file LICENSE.LGPL3 included in the
 ** packaging of this file. Please review the following information to
 ** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
+** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 **
 ** GNU General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
+** General Public License version 2.0 or (at your option) the GNU General
+** Public license version 3 or any later version approved by the KDE Free
+** Qt Foundation. The licenses are as published by the Free Software
+** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-2.0.html and
+** https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
 ****************************************************************************/
 
 #include "qquickpdfdocument_p.h"
-#include <QQuickItem>
-#include <QQmlEngine>
-#include <QStandardPaths>
+#include <QtCore/qstandardpaths.h>
+#include <QtQml/qqmlcontext.h>
+#include <QtQml/qqmlengine.h>
+#include <QtQuick/qquickitem.h>
 
 QT_BEGIN_NAMESPACE
 
 /*!
     \qmltype PdfDocument
-    \instantiates QQuickPdfDocument
+//!    \instantiates QQuickPdfDocument
     \inqmlmodule QtQuick.Pdf
     \ingroup pdf
     \brief A representation of a PDF document.
@@ -54,7 +58,7 @@ QT_BEGIN_NAMESPACE
     \l Image with source set to the URL of the PDF.
 */
 
-/*!
+/*
     Constructs a PDF document.
 */
 QQuickPdfDocument::QQuickPdfDocument(QObject *parent)
@@ -69,6 +73,11 @@ QQuickPdfDocument::QQuickPdfDocument(QObject *parent)
     });
     connect(&m_doc, &QPdfDocument::pageCountChanged, this, &QQuickPdfDocument::pageCountChanged);
 }
+
+/*!
+    \internal
+*/
+QQuickPdfDocument::~QQuickPdfDocument() = default;
 
 void QQuickPdfDocument::componentComplete()
 {
@@ -91,10 +100,12 @@ void QQuickPdfDocument::setSource(QUrl source)
     m_source = source;
     m_maxPageWidthHeight = QSizeF();
     emit sourceChanged();
+    const QQmlContext *context = qmlContext(this);
+    m_resolvedSource = context ? context->resolvedUrl(source) : source;
     if (source.scheme() == QLatin1String("qrc"))
-        m_doc.load(QLatin1Char(':') + source.path());
+        m_doc.load(QLatin1Char(':') + m_resolvedSource.path());
     else
-        m_doc.load(source.toLocalFile());
+        m_doc.load(m_resolvedSource.toLocalFile());
 }
 
 /*!
@@ -133,7 +144,7 @@ QString QQuickPdfDocument::error() const
 }
 
 /*!
-    \qmlproperty bool PdfDocument::password
+    \qmlproperty string PdfDocument::password
 
     This property holds the document password. If the passwordRequired()
     signal is emitted, the UI should prompt the user and then set this
@@ -144,8 +155,8 @@ void QQuickPdfDocument::setPassword(const QString &password)
     if (m_doc.password() == password)
         return;
     m_doc.setPassword(password);
-    if (source().isValid() && source().isLocalFile())
-        m_doc.load(source().path());
+    if (resolvedSource().isValid() && resolvedSource().isLocalFile())
+        m_doc.load(resolvedSource().path());
 }
 
 /*!
@@ -182,32 +193,6 @@ qreal QQuickPdfDocument::maxPageHeight() const
 {
     const_cast<QQuickPdfDocument *>(this)->updateMaxPageSize();
     return m_maxPageWidthHeight.height();
-}
-
-/*!
-    \internal
-    \qmlmethod size PdfDocument::heightSumBeforePage(int page)
-
-    Returns the sum of the heights, in points, of all sets of \a facingPages
-    pages from 0 to the given \a page, exclusive.
-
-    That is, if the pages were laid out end-to-end in adjacent sets of
-    \a facingPages, what would be the distance in points from the top of the
-    first page to the top of the given page.
-*/
-// Workaround for lack of something analogous to ListView.positionViewAtIndex() in TableView
-qreal QQuickPdfDocument::heightSumBeforePage(int page, qreal spacing, int facingPages) const
-{
-    qreal ret = 0;
-    for (int i = 0; i < page; i+= facingPages) {
-        if (i + facingPages > page)
-            break;
-        qreal facingPagesHeight = 0;
-        for (int j = i; j < i + facingPages; ++j)
-            facingPagesHeight = qMax(facingPagesHeight, pagePointSize(j).height());
-        ret += facingPagesHeight + spacing;
-    }
-    return ret;
 }
 
 void QQuickPdfDocument::updateMaxPageSize()
@@ -277,13 +262,13 @@ void QQuickPdfDocument::updateMaxPageSize()
 */
 
 /*!
-    \qmlproperty string PdfDocument::creationDate
+    \qmlproperty date PdfDocument::creationDate
 
     This property holds the date and time the document was created.
 */
 
 /*!
-    \qmlproperty string PdfDocument::modificationDate
+    \qmlproperty date PdfDocument::modificationDate
 
     This property holds the date and time the document was most recently
     modified.

@@ -17,6 +17,8 @@
 #include "src/gpu/GrManagedResource.h"
 #include "src/gpu/GrTexture.h"
 
+#include <cinttypes>
+
 class GrVkGpu;
 class GrVkTexture;
 
@@ -45,6 +47,7 @@ public:
         SkASSERT(fResource);
         return fInfo.fAlloc;
     }
+    const GrVkImageInfo& vkImageInfo() const { return fInfo; }
     VkFormat imageFormat() const { return fInfo.fFormat; }
     GrBackendFormat getBackendFormat() const {
         if (fResource && this->ycbcrConversionInfo().isValid()) {
@@ -61,6 +64,7 @@ public:
         SkASSERT(fResource);
         return fInfo.fYcbcrConversionInfo;
     }
+    VkImageUsageFlags vkUsageFlags() { return fInfo.fImageUsageFlags; }
     bool supportsInputAttachmentUsage() const {
         return fInfo.fImageUsageFlags & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
     }
@@ -191,7 +195,7 @@ private:
 
 #ifdef SK_TRACE_MANAGED_RESOURCES
         void dumpInfo() const override {
-            SkDebugf("GrVkImage: %d (%d refs)\n", fImage, this->getRefCnt());
+            SkDebugf("GrVkImage: %" PRIdPTR " (%d refs)\n", (intptr_t)fImage, this->getRefCnt());
         }
 #endif
 

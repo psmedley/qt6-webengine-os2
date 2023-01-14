@@ -51,10 +51,9 @@ jumbo_source_set("heap_unsanitized") {
 }
 
 blink_platform_sources("heap") {
-  configs += [ "//build/config/compiler:noshadowing" ]
-
   sources = [
     "blink_gc_memory_dump_provider.h",
+    "collection_support/clear_collection_scope.h",
     "collection_support/heap_deque.h",
     "collection_support/heap_hash_counted_set.h",
     "collection_support/heap_hash_map.h",
@@ -67,6 +66,7 @@ blink_platform_sources("heap") {
     "collection_support/heap_vector_backing.h",
     "custom_spaces.h",
     "disallow_new_wrapper.h",
+    "forward.h",
     "garbage_collected.h",
     "gc_task_runner.h",
     "handle.h",
@@ -110,18 +110,17 @@ blink_platform_sources("heap") {
       "v8_wrapper/garbage_collected.h",
       "v8_wrapper/heap.h",
       "v8_wrapper/heap_allocator_impl.h",
-      "v8_wrapper/heap_stats_collector.h",
-      "v8_wrapper/heap_traits.h",
       "v8_wrapper/member.h",
       "v8_wrapper/persistent.h",
       "v8_wrapper/process_heap.h",
+      "v8_wrapper/thread_local.h",
       "v8_wrapper/thread_state.cc",
       "v8_wrapper/thread_state.h",
       "v8_wrapper/thread_state_scopes.h",
       "v8_wrapper/trace_traits.h",
-      "v8_wrapper/unified_heap_controller.h",
       "v8_wrapper/unified_heap_marking_visitor.h",
       "v8_wrapper/visitor.h",
+      "v8_wrapper/write_barrier.h",
     ]
 
     deps += [
@@ -206,10 +205,18 @@ blink_platform_sources("heap") {
 jumbo_source_set("test_support") {
   testonly = true
 
-  sources = [ "heap_test_utilities.h" ]
+  sources = [
+    "heap_test_objects.cc",
+    "heap_test_objects.h",
+    "heap_test_platform.h",
+    "heap_test_utilities.h",
+  ]
 
   if (enable_blink_heap_use_v8_oilpan) {
-    sources += [ "v8_wrapper/heap_test_utilities.h" ]
+    sources += [
+      "v8_wrapper/heap_test_utilities.cc",
+      "v8_wrapper/heap_test_utilities.h",
+    ]
   } else {
     sources += [
       "impl/heap_test_utilities.cc",
@@ -226,8 +233,11 @@ jumbo_source_set("test_support") {
     "//third_party/blink/renderer/platform/wtf:buildflags",
   ]
 
+  # TODO(v8:11952): Switch to `//v8:v8_for_testing` as target once it properly
+  # depends on v8 without duplicating the whole library which causes ODR
+  # violations when `//v8:v8` is also pulled in otherwise.
   if (enable_blink_heap_use_v8_oilpan) {
-    deps += [ "//v8:v8_for_testing" ]
+    deps += [ "//v8:v8" ]
   }
 
   public_deps = [ "//base/test:test_support" ]
@@ -235,6 +245,7 @@ jumbo_source_set("test_support") {
 
 test("blink_heap_unittests") {
   deps = [ ":blink_heap_unittests_sources" ]
+
   if (is_android) {
     deps += [
       "//base:base_java",
@@ -243,6 +254,13 @@ test("blink_heap_unittests") {
       "//ui/android:ui_full_java",
     ]
   }
+
+  if (is_fuchsia && enable_blink_heap_use_v8_oilpan) {
+    # Oilpan reuses V8's v8::PageAllocator which generally requires JIT
+    # permissions.
+    additional_manifest_fragments =
+        [ "//build/config/fuchsia/test/jit_capabilities.test-cmx" ]
+  }
 }
 
 jumbo_source_set("blink_heap_unittests_sources") {
@@ -250,33 +268,38 @@ jumbo_source_set("blink_heap_unittests_sources") {
 
   sources = [ "../testing/run_all_tests.cc" ]
 
+  sources += [
+    "test/blink_gc_memory_dump_provider_test.cc",
+    "test/concurrent_marking_test.cc",
+    "test/heap_compact_test.cc",
+    "test/heap_linked_stack_test.cc",
+    "test/heap_test.cc",
+    "test/heap_traits_test.cc",
+    "test/incremental_marking_test.cc",
+    "test/persistent_test.cc",
+    "test/weakness_marking_test.cc",
+    "test/write_barrier_perftest.cc",
+  ]
+
   if (!enable_blink_heap_use_v8_oilpan) {
     sources += [
-      "test/blink_gc_memory_dump_provider_test.cc",
-      "test/card_table_test.cc",
-      "test/concurrent_marking_test.cc",
-      "test/gc_info_test.cc",
-      "test/heap_compact_test.cc",
-      "test/heap_linked_stack_test.cc",
-      "test/heap_stats_collector_test.cc",
-      "test/heap_test.cc",
-      "test/heap_thread_test.cc",
-      "test/heap_traits_test.cc",
-      "test/incremental_marking_test.cc",
-      "test/marking_scheduling_oracle_test.cc",
-      "test/marking_verifier_test.cc",
-      "test/name_trait_test.cc",
-      "test/object_start_bitmap_test.cc",
-      "test/persistent_test.cc",
-      "test/thread_state_scheduling_test.cc",
-      "test/weakness_marking_test.cc",
-      "test/worklist_test.cc",
-      "test/write_barrier_perftest.cc",
+      "impl/test/card_table_test.cc",
+      "impl/test/gc_info_test.cc",
+      "impl/test/heap_internals_test.cc",
+      "impl/test/heap_stats_collector_test.cc",
+      "impl/test/heap_thread_test.cc",
+      "impl/test/incremental_marking_internals_test.cc",
+      "impl/test/marking_scheduling_oracle_test.cc",
+      "impl/test/marking_verifier_test.cc",
+      "impl/test/name_trait_test.cc",
+      "impl/test/object_start_bitmap_test.cc",
+      "impl/test/thread_state_scheduling_test.cc",
+      "impl/test/worklist_test.cc",
     ]
+  }
 
-    if (enable_blink_heap_young_generation) {
-      sources += [ "test/minor_gc_test.cc" ]
-    }
+  if (enable_blink_heap_young_generation) {
+    sources += [ "test/minor_gc_test.cc" ]
   }
 
   configs += [
@@ -289,6 +312,7 @@ jumbo_source_set("blink_heap_unittests_sources") {
     ":test_support",
     "//base",
     "//base/test:test_support",
+    "//gin:gin",
     "//mojo/core/embedder:embedder",
     "//skia:test_fonts",
     "//testing/gmock",

@@ -13,7 +13,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -178,8 +177,9 @@ TEST_P(CredentialsFilterTest, ReportFormLoginSuccess_NewSyncCredentials) {
 
 TEST_P(CredentialsFilterTest, ReportFormLoginSuccess_GAIANotSyncCredentials) {
   const char kOtherUsername[] = "other_user@gmail.com";
+  const char16_t kOtherUsername16[] = u"other_user@gmail.com";
   FakeSigninAs(kOtherUsername);
-  ASSERT_NE(pending_.username_value, base::ASCIIToUTF16(kOtherUsername));
+  ASSERT_NE(pending_.username_value, kOtherUsername16);
   SetSyncingPasswords(true);
 
   base::UserActionTester tester;

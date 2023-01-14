@@ -5,7 +5,6 @@
 #include "content/public/browser/permission_type.h"
 
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom.h"
 
@@ -31,7 +30,7 @@ const std::vector<PermissionType>& GetAllPermissionTypes() {
   return *kAllPermissionTypes;
 }
 
-base::Optional<PermissionType> PermissionDescriptorToPermissionType(
+absl::optional<PermissionType> PermissionDescriptorToPermissionType(
     const PermissionDescriptorPtr& descriptor) {
   switch (descriptor->name) {
     case PermissionName::GEOLOCATION:
@@ -50,7 +49,7 @@ base::Optional<PermissionType> PermissionDescriptorToPermissionType(
       return PermissionType::PROTECTED_MEDIA_IDENTIFIER;
 #else
       NOTIMPLEMENTED();
-      return base::nullopt;
+      return absl::nullopt;
 #endif  // defined(ENABLE_PROTECTED_MEDIA_IDENTIFIER_PERMISSION)
     case PermissionName::DURABLE_STORAGE:
       return PermissionType::DURABLE_STORAGE;
@@ -101,10 +100,12 @@ base::Optional<PermissionType> PermissionDescriptorToPermissionType(
       return PermissionType::FONT_ACCESS;
     case PermissionName::DISPLAY_CAPTURE:
       return PermissionType::DISPLAY_CAPTURE;
+    case PermissionName::FILE_HANDLING:
+      return PermissionType::FILE_HANDLING;
   }
 
   NOTREACHED();
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 }  // namespace content

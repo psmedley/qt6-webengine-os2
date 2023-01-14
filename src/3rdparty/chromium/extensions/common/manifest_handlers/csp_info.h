@@ -37,6 +37,12 @@ struct CSPInfo : public Extension::ManifestData {
   // shouldn't be returned for those cases.
   static const std::string& GetExtensionPagesCSP(const Extension* extension);
 
+  // Returns the default CSP (if any) to append for the `extension`'s resource
+  // at the given `relative_path`.
+  static const std::string* GetDefaultCSPToAppend(
+      const Extension& extension,
+      const std::string& relative_path);
+
   // Returns the Content Security Policy to be used for extension isolated
   // worlds or null if there is no defined CSP.
   static const std::string* GetIsolatedWorldCSP(const Extension& extension);
@@ -60,16 +66,16 @@ class CSPHandler : public ManifestHandler {
   ~CSPHandler() override;
 
   // ManifestHandler override:
-  bool Parse(Extension* extension, base::string16* error) override;
+  bool Parse(Extension* extension, std::u16string* error) override;
 
  private:
   // Parses the "content_security_policy" dictionary in the manifest.
-  bool ParseCSPDictionary(Extension* extension, base::string16* error);
+  bool ParseCSPDictionary(Extension* extension, std::u16string* error);
 
   // Parses the content security policy specified in the manifest for extension
   // pages.
   bool ParseExtensionPagesCSP(Extension* extension,
-                              base::string16* error,
+                              std::u16string* error,
                               base::StringPiece manifest_key,
                               bool secure_only,
                               const base::Value* content_security_policy);
@@ -77,7 +83,7 @@ class CSPHandler : public ManifestHandler {
   // Parses the content security policy specified in the manifest for sandboxed
   // pages. This should be called after ParseExtensionPagesCSP.
   bool ParseSandboxCSP(Extension* extension,
-                       base::string16* error,
+                       std::u16string* error,
                        base::StringPiece manifest_key,
                        const base::Value* sandbox_csp);
 

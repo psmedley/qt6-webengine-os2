@@ -30,7 +30,7 @@ bool CrossOriginResourcePolicyChecker::IsBlocked(
     // the same origin.
     return false;
   }
-  base::Optional<std::string> corp_header_value;
+  absl::optional<std::string> corp_header_value;
   String wtf_corp_header_value;
   if (response.InternalHeaderList()->Get(
           network::CrossOriginResourcePolicy::kHeaderName,
@@ -41,8 +41,8 @@ bool CrossOriginResourcePolicyChecker::IsBlocked(
   return network::CrossOriginResourcePolicy::IsBlockedByHeaderValue(
              response.InternalURLList().back(),
              response.InternalURLList().front(), initiator_origin,
-             corp_header_value, request_mode, initiator_origin,
-             request_destination, policy_,
+             corp_header_value, request_mode, request_destination,
+             response.GetResponse()->RequestIncludeCredentials(), policy_,
              reporter_ ? reporter_.get() : nullptr)
       .has_value();
 }

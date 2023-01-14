@@ -23,8 +23,6 @@
 #ifndef AVCODEC_OPUSTAB_H
 #define AVCODEC_OPUSTAB_H
 
-#include "libavutil/mem.h"
-
 #include <stdint.h>
 
 extern const uint8_t  ff_celt_band_end[];
@@ -152,12 +150,11 @@ extern const uint8_t  ff_celt_bit_deinterleave[];
 extern const uint8_t  ff_celt_hadamard_order[];
 
 extern const uint16_t ff_celt_qn_exp2[];
-extern const uint32_t ff_celt_pvq_u[1272];
 
 extern const float    ff_celt_postfilter_taps[3][3];
 
 extern const float    ff_celt_window2[120];
-extern const float   *ff_celt_window;
+extern const float *const ff_celt_window;
 
 extern const uint32_t * const ff_celt_pvq_u_row[15];
 

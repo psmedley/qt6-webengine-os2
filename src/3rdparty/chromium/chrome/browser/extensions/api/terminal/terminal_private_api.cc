@@ -10,8 +10,9 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/ash_pref_names.h"
+#include "ash/constants/ash_pref_names.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/json/json_writer.h"
@@ -21,12 +22,13 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
+#include "base/task_runner_util.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/crostini/crostini_features.h"
-#include "chrome/browser/chromeos/crostini/crostini_manager.h"
-#include "chrome/browser/chromeos/crostini/crostini_pref_names.h"
-#include "chrome/browser/chromeos/crostini/crostini_terminal.h"
-#include "chrome/browser/chromeos/crostini/crostini_util.h"
+#include "chrome/browser/ash/crostini/crostini_features.h"
+#include "chrome/browser/ash/crostini/crostini_manager.h"
+#include "chrome/browser/ash/crostini/crostini_pref_names.h"
+#include "chrome/browser/ash/crostini/crostini_terminal.h"
+#include "chrome/browser/ash/crostini/crostini_util.h"
 #include "chrome/browser/extensions/api/terminal/crostini_startup_status.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -77,18 +79,41 @@ const char kSwitchCurrentWorkingDir[] = "cwd";
 
 const char kCwdTerminalIdPrefix[] = "terminal_id:";
 
+void CloseTerminal(const std::string& terminal_id,
+                   base::OnceCallback<void(bool)> callback) {
+  chromeos::ProcessProxyRegistry::GetTaskRunner()->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(
+          [](const std::string& terminal_id) {
+            return chromeos::ProcessProxyRegistry::Get()->CloseProcess(
+                terminal_id);
+          },
+          terminal_id),
+      std::move(callback));
+}
+
 class TerminalTabHelper
     : public content::WebContentsUserData<TerminalTabHelper> {
  public:
+  ~TerminalTabHelper() override {
+    // The web contents object is being destructed. We should close all
+    // terminals that haven't been closed already. This can happen when the JS
+    // code didn't have a chance to do that (e.g. memory stress causes the web
+    // contents to be killed directly).
+    for (const std::string& terminal_id : terminal_ids_) {
+      CloseTerminal(terminal_id, base::DoNothing());
+    }
+  }
+
   void AddTerminalId(const std::string& terminal_id) {
     if (!terminal_ids_.insert(terminal_id).second) {
-      LOG(ERROR) << "terminal id already exists" << terminal_id;
+      LOG(ERROR) << "Terminal id already exists: " << terminal_id;
     }
   }
 
   void RemoveTerminalId(const std::string& terminal_id) {
     if (terminal_ids_.erase(terminal_id) == 0) {
-      LOG(ERROR) << "terminal id does not exists" << terminal_id;
+      LOG(ERROR) << "Terminal id does not exist: " << terminal_id;
     }
   }
 
@@ -140,10 +165,10 @@ void NotifyProcessOutput(content::BrowserContext* browser_context,
     return;
   }
 
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->AppendString(terminal_id);
-  args->AppendString(output_type);
-  args->AppendString(output);
+  std::vector<base::Value> args;
+  args.push_back(base::Value(terminal_id));
+  args.push_back(base::Value(output_type));
+  args.push_back(base::Value(output));
 
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(browser_context);
@@ -159,8 +184,8 @@ void PreferenceChanged(Profile* profile,
                        const std::string& pref_name,
                        extensions::events::HistogramValue histogram,
                        const char* eventName) {
-  auto args = std::make_unique<base::ListValue>();
-  args->Append(profile->GetPrefs()->Get(pref_name)->CreateDeepCopy());
+  std::vector<base::Value> args;
+  args.push_back(profile->GetPrefs()->Get(pref_name)->Clone());
   extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
   if (event_router) {
     auto event = std::make_unique<extensions::Event>(histogram, eventName,
@@ -204,6 +229,9 @@ BrowserContextKeyedAPIFactory<TerminalPrivateAPI>*
 TerminalPrivateAPI::GetFactoryInstance() {
   return g_factory.Pointer();
 }
+
+TerminalPrivateOpenTerminalProcessFunction::
+    TerminalPrivateOpenTerminalProcessFunction() = default;
 
 TerminalPrivateOpenTerminalProcessFunction::
     ~TerminalPrivateOpenTerminalProcessFunction() = default;
@@ -272,20 +300,18 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
 
     auto* mgr = crostini::CrostiniManager::GetForProfile(profile);
     bool verbose = !mgr->GetContainerInfo(container_id).has_value();
-    auto observer = std::make_unique<CrostiniStartupStatus>(
+    startup_status_ = std::make_unique<CrostiniStartupStatus>(
         base::BindRepeating(&NotifyProcessOutput, browser_context(), startup_id,
                             api::terminal_private::ToString(
                                 api::terminal_private::OUTPUT_TYPE_STDOUT)),
         verbose);
-    // Save copy of pointer for RestartObserver before moving object.
-    CrostiniStartupStatus* observer_ptr = observer.get();
-    observer->ShowProgressAtInterval();
+    startup_status_->ShowProgressAtInterval();
     mgr->RestartCrostini(
         container_id,
         base::BindOnce(
             &TerminalPrivateOpenTerminalProcessFunction::OnCrostiniRestarted,
-            this, std::move(observer), user_id_hash, std::move(cmdline)),
-        observer_ptr);
+            this, user_id_hash, std::move(cmdline)),
+        startup_status_.get());
   } else {
     // command=[unrecognized].
     return RespondNow(Error("Invalid process name: " + process_name));
@@ -294,7 +320,6 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
 }
 
 void TerminalPrivateOpenTerminalProcessFunction::OnCrostiniRestarted(
-    std::unique_ptr<CrostiniStartupStatus> startup_status,
     const std::string& user_id_hash,
     base::CommandLine cmdline,
     crostini::CrostiniResult result) {
@@ -305,7 +330,7 @@ void TerminalPrivateOpenTerminalProcessFunction::OnCrostiniRestarted(
     Respond(Error(msg));
     return;
   }
-  startup_status->OnCrostiniRestarted(result);
+  startup_status_->OnCrostiniRestarted(result);
   if (result == crostini::CrostiniResult::SUCCESS) {
     OpenVmshellProcess(user_id_hash, std::move(cmdline));
   } else {
@@ -392,6 +417,11 @@ void TerminalPrivateOpenTerminalProcessFunction::OpenOnRegistryTaskRunner(
 void TerminalPrivateOpenTerminalProcessFunction::RespondOnUIThread(
     bool success,
     const std::string& terminal_id) {
+  if (startup_status_) {
+    startup_status_->OnCrostiniConnected(
+        success ? crostini::CrostiniResult::SUCCESS
+                : crostini::CrostiniResult::VSH_CONNECT_FAILED);
+  }
   auto* contents = GetSenderWebContents();
   if (!contents) {
     LOG(WARNING) << "content is closed before returning opened process";
@@ -486,25 +516,13 @@ TerminalPrivateCloseTerminalProcessFunction::Run() {
   TerminalTabHelper::FromWebContents(GetSenderWebContents())
       ->RemoveTerminalId(params->id);
 
-  // Registry lives on its own task runner.
-  chromeos::ProcessProxyRegistry::GetTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&TerminalPrivateCloseTerminalProcessFunction::
-                                    CloseOnRegistryTaskRunner,
-                                this, params->id));
+  CloseTerminal(
+      params->id,
+      base::BindOnce(
+          &TerminalPrivateCloseTerminalProcessFunction::RespondOnUIThread,
+          this));
 
   return RespondLater();
-}
-
-void TerminalPrivateCloseTerminalProcessFunction::CloseOnRegistryTaskRunner(
-    const std::string& terminal_id) {
-  bool success =
-      chromeos::ProcessProxyRegistry::Get()->CloseProcess(terminal_id);
-
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          &TerminalPrivateCloseTerminalProcessFunction::RespondOnUIThread, this,
-          success));
 }
 
 void TerminalPrivateCloseTerminalProcessFunction::RespondOnUIThread(

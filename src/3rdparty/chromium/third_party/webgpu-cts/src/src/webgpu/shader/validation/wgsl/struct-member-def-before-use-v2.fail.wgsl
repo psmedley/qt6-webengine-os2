@@ -12,8 +12,8 @@ struct foo {
   x : goo;
 };
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
   var f : foo;
   f.x.y.t = 2.0;
   return;

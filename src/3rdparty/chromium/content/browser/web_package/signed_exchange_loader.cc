@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/stringprintf.h"
 #include "components/web_package/web_bundle_utils.h"
 #include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/browser/web_package/signed_exchange_cert_fetcher_factory.h"
@@ -33,7 +32,9 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/source_stream_to_data_pipe.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "third_party/blink/public/common/web_package/web_package_request_matcher.h"
 
@@ -111,6 +112,11 @@ SignedExchangeLoader::SignedExchangeLoader(
 }
 
 SignedExchangeLoader::~SignedExchangeLoader() = default;
+
+void SignedExchangeLoader::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  NOTREACHED();
+}
 
 void SignedExchangeLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head) {
@@ -199,7 +205,7 @@ void SignedExchangeLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   NOTREACHED();
 }
 
@@ -281,7 +287,7 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
           *outer_response_head_, false /* is_fallback_redirect */));
   forwarding_client_.reset();
 
-  const base::Optional<net::SSLInfo>& ssl_info = resource_response->ssl_info;
+  const absl::optional<net::SSLInfo>& ssl_info = resource_response->ssl_info;
   if (ssl_info.has_value() &&
       (url_loader_options_ &
        network::mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
@@ -294,7 +300,7 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
   if (ssl_info.has_value() &&
       !(url_loader_options_ &
         network::mojom::kURLLoadOptionSendSSLInfoWithResponse)) {
-    inner_response_head_shown_to_client->ssl_info = base::nullopt;
+    inner_response_head_shown_to_client->ssl_info = absl::nullopt;
   }
   inner_response_head_shown_to_client->was_fetched_via_cache =
       outer_response_head_->was_fetched_via_cache;
@@ -309,7 +315,8 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
   options.struct_size = sizeof(MojoCreateDataPipeOptions);
   options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
   options.element_num_bytes = 1;
-  options.capacity_num_bytes = network::kDataPipeDefaultAllocationSize;
+  options.capacity_num_bytes =
+      network::features::GetDataPipeDefaultAllocationSize();
   if (mojo::CreateDataPipe(&options, producer_handle, consumer_handle) !=
       MOJO_RESULT_OK) {
     forwarding_client_->OnComplete(

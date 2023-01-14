@@ -6,8 +6,8 @@
 
 #include <stdint.h>
 
+#include "base/cxx17_backports.h"
 #include "base/format_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -1068,6 +1068,94 @@ const DeviceCapabilities kDrallionStylus = {
     base::size(kDrallionStylusAxes),
 };
 
+const DeviceCapabilities kPuffMicrophoneMuteSwitch = {
+    /* path */
+    "/sys/devices/pci0000:00/0000:00:19.0/PRP0001:00/input/input3/event3",
+    /* name */ "mic_mute_switch",
+    /* phys */ "gpio-keys/input0",
+    /* uniq */ "",
+    /* bustype */ "0019",
+    /* vendor */ "0001",
+    /* product */ "0001",
+    /* version */ "0100",
+    /* prop */ "0",
+    /* ev */ "21",
+    /* key */ "0",
+    /* rel */ "0",
+    /* abs */ "0",
+    /* msc */ "0",
+    /* sw */ "4000",
+    /* led */ "0",
+    /* ff */ "0",
+};
+
+const DeviceCapabilities kDrawciaStylusGarage = {
+    /* path */
+    "/sys/devices/pci0000:00/0000:00:15.2/PRP0001:00/input/input4/event4",
+    /* name */ "PRP0001:00",
+    /* phys */ "gpio-keys/input0",
+    /* uniq */ "",
+    /* bustype */ "0019",
+    /* vendor */ "0001",
+    /* product */ "0001",
+    /* version */ "0100",
+    /* prop */ "0",
+    /* ev */ "21",
+    /* key */ "0",
+    /* rel */ "0",
+    /* abs */ "0",
+    /* msc */ "0",
+    /* sw */ "8000",
+    /* led */ "0",
+    /* ff */ "0",
+};
+
+// The built-in keyboard for Eve, which has an Assistant key.
+const DeviceCapabilities kEveKeyboard = {
+    /* path */ "/sys/devices/platform/i8042/serio0/input/input3/event3",
+    /* name */ "AT Translated Set 2 keyboard",
+    /* phys */ "isa0060/serio0/input0",
+    /* uniq */ "",
+    /* bustype */ "0011",
+    /* vendor */ "0001",
+    /* product */ "0001",
+    /* version */ "ab83",
+    /* prop */ "0",
+    /* ev */ "120013",
+    /* key */
+    "88 0 0 0 0 0 402000000 3003078f800d001 feffffdfffefffff "
+    "fffffffffffffffe",
+    /* rel */ "0",
+    /* abs */ "0",
+    /* msc */ "10",
+    /* sw */ "0",
+    /* led */ "7",
+    /* ff */ "0",
+};
+
+// The built-in keyboard on Sarien, which has a few more keys than normal.
+const DeviceCapabilities kSarienKeyboard = {
+    /* path */ "/sys/devices/platform/i8042/serio0/input/input2/event2",
+    /* name */ "AT Translated Set 2 keyboard",
+    /* phys */ "isa0060/serio0/input0",
+    /* uniq */ "",
+    /* bustype */ "0011",
+    /* vendor */ "0001",
+    /* product */ "0001",
+    /* version */ "ab41",
+    /* prop */ "0",
+    /* ev */ "120013",
+    /* key */
+    "100 0 0 0 10000000000000 0 f02000000 3803078f800d001 ffffffdfffefffff "
+    "fffffffffffffffe",
+    /* rel */ "0",
+    /* abs */ "0",
+    /* msc */ "10",
+    /* sw */ "0",
+    /* led */ "7",
+    /* ff */ "0",
+};
+
 // NB: Please use the capture_device_capabilities.py script to add more
 // test data here. This will help ensure the data matches what the kernel
 // reports for a real device and is entered correctly.
@@ -1076,7 +1164,7 @@ const DeviceCapabilities kDrallionStylus = {
 //   DEVICE_IP=<your device IP>
 //   cd ui/events/ozone/evdev/
 //   scp capture_device_capabilities.py "root@${DEVICE_IP}:/tmp/"
-//   ssh "root@${DEVICE_IP}" /tmp/capture_device_capabilities.py
+//   ssh "root@${DEVICE_IP}" python /tmp/capture_device_capabilities.py
 
 bool CapabilitiesToDeviceInfo(const DeviceCapabilities& capabilities,
                               EventDeviceInfo* devinfo) {
@@ -1099,6 +1187,11 @@ bool CapabilitiesToDeviceInfo(const DeviceCapabilities& capabilities,
   if (!ParseBitfield(capabilities.abs, ABS_CNT, &abs_bits))
     return false;
   devinfo->SetAbsEvents(&abs_bits[0], abs_bits.size());
+
+  std::vector<unsigned long> sw_bits;
+  if (!ParseBitfield(capabilities.sw, SW_CNT, &sw_bits))
+    return false;
+  devinfo->SetSwEvents(&sw_bits[0], sw_bits.size());
 
   std::vector<unsigned long> msc_bits;
   if (!ParseBitfield(capabilities.msc, MSC_CNT, &msc_bits))

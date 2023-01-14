@@ -37,11 +37,12 @@
 namespace blink {
 
 template <>
-const SVGEnumerationMap& GetEnumerationMap<EdgeModeType>() {
+CORE_EXPORT const SVGEnumerationMap&
+GetEnumerationMap<FEConvolveMatrix::EdgeModeType>() {
   static const SVGEnumerationMap::Entry enum_items[] = {
-      {EDGEMODE_DUPLICATE, "duplicate"},
-      {EDGEMODE_WRAP, "wrap"},
-      {EDGEMODE_NONE, "none"},
+      {FEConvolveMatrix::EDGEMODE_DUPLICATE, "duplicate"},
+      {FEConvolveMatrix::EDGEMODE_WRAP, "wrap"},
+      {FEConvolveMatrix::EDGEMODE_NONE, "none"},
   };
   static const SVGEnumerationMap entries(enum_items);
   return entries;
@@ -88,10 +89,11 @@ SVGFEConvolveMatrixElement::SVGFEConvolveMatrixElement(Document& document)
                                                        svg_names::kDivisorAttr,
                                                        1)),
       in1_(MakeGarbageCollected<SVGAnimatedString>(this, svg_names::kInAttr)),
-      edge_mode_(MakeGarbageCollected<SVGAnimatedEnumeration<EdgeModeType>>(
+      edge_mode_(MakeGarbageCollected<
+                 SVGAnimatedEnumeration<FEConvolveMatrix::EdgeModeType>>(
           this,
           svg_names::kEdgeModeAttr,
-          EDGEMODE_DUPLICATE)),
+          FEConvolveMatrix::EDGEMODE_DUPLICATE)),
       kernel_matrix_(MakeGarbageCollected<SVGAnimatedNumberList>(
           this,
           svg_names::kKernelMatrixAttr)),
@@ -178,8 +180,8 @@ float SVGFEConvolveMatrixElement::ComputeDivisor() const {
     return divisor_->CurrentValue()->Value();
   float divisor_value = 0;
   SVGNumberList* kernel_matrix = kernel_matrix_->CurrentValue();
-  size_t kernel_matrix_size = kernel_matrix->length();
-  for (size_t i = 0; i < kernel_matrix_size; ++i)
+  uint32_t kernel_matrix_size = kernel_matrix->length();
+  for (uint32_t i = 0; i < kernel_matrix_size; ++i)
     divisor_value += kernel_matrix->at(i)->Value();
   return divisor_value ? divisor_value : 1;
 }

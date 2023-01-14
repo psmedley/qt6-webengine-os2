@@ -11,6 +11,7 @@
 #include "base/sequenced_task_runner.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 namespace android {
@@ -38,7 +39,7 @@ class NET_EXPORT_PRIVATE NetworkActivationRequest {
 
   // Exposes a handle to the network currently activated by the system on behalf
   // of this request, if any.
-  const base::Optional<NetworkHandle>& activated_network() const {
+  const absl::optional<NetworkHandle>& activated_network() const {
     return activated_network_;
   }
 
@@ -53,7 +54,7 @@ class NET_EXPORT_PRIVATE NetworkActivationRequest {
   const scoped_refptr<base::SequencedTaskRunner> task_runner_;
   base::WeakPtr<NetworkActivationRequest> weak_self_;
   base::android::ScopedJavaGlobalRef<jobject> java_request_;
-  base::Optional<NetworkHandle> activated_network_;
+  absl::optional<NetworkHandle> activated_network_;
   base::WeakPtrFactory<NetworkActivationRequest> weak_ptr_factory_{this};
 };
 

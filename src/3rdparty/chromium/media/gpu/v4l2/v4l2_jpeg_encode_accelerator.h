@@ -24,7 +24,6 @@
 #include "media/base/video_frame.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/gpu/v4l2/v4l2_device.h"
-#include "media/gpu/v4l2/v4l2_jpeg_encode_accelerator.h"
 #include "media/parsers/jpeg_parser.h"
 
 namespace {
@@ -57,8 +56,9 @@ class MEDIA_GPU_EXPORT V4L2JpegEncodeAccelerator
   ~V4L2JpegEncodeAccelerator() override;
 
   // JpegEncodeAccelerator implementation.
-  chromeos_camera::JpegEncodeAccelerator::Status Initialize(
-      chromeos_camera::JpegEncodeAccelerator::Client* client) override;
+  void InitializeAsync(
+      chromeos_camera::JpegEncodeAccelerator::Client* client,
+      chromeos_camera::JpegEncodeAccelerator::InitCB init_cb) override;
   size_t GetMaxCodedBufferSize(const gfx::Size& picture_size) override;
   void Encode(scoped_refptr<media::VideoFrame> video_frame,
               int quality,
@@ -72,6 +72,10 @@ class MEDIA_GPU_EXPORT V4L2JpegEncodeAccelerator
                         BitstreamBuffer* exif_buffer) override;
 
  private:
+  void InitializeOnTaskRunner(
+      chromeos_camera::JpegEncodeAccelerator::Client* client,
+      InitCB init_cb);
+
   // Record for input buffers.
   struct I420BufferRecord {
     I420BufferRecord();
@@ -330,7 +334,7 @@ class MEDIA_GPU_EXPORT V4L2JpegEncodeAccelerator
     V4L2JpegEncodeAccelerator* parent_;
 
     // Layout that represents the input data.
-    base::Optional<VideoFrameLayout> device_input_layout_;
+    absl::optional<VideoFrameLayout> device_input_layout_;
 
     // The V4L2Device this class is operating upon.
     scoped_refptr<V4L2Device> device_;

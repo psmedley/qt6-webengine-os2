@@ -26,7 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_H_
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -66,7 +66,6 @@ class MutationObserver;
 class MutationObserverRegistration;
 class NodeList;
 class NodeListsNodeData;
-class NodeOrStringOrTrustedScript;
 class NodeRareData;
 class QualifiedName;
 class RegisteredEventListener;
@@ -78,9 +77,10 @@ class ShadowRoot;
 template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
-class StringOrTrustedScript;
 class StyleChangeReasonForTracing;
 class V8ScrollStateCallback;
+class V8UnionNodeOrStringOrTrustedScript;
+class V8UnionStringOrTrustedScript;
 class WebPluginContainerImpl;
 struct PhysicalRect;
 
@@ -125,6 +125,16 @@ enum class LegacyLayout {
 
   // Force legacy layout object creation.
   kForce
+};
+
+// LinkHighlight determines the largest enclosing node with hand cursor set.
+enum class LinkHighlightCandidate {
+  // This node is with hand cursor set.
+  kYes,
+  // This node is not with hand cursor set.
+  kNo,
+  // |kYes| if its ancestor is |kYes|.
+  kMayBe
 };
 
 // A Node is a base class for all objects in the DOM tree.
@@ -192,7 +202,8 @@ class CORE_EXPORT Node : public EventTarget {
   bool HasTagName(const SVGQualifiedName&) const;
   virtual String nodeName() const = 0;
   virtual String nodeValue() const;
-  virtual void setNodeValue(const String&);
+  virtual void setNodeValue(const String&,
+                            ExceptionState& = ASSERT_NO_EXCEPTION);
   virtual NodeType getNodeType() const = 0;
   ContainerNode* parentNode() const;
   ContainerNode* ParentNodeWithCounting() const;
@@ -227,14 +238,24 @@ class CORE_EXPORT Node : public EventTarget {
   // https://dom.spec.whatwg.org/#concept-closed-shadow-hidden
   bool IsClosedShadowHiddenFrom(const Node&) const;
 
-  void Prepend(const HeapVector<NodeOrStringOrTrustedScript>&, ExceptionState&);
-  void Append(const HeapVector<NodeOrStringOrTrustedScript>&, ExceptionState&);
-  void Before(const HeapVector<NodeOrStringOrTrustedScript>&, ExceptionState&);
-  void After(const HeapVector<NodeOrStringOrTrustedScript>&, ExceptionState&);
-  void ReplaceWith(const HeapVector<NodeOrStringOrTrustedScript>&,
-                   ExceptionState&);
-  void ReplaceChildren(const HeapVector<NodeOrStringOrTrustedScript>&,
-                       ExceptionState&);
+  void Prepend(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
+  void Append(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
+  void Before(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
+  void After(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
+  void ReplaceWith(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
+  void ReplaceChildren(
+      const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
+      ExceptionState& exception_state);
   void remove(ExceptionState&);
   void remove();
 
@@ -270,8 +291,10 @@ class CORE_EXPORT Node : public EventTarget {
 
   String textContent(bool convert_brs_to_newlines = false) const;
   virtual void setTextContent(const String&);
-  void textContent(StringOrTrustedScript& result);
-  virtual void setTextContent(const StringOrTrustedScript&, ExceptionState&);
+  V8UnionStringOrTrustedScript* textContentForBinding() const;
+  virtual void setTextContentForBinding(
+      const V8UnionStringOrTrustedScript* value,
+      ExceptionState& exception_state);
 
   bool SupportsAltText();
 
@@ -348,7 +371,6 @@ class CORE_EXPORT Node : public EventTarget {
   bool IsTreeScope() const;
   bool IsShadowRoot() const { return IsDocumentFragment() && IsTreeScope(); }
 
-  bool CanParticipateInFlatTree() const;
   bool IsActiveSlot() const;
   bool IsSlotable() const { return IsTextNode() || IsElementNode(); }
   AtomicString SlotName() const;
@@ -569,6 +591,9 @@ class CORE_EXPORT Node : public EventTarget {
   // inert to prevent text selection.
   bool IsInert() const;
 
+  // Returns how |this| participates to the nodes with hand cursor set.
+  LinkHighlightCandidate IsLinkHighlightCandidate() const;
+
   virtual PhysicalRect BoundingBox() const;
   IntRect PixelSnappedBoundingBox() const;
 
@@ -629,6 +654,7 @@ class CORE_EXPORT Node : public EventTarget {
   unsigned CountChildren() const;
 
   bool IsDescendantOf(const Node*) const;
+  bool IsDescendantOrShadowDescendantOf(const Node*) const;
   bool contains(const Node*) const;
   // https://dom.spec.whatwg.org/#concept-shadow-including-inclusive-ancestor
   bool IsShadowIncludingInclusiveAncestorOf(const Node&) const;
@@ -706,15 +732,17 @@ class CORE_EXPORT Node : public EventTarget {
   // Note that the following 'inline' functions are not defined in this header,
   // but in node_computed_style.h. Please include that file if you want to use
   // these functions.
-  ComputedStyle* MutableComputedStyleForEditingDeprecated() const;
-  const ComputedStyle* GetComputedStyle() const;
-  const ComputedStyle* ParentComputedStyle() const;
+  inline ComputedStyle* MutableComputedStyleForEditingDeprecated() const;
+  inline const ComputedStyle* GetComputedStyle() const;
+  inline const ComputedStyle* ParentComputedStyle() const;
   inline const ComputedStyle& ComputedStyleRef() const;
   bool ShouldSkipMarkingStyleDirty() const;
 
   const ComputedStyle* EnsureComputedStyle(
-      PseudoId pseudo_element_specifier = kPseudoIdNone) {
-    return VirtualEnsureComputedStyle(pseudo_element_specifier);
+      PseudoId pseudo_element_specifier = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom) {
+    return VirtualEnsureComputedStyle(pseudo_element_specifier,
+                                      pseudo_argument);
   }
 
   // ---------------------------------------------------------------------------
@@ -792,7 +820,7 @@ class CORE_EXPORT Node : public EventTarget {
   void ClearFlatTreeNodeData();
   void ClearFlatTreeNodeDataIfHostChanged(const ContainerNode& parent);
 
-  virtual bool WillRespondToMouseMoveEvents();
+  virtual bool WillRespondToMouseMoveEvents() const;
   virtual bool WillRespondToMouseClickEvents();
 
   enum ShadowTreesTreatment {
@@ -892,6 +920,10 @@ class CORE_EXPORT Node : public EventTarget {
   void RegisterScrollTimeline(ScrollTimeline*);
   void UnregisterScrollTimeline(ScrollTimeline*);
 
+  // For the imperative slot distribution API.
+  void SetManuallyAssignedSlot(HTMLSlotElement* slot);
+  HTMLSlotElement* ManuallyAssignedSlot();
+
   // For Element.
   void SetHasDisplayLockContext() { SetFlag(kHasDisplayLockContext); }
   bool HasDisplayLockContext() const { return GetFlag(kHasDisplayLockContext); }
@@ -929,7 +961,6 @@ class CORE_EXPORT Node : public EventTarget {
   void ClearNeedsInheritDirectionalityFromParent() {
     ClearFlag(kNeedsInheritDirectionalityFromParent);
   }
-
   void Trace(Visitor*) const override;
 
  private:
@@ -1106,7 +1137,8 @@ class CORE_EXPORT Node : public EventTarget {
   }
 
   virtual const ComputedStyle* VirtualEnsureComputedStyle(
-      PseudoId = kPseudoIdNone);
+      PseudoId = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom);
 
   void TrackForDebugging();
 
@@ -1126,6 +1158,8 @@ class CORE_EXPORT Node : public EventTarget {
     return reinterpret_cast<NodeRenderingData*>(data_.Get());
   }
   ShadowRoot* GetSlotAssignmentRoot() const;
+
+  void AddCandidateDirectionalityForSlot();
 
   uint32_t node_flags_;
   Member<Node> parent_or_shadow_host_node_;

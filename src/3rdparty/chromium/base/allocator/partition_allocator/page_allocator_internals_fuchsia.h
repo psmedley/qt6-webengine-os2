@@ -49,6 +49,7 @@ zx_vm_option_t PageAccessibilityToZxVmOptions(
     case PageReadWrite:
     case PageReadWriteTagged:
       return ZX_VM_PERM_READ | ZX_VM_PERM_WRITE;
+    case PageReadExecuteProtected:
     case PageReadExecute:
       return ZX_VM_PERM_READ | ZX_VM_PERM_EXECUTE;
     case PageReadWriteExecute:
@@ -150,7 +151,7 @@ bool TrySetSystemPagesAccessInternal(
     void* address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  zx_status_t status = zx::vmar::root_self()->protect2(
+  zx_status_t status = zx::vmar::root_self()->protect(
       PageAccessibilityToZxVmOptions(accessibility),
       reinterpret_cast<uint64_t>(address), length);
   return status == ZX_OK;
@@ -160,7 +161,7 @@ void SetSystemPagesAccessInternal(
     void* address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  zx_status_t status = zx::vmar::root_self()->protect2(
+  zx_status_t status = zx::vmar::root_self()->protect(
       PageAccessibilityToZxVmOptions(accessibility),
       reinterpret_cast<uint64_t>(address), length);
   ZX_CHECK(status == ZX_OK, status);

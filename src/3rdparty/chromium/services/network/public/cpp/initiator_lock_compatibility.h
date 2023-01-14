@@ -6,14 +6,10 @@
 #define SERVICES_NETWORK_PUBLIC_CPP_INITIATOR_LOCK_COMPATIBILITY_H_
 
 #include "base/component_export.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
 namespace network {
-
-namespace mojom {
-class URLLoaderFactoryParams;
-}  // namespace mojom
 
 // These values are logged to UMA. Entries should not be renumbered and
 // numeric values should never be reused. Please keep in sync with
@@ -57,30 +53,25 @@ enum class InitiatorLockCompatibility {
 // (ones that are not coverd by the kExcludedPlugin exception).
 COMPONENT_EXPORT(NETWORK_CPP)
 InitiatorLockCompatibility VerifyRequestInitiatorLock(
-    const base::Optional<url::Origin>& request_initiator_origin_lock,
-    const base::Optional<url::Origin>& request_initiator);
+    const absl::optional<url::Origin>& request_initiator_origin_lock,
+    const absl::optional<url::Origin>& request_initiator);
 
-// Gets initiator of request, falling back to a unique origin if
-// 1) |request_initiator| is missing or
-// 2) |request_initiator| is incompatible with |request_initiator_origin_lock|.
-//
-// |request_initiator_origin_lock| is the origin to which the URLLoaderFactory
-// of the request is locked in a trustworthy way.
-//   Example:
-//     URLLoaderFactoryParams::request_initiator_origin_lock
-//     SubresourceSignedExchangeURLLoaderFactory::request_initiator_origin_lock
-// |request_initiator| should come from net::URLRequest::initiator() or
-// network::ResourceRequest::request_initiator which may be initially set in an
-// untrustworthy process (eg: renderer process).
-//
-// TODO(lukasza): Remove this function if https://crrev.com/c/1661114 sticks
-// (i.e. if ResourceRequest::request_initiator is sanitized and made trustworthy
-// by CorsURLLoaderFactory::CreateLoaderAndStart and IsValidRequest). Once we
-// remove this, this header can be moved to non-public directory.
-COMPONENT_EXPORT(NETWORK_CPP)
-url::Origin GetTrustworthyInitiator(
-    const base::Optional<url::Origin>& request_initiator_origin_lock,
-    const base::Optional<url::Origin>& request_initiator);
+namespace debug {
+
+class COMPONENT_EXPORT(NETWORK_CPP) ScopedRequestInitiatorOriginLockCrashKey
+    : public url::debug::ScopedOriginCrashKey {
+ public:
+  explicit ScopedRequestInitiatorOriginLockCrashKey(
+      const absl::optional<url::Origin>& request_initiator_origin_lock);
+  ~ScopedRequestInitiatorOriginLockCrashKey();
+
+  ScopedRequestInitiatorOriginLockCrashKey(
+      const ScopedRequestInitiatorOriginLockCrashKey&) = delete;
+  ScopedRequestInitiatorOriginLockCrashKey& operator=(
+      const ScopedRequestInitiatorOriginLockCrashKey&) = delete;
+};
+
+}  // namespace debug
 
 }  // namespace network
 

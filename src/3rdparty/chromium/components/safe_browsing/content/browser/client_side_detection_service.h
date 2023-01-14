@@ -24,13 +24,14 @@
 #include "base/containers/queue.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "components/safe_browsing/content/browser/client_side_model_loader.h"
-#include "components/safe_browsing/core/proto/csd.pb.h"
+#include "components/safe_browsing/content/browser/client_side_phishing_model.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -94,10 +95,12 @@ class ClientSideDetectionService : public KeyedService {
   // phishing verdict will always be false.  The callback is always called after
   // SendClientReportPhishingRequest() returns and on the same thread as
   // SendClientReportPhishingRequest() was called.  You may set |callback| to
-  // NULL if you don't care about the server verdict.
+  // NULL if you don't care about the server verdict.  If |access_token| is not
+  // empty, it is set in the "Authorization: Bearer" header.
   virtual void SendClientReportPhishingRequest(
       std::unique_ptr<ClientPhishingRequest> verdict,
-      ClientReportPhishingRequestCallback callback);
+      ClientReportPhishingRequestCallback callback,
+      const std::string& access_token);
 
   // Returns true if the given IP address string falls within a private
   // (unroutable) network block.  Pages which are hosted on these IP addresses
@@ -122,17 +125,21 @@ class ClientSideDetectionService : public KeyedService {
   // Sends a model to each renderer.
   virtual void SendModelToRenderers();
 
-  // Get the model status for the given client-side model.
-  ModelLoader::ClientModelStatus GetLastModelStatus();
+  // Returns the model string. Used only for protobuf model. Virtual so that
+  // mock implementation can override it.
+  virtual const std::string& GetModelStr();
 
-  // Returns the model string. Virtual so that mock implementation can override
-  // it.
-  virtual std::string GetModelStr();
+  // Returns the model type (protobuf or flatbuffer). Virtual so that mock
+  // implementation can override it.
+  virtual CSDModelType GetModelType();
 
-  // Makes ModelLoaders be constructed by calling |factory| rather than the
-  // default constructor.
-  void SetModelLoaderFactoryForTesting(
-      base::RepeatingCallback<std::unique_ptr<ModelLoader>()> factory);
+  // Returns the ReadOnlySharedMemoryRegion for the flatbuffer model. Virtual so
+  // that mock implementation can override it.
+  virtual base::ReadOnlySharedMemoryRegion GetModelSharedMemoryRegion();
+
+  // Returns the TfLite model file. Virtual so that mock implementation can
+  // override it.
+  virtual const base::File& GetVisualTfLiteModel();
 
   // Overrides the SharedURLLoaderFactory
   void SetURLLoaderFactoryForTesting(
@@ -161,7 +168,6 @@ class ClientSideDetectionService : public KeyedService {
 
   static const char kClientReportPhishingUrl[];
   static const int kMaxReportsPerInterval;
-  static const int kInitialClientModelFetchDelayMs;
   static const int kReportsIntervalDays;
   static const int kNegativeCacheIntervalDays;
   static const int kPositiveCacheIntervalMinutes;
@@ -178,7 +184,8 @@ class ClientSideDetectionService : public KeyedService {
   // This method takes ownership of both pointers.
   void StartClientReportPhishingRequest(
       std::unique_ptr<ClientPhishingRequest> request,
-      ClientReportPhishingRequestCallback callback);
+      ClientReportPhishingRequestCallback callback,
+      const std::string& access_token);
 
   // Called by OnURLFetchComplete to handle the server response from
   // sending the client-side phishing request.
@@ -212,8 +219,6 @@ class ClientSideDetectionService : public KeyedService {
   // choice of model.
   bool extended_reporting_ = false;
 
-  std::unique_ptr<ModelLoader> model_loader_;
-
   // Map of client report phishing request to the corresponding callback that
   // has to be invoked when the request is done.
   struct ClientPhishingReportInfo;
@@ -241,10 +246,9 @@ class ClientSideDetectionService : public KeyedService {
 
   std::vector<ClientSideDetectionHost*> csd_hosts_;
 
-  // Factory used for constructing ModelLoaders
-  base::RepeatingCallback<std::unique_ptr<ModelLoader>()> model_factory_;
-
   std::unique_ptr<Delegate> delegate_;
+
+  base::CallbackListSubscription update_model_subscription_;
 
   // Used to asynchronously call the callbacks for
   // SendClientReportPhishingRequest.

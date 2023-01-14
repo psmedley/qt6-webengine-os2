@@ -68,150 +68,126 @@ class DISABLED_MediaControlsProgressViewTest
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, InitProgress) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, InitProgressOverHour) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromHours(2) /* duration */,
-      base::TimeDelta::FromMinutes(30) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromHours(2),
+      /*position=*/base::TimeDelta::FromMinutes(30), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("2:00:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("0:30:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"2:00:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"0:30:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .25);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, InitProgressOverDay) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromHours(25) /* duration */,
-      base::TimeDelta::FromHours(5) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromHours(25),
+      /*position=*/base::TimeDelta::FromHours(5), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
   // Verify that base::DURATION_WIDTH_NARROW time format is used here.
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("25h 0m 0s"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("5h 0m 0s"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"25h 0m 0s");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"5h 0m 0s");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .2);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgress) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(30));
   task_environment()->RunUntilIdle();
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:30"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:30");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .55);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressFastPlayback) {
   media_session::MediaPosition media_position(
-      2 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/2, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(15));
   task_environment()->RunUntilIdle();
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:30"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:30");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .55);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressSlowPlayback) {
   media_session::MediaPosition media_position(
-      .5 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/.5, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(60));
   task_environment()->RunUntilIdle();
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:30"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:30");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .55);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressNegativePlayback) {
   media_session::MediaPosition media_position(
-      -1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/-1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(30));
   task_environment()->RunUntilIdle();
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("04:30"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"04:30");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .45);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressPastDuration) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   // Move forward in time past the duration.
@@ -219,24 +195,20 @@ TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressPastDuration) {
   task_environment()->RunUntilIdle();
 
   // Verify the progress does not go past the duration.
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("10:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"10:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), 1);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressBeforeStart) {
   media_session::MediaPosition media_position(
-      -1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/-1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   // Move forward in time before the start using negative playback rate.
@@ -244,63 +216,53 @@ TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressBeforeStart) {
   task_environment()->RunUntilIdle();
 
   // Verify the progress does not go below 0.
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("00:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"00:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), 0);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressPaused) {
   media_session::MediaPosition media_position(
-      0 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/0, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   task_environment()->FastForwardBy(base::TimeDelta::FromMinutes(6));
   task_environment()->RunUntilIdle();
 
   // Verify the progress does not change while media is paused.
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 }
 
 TEST_F(MAYBE_MediaControlsProgressViewTest, UpdateProgressTwice) {
   media_session::MediaPosition media_position(
-      1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
-      base::TimeDelta::FromSeconds(300) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromSeconds(600),
+      /*position=*/base::TimeDelta::FromSeconds(300), /*end_of_media=*/false);
 
   // Simulate first position change.
   progress_view_->UpdateProgress(media_position);
 
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("10:00"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("05:00"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"10:00");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"05:00");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .5);
 
   media_session::MediaPosition new_media_position(
-      1 /* playback_rate */, base::TimeDelta::FromSeconds(200) /* duration */,
-      base::TimeDelta::FromSeconds(50) /* position */);
+      /*playback_rate=*/1, /*duration=*/base::TimeDelta::FromSeconds(200),
+      /*position=*/base::TimeDelta::FromSeconds(50), /*end_of_media=*/false);
 
   // Simulate second position change.
   progress_view_->UpdateProgress(new_media_position);
 
   // Verify that the progress reflects the most recent position update.
-  EXPECT_EQ(progress_view_->duration_for_testing(),
-            base::ASCIIToUTF16("03:20"));
-  EXPECT_EQ(progress_view_->progress_time_for_testing(),
-            base::ASCIIToUTF16("00:50"));
+  EXPECT_EQ(progress_view_->duration_for_testing(), u"03:20");
+  EXPECT_EQ(progress_view_->progress_time_for_testing(), u"00:50");
   EXPECT_EQ(progress_view_->progress_bar_for_testing()->GetValue(), .25);
 }
 

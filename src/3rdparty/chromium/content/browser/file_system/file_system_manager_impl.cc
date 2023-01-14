@@ -36,6 +36,7 @@
 #include "storage/common/file_system/file_system_info.h"
 #include "storage/common/file_system/file_system_types.h"
 #include "storage/common/file_system/file_system_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -96,7 +97,6 @@ blink::mojom::FileSystemType ToMojoFileSystemType(
     case storage::FileSystemType::kFileSystemTypeLocalForPlatformApp:
     case storage::FileSystemType::kFileSystemTypeForTransientFile:
     case storage::FileSystemType::kFileSystemTypePluginPrivate:
-    case storage::FileSystemType::kFileSystemTypeCloudDevice:
     case storage::FileSystemType::kFileSystemTypeProvided:
     case storage::FileSystemType::kFileSystemTypeDeviceMediaAsFileStorage:
     case storage::FileSystemType::kFileSystemTypeArcContent:
@@ -223,8 +223,10 @@ void FileSystemManagerImpl::Open(const url::Origin& origin,
   } else if (file_system_type == blink::mojom::FileSystemType::kPersistent) {
     RecordAction(base::UserMetricsAction("OpenFileSystemPersistent"));
   }
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
   context_->OpenFileSystem(
-      origin, ToStorageFileSystemType(file_system_type),
+      blink::StorageKey(origin), ToStorageFileSystemType(file_system_type),
       storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
       base::BindOnce(&FileSystemManagerImpl::DidOpenFileSystem, GetWeakPtr(),
                      std::move(callback)));
@@ -233,8 +235,11 @@ void FileSystemManagerImpl::Open(const url::Origin& origin,
 void FileSystemManagerImpl::ResolveURL(const GURL& filesystem_url,
                                        ResolveURLCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(filesystem_url));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(context_->CrackURL(
+      filesystem_url, blink::StorageKey(url::Origin::Create(filesystem_url))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(blink::mojom::FileSystemInfo::New(),
                             base::FilePath(), false, opt_error.value());
@@ -257,9 +262,15 @@ void FileSystemManagerImpl::Move(const GURL& src_path,
                                  const GURL& dest_path,
                                  MoveCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL src_url(context_->CrackURL(src_path));
-  FileSystemURL dest_url(context_->CrackURL(dest_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(src_url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL src_url(context_->CrackURL(
+      src_path, blink::StorageKey(url::Origin::Create(src_path))));
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL dest_url(context_->CrackURL(
+      dest_path, blink::StorageKey(url::Origin::Create(dest_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(src_url);
   if (!opt_error)
     opt_error = ValidateFileSystemURL(dest_url);
   if (opt_error) {
@@ -273,19 +284,27 @@ void FileSystemManagerImpl::Move(const GURL& src_path,
     return;
   }
 
-  operation_runner()->Move(src_url, dest_url,
-                           storage::FileSystemOperation::OPTION_NONE,
-                           base::BindOnce(&FileSystemManagerImpl::DidFinish,
-                                          GetWeakPtr(), std::move(callback)));
+  operation_runner()->Move(
+      src_url, dest_url, storage::FileSystemOperation::OPTION_NONE,
+      FileSystemOperation::ERROR_BEHAVIOR_ABORT,
+      storage::FileSystemOperation::CopyOrMoveProgressCallback(),
+      base::BindOnce(&FileSystemManagerImpl::DidFinish, GetWeakPtr(),
+                     std::move(callback)));
 }
 
 void FileSystemManagerImpl::Copy(const GURL& src_path,
                                  const GURL& dest_path,
                                  CopyCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL src_url(context_->CrackURL(src_path));
-  FileSystemURL dest_url(context_->CrackURL(dest_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(src_url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL src_url(context_->CrackURL(
+      src_path, blink::StorageKey(url::Origin::Create(src_path))));
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL dest_url(context_->CrackURL(
+      dest_path, blink::StorageKey(url::Origin::Create(dest_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(src_url);
   if (!opt_error)
     opt_error = ValidateFileSystemURL(dest_url);
   if (opt_error) {
@@ -301,7 +320,7 @@ void FileSystemManagerImpl::Copy(const GURL& src_path,
   operation_runner()->Copy(
       src_url, dest_url, storage::FileSystemOperation::OPTION_NONE,
       FileSystemOperation::ERROR_BEHAVIOR_ABORT,
-      storage::FileSystemOperationRunner::CopyProgressCallback(),
+      storage::FileSystemOperation::CopyOrMoveProgressCallback(),
       base::BindOnce(&FileSystemManagerImpl::DidFinish, GetWeakPtr(),
                      std::move(callback)));
 }
@@ -310,8 +329,11 @@ void FileSystemManagerImpl::Remove(const GURL& path,
                                    bool recursive,
                                    RemoveCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(opt_error.value());
     return;
@@ -329,8 +351,11 @@ void FileSystemManagerImpl::Remove(const GURL& path,
 void FileSystemManagerImpl::ReadMetadata(const GURL& path,
                                          ReadMetadataCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(base::File::Info(), opt_error.value());
     return;
@@ -356,8 +381,11 @@ void FileSystemManagerImpl::Create(const GURL& path,
                                    bool recursive,
                                    CreateCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(opt_error.value());
     return;
@@ -384,8 +412,11 @@ void FileSystemManagerImpl::Exists(const GURL& path,
                                    bool is_directory,
                                    ExistsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(opt_error.value());
     return;
@@ -411,8 +442,11 @@ void FileSystemManagerImpl::ReadDirectory(
     mojo::PendingRemote<blink::mojom::FileSystemOperationListener>
         pending_listener) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   mojo::Remote<blink::mojom::FileSystemOperationListener> listener(
       std::move(pending_listener));
   if (opt_error) {
@@ -434,8 +468,11 @@ void FileSystemManagerImpl::ReadDirectorySync(
     const GURL& path,
     ReadDirectorySyncCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(
+      context_->CrackURL(path, blink::StorageKey(url::Origin::Create(path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(std::vector<filesystem::mojom::DirectoryEntryPtr>(),
                             opt_error.value());
@@ -463,9 +500,11 @@ void FileSystemManagerImpl::Write(
     mojo::PendingRemote<blink::mojom::FileSystemOperationListener>
         pending_listener) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  FileSystemURL url(context_->CrackURL(file_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(context_->CrackURL(
+      file_path, blink::StorageKey(url::Origin::Create(file_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   mojo::Remote<blink::mojom::FileSystemOperationListener> listener(
       std::move(pending_listener));
   if (opt_error) {
@@ -495,9 +534,11 @@ void FileSystemManagerImpl::WriteSync(const GURL& file_path,
                                       int64_t position,
                                       WriteSyncCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  FileSystemURL url(context_->CrackURL(file_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(context_->CrackURL(
+      file_path, blink::StorageKey(url::Origin::Create(file_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(0, opt_error.value());
     return;
@@ -523,8 +564,11 @@ void FileSystemManagerImpl::Truncate(
         op_receiver,
     TruncateCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(file_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(context_->CrackURL(
+      file_path, blink::StorageKey(url::Origin::Create(file_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(opt_error.value());
     return;
@@ -547,8 +591,11 @@ void FileSystemManagerImpl::TruncateSync(const GURL& file_path,
                                          int64_t length,
                                          TruncateSyncCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(file_path));
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  // TODO(https://crbug.com/1221308): function will use StorageKey for the
+  // receiver frame/worker in future CL
+  FileSystemURL url(context_->CrackURL(
+      file_path, blink::StorageKey(url::Origin::Create(file_path))));
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(opt_error.value());
     return;
@@ -568,12 +615,13 @@ void FileSystemManagerImpl::CreateSnapshotFile(
     const GURL& file_path,
     CreateSnapshotFileCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  FileSystemURL url(context_->CrackURL(file_path));
+  FileSystemURL url(context_->CrackURL(
+      file_path, blink::StorageKey(url::Origin::Create(file_path))));
 
   // Make sure if this file can be read by the renderer as this is
   // called when the renderer is about to create a new File object
   // (for reading the file).
-  base::Optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
+  absl::optional<base::File::Error> opt_error = ValidateFileSystemURL(url);
   if (opt_error) {
     std::move(callback).Run(base::File::Info(), base::FilePath(),
                             opt_error.value(), mojo::NullRemote());
@@ -843,7 +891,7 @@ void FileSystemManagerImpl::GetPlatformPathOnFileThread(
           std::move(file_system_manager), std::move(callback)));
 }
 
-base::Optional<base::File::Error> FileSystemManagerImpl::ValidateFileSystemURL(
+absl::optional<base::File::Error> FileSystemManagerImpl::ValidateFileSystemURL(
     const storage::FileSystemURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!FileSystemURLIsValid(context_.get(), url))
@@ -855,7 +903,7 @@ base::Optional<base::File::Error> FileSystemManagerImpl::ValidateFileSystemURL(
   if (url.type() == storage::kFileSystemTypePluginPrivate)
     return base::File::FILE_ERROR_SECURITY;
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 FileSystemManagerImpl::OperationListenerID FileSystemManagerImpl::AddOpListener(

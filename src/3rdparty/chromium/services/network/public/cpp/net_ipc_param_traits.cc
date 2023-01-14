@@ -20,9 +20,9 @@ void ParamTraits<net::AuthCredentials>::Write(base::Pickle* m,
 bool ParamTraits<net::AuthCredentials>::Read(const base::Pickle* m,
                                              base::PickleIterator* iter,
                                              param_type* r) {
-  base::string16 username;
+  std::u16string username;
   bool read_username = ReadParam(m, iter, &username);
-  base::string16 password;
+  std::u16string password;
   bool read_password = ReadParam(m, iter, &password);
 
   if (!read_username || !read_password)
@@ -224,14 +224,12 @@ void ParamTraits<net::ProxyServer>::Write(base::Pickle* m,
       scheme != net::ProxyServer::SCHEME_INVALID) {
     WriteParam(m, p.host_port_pair());
   }
-  WriteParam(m, p.is_trusted_proxy());
 }
 
 bool ParamTraits<net::ProxyServer>::Read(const base::Pickle* m,
                                          base::PickleIterator* iter,
                                          param_type* r) {
   net::ProxyServer::Scheme scheme;
-  bool is_trusted_proxy = false;
   if (!ReadParam(m, iter, &scheme))
     return false;
 
@@ -244,10 +242,7 @@ bool ParamTraits<net::ProxyServer>::Read(const base::Pickle* m,
     return false;
   }
 
-  if (!ReadParam(m, iter, &is_trusted_proxy))
-    return false;
-
-  *r = net::ProxyServer(scheme, host_port_pair, is_trusted_proxy);
+  *r = net::ProxyServer(scheme, host_port_pair);
   return true;
 }
 
@@ -576,14 +571,14 @@ bool ParamTraits<url::Origin>::Read(const base::Pickle* m,
   std::string host;
   uint16_t port;
   std::string full_url;
-  base::Optional<base::UnguessableToken> nonce_if_opaque;
+  absl::optional<base::UnguessableToken> nonce_if_opaque;
   if (!ReadParam(m, iter, &scheme) || !ReadParam(m, iter, &host) ||
       !ReadParam(m, iter, &port) || !ReadParam(m, iter, &nonce_if_opaque)
       || !ReadParam(m, iter, &full_url)) {
     return false;
   }
 
-  base::Optional<url::Origin> creation_result =
+  absl::optional<url::Origin> creation_result =
       nonce_if_opaque
           ? url::Origin::UnsafelyCreateOpaqueOriginWithoutNormalization(
                 scheme, host, port, url::Origin::Nonce(*nonce_if_opaque))

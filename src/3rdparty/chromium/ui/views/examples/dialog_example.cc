@@ -63,7 +63,7 @@ class DialogExample::Delegate : public virtual DialogType {
   }
 
  protected:
-  base::string16 GetWindowTitle() const override {
+  std::u16string GetWindowTitle() const override {
     return parent_->title_->GetText();
   }
 
@@ -93,14 +93,11 @@ class DialogExample::Bubble : public Delegate<BubbleDialogDelegateView> {
 
 class DialogExample::Dialog : public Delegate<DialogDelegateView> {
  public:
-  explicit Dialog(DialogExample* parent) : Delegate(parent) {}
-
-  // WidgetDelegate:
-  bool CanResize() const override {
+  explicit Dialog(DialogExample* parent) : Delegate(parent) {
     // Mac supports resizing of modal dialogs (parent or window-modal). On other
     // platforms this will be weird unless the modal type is "none", but helps
     // test layout.
-    return true;
+    SetCanResize(true);
   }
 
  private:
@@ -110,11 +107,11 @@ class DialogExample::Dialog : public Delegate<DialogDelegateView> {
 DialogExample::DialogExample()
     : ExampleBase("Dialog"),
       mode_model_({
-          base::ASCIIToUTF16("Modeless"),
-          base::ASCIIToUTF16("Window Modal"),
-          base::ASCIIToUTF16("Child Modal"),
-          base::ASCIIToUTF16("System Modal"),
-          base::ASCIIToUTF16("Fake Modeless (non-bubbles)"),
+          ui::SimpleComboboxModel::Item(u"Modeless"),
+          ui::SimpleComboboxModel::Item(u"Window Modal"),
+          ui::SimpleComboboxModel::Item(u"Child Modal"),
+          ui::SimpleComboboxModel::Item(u"System Modal"),
+          ui::SimpleComboboxModel::Item(u"Fake Modeless (non-bubbles)"),
       }) {}
 
 DialogExample::~DialogExample() = default;
@@ -160,7 +157,7 @@ void DialogExample::CreateExampleView(View* container) {
   StartRowWithLabel(layout, "Bubble");
   AddCheckbox(layout, &bubble_);
   AddCheckbox(layout, &persistent_bubble_);
-  persistent_bubble_->SetText(base::ASCIIToUTF16("Persistent"));
+  persistent_bubble_->SetText(u"Persistent");
 
   column_set = layout->AddColumnSet(kButtonsColumnId);
   column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, kStretchy,
@@ -172,7 +169,7 @@ void DialogExample::CreateExampleView(View* container) {
   show_ = layout->AddView(std::make_unique<views::MdTextButton>(
       base::BindRepeating(&DialogExample::ShowButtonPressed,
                           base::Unretained(this)),
-      base::ASCIIToUTF16("Show")));
+      u"Show"));
 }
 
 void DialogExample::StartRowWithLabel(GridLayout* layout, const char* label) {
@@ -199,7 +196,7 @@ void DialogExample::AddCheckbox(GridLayout* layout, Checkbox** member) {
   auto callback = member == &bubble_ ? &DialogExample::BubbleCheckboxPressed
                                      : &DialogExample::OtherCheckboxPressed;
   auto checkbox = std::make_unique<Checkbox>(
-      base::string16(), base::BindRepeating(callback, base::Unretained(this)));
+      std::u16string(), base::BindRepeating(callback, base::Unretained(this)));
   checkbox->SetChecked(true);
   *member = layout->AddView(std::move(checkbox));
 }
@@ -297,7 +294,7 @@ void DialogExample::OtherCheckboxPressed() {
 }
 
 void DialogExample::ContentsChanged(Textfield* sender,
-                                    const base::string16& new_contents) {
+                                    const std::u16string& new_contents) {
   if (!last_dialog_)
     return;
 
@@ -317,7 +314,7 @@ void DialogExample::ContentsChanged(Textfield* sender,
 
 void DialogExample::OnPerformAction() {
   bool enable = bubble_->GetChecked() || GetModalType() != ui::MODAL_TYPE_CHILD;
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   enable = enable && GetModalType() != ui::MODAL_TYPE_SYSTEM;
 #endif
   show_->SetEnabled(enable);

@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/optional.h"
 #include "sql/recover_module/parsing.h"
 #include "third_party/sqlite/sqlite3.h"
 

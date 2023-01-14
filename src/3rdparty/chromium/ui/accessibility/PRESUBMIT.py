@@ -6,6 +6,8 @@
 
 import os, re, json
 
+USE_PYTHON3 = True
+
 AX_MOJOM = 'ui/accessibility/ax_enums.mojom'
 AUTOMATION_IDL = 'extensions/common/api/automation.idl'
 
@@ -33,6 +35,9 @@ def GetEnumsFromFile(fullpath):
   for line in open(fullpath).readlines():
     # Strip out comments
     line = re.sub('//.*', '', line)
+
+    # Strip out mojo annotations.
+    line = re.sub('\[(.*)\]', '', line)
 
     # Look for lines of the form "enum ENUM_NAME {" and get the enum_name
     m = re.search('enum ([\w]+) {', line)
@@ -159,6 +164,10 @@ def CheckEnumsMatch(input_api, output_api):
                    'IntentMoveDirectionType', errs, output_api)
   CheckMatchingEnum(ax_enums, 'SortDirection', automation_enums,
                    'SortDirectionType', errs, output_api)
+  CheckMatchingEnum(ax_enums, 'HasPopup', automation_enums,
+                   'HasPopup', errs, output_api)
+  CheckMatchingEnum(ax_enums, 'AriaCurrentState', automation_enums,
+                   'AriaCurrentState', errs, output_api)
   return errs
 
 # Given a full path to c++ header, return an array of the first static

@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/frame/root_frame_viewport.h"
 
 #include "base/barrier_closure.h"
+#include "base/callback_helpers.h"
 #include "cc/input/snap_selection_strategy.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -478,6 +479,10 @@ IntSize RootFrameViewport::ContentsSize() const {
   return LayoutViewport().ContentsSize();
 }
 
+bool RootFrameViewport::UsesCompositedScrolling() const {
+  return LayoutViewport().UsesCompositedScrolling();
+}
+
 bool RootFrameViewport::ShouldScrollOnMainThread() const {
   return LayoutViewport().ShouldScrollOnMainThread();
 }
@@ -649,7 +654,7 @@ const cc::SnapContainerData* RootFrameViewport::GetSnapContainerData() const {
 }
 
 void RootFrameViewport::SetSnapContainerData(
-    base::Optional<cc::SnapContainerData> data) {
+    absl::optional<cc::SnapContainerData> data) {
   LayoutViewport().SetSnapContainerData(data);
 }
 
@@ -674,7 +679,7 @@ void RootFrameViewport::SetNeedsResnap(bool needs_resnap) {
   LayoutViewport().SetNeedsResnap(needs_resnap);
 }
 
-base::Optional<FloatPoint> RootFrameViewport::GetSnapPositionAndSetTarget(
+absl::optional<FloatPoint> RootFrameViewport::GetSnapPositionAndSetTarget(
     const cc::SnapSelectionStrategy& strategy) {
   return LayoutViewport().GetSnapPositionAndSetTarget(strategy);
 }

@@ -34,6 +34,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/numerics/checked_math.h"
 #include "build/build_config.h"
@@ -105,7 +106,7 @@ void ForceNextDrawingBufferCreationToFailForTest() {
 
 scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-    bool using_gpu_compositing,
+    const Platform::GraphicsInfo& graphics_info,
     bool using_swap_chain,
     Client* client,
     const IntSize& size,
@@ -117,7 +118,7 @@ scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
     PreserveDrawingBuffer preserve,
     WebGLVersion webgl_version,
     ChromiumImageUsage chromium_image_usage,
-    SkFilterQuality filter_quality,
+    cc::PaintFlags::FilterQuality filter_quality,
     const CanvasColorParams& color_params,
     gl::GpuPreference gpu_preference) {
   if (g_should_fail_drawing_buffer_creation_for_testing) {
@@ -166,7 +167,7 @@ scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
 
   scoped_refptr<DrawingBuffer> drawing_buffer =
       base::AdoptRef(new DrawingBuffer(
-          std::move(context_provider), using_gpu_compositing, using_swap_chain,
+          std::move(context_provider), graphics_info, using_swap_chain,
           std::move(extensions_util), client, discard_framebuffer_supported,
           want_alpha_channel, premultiplied_alpha, preserve, webgl_version,
           want_depth_buffer, want_stencil_buffer, chromium_image_usage,
@@ -180,7 +181,7 @@ scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
 
 DrawingBuffer::DrawingBuffer(
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-    bool using_gpu_compositing,
+    const Platform::GraphicsInfo& graphics_info,
     bool using_swap_chain,
     std::unique_ptr<Extensions3DUtil> extensions_util,
     Client* client,
@@ -192,7 +193,7 @@ DrawingBuffer::DrawingBuffer(
     bool want_depth,
     bool want_stencil,
     ChromiumImageUsage chromium_image_usage,
-    SkFilterQuality filter_quality,
+    cc::PaintFlags::FilterQuality filter_quality,
     const CanvasColorParams& color_params,
     gl::GpuPreference gpu_preference)
     : client_(client),
@@ -200,12 +201,12 @@ DrawingBuffer::DrawingBuffer(
       webgl_version_(webgl_version),
       context_provider_(std::make_unique<WebGraphicsContext3DProviderWrapper>(
           std::move(context_provider))),
-      gl_(this->ContextProvider()->ContextGL()),
+      gl_(ContextProvider()->ContextGL()),
       extensions_util_(std::move(extensions_util)),
       discard_framebuffer_supported_(discard_framebuffer_supported),
       want_alpha_channel_(want_alpha_channel),
       premultiplied_alpha_(premultiplied_alpha),
-      using_gpu_compositing_(using_gpu_compositing),
+      graphics_info_(graphics_info),
       using_swap_chain_(using_swap_chain),
       want_depth_(want_depth),
       want_stencil_(want_stencil),
@@ -289,11 +290,14 @@ void DrawingBuffer::SetIsInHiddenPage(bool hidden) {
   gl_->Flush();
 }
 
-void DrawingBuffer::SetFilterQuality(SkFilterQuality filter_quality) {
+void DrawingBuffer::SetFilterQuality(
+    cc::PaintFlags::FilterQuality filter_quality) {
   if (filter_quality_ != filter_quality) {
     filter_quality_ = filter_quality;
-    if (layer_)
-      layer_->SetNearestNeighbor(filter_quality == kNone_SkFilterQuality);
+    if (layer_) {
+      layer_->SetNearestNeighbor(filter_quality ==
+                                 cc::PaintFlags::FilterQuality::kNone);
+    }
   }
 }
 
@@ -315,7 +319,8 @@ DrawingBuffer::RegisteredBitmap DrawingBuffer::CreateOrRecycleBitmap(
                               return registered.bitmap->size() !=
                                      static_cast<gfx::Size>(size_);
                             });
-  recycled_bitmaps_.Shrink(it - recycled_bitmaps_.begin());
+  recycled_bitmaps_.Shrink(
+      static_cast<wtf_size_t>(it - recycled_bitmaps_.begin()));
 
   if (!recycled_bitmaps_.IsEmpty()) {
     RegisteredBitmap recycled = std::move(recycled_bitmaps_.back());
@@ -338,18 +343,15 @@ DrawingBuffer::RegisteredBitmap DrawingBuffer::CreateOrRecycleBitmap(
 bool DrawingBuffer::PrepareTransferableResource(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
+    viz::ReleaseCallback* out_release_callback) {
   ScopedStateRestorer scoped_state_restorer(this);
   bool force_gpu_result = false;
   return PrepareTransferableResourceInternal(
       bitmap_registrar, out_resource, out_release_callback, force_gpu_result);
 }
 
-bool DrawingBuffer::PrepareTransferableResourceInternal(
-    cc::SharedBitmapIdRegistrar* bitmap_registrar,
-    viz::TransferableResource* out_resource,
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback,
-    bool force_gpu_result) {
+DrawingBuffer::CheckForDestructionResult
+DrawingBuffer::CheckForDestructionAndChangeAndResolveIfNeeded() {
   DCHECK(state_restorer_);
   if (destruction_in_progress_) {
     // It can be hit in the following sequence.
@@ -357,7 +359,7 @@ bool DrawingBuffer::PrepareTransferableResourceInternal(
     // 2. The compositor begins the frame.
     // 3. Javascript makes a context lost using WEBGL_lose_context extension.
     // 4. Here.
-    return false;
+    return DestroyedOrLost;
   }
 
   // There used to be a DCHECK(!is_hidden_) here, but in some tab
@@ -365,20 +367,32 @@ bool DrawingBuffer::PrepareTransferableResourceInternal(
   // backgrounded tabs.
 
   if (!contents_changed_)
-    return false;
+    return ContentsUnchanged;
 
   // If the context is lost, we don't know if we should be producing GPU or
   // software frames, until we get a new context, since the compositor will
   // be trying to get a new context and may change modes.
   if (gl_->GetGraphicsResetStatusKHR() != GL_NO_ERROR)
-    return false;
+    return DestroyedOrLost;
 
   TRACE_EVENT0("blink,rail", "DrawingBuffer::prepareMailbox");
 
   // Resolve the multisampled buffer into the texture attached to fbo_.
   ResolveIfNeeded();
 
-  if (!using_gpu_compositing_ && !force_gpu_result) {
+  return ContentsResolvedIfNeeded;
+}
+
+bool DrawingBuffer::PrepareTransferableResourceInternal(
+    cc::SharedBitmapIdRegistrar* bitmap_registrar,
+    viz::TransferableResource* out_resource,
+    viz::ReleaseCallback* out_release_callback,
+    bool force_gpu_result) {
+  if (CheckForDestructionAndChangeAndResolveIfNeeded() !=
+      ContentsResolvedIfNeeded)
+    return false;
+
+  if (!IsUsingGpuCompositing() && !force_gpu_result) {
     return FinishPrepareTransferableResourceSoftware(
         bitmap_registrar, out_resource, out_release_callback);
   }
@@ -387,30 +401,54 @@ bool DrawingBuffer::PrepareTransferableResourceInternal(
                                               out_release_callback);
 }
 
+scoped_refptr<StaticBitmapImage>
+DrawingBuffer::GetUnacceleratedStaticBitmapImage(bool flip_y) {
+  ScopedStateRestorer scoped_state_restorer(this);
+
+  if (CheckForDestructionAndChangeAndResolveIfNeeded() == DestroyedOrLost)
+    return nullptr;
+
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(size_.Width(), size_.Height());
+  ReadFramebufferIntoBitmapPixels(static_cast<uint8_t*>(bitmap.getPixels()));
+  auto sk_image = SkImage::MakeFromBitmap(bitmap);
+
+  bool origin_top_left =
+      flip_y ? opengl_flip_y_extension_ : !opengl_flip_y_extension_;
+
+  return sk_image ? UnacceleratedStaticBitmapImage::Create(
+                        sk_image, origin_top_left
+                                      ? ImageOrientationEnum::kOriginTopLeft
+                                      : ImageOrientationEnum::kOriginBottomLeft)
+                  : nullptr;
+}
+
+void DrawingBuffer::ReadFramebufferIntoBitmapPixels(uint8_t* pixels) {
+  DCHECK(pixels);
+  DCHECK(state_restorer_);
+  bool need_premultiply = want_alpha_channel_ && !premultiplied_alpha_;
+  WebGLImageConversion::AlphaOp op =
+      need_premultiply ? WebGLImageConversion::kAlphaDoPremultiply
+                       : WebGLImageConversion::kAlphaDoNothing;
+  state_restorer_->SetFramebufferBindingDirty();
+  gl_->BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+
+  // Readback in Skia native byte order (RGBA or BGRA) with kN32_SkColorType.
+  const size_t buffer_size = viz::ResourceSizes::CheckedSizeInBytes<size_t>(
+      static_cast<gfx::Size>(size_), viz::RGBA_8888);
+  ReadBackFramebuffer(base::span<uint8_t>(pixels, buffer_size),
+                      kN32_SkColorType, op);
+}
+
 bool DrawingBuffer::FinishPrepareTransferableResourceSoftware(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
+    viz::ReleaseCallback* out_release_callback) {
   DCHECK(state_restorer_);
   RegisteredBitmap registered = CreateOrRecycleBitmap(bitmap_registrar);
 
-  // Read the framebuffer into |bitmap|.
-  {
-    uint8_t* pixels = static_cast<uint8_t*>(registered.bitmap->memory());
-    DCHECK(pixels);
-    bool need_premultiply = want_alpha_channel_ && !premultiplied_alpha_;
-    WebGLImageConversion::AlphaOp op =
-        need_premultiply ? WebGLImageConversion::kAlphaDoPremultiply
-                         : WebGLImageConversion::kAlphaDoNothing;
-    state_restorer_->SetFramebufferBindingDirty();
-    gl_->BindFramebuffer(GL_FRAMEBUFFER, fbo_);
-
-    // Readback in Skia native byte order (RGBA or BGRA) with kN32_SkColorType.
-    const size_t buffer_size = viz::ResourceSizes::CheckedSizeInBytes<size_t>(
-        static_cast<gfx::Size>(size_), viz::RGBA_8888);
-    ReadBackFramebuffer(base::span<uint8_t>(pixels, buffer_size),
-                        kN32_SkColorType, op);
-  }
+  ReadFramebufferIntoBitmapPixels(
+      static_cast<uint8_t*>(registered.bitmap->memory()));
 
   *out_resource = viz::TransferableResource::MakeSoftware(
       registered.bitmap->id(), static_cast<gfx::Size>(size_), viz::RGBA_8888);
@@ -419,9 +457,9 @@ bool DrawingBuffer::FinishPrepareTransferableResourceSoftware(
   // This holds a ref on the DrawingBuffer that will keep it alive until the
   // mailbox is released (and while the release callback is running). It also
   // owns the SharedBitmap.
-  auto func = base::BindOnce(&DrawingBuffer::MailboxReleasedSoftware,
-                             weak_factory_.GetWeakPtr(), std::move(registered));
-  *out_release_callback = viz::SingleReleaseCallback::Create(std::move(func));
+  *out_release_callback =
+      base::BindOnce(&DrawingBuffer::MailboxReleasedSoftware,
+                     weak_factory_.GetWeakPtr(), std::move(registered));
 
   contents_changed_ = false;
   ResetBuffersToAutoClear();
@@ -430,7 +468,7 @@ bool DrawingBuffer::FinishPrepareTransferableResourceSoftware(
 
 bool DrawingBuffer::FinishPrepareTransferableResourceGpu(
     viz::TransferableResource* out_resource,
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
+    viz::ReleaseCallback* out_release_callback) {
   DCHECK(state_restorer_);
   if (webgl_version_ > kWebGL1) {
     state_restorer_->SetPixelUnpackBufferBindingDirty();
@@ -524,7 +562,7 @@ bool DrawingBuffer::FinishPrepareTransferableResourceGpu(
     // mailbox is released (and while the release callback is running).
     auto func = base::BindOnce(&DrawingBuffer::NotifyMailboxReleasedGpu,
                                color_buffer_for_mailbox);
-    *out_release_callback = viz::SingleReleaseCallback::Create(std::move(func));
+    *out_release_callback = std::move(func);
   }
 
   // Point |m_frontColorBuffer| to the buffer that we are now presenting.
@@ -593,7 +631,7 @@ scoped_refptr<StaticBitmapImage> DrawingBuffer::TransferToStaticBitmapImage() {
   ScopedStateRestorer scoped_state_restorer(this);
 
   viz::TransferableResource transferable_resource;
-  std::unique_ptr<viz::SingleReleaseCallback> release_callback;
+  viz::ReleaseCallback release_callback;
   constexpr bool force_gpu_result = true;
   if (!PrepareTransferableResourceInternal(nullptr, &transferable_resource,
                                            &release_callback,
@@ -693,10 +731,10 @@ scoped_refptr<CanvasResource> DrawingBuffer::ExportLowLatencyCanvasResource(
   }
 
   return ExternalCanvasResource::Create(
-      canvas_resource_buffer->mailbox, /*release_callback=*/nullptr,
-      gpu::SyncToken(), canvas_resource_buffer->size, texture_target_,
-      resource_params, context_provider_->GetWeakPtr(), resource_provider,
-      kLow_SkFilterQuality,
+      canvas_resource_buffer->mailbox, viz::ReleaseCallback(), gpu::SyncToken(),
+      canvas_resource_buffer->size, texture_target_, resource_params,
+      context_provider_->GetWeakPtr(), resource_provider,
+      cc::PaintFlags::FilterQuality::kLow,
       /*is_origin_top_left=*/opengl_flip_y_extension_,
       /*is_overlay_candidate=*/true);
 }
@@ -708,7 +746,7 @@ scoped_refptr<CanvasResource> DrawingBuffer::ExportCanvasResource() {
   // Using PrepareTransferableResourceInternal, with force_gpu_result as we
   // will use this ExportCanvasResource only for gpu_composited content.
   viz::TransferableResource out_resource;
-  std::unique_ptr<viz::SingleReleaseCallback> out_release_callback;
+  viz::ReleaseCallback out_release_callback;
   const bool force_gpu_result = true;
   if (!PrepareTransferableResourceInternal(
           nullptr, &out_resource, &out_release_callback, force_gpu_result))
@@ -735,7 +773,7 @@ scoped_refptr<CanvasResource> DrawingBuffer::ExportCanvasResource() {
       out_resource.mailbox_holder.sync_token, IntSize(out_resource.size),
       out_resource.mailbox_holder.texture_target, resource_params,
       context_provider_->GetWeakPtr(), /*resource_provider=*/nullptr,
-      kLow_SkFilterQuality,
+      cc::PaintFlags::FilterQuality::kLow,
       /*is_origin_top_left=*/opengl_flip_y_extension_,
       out_resource.is_overlay_candidate);
 }
@@ -909,7 +947,8 @@ bool DrawingBuffer::Initialize(const IntSize& size, bool use_multisampling) {
       gl_->FramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_FLIP_Y_MESA, 1);
   }
   if (!ResizeFramebufferInternal(size)) {
-    DLOG(ERROR) << "Initialization failed to allocate backbuffer.";
+    DLOG(ERROR) << "Initialization failed to allocate backbuffer of size "
+                << size.Width() << " x " << size.Height() << ".";
     return false;
   }
 
@@ -1064,7 +1103,8 @@ cc::Layer* DrawingBuffer::CcLayer() {
     DCHECK(!(premultiplied_alpha_ && premultiplied_alpha_false_texture_));
     layer_->SetPremultipliedAlpha(premultiplied_alpha_ ||
                                   premultiplied_alpha_false_texture_);
-    layer_->SetNearestNeighbor(filter_quality_ == kNone_SkFilterQuality);
+    layer_->SetNearestNeighbor(filter_quality_ ==
+                               cc::PaintFlags::FilterQuality::kNone);
 
     if (opengl_flip_y_extension_)
       layer_->SetFlipped(false);
@@ -1150,9 +1190,12 @@ bool DrawingBuffer::ResizeDefaultFramebuffer(const IntSize& size) {
       premultiplied_alpha_false_mailbox_.SetZero();
       premultiplied_alpha_false_texture_ = 0;
     }
+    GrSurfaceOrigin origin = opengl_flip_y_extension_
+                                 ? kTopLeft_GrSurfaceOrigin
+                                 : kBottomLeft_GrSurfaceOrigin;
     premultiplied_alpha_false_mailbox_ = sii->CreateSharedImage(
         back_color_buffer_->format, static_cast<gfx::Size>(size),
-        storage_color_space_, kTopLeft_GrSurfaceOrigin, kUnpremul_SkAlphaType,
+        storage_color_space_, origin, kUnpremul_SkAlphaType,
         gpu::SHARED_IMAGE_USAGE_GLES2 |
             gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
             gpu::SHARED_IMAGE_USAGE_RASTER,
@@ -1313,12 +1356,18 @@ bool DrawingBuffer::ResizeFramebufferInternal(const IntSize& new_size) {
   return true;
 }
 
-void DrawingBuffer::ResolveAndBindForReadAndDraw() {
+bool DrawingBuffer::ResolveAndBindForReadAndDraw() {
   {
     ScopedStateRestorer scoped_state_restorer(this);
     ResolveIfNeeded();
+    // Note that in rare situations on macOS the drawing buffer can be
+    // destroyed during the resolve process, specifically during
+    // automatic graphics switching. Guard against this.
+    if (destruction_in_progress_)
+      return false;
   }
   gl_->BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+  return true;
 }
 
 void DrawingBuffer::ResolveMultisampleFramebufferInternal() {
@@ -1490,7 +1539,7 @@ sk_sp<SkData> DrawingBuffer::PaintRenderingResultsToDataArray(
   // Readback in native GL byte order (RGBA).
   SkColorType color_type = kRGBA_8888_SkColorType;
   base::CheckedNumeric<size_t> row_bytes = 4;
-  if (RuntimeEnabledFeatures::CanvasColorManagementEnabled() &&
+  if (RuntimeEnabledFeatures::CanvasColorManagementV2Enabled() &&
       back_color_buffer_->format == viz::RGBA_F16) {
     color_type = kRGBA_F16_SkColorType;
     row_bytes *= 2;
@@ -1554,7 +1603,7 @@ void DrawingBuffer::ReadBackFramebuffer(base::span<uint8_t> pixels,
   expected_data_size *= Size().Width();
   expected_data_size *= Size().Height();
 
-  if (RuntimeEnabledFeatures::CanvasColorManagementEnabled() &&
+  if (RuntimeEnabledFeatures::CanvasColorManagementV2Enabled() &&
       color_type == kRGBA_F16_SkColorType) {
     data_type = (webgl_version_ > kWebGL1) ? GL_HALF_FLOAT : GL_HALF_FLOAT_OES;
     expected_data_size *= 2;
@@ -1655,6 +1704,9 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
   uint32_t usage = gpu::SHARED_IMAGE_USAGE_GLES2 |
                    gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
                    gpu::SHARED_IMAGE_USAGE_DISPLAY;
+  GrSurfaceOrigin origin = opengl_flip_y_extension_
+                               ? kTopLeft_GrSurfaceOrigin
+                               : kBottomLeft_GrSurfaceOrigin;
 
   viz::ResourceFormat format;
   if (allocate_alpha_channel_) {
@@ -1667,8 +1719,7 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
   if (UsingSwapChain()) {
     gpu::SharedImageInterface::SwapChainMailboxes mailboxes =
         sii->CreateSwapChain(format, static_cast<gfx::Size>(size),
-                             storage_color_space_, kTopLeft_GrSurfaceOrigin,
-                             kPremul_SkAlphaType,
+                             storage_color_space_, origin, kPremul_SkAlphaType,
                              usage | gpu::SHARED_IMAGE_USAGE_SCANOUT);
     back_buffer_mailbox = mailboxes.back_buffer;
     front_buffer_mailbox = mailboxes.front_buffer;
@@ -1691,15 +1742,22 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
       // the non-GMB CreateSharedImage with gpu::SHARED_IMAGE_USAGE_SCANOUT in
       // order to allocate the GMB service-side and avoid a synchronous
       // round-trip to the browser process here.
+      gfx::BufferUsage buffer_usage = gfx::BufferUsage::SCANOUT;
+      uint32_t additional_usage_flags = gpu::SHARED_IMAGE_USAGE_SCANOUT;
+      if (low_latency_enabled()) {
+        buffer_usage = gfx::BufferUsage::SCANOUT_FRONT_RENDERING;
+        additional_usage_flags = gpu::SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
+      }
+
       gpu_memory_buffer = gpu_memory_buffer_manager->CreateGpuMemoryBuffer(
-          gfx::Size(size), buffer_format, gfx::BufferUsage::SCANOUT,
-          gpu::kNullSurfaceHandle);
+          gfx::Size(size), buffer_format, buffer_usage, gpu::kNullSurfaceHandle,
+          nullptr);
 
       if (gpu_memory_buffer) {
         back_buffer_mailbox = sii->CreateSharedImage(
             gpu_memory_buffer.get(), gpu_memory_buffer_manager,
-            storage_color_space_, kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType,
-            usage | gpu::SHARED_IMAGE_USAGE_SCANOUT);
+            storage_color_space_, origin, kPremul_SkAlphaType,
+            usage | additional_usage_flags);
       }
     }
 
@@ -1715,8 +1773,8 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
         alpha_type = kUnpremul_SkAlphaType;
 
       back_buffer_mailbox = sii->CreateSharedImage(
-          format, static_cast<gfx::Size>(size), storage_color_space_,
-          kTopLeft_GrSurfaceOrigin, alpha_type, usage, gpu::kNullSurfaceHandle);
+          format, static_cast<gfx::Size>(size), storage_color_space_, origin,
+          alpha_type, usage, gpu::kNullSurfaceHandle);
     }
   }
 

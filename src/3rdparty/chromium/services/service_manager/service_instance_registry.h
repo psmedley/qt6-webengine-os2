@@ -12,6 +12,7 @@
 #include "base/token.h"
 #include "services/service_manager/public/cpp/identity.h"
 #include "services/service_manager/public/cpp/service_filter.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace service_manager {
 
@@ -101,7 +102,7 @@ class ServiceInstanceRegistry {
 
   ServiceInstance* FindMatchInEntries(
       const std::vector<Entry>& entries,
-      const base::Optional<base::Token>& guid) const;
+      const absl::optional<base::Token>& guid) const;
   bool EraseEntry(const base::Token& guid, std::vector<Entry>* entries);
 
   RegularInstanceMap regular_instances_;

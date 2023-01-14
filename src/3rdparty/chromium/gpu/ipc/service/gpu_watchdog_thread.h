@@ -76,25 +76,25 @@ constexpr int kMaxExtraCyclesBeforeKill = 0;
 
 // A thread that intermitently sends tasks to a group of watched message loops
 // and deliberately crashes if one of them does not respond after a timeout.
-class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread : public base::Thread,
-                                                 public base::PowerObserver,
-                                                 public base::TaskObserver,
-                                                 public gl::ProgressReporter {
+class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread
+    : public base::Thread,
+      public base::PowerSuspendObserver,
+      public base::TaskObserver,
+      public gl::ProgressReporter {
  public:
-  static std::unique_ptr<GpuWatchdogThread> Create(bool start_backgrounded);
+  static std::unique_ptr<GpuWatchdogThread> Create(
+      bool start_backgrounded,
+      const std::string& thread_name);
 
   static std::unique_ptr<GpuWatchdogThread> Create(
       bool start_backgrounded,
       base::TimeDelta timeout,
       int init_factor,
       int restart_factor,
-      bool test_mode);
+      bool test_mode,
+      const std::string& thread_name);
 
   ~GpuWatchdogThread() override;
-
-  // Must be called after a PowerMonitor has been created. Can be called from
-  // any thread.
-  void AddPowerObserver();
 
   // Notifies the watchdog when Chrome is backgrounded / foregrounded. Should
   // only be used if Chrome is completely backgrounded and not expected to
@@ -121,8 +121,6 @@ class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread : public base::Thread,
   // For gpu testing only. Return status for the watchdog tests
   bool IsGpuHangDetectedForTesting();
 
-  void WaitForPowerObserverAddedForTesting();
-
   // Implements base::Thread.
   void Init() override;
   void CleanUp() override;
@@ -135,7 +133,7 @@ class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread : public base::Thread,
                        bool was_blocked_or_low_priority) override;
   void DidProcessTask(const base::PendingTask& pending_task) override;
 
-  // Implements base::PowerObserver.
+  // Implements base::PowerSuspendObserver.
   void OnSuspend() override;
   void OnResume() override;
 
@@ -152,8 +150,9 @@ class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread : public base::Thread,
   GpuWatchdogThread(base::TimeDelta timeout,
                     int init_factor,
                     int restart_factor,
-                    bool test_mode);
-  void OnAddPowerObserver();
+                    bool test_mode,
+                    const std::string& thread_name);
+  void AddPowerObserver();
   void RestartWatchdogTimeoutTask(PauseResumeSource source_of_request);
   void StopWatchdogTimeoutTask(PauseResumeSource source_of_request);
   void UpdateInitializationFlag();
@@ -289,11 +288,6 @@ class GPU_IPC_SERVICE_EXPORT GpuWatchdogThread : public base::Thread,
 
   // The GPU watchdog is paused. The timeout task is temporarily stopped.
   bool is_paused_ = false;
-
-  // Whether the watchdog thread has been called and added to the power monitor
-  // observer.
-  bool is_add_power_observer_called_ = false;
-  bool is_power_observer_added_ = false;
 
   // whether GpuWatchdogThreadEvent::kGpuWatchdogStart has been recorded.
   bool is_watchdog_start_histogram_recorded = false;

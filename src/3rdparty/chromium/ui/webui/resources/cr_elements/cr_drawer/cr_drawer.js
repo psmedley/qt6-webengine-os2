@@ -2,46 +2,60 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-Polymer({
-  is: 'cr-drawer',
+import '../shared_vars_css.m.js';
 
-  properties: {
-    heading: String,
+import {html, mixinBehaviors, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-    /** @private */
-    show_: {
-      type: Boolean,
-      reflectToAttribute: true,
-    },
+import {assertNotReached} from '../../js/assert.m.js';
+import {listenOnce} from '../../js/util.m.js';
 
-    /** The alignment of the drawer on the screen ('ltr' or 'rtl'). */
-    align: {
-      type: String,
-      value: 'ltr',
-      reflectToAttribute: true,
-    },
+/** @polymer */
+export class CrDrawerElement extends PolymerElement {
+  static get is() {
+    return 'cr-drawer';
+  }
 
-    /**
-     * An iron-icon resource name, e.g. "cr20:menu". If null, no icon will
-     * be shown.
-     */
-    iconName: {
-      type: String,
-      value: null,
-    },
+  static get template() {
+    return html`{__html_template__}`;
+  }
 
-    /** Title attribute for the icon, if shown. */
-    iconTitle: String,
-  },
+  static get properties() {
+    return {
+      heading: String,
+
+      /** @private */
+      show_: {
+        type: Boolean,
+        reflectToAttribute: true,
+      },
+
+      /** The alignment of the drawer on the screen ('ltr' or 'rtl'). */
+      align: {
+        type: String,
+        value: 'ltr',
+        reflectToAttribute: true,
+      },
+    };
+  }
+
+  /**
+   * @param {string} eventName
+   * @param {*=} detail
+   * @private
+   */
+  fire_(eventName, detail) {
+    this.dispatchEvent(
+        new CustomEvent(eventName, {bubbles: true, composed: true, detail}));
+  }
 
   /** @type {boolean} */
   get open() {
     return this.$.dialog.open;
-  },
+  }
 
   set open(value) {
     assertNotReached('Cannot set |open|.');
-  },
+  }
 
   /** Toggles the drawer open and close. */
   toggle() {
@@ -50,7 +64,7 @@ Polymer({
     } else {
       this.openDrawer();
     }
-  },
+  }
 
   /** Shows drawer and slides it into view. */
   openDrawer() {
@@ -59,11 +73,11 @@ Polymer({
     }
     this.$.dialog.showModal();
     this.show_ = true;
-    this.fire('cr-drawer-opening');
+    this.fire_('cr-drawer-opening');
     listenOnce(this.$.dialog, 'transitionend', () => {
-      this.fire('cr-drawer-opened');
+      this.fire_('cr-drawer-opened');
     });
-  },
+  }
 
   /**
    * Slides the drawer away, then closes it after the transition has ended. It
@@ -79,29 +93,20 @@ Polymer({
     listenOnce(this.$.dialog, 'transitionend', () => {
       this.$.dialog.close(cancel ? 'canceled' : 'closed');
     });
-  },
+  }
 
   cancel() {
     this.dismiss_(true);
-  },
+  }
 
   close() {
     this.dismiss_(false);
-  },
+  }
 
   /** @return {boolean} */
   wasCanceled() {
     return !this.open && this.$.dialog.returnValue === 'canceled';
-  },
-
-  /**
-   * Handles a tap on the (optional) icon.
-   * @param {!Event} event
-   * @private
-   */
-  onIconTap_(event) {
-    this.cancel();
-  },
+  }
 
   /**
    * Stop propagation of a tap event inside the container. This will allow
@@ -111,7 +116,7 @@ Polymer({
    */
   onContainerTap_(event) {
     event.stopPropagation();
-  },
+  }
 
   /**
    * Close the dialog when tapped outside the container.
@@ -119,7 +124,7 @@ Polymer({
    */
   onDialogTap_() {
     this.cancel();
-  },
+  }
 
   /**
    * Overrides the default cancel machanism to allow for a close animation.
@@ -129,20 +134,17 @@ Polymer({
   onDialogCancel_(event) {
     event.preventDefault();
     this.cancel();
-  },
+  }
 
   /**
    * @param {!Event} event
    * @private
    */
   onDialogClose_(event) {
-    // TODO(dpapad): This is necessary to make the code work both for Polymer 1
-    // and Polymer 2. Remove once migration to Polymer 2 is completed.
-    event.stopPropagation();
-
     // Catch and re-fire the 'close' event such that it bubbles across Shadow
     // DOM v1.
-    this.fire('close');
-  },
-});
-/* #ignore */ console.warn('crbug/1173575, non-JS module files deprecated.');
+    this.fire_('close');
+  }
+}
+
+customElements.define(CrDrawerElement.is, CrDrawerElement);

@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -18,7 +18,8 @@ class DisplayModeMatchesManifestTest : public ChromeManifestTest {};
 TEST_F(DisplayModeMatchesManifestTest, DisplayMode) {
   Testcase testcases[] = {
       Testcase("display_mode.json", std::string(),
-               extensions::Manifest::INTERNAL, Extension::FROM_BOOKMARK),
+               extensions::mojom::ManifestLocation::kInternal,
+               Extension::FROM_BOOKMARK),
   };
   RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_SUCCESS);
 

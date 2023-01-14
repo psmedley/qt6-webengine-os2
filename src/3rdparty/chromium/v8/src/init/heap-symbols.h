@@ -12,10 +12,12 @@
   V(_, accounting_string, "accounting")                             \
   V(_, breakType_string, "breakType")                               \
   V(_, calendar_string, "calendar")                                 \
+  V(_, calendars_string, "calendars")                               \
   V(_, cardinal_string, "cardinal")                                 \
   V(_, caseFirst_string, "caseFirst")                               \
   V(_, compare_string, "compare")                                   \
   V(_, collation_string, "collation")                               \
+  V(_, collations_string, "collations")                             \
   V(_, compact_string, "compact")                                   \
   V(_, compactDisplay_string, "compactDisplay")                     \
   V(_, currency_string, "currency")                                 \
@@ -26,6 +28,8 @@
   V(_, day_string, "day")                                           \
   V(_, dayPeriod_string, "dayPeriod")                               \
   V(_, decimal_string, "decimal")                                   \
+  V(_, dialect_string, "dialect")                                   \
+  V(_, direction_string, "direction")                               \
   V(_, endRange_string, "endRange")                                 \
   V(_, engineering_string, "engineering")                           \
   V(_, era_string, "era")                                           \
@@ -35,6 +39,7 @@
   V(_, exponentSeparator_string, "exponentSeparator")               \
   V(_, fallback_string, "fallback")                                 \
   V(_, first_string, "first")                                       \
+  V(_, firstDay_string, "firstDay")                                 \
   V(_, format_string, "format")                                     \
   V(_, fraction_string, "fraction")                                 \
   V(_, fractionalSecond_string, "fractionalSecond")                 \
@@ -50,6 +55,7 @@
   V(_, hour_string, "hour")                                         \
   V(_, hour12_string, "hour12")                                     \
   V(_, hourCycle_string, "hourCycle")                               \
+  V(_, hourCycles_string, "hourCycles")                             \
   V(_, ideo_string, "ideo")                                         \
   V(_, ignorePunctuation_string, "ignorePunctuation")               \
   V(_, Invalid_Date_string, "Invalid Date")                         \
@@ -57,14 +63,17 @@
   V(_, isWordLike_string, "isWordLike")                             \
   V(_, kana_string, "kana")                                         \
   V(_, language_string, "language")                                 \
+  V(_, languageDisplay_string, "languageDisplay")                   \
   V(_, letter_string, "letter")                                     \
   V(_, list_string, "list")                                         \
   V(_, literal_string, "literal")                                   \
   V(_, locale_string, "locale")                                     \
   V(_, loose_string, "loose")                                       \
   V(_, lower_string, "lower")                                       \
+  V(_, ltr_string, "ltr")                                           \
   V(_, maximumFractionDigits_string, "maximumFractionDigits")       \
   V(_, maximumSignificantDigits_string, "maximumSignificantDigits") \
+  V(_, minimalDays_string, "minimalDays")                           \
   V(_, minimumFractionDigits_string, "minimumFractionDigits")       \
   V(_, minimumIntegerDigits_string, "minimumIntegerDigits")         \
   V(_, minimumSignificantDigits_string, "minimumSignificantDigits") \
@@ -78,6 +87,7 @@
   V(_, notation_string, "notation")                                 \
   V(_, normal_string, "normal")                                     \
   V(_, numberingSystem_string, "numberingSystem")                   \
+  V(_, numberingSystems_string, "numberingSystems")                 \
   V(_, numeric_string, "numeric")                                   \
   V(_, ordinal_string, "ordinal")                                   \
   V(_, percentSign_string, "percentSign")                           \
@@ -85,6 +95,7 @@
   V(_, quarter_string, "quarter")                                   \
   V(_, region_string, "region")                                     \
   V(_, relatedYear_string, "relatedYear")                           \
+  V(_, rtl_string, "rtl")                                           \
   V(_, scientific_string, "scientific")                             \
   V(_, second_string, "second")                                     \
   V(_, segment_string, "segment")                                   \
@@ -99,8 +110,10 @@
   V(_, strict_string, "strict")                                     \
   V(_, style_string, "style")                                       \
   V(_, term_string, "term")                                         \
+  V(_, textInfo_string, "textInfo")                                 \
   V(_, timeStyle_string, "timeStyle")                               \
   V(_, timeZone_string, "timeZone")                                 \
+  V(_, timeZones_string, "timeZones")                               \
   V(_, timeZoneName_string, "timeZoneName")                         \
   V(_, type_string, "type")                                         \
   V(_, unknown_string, "unknown")                                   \
@@ -111,6 +124,9 @@
   V(_, unit_string, "unit")                                         \
   V(_, unitDisplay_string, "unitDisplay")                           \
   V(_, weekday_string, "weekday")                                   \
+  V(_, weekendEnd_string, "weekendEnd")                             \
+  V(_, weekendStart_string, "weekendStart")                         \
+  V(_, weekInfo_string, "weekInfo")                                 \
   V(_, year_string, "year")                                         \
   V(_, yearName_string, "yearName")
 #else  // V8_INTL_SUPPORT
@@ -152,6 +168,7 @@
   V(_, CompileError_string, "CompileError")                          \
   V(_, callee_string, "callee")                                      \
   V(_, caller_string, "caller")                                      \
+  V(_, cause_string, "cause")                                        \
   V(_, character_string, "character")                                \
   V(_, closure_string, "(closure)")                                  \
   V(_, code_string, "code")                                          \
@@ -207,6 +224,7 @@
   V(_, global_string, "global")                                      \
   V(_, globalThis_string, "globalThis")                              \
   V(_, groups_string, "groups")                                      \
+  V(_, growable_string, "growable")                                  \
   V(_, has_string, "has")                                            \
   V(_, has_indices_string, "hasIndices")                             \
   V(_, ignoreCase_string, "ignoreCase")                              \
@@ -233,6 +251,7 @@
   V(_, long_string, "long")                                          \
   V(_, Map_string, "Map")                                            \
   V(_, MapIterator_string, "Map Iterator")                           \
+  V(_, max_byte_length_string, "maxByteLength")                      \
   V(_, medium_string, "medium")                                      \
   V(_, message_string, "message")                                    \
   V(_, meta_string, "meta")                                          \
@@ -280,10 +299,12 @@
   V(_, ReflectHas_string, "Reflect.has")                             \
   V(_, RegExp_string, "RegExp")                                      \
   V(_, regexp_to_string, "[object RegExp]")                          \
+  V(_, resizable_string, "resizable")                                \
   V(_, resolve_string, "resolve")                                    \
   V(_, return_string, "return")                                      \
   V(_, revoke_string, "revoke")                                      \
   V(_, RuntimeError_string, "RuntimeError")                          \
+  V(_, WebAssemblyException_string, "WebAssembly.Exception")         \
   V(_, Script_string, "Script")                                      \
   V(_, script_string, "script")                                      \
   V(_, short_string, "short")                                        \
@@ -349,6 +370,7 @@
   V(_, error_start_pos_symbol)                 \
   V(_, frozen_symbol)                          \
   V(_, interpreter_trampoline_symbol)          \
+  V(_, mega_dom_symbol)                        \
   V(_, megamorphic_symbol)                     \
   V(_, native_context_index_symbol)            \
   V(_, nonextensible_symbol)                   \
@@ -517,6 +539,8 @@
   F(BACKGROUND_FULL_ARRAY_BUFFER_SWEEP)           \
   F(BACKGROUND_COLLECTION)                        \
   F(BACKGROUND_UNMAPPER)                          \
+  F(BACKGROUND_UNPARK)                            \
+  F(BACKGROUND_SAFEPOINT)                         \
   F(MC_BACKGROUND_EVACUATE_COPY)                  \
   F(MC_BACKGROUND_EVACUATE_UPDATE_POINTERS)       \
   F(MC_BACKGROUND_MARKING)                        \

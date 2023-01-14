@@ -10,14 +10,14 @@
 #include <map>
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/stringprintf.h"
 #include "gin/handle.h"
+#include "skia/ext/skia_matrix_44.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
-#include "third_party/skia/include/core/SkMatrix44.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -31,10 +31,12 @@ namespace {
 // Map role value to string, matching Safari/Mac platform implementation to
 // avoid rebaselining web tests.
 std::string RoleToString(ax::mojom::Role role) {
-  constexpr int kSkipPrefixLen = 7;  /// Length of "Role::k"
+  std::string prefix = "k";
   std::ostringstream result;
   result << role;
-  return "AXRole: AX" + result.str().substr(kSkipPrefixLen);
+  // Check that |result| starts with |prefix|.
+  DCHECK_EQ(result.str().find(prefix), 0ull);
+  return "AXRole: AX" + result.str().substr(prefix.size());
 }
 
 std::string GetStringValue(const blink::WebAXObject& object) {
@@ -46,7 +48,7 @@ std::string GetStringValue(const blink::WebAXObject& object) {
     unsigned int blue = color & 0xFF;
     value = base::StringPrintf("rgba(%d, %d, %d, 1)", red, green, blue);
   } else {
-    value = object.StringValue().Utf8();
+    value = object.GetValueForControl().Utf8();
   }
   return value.insert(0, "AXValue: ");
 }
@@ -83,7 +85,7 @@ std::string GetAttributes(const blink::WebAXObject& object) {
 gfx::RectF BoundsForObject(const blink::WebAXObject& object) {
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   object.GetRelativeBounds(container, bounds, matrix);
   gfx::RectF computed_bounds(0, 0, bounds.width(), bounds.height());
   while (!container.IsDetached()) {
@@ -487,7 +489,7 @@ void WebAXObjectProxy::NotificationReceived(
       v8::Array::New(isolate, event_intents.size()));
   for (size_t i = 0; i < event_intents.size(); ++i) {
     intents_array
-        ->CreateDataProperty(context, uint32_t{i},
+        ->CreateDataProperty(context, static_cast<uint32_t>(i),
                              v8::String::NewFromUtf8(
                                  isolate, event_intents[i].ToString().c_str())
                                  .ToLocalChecked())
@@ -562,7 +564,7 @@ int WebAXObjectProxy::IntValue() {
   } else if (accessibility_object_.Role() == ax::mojom::Role::kHeading) {
     return accessibility_object_.HeadingLevel();
   } else {
-    return atoi(accessibility_object_.StringValue().Utf8().data());
+    return atoi(accessibility_object_.GetValueForControl().Utf8().data());
   }
 }
 
@@ -766,7 +768,8 @@ bool WebAXObjectProxy::IsRequired() {
 bool WebAXObjectProxy::IsEditableRoot() {
   UpdateLayout();
   return GetAXNodeData().GetBoolAttribute(
-      ax::mojom::BoolAttribute::kEditableRoot);
+             ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot) &&
+         GetAXNodeData().HasState(ax::mojom::State::kEditable);
 }
 
 bool WebAXObjectProxy::IsEditable() {
@@ -848,7 +851,7 @@ bool WebAXObjectProxy::IsCollapsed() {
 
 bool WebAXObjectProxy::IsVisible() {
   UpdateLayout();
-  return !GetAXNodeData().HasState(ax::mojom::State::kInvisible);
+  return !GetAXNodeData().IsInvisible();
 }
 
 bool WebAXObjectProxy::IsVisited() {
@@ -1401,8 +1404,9 @@ void WebAXObjectProxy::Press() {
 bool WebAXObjectProxy::SetValue(const std::string& value) {
   UpdateLayout();
   if (GetAXNodeData().GetRestriction() != ax::mojom::Restriction::kNone ||
-      accessibility_object_.StringValue().IsEmpty())
+      accessibility_object_.GetValueForControl().IsEmpty()) {
     return false;
+  }
 
   ui::AXActionData action_data;
   action_data.action = ax::mojom::Action::kSetValue;
@@ -1567,7 +1571,7 @@ std::string WebAXObjectProxy::MisspellingAtIndex(int index) {
   UpdateLayout();
 
   std::vector<std::string> misspellings = GetMisspellings();
-  if (index < 0 || index >= int{misspellings.size()})
+  if (index < 0 || index >= static_cast<int>(misspellings.size()))
     return std::string();
   return misspellings[index];
 }
@@ -1644,20 +1648,25 @@ std::string WebAXObjectProxy::DescriptionFrom() {
   blink::WebVector<blink::WebAXObject> name_objects;
   accessibility_object_.GetName(name_from, name_objects);
   ax::mojom::DescriptionFrom description_from =
-      ax::mojom::DescriptionFrom::kUninitialized;
+      ax::mojom::DescriptionFrom::kNone;
   blink::WebVector<blink::WebAXObject> description_objects;
   accessibility_object_.Description(name_from, description_from,
                                     description_objects);
   switch (description_from) {
-    case ax::mojom::DescriptionFrom::kUninitialized:
     case ax::mojom::DescriptionFrom::kNone:
       return "";
-    case ax::mojom::DescriptionFrom::kAttribute:
-      return "attribute";
-    case ax::mojom::DescriptionFrom::kContents:
-      return "contents";
+    case ax::mojom::DescriptionFrom::kAriaDescription:
+      return "ariaDescription";
+    case ax::mojom::DescriptionFrom::kButtonLabel:
+      return "buttonLabel";
     case ax::mojom::DescriptionFrom::kRelatedElement:
       return "relatedElement";
+    case ax::mojom::DescriptionFrom::kRubyAnnotation:
+      return "rubyAnnotation";
+    case ax::mojom::DescriptionFrom::kSummary:
+      return "summary";
+    case ax::mojom::DescriptionFrom::kTableCaption:
+      return "tableCaption";
     case ax::mojom::DescriptionFrom::kTitle:
       return "title";
   }
@@ -1710,7 +1719,7 @@ v8::Local<v8::Object> WebAXObjectProxy::OffsetContainer() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return factory_->GetOrCreate(container);
 }
@@ -1719,7 +1728,7 @@ float WebAXObjectProxy::BoundsInContainerX() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return bounds.x();
 }
@@ -1728,7 +1737,7 @@ float WebAXObjectProxy::BoundsInContainerY() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return bounds.y();
 }
@@ -1737,7 +1746,7 @@ float WebAXObjectProxy::BoundsInContainerWidth() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return bounds.width();
 }
@@ -1746,7 +1755,7 @@ float WebAXObjectProxy::BoundsInContainerHeight() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return bounds.height();
 }
@@ -1755,7 +1764,7 @@ bool WebAXObjectProxy::HasNonIdentityTransform() {
   UpdateLayout();
   blink::WebAXObject container;
   gfx::RectF bounds;
-  SkMatrix44 matrix;
+  skia::Matrix44 matrix;
   accessibility_object_.GetRelativeBounds(container, bounds, matrix);
   return !matrix.isIdentity();
 }

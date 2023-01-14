@@ -48,6 +48,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_inclusion_status.h"
 #include "net/http/http_util.h"
 
 namespace {
@@ -61,11 +62,12 @@ const char kHttpOnlyTokenName[] = "httponly";
 const char kSameSiteTokenName[] = "samesite";
 const char kPriorityTokenName[] = "priority";
 const char kSamePartyTokenName[] = "sameparty";
+const char kPartitionedTokenName[] = "partitioned";
 
 const char kTerminator[] = "\n\r\0";
 const int kTerminatorLen = sizeof(kTerminator) - 1;
 const char kWhitespace[] = " \t";
-const char kValueSeparator[] = ";";
+const char kValueSeparator = ';';
 const char kTokenSeparator[] = ";=";
 
 // Returns true if |c| occurs in |chars|
@@ -73,6 +75,17 @@ const char kTokenSeparator[] = ";=";
 inline bool CharIsA(const char c, const char* chars) {
   return strchr(chars, c) != nullptr;
 }
+
+// Seek the iterator to the first occurrence of |character|.
+// Returns true if it hits the end, false otherwise.
+inline bool SeekToCharacter(std::string::const_iterator* it,
+                            const std::string::const_iterator& end,
+                            const char character) {
+  for (; *it != end && **it != character; ++(*it)) {
+  }
+  return *it == end;
+}
+
 // Seek the iterator to the first occurrence of a character in |chars|.
 // Returns true if it hit the end, false otherwise.
 inline bool SeekTo(std::string::const_iterator* it,
@@ -122,25 +135,54 @@ bool IsValidCookieValue(const std::string& value) {
   return true;
 }
 
-// RFC 5234 states that control characters are considered to be:
-//         CTL            =  %x00-1F / %x7F
-bool IsControlCharacter(unsigned char c) {
-  return c <= 0x1F || c == 0x7F;
+// Returns the string piece within |value| that is a valid cookie value.
+base::StringPiece ValidStringPieceForValue(const std::string& value) {
+  std::string::const_iterator it = value.begin();
+  std::string::const_iterator end =
+      net::ParsedCookie::FindFirstTerminator(value);
+  std::string::const_iterator value_start;
+  std::string::const_iterator value_end;
+
+  net::ParsedCookie::ParseValue(&it, end, &value_start, &value_end);
+
+  return base::MakeStringPiece(value_start, value_end);
 }
 
 }  // namespace
 
 namespace net {
 
-ParsedCookie::ParsedCookie(const std::string& cookie_line) {
+ParsedCookie::ParsedCookie(const std::string& cookie_line,
+                           CookieInclusionStatus* status_out) {
+  // Put a pointer on the stack so the rest of the function can assign to it if
+  // the default nullptr is passed in.
+  CookieInclusionStatus blank_status;
+  if (status_out == nullptr) {
+    status_out = &blank_status;
+  }
+
   if (cookie_line.size() > kMaxCookieSize) {
     DVLOG(1) << "Not parsing cookie, too large: " << cookie_line.size();
+    // TODO(crbug.com/1228815): Apply more specific exclusion reasons.
+    status_out->AddExclusionReason(
+        CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE);
     return;
   }
 
-  ParseTokenValuePairs(cookie_line);
-  if (!pairs_.empty())
+  ParseTokenValuePairs(cookie_line, *status_out);
+  if (IsValid()) {
     SetupAttributes();
+  } else if (status_out->IsInclude()) {
+    // TODO(crbug.com/1228815): Apply more specific exclusion reasons.
+    status_out->AddExclusionReason(
+        CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE);
+  }
+
+  // Status should indicate exclusion if the resulting ParsedCookie is invalid.
+  DCHECK(IsValid() || !status_out->IsInclude());
+
+  if (IsValid())
+    RecordCookieAttributeValueLengthHistograms();
 }
 
 ParsedCookie::~ParsedCookie() = default;
@@ -231,6 +273,10 @@ bool ParsedCookie::SetIsSameParty(bool is_same_party) {
   return SetBool(&same_party_index_, kSamePartyTokenName, is_same_party);
 }
 
+bool ParsedCookie::SetIsPartitioned(bool is_partitioned) {
+  return SetBool(&partitioned_index_, kPartitionedTokenName, is_partitioned);
+}
+
 std::string ParsedCookie::ToCookieLine() const {
   std::string out;
   for (auto it = pairs_.begin(); it != pairs_.end(); ++it) {
@@ -242,7 +288,8 @@ std::string ParsedCookie::ToCookieLine() const {
     // we need to consider whether the name component is a special token.
     if (it == pairs_.begin() ||
         (it->first != kSecureTokenName && it->first != kHttpOnlyTokenName &&
-         it->first != kSamePartyTokenName)) {
+         it->first != kSamePartyTokenName &&
+         it->first != kPartitionedTokenName)) {
       out.append("=");
       out.append(it->second);
     }
@@ -306,22 +353,24 @@ void ParsedCookie::ParseValue(std::string::const_iterator* it,
                               std::string::const_iterator* value_end) {
   DCHECK(it && value_start && value_end);
 
-  // Seek past any whitespace that might in-between the token and value.
+  // Seek past any whitespace that might be in-between the token and value.
   SeekPast(it, end, kWhitespace);
   // value_start should point at the first character of the value.
   *value_start = *it;
 
   // Just look for ';' to terminate ('=' allowed).
   // We can hit the end, maybe they didn't terminate.
-  SeekTo(it, end, kValueSeparator);
+  SeekToCharacter(it, end, kValueSeparator);
 
-  // Will be pointed at the ; seperator or the end.
+  // Will point at the ; separator or the end.
   *value_end = *it;
 
   // Ignore any unwanted whitespace after the value.
   if (*value_end != *value_start) {  // Could have an empty value
     --(*value_end);
+    // Skip over any whitespace to the first non-whitespace character.
     SeekBackPast(value_end, *value_start, kWhitespace);
+    // Point after it.
     ++(*value_end);
   }
 }
@@ -339,12 +388,15 @@ std::string ParsedCookie::ParseTokenString(const std::string& token) {
 
 // static
 std::string ParsedCookie::ParseValueString(const std::string& value) {
-  std::string::const_iterator it = value.begin();
-  std::string::const_iterator end = FindFirstTerminator(value);
+  return std::string(ValidStringPieceForValue(value));
+}
 
-  std::string::const_iterator value_start, value_end;
-  ParseValue(&it, end, &value_start, &value_end);
-  return std::string(value_start, value_end);
+// static
+bool ParsedCookie::ValueMatchesParsedValue(const std::string& value) {
+  // ValidStringPieceForValue() returns a valid substring of |value|.
+  // If |value| can be fully parsed the result will have the same length
+  // as |value|.
+  return ValidStringPieceForValue(value).length() == value.length();
 }
 
 // static
@@ -352,14 +404,15 @@ bool ParsedCookie::IsValidCookieAttributeValue(const std::string& value) {
   // The greatest common denominator of cookie attribute values is
   // <any CHAR except CTLs or ";"> according to RFC 6265.
   for (std::string::const_iterator i = value.begin(); i != value.end(); ++i) {
-    if (IsControlCharacter(*i) || *i == ';')
+    if (HttpUtil::IsControlChar(*i) || *i == ';')
       return false;
   }
   return true;
 }
 
 // Parse all token/value pairs and populate pairs_.
-void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
+void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line,
+                                        CookieInclusionStatus& status_out) {
   pairs_.clear();
 
   // Ok, here we go.  We should be expecting to be starting somewhere
@@ -372,8 +425,12 @@ void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
   std::string::const_iterator end = FindFirstTerminator(cookie_line);
 
   // Exit early for an empty cookie string.
-  if (it == end)
+  if (it == end) {
+    // TODO(crbug.com/1228815): Apply more specific exclusion reasons.
+    status_out.AddExclusionReason(
+        CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE);
     return;
+  }
 
   for (int pair_num = 0; it != end; ++pair_num) {
     TokenValuePair pair;
@@ -420,6 +477,9 @@ void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
 
     // Ignore cookies with neither name nor value.
     if (pair_num == 0 && (pair.first.empty() && pair.second.empty())) {
+      // TODO(crbug.com/1228815): Apply more specific exclusion reasons.
+      status_out.AddExclusionReason(
+          CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE);
       pairs_.clear();
       break;
     }
@@ -432,6 +492,9 @@ void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
     // http://crbug.com/238041.
     if (!IsValidCookieAttributeValue(pair.first) ||
         !IsValidCookieAttributeValue(pair.second)) {
+      // TODO(crbug.com/1228815): Apply more specific exclusion reasons.
+      status_out.AddExclusionReason(
+          CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE);
       pairs_.clear();
       break;
     }
@@ -442,6 +505,23 @@ void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
     // the string or a ValueSeparator like ';', which we want to skip.
     if (it != end)
       ++it;
+  }
+
+  // For metrics on name/value truncation.
+  //
+  // If we stopped before the (real) end of the string and the leftovers include
+  // something other than terminating characters or whitespace then this cookie
+  // was truncated due to a terminating CTL.
+  //
+  // We only care about the name or value being truncated which means we only
+  // care about the first pair. If the pairs_.size() > 1 then that means the
+  // truncation happened after name/value parsing which we're not concerned
+  // about for metrics.
+  using std::string_literals::operator""s;
+  if (pairs_.size() == 1 &&
+      cookie_line.find_first_not_of("\n\r\0 \t"s, end - start) !=
+          std::string::npos) {
+    truncated_name_or_value_ = true;
   }
 }
 
@@ -466,6 +546,8 @@ void ParsedCookie::SetupAttributes() {
       priority_index_ = i;
     } else if (pairs_[i].first == kSamePartyTokenName) {
       same_party_index_ = i;
+    } else if (pairs_[i].first == kPartitionedTokenName) {
+      partitioned_index_ = i;
     } else {
       /* some attribute we don't know or don't care about. */
     }
@@ -531,9 +613,10 @@ void ParsedCookie::ClearAttributePair(size_t index) {
   if (index == 0)
     return;
 
-  size_t* indexes[] = {&path_index_,      &domain_index_,   &expires_index_,
-                       &maxage_index_,    &secure_index_,   &httponly_index_,
-                       &same_site_index_, &priority_index_, &same_party_index_};
+  size_t* indexes[] = {&path_index_,       &domain_index_,   &expires_index_,
+                       &maxage_index_,     &secure_index_,   &httponly_index_,
+                       &same_site_index_,  &priority_index_, &same_party_index_,
+                       &partitioned_index_};
   for (size_t* attribute_index : indexes) {
     if (*attribute_index == index)
       *attribute_index = 0;
@@ -541,6 +624,17 @@ void ParsedCookie::ClearAttributePair(size_t index) {
       --(*attribute_index);
   }
   pairs_.erase(pairs_.begin() + index);
+}
+
+void ParsedCookie::RecordCookieAttributeValueLengthHistograms() const {
+  DCHECK(IsValid());
+  // These all max out at 4096 total. (See ParsedCookie::kMaxCookieSize.)
+  UMA_HISTOGRAM_COUNTS_10000("Cookie.Length.NameAndValue",
+                             Name().length() + Value().length());
+  UMA_HISTOGRAM_COUNTS_10000("Cookie.Length.Domain",
+                             HasDomain() ? Domain().length() : 0);
+  UMA_HISTOGRAM_COUNTS_10000("Cookie.Length.Path",
+                             HasPath() ? Path().length() : 0);
 }
 
 }  // namespace net

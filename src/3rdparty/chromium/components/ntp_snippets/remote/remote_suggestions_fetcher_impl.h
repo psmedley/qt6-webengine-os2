@@ -8,11 +8,9 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/callback.h"
 #include "base/containers/queue.h"
-#include "base/optional.h"
 #include "base/time/clock.h"
 #include "components/ntp_snippets/remote/json_request.h"
 #include "components/ntp_snippets/remote/json_to_categories.h"

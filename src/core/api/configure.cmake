@@ -1,19 +1,38 @@
 #### Libraries
 
 if(NOT QT_CONFIGURE_RUNNING)
+    find_package(GLIB2 COMPONENTS gio)
+    find_package(GSSAPI)
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
         pkg_check_modules(ALSA alsa IMPORTED_TARGET)
         pkg_check_modules(PULSEAUDIO libpulse>=0.9.10 libpulse-mainloop-glib)
-        pkg_check_modules(GIO gio-2.0)
         pkg_check_modules(XDAMAGE xdamage)
+        pkg_check_modules(POPPLER_CPP poppler-cpp IMPORTED_TARGET)
+        if(NOT GIO_FOUND)
+            pkg_check_modules(GIO gio-2.0)
+        endif()
     endif()
+    find_package(Cups)
 
     find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET
         OPTIONAL_COMPONENTS Positioning WebChannel PrintSupport)
 endif()
 
 #### Tests
+
+qt_config_compile_test(poppler
+    LABEL "poppler"
+    LIBRARIES
+        PkgConfig::POPPLER_CPP
+    CODE
+"
+#include <poppler-document.h>
+
+int main() {
+   auto *pdf = poppler::document::load_from_raw_data(\"file\",100,std::string(\"user\"));
+}"
+)
 
 qt_config_compile_test(alsa
     LABEL "alsa"
@@ -62,7 +81,8 @@ qt_feature("webengine-printing-and-pdf" PRIVATE
     LABEL "Printing and PDF"
     PURPOSE "Provides printing and output to PDF."
     AUTODETECT NOT QT_FEATURE_webengine_embedded_build
-    CONDITION TARGET Qt::PrintSupport AND QT_FEATURE_printer
+    CONDITION TARGET Qt::PrintSupport AND QT_FEATURE_printer AND
+    (CUPS_FOUND OR WIN32)
 )
 qt_feature("webengine-webchannel" PUBLIC
     SECTION "WebEngine"
@@ -81,6 +101,7 @@ qt_feature("webengine-kerberos" PRIVATE
     LABEL "Kerberos Authentication"
     PURPOSE "Enables Kerberos Authentication Support"
     AUTODETECT WIN32
+    CONDITION NOT LINUX OR GSSAPI_FOUND
 )
 qt_feature("webengine-spellchecker" PUBLIC
     LABEL "Spellchecker"
@@ -95,9 +116,9 @@ qt_feature("webengine-native-spellchecker" PUBLIC
 qt_feature("webengine-extensions" PUBLIC
     SECTION "WebEngine"
     LABEL "Extensions"
-    PURPOSE "Enables Chromium extensions within certain limits. Currently used for enabling the pdf viewer."
-    AUTODETECT QT_FEATURE_webengine_printing_and_pdf
-    CONDITION QT_FEATURE_webengine_printing_and_pdf
+    PURPOSE "Enables Chromium extensions within certain limits. Currently used by the pdf viewer and hangout webrtc extension."
+    AUTODETECT ON
+    CONDITION QT_FEATURE_webengine_printing_and_pdf OR QT_FEATURE_webengine_printing_and_pdf
 )
 qt_feature("webengine-webrtc" PRIVATE
     LABEL "WebRTC"
@@ -125,6 +146,11 @@ qt_feature("webengine-sanitizer" PRIVATE
     PURPOSE "Enables support for build with sanitizers"
     AUTODETECT CLANG
     CONDITION CLANG AND ECM_ENABLE_SANITIZERS
+)
+# internal testing feature
+qt_feature("webengine-system-poppler" PRIVATE
+    LABEL "popler"
+    CONDITION UNIX AND TEST_poppler
 )
 qt_configure_add_summary_section(NAME "Qt WebEngineCore")
 qt_configure_add_summary_entry(ARGS "webengine-embedded-build")

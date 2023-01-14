@@ -10,8 +10,12 @@
 #include "build/chromeos_buildflags.h"
 #include "printing/units.h"
 
-#if defined(USE_CUPS) && (defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)) 
+#if defined(USE_CUPS) && (defined(OS_MAC) || defined(OS_CHROMEOS) || defined(OS_OS2)) 
 #include <cups/cups.h>
+#endif
+
+#if defined(OS_WIN)
+#include "printing/mojom/print.mojom.h"
 #endif
 
 namespace printing {
@@ -183,13 +187,13 @@ void GetColorModelForModel(mojom::ColorModel color_model,
   // all ColorModel values are determinantly handled.
 }
 
-#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
+#if defined(OS_MAC) || defined(OS_CHROMEOS) || defined(OS_OS2)
 std::string GetIppColorModelForModel(mojom::ColorModel color_model) {
-  // Accept |kUnknownColorModel| for consistency with GetColorModelForModel().
+  // Accept `kUnknownColorModel` for consistency with GetColorModelForModel().
   if (color_model == mojom::ColorModel::kUnknownColorModel)
     return CUPS_PRINT_COLOR_MODE_MONOCHROME;
 
-  base::Optional<bool> is_color = IsColorModelSelected(color_model);
+  absl::optional<bool> is_color = IsColorModelSelected(color_model);
   if (!is_color.has_value()) {
     NOTREACHED();
     return std::string();
@@ -198,10 +202,10 @@ std::string GetIppColorModelForModel(mojom::ColorModel color_model) {
   return is_color.value() ? CUPS_PRINT_COLOR_MODE_COLOR
                           : CUPS_PRINT_COLOR_MODE_MONOCHROME;
 }
-#endif  // defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // defined(OS_MAC) || defined(OS_CHROMEOS)
 #endif  // defined(USE_CUPS)
 
-base::Optional<bool> IsColorModelSelected(mojom::ColorModel color_model) {
+absl::optional<bool> IsColorModelSelected(mojom::ColorModel color_model) {
   switch (color_model) {
     case mojom::ColorModel::kColor:
     case mojom::ColorModel::kCMYK:
@@ -237,7 +241,7 @@ base::Optional<bool> IsColorModelSelected(mojom::ColorModel color_model) {
       return false;
     case mojom::ColorModel::kUnknownColorModel:
       NOTREACHED();
-      return base::nullopt;
+      return absl::nullopt;
   }
   // The default case is excluded from the above switch statement to ensure that
   // all ColorModel values are determinantly handled.
@@ -270,22 +274,23 @@ void PrintSettings::Clear() {
   dpi_ = gfx::Size();
   scale_factor_ = 1.0f;
   rasterize_pdf_ = false;
+  rasterize_pdf_dpi_ = 0;
   landscape_ = false;
   supports_alpha_blend_ = true;
 #if defined(OS_WIN)
   print_text_with_gdi_ = false;
-  printer_type_ = PrintSettings::PrinterType::TYPE_NONE;
+  printer_language_type_ = mojom::PrinterLanguageType::kNone;
 #endif
   is_modifiable_ = true;
   pages_per_sheet_ = 1;
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   advanced_settings_.clear();
 #endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
-#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
+#if defined(OS_CHROMEOS) || defined(OS_OS2)
   send_user_info_ = false;
   username_.clear();
   pin_value_.clear();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_OS2)
+#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
 }
 
 void PrintSettings::SetPrinterPrintableArea(

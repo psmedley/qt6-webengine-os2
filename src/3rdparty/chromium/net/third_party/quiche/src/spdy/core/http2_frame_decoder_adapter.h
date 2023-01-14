@@ -95,6 +95,10 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
     SPDY_HPACK_FRAGMENT_TOO_LONG,
     SPDY_HPACK_COMPRESSED_HEADER_SIZE_EXCEEDS_LIMIT,
 
+    // Set if the visitor no longer wishes to receive events for this
+    // connection.
+    SPDY_STOP_PROCESSING,
+
     LAST_ERROR,  // Must be the last entry in the enum.
   };
 
@@ -127,14 +131,16 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
     return debug_visitor_;
   }
 
-  // Set debug callbacks to be called from the HPACK decoder.
-  void SetDecoderHeaderTableDebugVisitor(
-      std::unique_ptr<spdy::HpackHeaderTable::DebugVisitorInterface> visitor);
-
   // Decode the |len| bytes of encoded HTTP/2 starting at |*data|. Returns
   // the number of bytes consumed. It is safe to pass more bytes in than
   // may be consumed. Should process (or otherwise buffer) as much as
   // available.
+  //
+  // If the input contains the entirety of a DATA frame payload, GOAWAY frame
+  // Additional Debug Data field, or unknown frame payload, then the
+  // corresponding SpdyFramerVisitorInterface::OnStreamFrameData(),
+  // OnGoAwayFrameData(), or ExtensionVisitorInterface::OnFramePayload() method
+  // is guaranteed to be called exactly once, with the entire payload or field.
   size_t ProcessInput(const char* data, size_t len);
 
   // Reset the decoder (used just for tests at this time).
@@ -151,12 +157,16 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
   // has responded with an HTTP/1.1 (or earlier) response.
   bool probable_http_response() const;
 
-  // Returns the estimate of dynamically allocated memory in bytes.
-  size_t EstimateMemoryUsage() const;
-
   spdy::HpackDecoderAdapter* GetHpackDecoder();
+  const spdy::HpackDecoderAdapter* GetHpackDecoder() const {
+    return hpack_decoder_.get();
+  }
 
   bool HasError() const;
+
+  // A visitor may call this method to indicate it no longer wishes to receive
+  // events for this connection.
+  void StopProcessing();
 
  private:
   bool OnFrameHeader(const Http2FrameHeader& header) override;

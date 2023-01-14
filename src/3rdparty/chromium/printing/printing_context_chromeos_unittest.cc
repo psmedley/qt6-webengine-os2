@@ -22,10 +22,12 @@ using ::testing::Return;
 using ::testing::SaveArg;
 
 constexpr char kPrinterName[] = "printer";
+constexpr char16_t kPrinterName16[] = u"printer";
 
 constexpr char kUsername[] = "test user";
 
 constexpr char kDocumentName[] = "document name";
+constexpr char16_t kDocumentName16[] = u"document name";
 
 const char* GetOptionValue(const std::vector<ScopedCupsOption>& options,
                            const char* option_name) {
@@ -82,7 +84,7 @@ class MockCupsPrinter : public CupsPrinter {
 
 class MockCupsConnection : public CupsConnection {
  public:
-  MOCK_METHOD0(GetDests, std::vector<std::unique_ptr<CupsPrinter>>());
+  MOCK_METHOD1(GetDests, bool(std::vector<std::unique_ptr<CupsPrinter>>&));
   MOCK_METHOD2(GetJobs,
                bool(const std::vector<std::string>& printer_ids,
                     std::vector<QueueStatus>* jobs));
@@ -91,6 +93,7 @@ class MockCupsConnection : public CupsConnection {
                     PrinterStatus* printer_status));
   MOCK_CONST_METHOD0(server_name, std::string());
   MOCK_CONST_METHOD0(last_error, int());
+  MOCK_CONST_METHOD0(last_error_message, std::string());
 
   MOCK_METHOD1(GetPrinter,
                std::unique_ptr<CupsPrinter>(const std::string& printer_name));
@@ -112,10 +115,10 @@ class PrintingContextTest : public testing::Test,
     EXPECT_CALL(*printer_, GetUri()).WillRepeatedly(Return(uri));
     EXPECT_CALL(*connection, GetPrinter(kPrinterName))
         .WillOnce(Return(ByMove(std::move(unique_printer))));
-    printing_context_ = std::make_unique<PrintingContextChromeos>(
+    printing_context_ = PrintingContextChromeos::CreateForTesting(
         this, std::move(unique_connection));
     auto settings = std::make_unique<PrintSettings>();
-    settings->set_device_name(base::ASCIIToUTF16(kPrinterName));
+    settings->set_device_name(kPrinterName16);
     settings->set_send_user_info(send_user_info);
     settings->set_duplex_mode(mojom::DuplexMode::kLongEdge);
     settings->set_username(kUsername);
@@ -189,10 +192,9 @@ TEST_F(PrintingContextTest, SettingsToCupsOptions_Resolution) {
 }
 
 TEST_F(PrintingContextTest, SettingsToCupsOptions_SendUserInfo_Secure) {
-  std::string uri = "ipps://test-uri";
   ipp_status_t status = ipp_status_t::IPP_STATUS_OK;
-  base::string16 document_name = base::ASCIIToUTF16(kDocumentName);
-  SetDefaultSettings(true, uri);
+  std::u16string document_name = kDocumentName16;
+  SetDefaultSettings(/*send_user_info=*/true, "ipps://test-uri");
   std::string create_job_document_name;
   std::string create_job_username;
   std::string start_document_document_name;
@@ -213,12 +215,11 @@ TEST_F(PrintingContextTest, SettingsToCupsOptions_SendUserInfo_Secure) {
 }
 
 TEST_F(PrintingContextTest, SettingsToCupsOptions_SendUserInfo_Insecure) {
-  std::string uri = "ipp://test-uri";
   ipp_status_t status = ipp_status_t::IPP_STATUS_OK;
-  base::string16 document_name = base::ASCIIToUTF16(kDocumentName);
+  std::u16string document_name = kDocumentName16;
   std::string default_username = "chronos";
   std::string default_document_name = "-";
-  SetDefaultSettings(true, uri);
+  SetDefaultSettings(/*send_user_info=*/true, "ipp://test-uri");
   std::string create_job_document_name;
   std::string create_job_username;
   std::string start_document_document_name;
@@ -239,11 +240,9 @@ TEST_F(PrintingContextTest, SettingsToCupsOptions_SendUserInfo_Insecure) {
 }
 
 TEST_F(PrintingContextTest, SettingsToCupsOptions_DoNotSendUserInfo) {
-  std::string uri = "ipps://test-uri";
   ipp_status_t status = ipp_status_t::IPP_STATUS_OK;
-  base::string16 document_name = base::ASCIIToUTF16(kDocumentName);
-  std::string blank;
-  SetDefaultSettings(false, uri);
+  std::u16string document_name = kDocumentName16;
+  SetDefaultSettings(/*send_user_info=*/false, "ipps://test-uri");
   std::string create_job_document_name;
   std::string create_job_username;
   std::string start_document_document_name;
@@ -257,10 +256,10 @@ TEST_F(PrintingContextTest, SettingsToCupsOptions_DoNotSendUserInfo) {
 
   printing_context_->NewDocument(document_name);
 
-  EXPECT_EQ(create_job_document_name, blank);
-  EXPECT_EQ(start_document_document_name, blank);
-  EXPECT_EQ(create_job_username, blank);
-  EXPECT_EQ(start_document_username, blank);
+  EXPECT_EQ(create_job_document_name, "");
+  EXPECT_EQ(start_document_document_name, "");
+  EXPECT_EQ(create_job_username, "");
+  EXPECT_EQ(start_document_username, "");
 }
 
 }  // namespace

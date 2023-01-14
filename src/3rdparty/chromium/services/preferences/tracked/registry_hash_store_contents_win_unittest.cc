@@ -4,9 +4,11 @@
 
 #include "services/preferences/tracked/registry_hash_store_contents_win.h"
 
+#include <memory>
+#include <string>
+
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/threading/thread.h"
@@ -36,8 +38,8 @@ class RegistryHashStoreContentsWinTest : public testing::Test {
     ASSERT_NO_FATAL_FAILURE(
         registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
 
-    contents.reset(
-        new RegistryHashStoreContentsWin(kRegistryPath, kStoreKey, nullptr));
+    contents = std::make_unique<RegistryHashStoreContentsWin>(
+        kRegistryPath, kStoreKey, nullptr);
   }
 
   std::unique_ptr<HashStoreContents> contents;

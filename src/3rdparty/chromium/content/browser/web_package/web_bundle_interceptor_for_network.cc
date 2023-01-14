@@ -92,8 +92,7 @@ bool WebBundleInterceptorForNetwork::MaybeCreateLoaderForResponse(
 
   reader_ = base::MakeRefCounted<WebBundleReader>(
       std::move(source), length_hint, std::move(*response_body),
-      url_loader->Unbind(),
-      BrowserContext::GetBlobStorageContext(browser_context_));
+      url_loader->Unbind(), browser_context_->GetBlobStorageContext());
   reader_->ReadMetadata(
       base::BindOnce(&WebBundleInterceptorForNetwork::OnMetadataReady,
                      weak_factory_.GetWeakPtr(), request));
@@ -146,7 +145,7 @@ void WebBundleInterceptorForNetwork::StartResponse(
   network::ResourceRequest new_resource_request = resource_request;
   new_resource_request.url = primary_url_;
   url_loader_factory_->CreateLoaderAndStart(
-      std::move(receiver), 0, 0, 0, new_resource_request, std::move(client),
+      std::move(receiver), 0, 0, new_resource_request, std::move(client),
       net::MutableNetworkTrafficAnnotationTag(
           web_bundle_utils::kTrafficAnnotation));
   std::move(done_callback_).Run(primary_url_, std::move(url_loader_factory_));

@@ -12,9 +12,6 @@
 #include <tuple>
 #include <utility>
 
-#include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/widestring.h"
-
 enum class FXDIB_Format : uint16_t {
   kInvalid = 0,
   k1bppRgb = 0x001,
@@ -24,12 +21,6 @@ enum class FXDIB_Format : uint16_t {
   k1bppMask = 0x101,
   k8bppMask = 0x108,
   kArgb = 0x220,
-};
-
-struct PixelWeight {
-  int m_SrcStart;
-  int m_SrcEnd;
-  int m_Weights[1];
 };
 
 using FX_ARGB = uint32_t;
@@ -129,7 +120,6 @@ constexpr FX_ARGB ArgbEncode(uint32_t a, uint32_t r, uint32_t g, uint32_t b) {
 }
 
 FX_ARGB AlphaAndColorRefToArgb(int a, FX_COLORREF colorref);
-FX_ARGB StringToFXARGB(WideStringView view);
 
 #define FXARGB_A(argb) ((uint8_t)((argb) >> 24))
 #define FXARGB_R(argb) ((uint8_t)((argb) >> 16))
@@ -160,12 +150,6 @@ FX_ARGB StringToFXARGB(WideStringView view);
 #define FXARGB_TOBGRORDERDIB(argb)                       \
   ((uint8_t)(argb >> 16) | ((uint8_t)(argb >> 8)) << 8 | \
    ((uint8_t)(argb)) << 16 | ((uint8_t)(argb >> 24) << 24))
-
-FX_RECT FXDIB_SwapClipBox(const FX_RECT& clip,
-                          int width,
-                          int height,
-                          bool bFlipX,
-                          bool bFlipY);
 
 inline void ReverseCopy3Bytes(uint8_t* dest, const uint8_t* src) {
   dest[2] = src[0];

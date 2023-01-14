@@ -32,9 +32,9 @@ class MockTextureOwner : public TextureOwner {
   MOCK_CONST_METHOD0(GetSurface, gl::GLSurface*());
   MOCK_CONST_METHOD0(CreateJavaSurface, gl::ScopedJavaSurface());
   MOCK_METHOD0(UpdateTexImage, void());
-  MOCK_METHOD0(EnsureTexImageBound, void());
+  MOCK_METHOD1(EnsureTexImageBound, void(GLuint));
   MOCK_METHOD0(ReleaseBackBuffers, void());
-  MOCK_METHOD1(OnTextureDestroyed, void(gpu::gles2::AbstractTexture*));
+  MOCK_METHOD0(ReleaseResources, void());
   MOCK_METHOD1(SetFrameAvailableCallback, void(const base::RepeatingClosure&));
   MOCK_METHOD3(GetCodedSizeAndVisibleRect,
                bool(gfx::Size rotated_visible_size,
@@ -51,7 +51,6 @@ class MockTextureOwner : public TextureOwner {
   gl::GLContext* fake_context;
   gl::GLSurface* fake_surface;
   int get_a_hardware_buffer_count = 0;
-  bool expect_update_tex_image;
 
  protected:
   ~MockTextureOwner();

@@ -8,12 +8,12 @@
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
+#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/scoped_clear_last_error.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
@@ -657,8 +657,9 @@ TEST_F(UDPSocketTest, JoinMulticastGroup) {
   socket.Close();
 }
 
-#if defined(OS_IOS)
-// TODO(https://crbug.com/947115): failing on device on iOS 12.2.
+// TODO(https://crbug.com/947115): failing on device on iOS 12.2. 
+// TODO(https://crbug.com/1227554): flaky on Mac 11.
+#if defined(OS_IOS) || defined (OS_MAC)
 #define MAYBE_SharedMulticastAddress DISABLED_SharedMulticastAddress
 #else
 #define MAYBE_SharedMulticastAddress SharedMulticastAddress
@@ -679,6 +680,13 @@ TEST_F(UDPSocketTest, MAYBE_SharedMulticastAddress) {
 
   NetworkInterfaceList interfaces;
   ASSERT_TRUE(GetNetworkList(&interfaces, 0));
+  // The test fails with the Hyper-V switch interface (on the host side).
+  interfaces.erase(std::remove_if(interfaces.begin(), interfaces.end(),
+                                  [](const auto& iface) {
+                                    return iface.friendly_name.rfind(
+                                               "vEthernet", 0) == 0;
+                                  }),
+                   interfaces.end());
   ASSERT_FALSE(interfaces.empty());
 
   // Setup first receiving socket.

@@ -170,7 +170,7 @@ You query Vulkan Instance functions using `vkGetInstanceProcAddr`.
 `vkGetInstanceProcAddr` can be used to query either device or instance entry
 points in addition to all core entry points.  The returned function pointer is
 valid for this Instance and any object created under this Instance (including
-all `VkDevice` objects).  
+all `VkDevice` objects).
 
 Similarly, an Instance extension is a set of Vulkan Instance functions extending
 the Vulkan language.  These will be discussed in more detail later.
@@ -697,6 +697,7 @@ target-specific extensions:
 | Linux (Wayland) | VK_KHR_wayland_surface |
 | Linux (X11) |  VK_KHR_xcb_surface and VK_KHR_xlib_surface |
 | macOS (MoltenVK) | VK_MVK_macos_surface |
+| QNX (Screen) | VK_QNX_screen_surface |
 
 It is important to understand that while the loader may support the various
 entry points for these extensions, there is a handshake required to actually
@@ -753,7 +754,7 @@ extensions when an application calls `vkEnumerateInstanceExtensionProperties`.
 Additionally, this behavior will cause the loader to throw an error during
 `vkCreateInstance` if you still attempt to use one of these extensions.  The intent is
 to protect applications so that they don't inadvertently use functionality
-which could lead to a crash.  
+which could lead to a crash.
 
 On the other hand, if you know you can safely use the extension, you may disable
 the filtering by defining the environment variable `VK_LOADER_DISABLE_INST_EXT_FILTER`
@@ -1546,6 +1547,7 @@ In order to intercept the pre-instance functions, several conditions must be met
 The functions that may be intercepted in this way are:
 * `vkEnumerateInstanceExtensionProperties`
 * `vkEnumerateInstanceLayerProperties`
+* `vkEnumerateInstanceVersion`
 
 Pre-instance functions work differently from all other layer intercept functions.
 Other intercept functions have a function prototype identical to that of the function they are intercepting.
@@ -1866,8 +1868,20 @@ Here's an example of a meta-layer manifest file:
 
 ##### Layer Manifest File Version History
 
-The current highest supported Layer Manifest file format supported is 1.1.2.
+The current highest supported Layer Manifest file format supported is 1.2.0.
 Information about each version is detailed in the following sub-sections:
+
+###### Layer Manifest File Version 1.2.0
+
+The ability to define the layer settings as defined by the [layer manifest schema](https://github.com/LunarG/VulkanTools/blob/master/vkconfig_core/layers/layers_schema.json).
+
+The ability to briefly document the layer thanks to the fields:
+ * "introduction": Presentation of the purpose of the layer in a paragraph.
+ * "url": A link the the layer home page.
+ * "platforms": The list of supported platforms of the layer
+ * "status": The life cycle of the layer: Alpha, Beta, Stable, or Deprecated
+
+These changes were made to enable third-party layers to expose their features within [Vulkan Configurator](https://github.com/LunarG/VulkanTools/blob/master/vkconfig/README.md) or other tools.
 
 ###### Layer Manifest File Version 1.1.2
 
@@ -2104,9 +2118,9 @@ locations of JSON manifest files. These keys are located in device keys
 created during driver installation and contain configuration information
 for base settings, including OpenGL and Direct3D ICD location.
 
-The Device Adapter and Software Component key paths should be obtained through the PnP
-Configuration Manager API. The `000X` key will be a numbered key, where each
-device is assigned a different number.
+The Device Adapter and Software Component key paths will be obtained by first enumerating DXGI adapters.
+Should that fail it will use the PnP Configuration Manager API. The `000X` key will be a numbered key,
+where each device is assigned a different number.
 
 ```
    HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Class\{Adapter GUID}\000X\VulkanDriverName
@@ -2241,7 +2255,7 @@ details.
 If you are seeing issues which may be related to the ICD, a possible option to debug is to enable the
 `LD_BIND_NOW` environment variable.  This forces every dynamic library's symbols to be fully resolved on load.  If
 there is a problem with an ICD missing symbols on your system, this will expose it and cause the Vulkan loader
-to fail on loading the ICD.  It is recommended that you enable `LD_BIND_NOW` along with `VK_LOADER_DEBUG=warn`
+to fail on loading the ICD.  It is recommended that you enable `LD_BIND_NOW` along with `VK_LOADER_DEBUG=error,warn,implem`
 to expose any issues.
 
 #### Using Pre-Production ICDs on Windows, Linux and macOS
@@ -2448,10 +2462,10 @@ then the value of NULL should be returned.
 
 This support is optional and should not be considered a requirement.  This is
 only required if an ICD intends to support some functionality not directly
-supported by a significant population of loaders in the public.  If an ICD
-does implement this support, it should return the address of its
-`vk_icdGetPhysicalDeviceProcAddr` function through the `vkGetInstanceProcAddr`
-function.
+supported by a significant population of loaders in the public.  If an ICD does
+implement this support, it must export the function from the ICD library using
+the name vk_icdGetPhysicalDeviceProcAddr so that the symbol can be located
+through the platform's dynamic linking utilities.
 
 The new behavior of the loader's vkGetInstanceProcAddr with support for the
 `vk_icdGetPhysicalDeviceProcAddr` function is as follows:
@@ -2553,9 +2567,9 @@ vkObj alloc_icd_obj()
 ### Handling KHR Surface Objects in WSI Extensions
 
 Normally, ICDs handle object creation and destruction for various Vulkan
-objects. The WSI surface extensions for Linux, Windows, and macOS
+objects. The WSI surface extensions for Linux, Windows, macOS, and QNX
 ("VK\_KHR\_win32\_surface", "VK\_KHR\_xcb\_surface", "VK\_KHR\_xlib\_surface",
-"VK\_KHR\_wayland\_surface", "VK\_MVK\_macos\_surface"
+"VK\_KHR\_wayland\_surface", "VK\_MVK\_macos\_surface", "VK\_QNX\_screen\_surface"
 and "VK\_KHR\_surface")
 are handled differently.  For these extensions, the `VkSurfaceKHR` object
 creation and destruction may be handled by either the loader  or an ICD.
@@ -2571,6 +2585,7 @@ If the loader handles the management of the `VkSurfaceKHR` objects:
       * Windows
       * Android
       * MacOS (`vkCreateMacOSSurfaceMVK`)
+      * QNX (`vkCreateScreenSurfaceQNX`)
  2. The loader creates a `VkIcdSurfaceXXX` object for the corresponding
 `vkCreateXXXSurfaceKHR` call.
     * The `VkIcdSurfaceXXX` structures are defined in `include/vulkan/vk_icd.h`.
@@ -2578,7 +2593,7 @@ If the loader handles the management of the `VkSurfaceKHR` objects:
     `VkIcdSurfaceXXX` structure.
  4. The first field of all the `VkIcdSurfaceXXX` structures is a
 `VkIcdSurfaceBase` enumerant that indicates whether the
-    surface object is Win32, XCB, Xlib, or Wayland.
+    surface object is Win32, XCB, Xlib, Wayland, or Screen.
 
 The ICD may choose to handle `VkSurfaceKHR` object creation instead.  If an ICD
 desires to handle creating and destroying it must do the following:
@@ -2804,7 +2819,7 @@ of discovery.
 | VK_INSTANCE_LAYERS                | Force the loader to add the given layers to the list of Enabled layers normally passed into `vkCreateInstance`.  These layers are added first, and the loader will remove any duplicate layers that appear in both this list as well as that passed into `ppEnabledLayerNames`. | `export VK_INSTANCE_LAYERS=<layer_a>:<layer_b>`<br/><br/>`set VK_INSTANCE_LAYERS=<layer_a>;<layer_b>` |
 | VK_LAYER_PATH                     | Override the loader's standard Layer library search folders and use the provided delimited folders to search for layer Manifest files. | `export VK_LAYER_PATH=<path_a>:<path_b>`<br/><br/>`set VK_LAYER_PATH=<path_a>;<path_b>` |
 | VK_LOADER_DISABLE_INST_EXT_FILTER | Disable the filtering out of instance extensions that the loader doesn't know about.  This will allow applications to enable instance extensions exposed by ICDs but that the loader has no support for.  **NOTE:** This may cause the loader or application to crash. |  `export VK_LOADER_DISABLE_INST_EXT_FILTER=1`<br/><br/>`set VK_LOADER_DISABLE_INST_EXT_FILTER=1` |
-| VK_LOADER_DEBUG                   | Enable loader debug messages.  Options are:<br/>- error (only errors)<br/>- warn (warnings and errors)<br/>- info (info, warning, and errors)<br/> - debug (debug + all before) <br/> -all (report out all messages) | `export VK_LOADER_DEBUG=all`<br/><br/>`set VK_LOADER_DEBUG=warn` |
+| VK_LOADER_DEBUG                   | Enable loader debug messages.  It is a comma-delimited list of options.  Options are:<br/>- error (enable error messages)<br/>- warn (enable warning messages)<br/>- info (enable info messages)<br/> - debug (enable debug messages) <br/>  - layer (enable layer messages) <br/>  - implem (enable implementation/ICD messages) <br/> - all (report out all messages) | `export VK_LOADER_DEBUG=all`<br/><br/>`set VK_LOADER_DEBUG=error,warn` |
 
 ## Glossary of Terms
 

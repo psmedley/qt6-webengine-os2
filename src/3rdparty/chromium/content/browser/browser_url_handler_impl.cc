@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
+#include "base/cxx17_backports.h"
 #include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "content/browser/renderer_host/debug_urls.h"
 #include "content/browser/webui/web_ui_impl.h"
@@ -15,6 +15,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
+#include "third_party/blink/public/common/chrome_debug_urls.h"
 #include "url/gurl.h"
 #include "url/url_util_qt.h"
 
@@ -79,7 +80,7 @@ static bool ReverseViewSource(GURL* url, BrowserContext* browser_context) {
 
 static bool DebugURLHandler(GURL* url, BrowserContext* browser_context) {
   // Circumvent processing URLs that the renderer process will handle.
-  return IsRendererDebugURL(*url);
+  return blink::IsRendererDebugURL(*url);
 }
 
 // static

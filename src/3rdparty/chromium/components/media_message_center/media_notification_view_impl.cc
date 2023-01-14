@@ -8,7 +8,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/media_message_center/media_notification_background_ash_impl.h"
 #include "components/media_message_center/media_notification_background_impl.h"
-#include "components/media_message_center/media_notification_constants.h"
 #include "components/media_message_center/media_notification_container.h"
 #include "components/media_message_center/media_notification_item.h"
 #include "components/media_message_center/media_notification_util.h"
@@ -18,6 +17,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -26,7 +26,6 @@
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/view_class_properties.h"
 
@@ -101,6 +100,10 @@ const gfx::VectorIcon* GetVectorIconForMediaAction(MediaSessionAction action) {
     case MediaSessionAction::kSeekTo:
     case MediaSessionAction::kScrubTo:
     case MediaSessionAction::kSwitchAudioDevice:
+    case MediaSessionAction::kToggleMicrophone:
+    case MediaSessionAction::kToggleCamera:
+    case MediaSessionAction::kHangUp:
+    case MediaSessionAction::kRaise:
       NOTREACHED();
       break;
   }
@@ -127,10 +130,10 @@ MediaNotificationViewImpl::MediaNotificationViewImpl(
     MediaNotificationContainer* container,
     base::WeakPtr<MediaNotificationItem> item,
     std::unique_ptr<views::View> header_row_controls_view,
-    const base::string16& default_app_name,
+    const std::u16string& default_app_name,
     int notification_width,
     bool should_show_icon,
-    base::Optional<NotificationTheme> theme)
+    absl::optional<NotificationTheme> theme)
     : container_(container),
       item_(std::move(item)),
       default_app_name_(default_app_name),
@@ -164,7 +167,7 @@ MediaNotificationViewImpl::MediaNotificationViewImpl(
   title_artist_row_ = main_row_->AddChildView(std::move(title_artist_row));
 
   auto title_label = std::make_unique<views::Label>(
-      base::string16(), views::style::CONTEXT_LABEL,
+      std::u16string(), views::style::CONTEXT_LABEL,
       views::style::STYLE_PRIMARY);
   const gfx::FontList& base_font_list = views::Label::GetDefaultFontList();
   title_label->SetFontList(base_font_list.Derive(
@@ -175,7 +178,7 @@ MediaNotificationViewImpl::MediaNotificationViewImpl(
   title_label_ = title_artist_row_->AddChildView(std::move(title_label));
 
   auto artist_label = std::make_unique<views::Label>(
-      base::string16(), views::style::CONTEXT_LABEL,
+      std::u16string(), views::style::CONTEXT_LABEL,
       views::style::STYLE_PRIMARY);
   artist_label->SetLineHeight(is_cros_ ? kCrOSArtistLineHeight
                                        : kTitleArtistLineHeight);
@@ -302,6 +305,9 @@ MediaNotificationViewImpl::MediaNotificationViewImpl(
                      message_center::kNotificationCornerRadius);
   UpdateViewForExpandedState();
 
+  if (header_row_)
+    header_row_->SetExpandButtonEnabled(GetExpandable());
+
   if (item_)
     item_->SetView(this);
 }
@@ -341,7 +347,7 @@ void MediaNotificationViewImpl::SetForcedExpandedState(
   } else {
     if (!forced_expanded_state_.has_value())
       return;
-    forced_expanded_state_ = base::nullopt;
+    forced_expanded_state_ = absl::nullopt;
   }
 
   if (header_row_)
@@ -461,7 +467,8 @@ void MediaNotificationViewImpl::UpdateWithMediaArtwork(
 
   UMA_HISTOGRAM_BOOLEAN(kArtworkHistogramName, has_artwork_);
 
-  UpdateForegroundColor();
+  if (GetWidget())
+    UpdateForegroundColor();
 
   container_->OnMediaArtworkChanged(image);
 
@@ -474,7 +481,8 @@ void MediaNotificationViewImpl::UpdateWithMediaArtwork(
 void MediaNotificationViewImpl::UpdateWithFavicon(const gfx::ImageSkia& icon) {
   GetMediaNotificationBackground()->UpdateFavicon(icon);
 
-  UpdateForegroundColor();
+  if (GetWidget())
+    UpdateForegroundColor();
   SchedulePaint();
 }
 
@@ -484,13 +492,11 @@ void MediaNotificationViewImpl::UpdateWithVectorIcon(
     return;
 
   vector_header_icon_ = &vector_icon;
-  const SkColor foreground =
-      GetMediaNotificationBackground()->GetForegroundColor(*this);
-  header_row_->SetAppIcon(gfx::CreateVectorIcon(
-      *vector_header_icon_, message_center::kSmallImageSizeMD, foreground));
   header_row_->SetAppIconVisible(true);
   header_row_->SetProperty(views::kMarginsKey,
                            kIconMediaNotificationHeaderInsets);
+  if (GetWidget())
+    UpdateForegroundColor();
 }
 
 void MediaNotificationViewImpl::UpdateDeviceSelectorAvailability(
@@ -508,7 +514,7 @@ views::Button* MediaNotificationViewImpl::GetHeaderRowForTesting() const {
   return header_row_;
 }
 
-base::string16 MediaNotificationViewImpl::GetSourceTitleForTesting() const {
+std::u16string MediaNotificationViewImpl::GetSourceTitleForTesting() const {
   return header_row_ ? header_row_->app_name_for_testing()  // IN-TEST
                      : cros_header_label_->GetText();
 }
@@ -611,7 +617,7 @@ void MediaNotificationViewImpl::UpdateViewForExpandedState() {
 
 void MediaNotificationViewImpl::CreateMediaButton(
     MediaSessionAction action,
-    const base::string16& accessible_name) {
+    const std::u16string& accessible_name) {
   auto button =
       views::CreateVectorImageButton(views::Button::PressedCallback());
   button->SetCallback(
@@ -643,6 +649,7 @@ void MediaNotificationViewImpl::CreateHeaderRow(
   }
 
   header_row->SetAppName(default_app_name_);
+  header_row->SetFocusBehavior(FocusBehavior::NEVER);
 
   if (should_show_icon) {
     header_row->ClearAppIcon();

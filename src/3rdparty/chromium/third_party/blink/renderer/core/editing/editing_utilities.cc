@@ -25,8 +25,10 @@
 
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/clipboard/clipboard_mime_types.h"
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
+#include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -76,7 +78,6 @@
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
@@ -92,17 +93,6 @@ std::ostream& operator<<(std::ostream& os, PositionMoveType type) {
   DCHECK_GE(it, std::begin(kTexts)) << "Unknown PositionMoveType value";
   DCHECK_LT(it, std::end(kTexts)) << "Unknown PositionMoveType value";
   return os << *it;
-}
-
-InputEvent::EventCancelable InputTypeIsCancelable(
-    InputEvent::InputType input_type) {
-  using InputType = InputEvent::InputType;
-  switch (input_type) {
-    case InputType::kInsertCompositionText:
-      return InputEvent::EventCancelable::kNotCancelable;
-    default:
-      return InputEvent::EventCancelable::kIsCancelable;
-  }
 }
 
 UChar WhitespaceRebalancingCharToAppend(const String& string,
@@ -311,9 +301,9 @@ int16_t ComparePositions(const Position& a, const Position& b) {
   int16_t bias = 0;
   if (node_a == node_b) {
     if (has_descendent_a)
-      bias = -1;
-    else if (has_descendent_b)
       bias = 1;
+    else if (has_descendent_b)
+      bias = -1;
   }
 
   int16_t result =
@@ -797,6 +787,14 @@ int FindNextBoundaryOffset(const String& str, int current) {
   }
   return current + machine.FinalizeAndGetBoundaryOffset();
 }
+
+// Explicit instantiation to avoid link error for the usage in EditContext.
+template int FindNextBoundaryOffset<BackwardGraphemeBoundaryStateMachine>(
+    const String& str,
+    int current);
+template int FindNextBoundaryOffset<ForwardGraphemeBoundaryStateMachine>(
+    const String& str,
+    int current);
 
 int PreviousGraphemeBoundaryOf(const Node& node, int current) {
   // TODO(yosin): Need to support grapheme crossing |Node| boundary.
@@ -1342,6 +1340,26 @@ HTMLSpanElement* CreateTabSpanElement(Document& document) {
   return CreateTabSpanElement(document, nullptr);
 }
 
+// Returns user-select:contain boundary element of specified position.
+// Because of we've not yet implemented "user-select:contain", we consider
+// following elements having "user-select:contain"
+//  - root editable
+//  - inner editor of text control (<input> and <textarea>)
+// Note: inner editor of readonly text control isn't content editable.
+// TODO(yosin): We should handle elements with "user-select:contain".
+// See http:/crbug.com/658129
+static Element* UserSelectContainBoundaryOf(const Position& position) {
+  if (auto* text_control = EnclosingTextControl(position)) {
+    // for <input readonly>. See http://crbug.com/185089
+    return text_control->InnerEditorElement();
+  }
+  // Note: Until we implement "user-select:contain", we treat root editable
+  // element and text control as having "user-select:contain".
+  if (Element* editable = RootEditableElementOf(position))
+    return editable;
+  return nullptr;
+}
+
 PositionWithAffinity PositionRespectingEditingBoundary(
     const Position& position,
     const HitTestResult& hit_test_result) {
@@ -1351,7 +1369,7 @@ PositionWithAffinity PositionRespectingEditingBoundary(
   if (!target_object)
     return PositionWithAffinity();
 
-  Element* editable_element = RootEditableElementOf(position);
+  Element* editable_element = UserSelectContainBoundaryOf(position);
   if (!editable_element || editable_element->contains(target_node))
     return hit_test_result.GetPosition();
 
@@ -1659,6 +1677,17 @@ wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position& position) {
 
 FloatQuad LocalToAbsoluteQuadOf(const LocalCaretRect& caret_rect) {
   return caret_rect.layout_object->LocalRectToAbsoluteQuad(caret_rect.rect);
+}
+
+InputEvent::EventCancelable InputTypeIsCancelable(
+    InputEvent::InputType input_type) {
+  using InputType = InputEvent::InputType;
+  switch (input_type) {
+    case InputType::kInsertCompositionText:
+      return InputEvent::EventCancelable::kNotCancelable;
+    default:
+      return InputEvent::EventCancelable::kIsCancelable;
+  }
 }
 
 const StaticRangeVector* TargetRangesForInputEvent(const Node& node) {

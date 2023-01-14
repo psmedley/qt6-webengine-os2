@@ -63,6 +63,8 @@ const char* GetUITaskQueueName(BrowserTaskQueues::QueueType queue_type) {
       return "ui_user_blocking_tq";
     case BrowserTaskQueues::QueueType::kUserVisible:
       return "ui_user_visible_tq";
+    case BrowserTaskQueues::QueueType::kUserInput:
+      return "ui_user_input_tq";
   }
 }
 
@@ -80,6 +82,8 @@ const char* GetIOTaskQueueName(BrowserTaskQueues::QueueType queue_type) {
       return "io_user_blocking_tq";
     case BrowserTaskQueues::QueueType::kUserVisible:
       return "io_user_visible_tq";
+    case BrowserTaskQueues::QueueType::kUserInput:
+      return "io_user_input_tq";
   }
 }
 
@@ -178,6 +182,10 @@ BrowserTaskQueues::BrowserTaskQueues(
   GetBrowserTaskQueue(QueueType::kBestEffort)
       ->SetQueuePriority(QueuePriority::kBestEffortPriority);
 
+  // User Input queue
+  GetBrowserTaskQueue(QueueType::kUserInput)
+      ->SetQueuePriority(QueuePriority::kHighestPriority);
+
   // Control queue
   control_queue_ =
       sequence_manager->CreateTaskQueue(base::sequence_manager::TaskQueue::Spec(
@@ -217,7 +225,7 @@ BrowserTaskQueues::CreateBrowserTaskRunners() const {
 }
 
 void BrowserTaskQueues::PostFeatureListInitializationSetup() {
-  if (base::FeatureList::IsEnabled(features::kPrioritizeBootstrapTasks)) {
+  if (base::FeatureList::IsEnabled(::features::kPrioritizeBootstrapTasks)) {
     GetBrowserTaskQueue(QueueType::kBootstrap)
         ->SetQueuePriority(QueuePriority::kHighestPriority);
 

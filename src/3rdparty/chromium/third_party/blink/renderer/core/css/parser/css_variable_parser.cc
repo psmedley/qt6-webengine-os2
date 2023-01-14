@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -146,7 +145,6 @@ bool CSSVariableParser::ContainsValidVariableReferences(
 }
 
 CSSCustomPropertyDeclaration* CSSVariableParser::ParseDeclarationValue(
-    const AtomicString& variable_name,
     const CSSTokenizedValue& tokenized_value,
     bool is_animation_tainted,
     const CSSParserContext& context) {
@@ -161,13 +159,12 @@ CSSCustomPropertyDeclaration* CSSVariableParser::ParseDeclarationValue(
     return nullptr;
   if (type == CSSValueID::kInternalVariableValue) {
     return MakeGarbageCollected<CSSCustomPropertyDeclaration>(
-        variable_name,
+
         CSSVariableData::Create(tokenized_value, is_animation_tainted,
                                 has_references, context.BaseURL(),
                                 context.Charset()));
   }
-  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(variable_name,
-                                                            type);
+  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(type);
 }
 
 CSSVariableReferenceValue* CSSVariableParser::ParseRegisteredPropertyValue(

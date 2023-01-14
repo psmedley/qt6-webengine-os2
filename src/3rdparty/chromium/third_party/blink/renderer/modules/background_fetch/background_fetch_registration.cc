@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_request_usvstring.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_cache_query_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -146,37 +148,37 @@ ScriptPromise BackgroundFetchRegistration::abort(ScriptState* script_state) {
 
 ScriptPromise BackgroundFetchRegistration::match(
     ScriptState* script_state,
-    const RequestOrUSVString& request,
+    const V8RequestInfo* request,
     const CacheQueryOptions* options,
     ExceptionState& exception_state) {
-  return MatchImpl(
-      script_state, base::make_optional<RequestOrUSVString>(request),
-      mojom::blink::CacheQueryOptions::From(options), exception_state,
-      /* match_all = */ false);
+  return MatchImpl(script_state, request,
+                   mojom::blink::CacheQueryOptions::From(options),
+                   exception_state,
+                   /* match_all = */ false);
 }
 
 ScriptPromise BackgroundFetchRegistration::matchAll(
     ScriptState* script_state,
     ExceptionState& exception_state) {
-  return MatchImpl(script_state, /* request = */ base::nullopt,
+  return MatchImpl(script_state, /* request = */ nullptr,
                    /* cache_query_options = */ nullptr, exception_state,
                    /* match_all = */ true);
 }
 
 ScriptPromise BackgroundFetchRegistration::matchAll(
     ScriptState* script_state,
-    const RequestOrUSVString& request,
+    const V8RequestInfo* request,
     const CacheQueryOptions* options,
     ExceptionState& exception_state) {
-  return MatchImpl(
-      script_state, base::make_optional<RequestOrUSVString>(request),
-      mojom::blink::CacheQueryOptions::From(options), exception_state,
-      /* match_all = */ true);
+  return MatchImpl(script_state, request,
+                   mojom::blink::CacheQueryOptions::From(options),
+                   exception_state,
+                   /* match_all = */ true);
 }
 
 ScriptPromise BackgroundFetchRegistration::MatchImpl(
     ScriptState* script_state,
-    base::Optional<RequestOrUSVString> request,
+    const V8RequestInfo* request,
     mojom::blink::CacheQueryOptionsPtr cache_query_options,
     ExceptionState& exception_state,
     bool match_all) {
@@ -199,15 +201,19 @@ ScriptPromise BackgroundFetchRegistration::MatchImpl(
 
   // Convert |request| to mojom::blink::FetchAPIRequestPtr.
   mojom::blink::FetchAPIRequestPtr request_to_match;
-  if (request.has_value()) {
-    if (request->IsRequest()) {
-      request_to_match = request->GetAsRequest()->CreateFetchAPIRequest();
-    } else {
-      Request* new_request = Request::Create(
-          script_state, request->GetAsUSVString(), exception_state);
-      if (exception_state.HadException())
-        return ScriptPromise();
-      request_to_match = new_request->CreateFetchAPIRequest();
+  if (request) {
+    switch (request->GetContentType()) {
+      case V8RequestInfo::ContentType::kRequest:
+        request_to_match = request->GetAsRequest()->CreateFetchAPIRequest();
+        break;
+      case V8RequestInfo::ContentType::kUSVString: {
+        Request* new_request = Request::Create(
+            script_state, request->GetAsUSVString(), exception_state);
+        if (exception_state.HadException())
+          return ScriptPromise();
+        request_to_match = new_request->CreateFetchAPIRequest();
+        break;
+      }
     }
   }
 

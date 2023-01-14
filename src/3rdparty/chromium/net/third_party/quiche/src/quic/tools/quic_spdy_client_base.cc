@@ -13,7 +13,7 @@
 #include "quic/core/quic_server_id.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
-#include "common/platform/api/quiche_text_utils.h"
+#include "common/quiche_text_utils.h"
 
 using spdy::Http2HeaderBlock;
 
@@ -50,8 +50,7 @@ QuicSpdyClientBase::QuicSpdyClientBase(
                      std::move(proof_verifier),
                      std::move(session_cache)),
       store_response_(false),
-      latest_response_code_(-1),
-      max_allowed_push_id_(0) {}
+      latest_response_code_(-1) {}
 
 QuicSpdyClientBase::~QuicSpdyClientBase() {
   // We own the push promise index. We need to explicitly kill
@@ -68,12 +67,12 @@ const QuicSpdyClientSession* QuicSpdyClientBase::client_session() const {
 }
 
 void QuicSpdyClientBase::InitializeSession() {
+  if (max_inbound_header_list_size_ > 0) {
+    client_session()->set_max_inbound_header_list_size(
+        max_inbound_header_list_size_);
+  }
   client_session()->Initialize();
   client_session()->CryptoConnect();
-  if (max_allowed_push_id_ > 0 &&
-      VersionUsesHttp3(client_session()->transport_version())) {
-    client_session()->SetMaxPushId(max_allowed_push_id_);
-  }
 }
 
 void QuicSpdyClientBase::OnClose(QuicSpdyStream* stream) {
@@ -146,7 +145,7 @@ void QuicSpdyClientBase::SendRequestInternal(Http2HeaderBlock sanitized_headers,
 
   QuicSpdyClientStream* stream = CreateClientStream();
   if (stream == nullptr) {
-    QUIC_BUG << "stream creation failed!";
+    QUIC_BUG(quic_bug_10949_1) << "stream creation failed!";
     return;
   }
   stream->SendRequest(std::move(sanitized_headers), body, fin);
@@ -166,7 +165,7 @@ void QuicSpdyClientBase::SendRequestsAndWaitForResponse(
   for (size_t i = 0; i < url_list.size(); ++i) {
     Http2HeaderBlock headers;
     if (!SpdyUtils::PopulateHeaderBlockFromUrl(url_list[i], &headers)) {
-      QUIC_BUG << "Unable to create request";
+      QUIC_BUG(quic_bug_10949_2) << "Unable to create request";
       continue;
     }
     SendRequest(headers, "", true);
@@ -260,33 +259,33 @@ void QuicSpdyClientBase::OnRendezvousResult(QuicSpdyStream* stream) {
 }
 
 int QuicSpdyClientBase::latest_response_code() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_3, !store_response_) << "Response not stored!";
   return latest_response_code_;
 }
 
 const std::string& QuicSpdyClientBase::latest_response_headers() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_4, !store_response_) << "Response not stored!";
   return latest_response_headers_;
 }
 
 const std::string& QuicSpdyClientBase::preliminary_response_headers() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_5, !store_response_) << "Response not stored!";
   return preliminary_response_headers_;
 }
 
 const Http2HeaderBlock& QuicSpdyClientBase::latest_response_header_block()
     const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_6, !store_response_) << "Response not stored!";
   return latest_response_header_block_;
 }
 
 const std::string& QuicSpdyClientBase::latest_response_body() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_7, !store_response_) << "Response not stored!";
   return latest_response_body_;
 }
 
 const std::string& QuicSpdyClientBase::latest_response_trailers() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  QUIC_BUG_IF(quic_bug_10949_8, !store_response_) << "Response not stored!";
   return latest_response_trailers_;
 }
 

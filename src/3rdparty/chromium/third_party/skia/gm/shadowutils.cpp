@@ -47,7 +47,7 @@ enum ShadowMode {
 
 void draw_paths(SkCanvas* canvas, ShadowMode mode) {
     SkTArray<SkPath> paths;
-    paths.push_back(SkPath::RRect(SkRect::MakeWH(50, 50), 10, 10));
+    paths.push_back(SkPath::RRect(SkRect::MakeWH(50, 50), 10, 10.00002f));
     SkRRect oddRRect;
     oddRRect.setNinePatch(SkRect::MakeWH(50, 50), 9, 13, 6, 16);
     paths.push_back(SkPath::RRect(oddRRect));
@@ -266,7 +266,7 @@ DEF_SIMPLE_GM(shadow_utils_directional, canvas, 256, 384) {
     static constexpr SkScalar kHeight = 12.f;
 
     SkPath rrect(SkPath::RRect(SkRect::MakeLTRB(-25, -25, 25, 25), 10, 10));
-    SkPoint3 lightPos = { -45, -45, 45 };
+    SkPoint3 lightPos = { -45, -45, 77.9422863406f };
 
     SkColor ambientColor = SkColorSetARGB(0.02f * 255, 0, 0, 0);
     SkColor spotColor = SkColorSetARGB(0.35f * 255, 0, 0, 0);

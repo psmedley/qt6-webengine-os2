@@ -41,7 +41,7 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
-// To avoid conflicts with the CreateWindow macro from the Windows SDK...
+// To avoid conflicts with the DrawText macro from the Windows SDK...
 #undef DrawText
 
 namespace cc {
@@ -79,6 +79,8 @@ class PLATFORM_EXPORT Font {
     return font_description_;
   }
 
+  enum class DrawType { kGlyphsOnly, kGlyphsAndClusters };
+
   enum CustomFontNotReadyAction {
     kDoNotPaintIfFontNotReady,
     kUseFallbackIfFontNotReady
@@ -91,25 +93,29 @@ class PLATFORM_EXPORT Font {
                 const TextRunPaintInfo&,
                 const FloatPoint&,
                 float device_scale_factor,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const TextRunPaintInfo&,
                 const FloatPoint&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const NGTextFragmentPaintInfo&,
                 const FloatPoint&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   bool DrawBidiText(cc::PaintCanvas*,
                     const TextRunPaintInfo&,
                     const FloatPoint&,
                     CustomFontNotReadyAction,
                     float device_scale_factor,
-                    const cc::PaintFlags&) const;
+                    const cc::PaintFlags&,
+                    DrawType = DrawType::kGlyphsOnly) const;
   void DrawEmphasisMarks(cc::PaintCanvas*,
                          const TextRunPaintInfo&,
                          const AtomicString& mark,
@@ -216,6 +222,9 @@ class PLATFORM_EXPORT Font {
 
   void ReportNotDefGlyph() const;
 
+  void ReportEmojiSegmentGlyphCoverage(unsigned num_clusters,
+                                       unsigned num_broken_clusters) const;
+
  private:
   enum ForTextEmphasisOrNot { kNotForTextEmphasis, kForTextEmphasis };
 
@@ -238,12 +247,6 @@ class PLATFORM_EXPORT Font {
     if (!font_fallback_list_)
       return false;
     return EnsureFontFallbackList()->ShouldSkipDrawing();
-  }
-
-  // Returns true if any of the matched @font-face rules has set a
-  // advance-override value.
-  bool HasAdvanceOverride() const {
-    return font_fallback_list_ && font_fallback_list_->HasAdvanceOverride();
   }
 
  private:
@@ -275,4 +278,4 @@ inline float Font::TabWidth(const SimpleFontData* font_data,
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_H_

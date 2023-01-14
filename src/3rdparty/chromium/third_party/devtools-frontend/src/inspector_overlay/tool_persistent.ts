@@ -28,9 +28,16 @@
 //  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 //  THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {Overlay, ResetData} from './common.js';
-import {drawLayoutFlexContainerHighlight, FlexContainerHighlight} from './highlight_flex_common.js';
-import {drawLayoutGridHighlight, GridHighlight} from './highlight_grid_common.js';
+import type {ResetData} from './common.js';
+import {Overlay} from './common.js';
+import type {ContainerQueryHighlight} from './highlight_container_query.js';
+import {drawContainerQueryHighlight} from './highlight_container_query.js';
+import type {FlexContainerHighlight} from './highlight_flex_common.js';
+import {drawLayoutFlexContainerHighlight} from './highlight_flex_common.js';
+import type {GridHighlight} from './highlight_grid_common.js';
+import {drawLayoutGridHighlight} from './highlight_grid_common.js';
+import type {ScrollSnapHighlight} from './highlight_scroll_snap.js';
+import {drawScrollSnapHighlight} from './highlight_scroll_snap.js';
 
 export class PersistentOverlay extends Overlay {
   private gridLabelState = {gridLayerCounter: 0};
@@ -84,6 +91,18 @@ export class PersistentOverlay extends Overlay {
     drawLayoutFlexContainerHighlight(
         highlight, this.context, this.deviceScaleFactor, this.canvasWidth, this.canvasHeight,
         this.emulationScaleFactor);
+    this.context.restore();
+  }
+
+  drawScrollSnapHighlight(highlight: ScrollSnapHighlight) {
+    this.context.save();
+    drawScrollSnapHighlight(highlight, this.context, this.emulationScaleFactor);
+    this.context.restore();
+  }
+
+  drawContainerQueryHighlight(highlight: ContainerQueryHighlight) {
+    this.context.save();
+    drawContainerQueryHighlight(highlight, this.context, this.emulationScaleFactor);
     this.context.restore();
   }
 }

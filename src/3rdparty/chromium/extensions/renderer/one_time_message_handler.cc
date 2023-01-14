@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "base/supports_user_data.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/common/api/messaging/message.h"
@@ -290,12 +290,6 @@ bool OneTimeMessageHandler::DeliverMessageToReceiver(
     NOTREACHED();
     return handled;
   }
-
-  // We shouldn't need to monitor context invalidation here. We store the ports
-  // for the context in PerContextData (cleaned up on context destruction), and
-  // the browser watches for frame navigation or destruction, and cleans up
-  // orphaned channels.
-  base::Closure on_context_invalidated;
 
   new GCCallback(
       script_context, response_function,

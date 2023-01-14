@@ -57,8 +57,7 @@ class Database final : public ScriptWrappable {
   Database(DatabaseContext*,
            const String& name,
            const String& expected_version,
-           const String& display_name,
-           uint32_t estimated_size);
+           const String& display_name);
   ~Database() override;
   void Trace(Visitor*) const override;
 
@@ -101,7 +100,6 @@ class Database final : public ScriptWrappable {
   const SecurityOrigin* GetSecurityOrigin() const;
   String StringIdentifier() const;
   String DisplayName() const;
-  uint32_t EstimatedSize() const;
   String FileName() const;
   SQLiteDatabase& SqliteDatabase() { return sqlite_database_; }
 
@@ -178,7 +176,6 @@ class Database final : public ScriptWrappable {
   String name_;
   String expected_version_;
   String display_name_;
-  uint32_t estimated_size_;
   String filename_;
 
   DatabaseGuid guid_;
@@ -196,6 +193,9 @@ class Database final : public ScriptWrappable {
   Mutex transaction_in_progress_mutex_;
   bool transaction_in_progress_;
   bool is_transaction_queue_enabled_;
+
+  // Gates a UKM counter to execute once per database instance.
+  bool did_try_to_count_third_party_transaction_;
 
   // Disable BackForwardCache when using WebDatabase feature, because we do not
   // handle the state inside the portal after putting the page in cache.

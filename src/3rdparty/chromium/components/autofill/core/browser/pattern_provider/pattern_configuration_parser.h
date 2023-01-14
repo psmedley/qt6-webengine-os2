@@ -7,11 +7,13 @@
 
 #include <string>
 
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/version.h"
 #include "components/autofill/core/browser/form_parsing/autofill_parsing_utils.h"
 #include "components/autofill/core/browser/pattern_provider/pattern_provider.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill {
 
@@ -36,7 +38,7 @@ base::Version ExtractVersionFromJsonObject(base::Value& root);
 //    }
 //  }
 //  An example can be found in the relative resources folder.
-base::Optional<PatternProvider::Map> GetConfigurationFromJsonObject(
+absl::optional<PatternProvider::Map> GetConfigurationFromJsonObject(
     const base::Value& root);
 
 // Tries to get and parse the default configuration in the resource bundle
@@ -50,11 +52,11 @@ void PopulateFromResourceBundle(
 void PopulateFromJsonString(std::string json_string);
 
 // Synchronous getter used to set up a test fixture.
-base::Optional<PatternProvider::Map>
+absl::optional<PatternProvider::Map>
 GetPatternsFromResourceBundleSynchronously();
 
 }  // namespace field_type_parsing
 
 }  // namespace autofill
 
-#endif
+#endif  // COMPONENTS_AUTOFILL_CORE_BROWSER_PATTERN_PROVIDER_PATTERN_CONFIGURATION_PARSER_H_

@@ -28,7 +28,8 @@ void AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager) {
+    BrowserAutofillManager::AutofillDownloadManagerState
+        enable_download_manager) {
   // By the time this method is called, no web_frame is available. This method
   // only prepares the factory and the AutofillDriverIOS will be created in the
   // first call to FromWebStateAndWebFrame.
@@ -51,10 +52,14 @@ AutofillDriverIOS::AutofillDriverIOS(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager)
+    BrowserAutofillManager::AutofillDownloadManagerState
+        enable_download_manager)
     : web_state_(web_state),
       bridge_(bridge),
-      autofill_manager_(this, client, app_locale, enable_download_manager) {
+      browser_autofill_manager_(this,
+                                client,
+                                app_locale,
+                                enable_download_manager) {
   web_frame_id_ = web::GetWebFrameId(web_frame);
 }
 
@@ -67,6 +72,10 @@ bool AutofillDriverIOS::IsIncognito() const {
 bool AutofillDriverIOS::IsInMainFrame() const {
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
   return web_frame ? web_frame->IsMainFrame() : true;
+}
+
+bool AutofillDriverIOS::IsPrerendering() const {
+  return false;
 }
 
 bool AutofillDriverIOS::CanShowAutofillUi() const {
@@ -88,10 +97,12 @@ bool AutofillDriverIOS::RendererIsAvailable() {
   return true;
 }
 
-void AutofillDriverIOS::SendFormDataToRenderer(
+void AutofillDriverIOS::FillOrPreviewForm(
     int query_id,
-    RendererFormDataAction action,
-    const FormData& data) {
+    mojom::RendererFormDataAction action,
+    const FormData& data,
+    const url::Origin& triggered_origin,
+    const base::flat_map<FieldGlobalId, ServerFieldType>& field_type_map) {
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
   if (!web_frame) {
     return;
@@ -101,17 +112,18 @@ void AutofillDriverIOS::SendFormDataToRenderer(
 
 void AutofillDriverIOS::PropagateAutofillPredictions(
     const std::vector<autofill::FormStructure*>& forms) {
-  autofill_manager_.client()->PropagateAutofillPredictions(nullptr, forms);
+  browser_autofill_manager_.client()->PropagateAutofillPredictions(nullptr,
+                                                                   forms);
 }
 
 void AutofillDriverIOS::HandleParsedForms(
     const std::vector<const FormData*>& forms) {
-  const std::map<FormRendererId, std::unique_ptr<FormStructure>>& map =
-      autofill_manager_.form_structures();
+  const std::map<FormGlobalId, std::unique_ptr<FormStructure>>& map =
+      browser_autofill_manager_.form_structures();
   std::vector<FormStructure*> form_structures;
   form_structures.reserve(forms.size());
   for (const FormData* form : forms) {
-    auto it = map.find(form->unique_renderer_id);
+    auto it = map.find(form->global_id());
     if (it != map.end())
       form_structures.push_back(it->second.get());
   }
@@ -134,8 +146,11 @@ void AutofillDriverIOS::SendAutofillTypePredictionsToRenderer(
 }
 
 void AutofillDriverIOS::RendererShouldAcceptDataListSuggestion(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
+
+void AutofillDriverIOS::SendFieldsEligibleForManualFillingToRenderer(
+    const std::vector<FieldGlobalId>& fields) {}
 
 void AutofillDriverIOS::RendererShouldClearFilledSection() {}
 
@@ -143,22 +158,18 @@ void AutofillDriverIOS::RendererShouldClearPreviewedForm() {
 }
 
 void AutofillDriverIOS::RendererShouldFillFieldWithValue(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
 
 void AutofillDriverIOS::RendererShouldPreviewFieldWithValue(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
 
 void AutofillDriverIOS::RendererShouldSetSuggestionAvailability(
+    const FieldGlobalId& field,
     const mojom::AutofillState state) {}
 
 void AutofillDriverIOS::PopupHidden() {
-}
-
-gfx::RectF AutofillDriverIOS::TransformBoundingBoxToViewportCoordinates(
-    const gfx::RectF& bounding_box) {
-  return bounding_box;
 }
 
 net::IsolationInfo AutofillDriverIOS::IsolationInfo() {

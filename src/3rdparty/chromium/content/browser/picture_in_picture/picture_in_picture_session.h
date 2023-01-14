@@ -42,10 +42,12 @@ class PictureInPictureSession : public blink::mojom::PictureInPictureSession {
 
   // blink::mojom::PictureInPictureSession interface.
   void Stop(StopCallback callback) final;
-  void Update(uint32_t player_id,
-              const base::Optional<viz::SurfaceId>& surface_id,
-              const gfx::Size& natural_size,
-              bool show_play_pause_button) final;
+  void Update(
+      uint32_t player_id,
+      mojo::PendingAssociatedRemote<media::mojom::MediaPlayer> player_remote,
+      const viz::SurfaceId& surface_id,
+      const gfx::Size& natural_size,
+      bool show_play_pause_button) final;
 
   void NotifyWindowResized(const gfx::Size& size);
 
@@ -53,7 +55,7 @@ class PictureInPictureSession : public blink::mojom::PictureInPictureSession {
   mojo::AssociatedRemote<media::mojom::MediaPlayer>& GetMediaPlayerRemote();
 
   // Returns the player that is currently in Picture-in-Picture.
-  MediaPlayerId player_id() const { return player_id_; }
+  const absl::optional<MediaPlayerId>& player_id() const { return player_id_; }
 
   // Stops the session without closing the window. It will prevent the session
   // to later trying to shutdown when the PictureInPictureWindowController is
@@ -78,6 +80,10 @@ class PictureInPictureSession : public blink::mojom::PictureInPictureSession {
   // Called when the |receiver_| hits a connection error.
   void OnConnectionError();
 
+  // Called when |media_player_remote_| is disconnected, typically when the
+  // media player is destroyed while the session is still active.
+  void OnPlayerGone();
+
   // Returns the WebContentsImpl associated with this Picture-in-Picture
   // session. It relies on the WebContents associated with the |service_|.
   WebContentsImpl* GetWebContentsImpl();
@@ -93,7 +99,7 @@ class PictureInPictureSession : public blink::mojom::PictureInPictureSession {
 
   mojo::Receiver<blink::mojom::PictureInPictureSession> receiver_;
 
-  MediaPlayerId player_id_;
+  absl::optional<MediaPlayerId> player_id_;
 
   // Whether the session is currently stopping. The final stop of stopping is to
   // be destroyed so once its set to true it will never be set back to false and

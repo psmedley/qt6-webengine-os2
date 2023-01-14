@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/observer_list.h"
 #include "ui/base/x/x11_display_manager.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/x/event.h"
@@ -52,8 +51,9 @@ class X11ScreenOzone : public PlatformScreen,
   void AddObserver(display::DisplayObserver* observer) override;
   void RemoveObserver(display::DisplayObserver* observer) override;
   std::string GetCurrentWorkspace() override;
-  base::Value GetGpuExtraInfoAsListValue(
+  std::vector<base::Value> GetGpuExtraInfo(
       const gfx::GpuExtraInfo& gpu_extra_info) override;
+  void SetDeviceScaleFactor(float scale) override;
 
   // Overridden from x11::EventObserver:
   void OnEvent(const x11::Event& event) override;
@@ -69,6 +69,10 @@ class X11ScreenOzone : public PlatformScreen,
 
   X11WindowManager* const window_manager_;
   std::unique_ptr<ui::XDisplayManager> x11_display_manager_;
+
+  // Scale value that DesktopScreenOzoneLinux sets by listening to
+  // DeviceScaleFactorObserver.
+  float device_scale_factor_ = 1.0f;
 
   DISALLOW_COPY_AND_ASSIGN(X11ScreenOzone);
 };

@@ -64,11 +64,11 @@ namespace dawn_native { namespace vulkan {
     }  // anonymous namespace
 
     // static
-    ResultOrError<QuerySet*> QuerySet::Create(Device* device,
-                                              const QuerySetDescriptor* descriptor) {
+    ResultOrError<Ref<QuerySet>> QuerySet::Create(Device* device,
+                                                  const QuerySetDescriptor* descriptor) {
         Ref<QuerySet> queryset = AcquireRef(new QuerySet(device, descriptor));
         DAWN_TRY(queryset->Initialize());
-        return queryset.Detach();
+        return queryset;
     }
 
     MaybeError QuerySet::Initialize() {
@@ -77,7 +77,7 @@ namespace dawn_native { namespace vulkan {
         createInfo.pNext = NULL;
         createInfo.flags = 0;
         createInfo.queryType = VulkanQueryType(GetQueryType());
-        createInfo.queryCount = GetQueryCount();
+        createInfo.queryCount = std::max(GetQueryCount(), uint32_t(1u));
         if (GetQueryType() == wgpu::QueryType::PipelineStatistics) {
             createInfo.pipelineStatistics =
                 VulkanQueryPipelineStatisticFlags(GetPipelineStatistics());

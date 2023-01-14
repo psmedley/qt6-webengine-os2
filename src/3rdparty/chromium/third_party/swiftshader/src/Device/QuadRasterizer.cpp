@@ -83,7 +83,7 @@ void QuadRasterizer::rasterize(Int &yMin, Int &yMax)
 		}
 	}
 
-	if(state.depthTestActive)
+	if(state.depthTestActive || state.depthBoundsTestActive)
 	{
 		zBuffer = *Pointer<Pointer<Byte>>(data + OFFSET(DrawData, depthBuffer)) + yMin * *Pointer<Int>(data + OFFSET(DrawData, depthPitchB));
 	}
@@ -198,10 +198,6 @@ void QuadRasterizer::rasterize(Int &yMin, Int &yMax)
 						Short4 mask = CmpGT(xxxx, xLeft[i]) & CmpGT(xRight[i], xxxx);
 						cMask[q] = SignMask(PackSigned(mask, mask)) & 0x0000000F;
 					}
-					else
-					{
-						cMask[q] = 0;
-					}
 				}
 
 				quad(cBuffer, zBuffer, sBuffer, cMask, x, y);
@@ -216,7 +212,7 @@ void QuadRasterizer::rasterize(Int &yMin, Int &yMax)
 			}
 		}
 
-		if(state.depthTestActive)
+		if(state.depthTestActive || state.depthBoundsTestActive)
 		{
 			zBuffer += *Pointer<Int>(data + OFFSET(DrawData, depthPitchB)) << (1 + clusterCountLog2);  // FIXME: Precompute
 		}

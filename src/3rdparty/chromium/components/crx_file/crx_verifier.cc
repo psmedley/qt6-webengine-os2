@@ -14,10 +14,10 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/crx_file/crx3.pb.h"
 #include "components/crx_file/crx_file.h"
@@ -26,6 +26,7 @@
 #include "crypto/secure_util.h"
 #include "crypto/sha2.h"
 #include "crypto/signature_verifier.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace crx_file {
 
@@ -133,8 +134,10 @@ VerifierResult VerifyCrx3(
   // Create a little-endian representation of [signed-header-size].
   const int signed_header_size = signed_header_data_str.size();
   const uint8_t header_size_octets[] = {
-      uint8_t(signed_header_size), uint8_t(signed_header_size >> 8),
-      uint8_t(signed_header_size >> 16), uint8_t(signed_header_size >> 24)};
+      static_cast<uint8_t>(signed_header_size),
+      static_cast<uint8_t>(signed_header_size >> 8),
+      static_cast<uint8_t>(signed_header_size >> 16),
+      static_cast<uint8_t>(signed_header_size >> 24)};
 
   // Create a set of all required key hashes.
   std::set<std::vector<uint8_t>> required_key_set(required_key_hashes.begin(),
@@ -156,7 +159,7 @@ VerifierResult VerifyCrx3(
 
   std::vector<uint8_t> publisher_key(std::begin(kPublisherKeyHash),
                                      std::end(kPublisherKeyHash));
-  base::Optional<std::vector<uint8_t>> publisher_test_key;
+  absl::optional<std::vector<uint8_t>> publisher_test_key;
   if (accept_publisher_test_key) {
     publisher_test_key.emplace(std::begin(kPublisherTestKeyHash),
                                std::end(kPublisherTestKeyHash));

@@ -46,9 +46,6 @@ extern const char kBlockExternalExtensions[];
 // extension ids.
 extern const char kExtensions[];
 
-// A boolean indicating if the extensions checkup has been shown on startup.
-extern const char kExtensionCheckupOnStartup[];
-
 // Dictionary pref that manages extensions, controlled by policy.
 // Values are expected to conform to the schema of the ExtensionManagement
 // policy.
@@ -98,14 +95,6 @@ extern const char kStorageGarbageCollect[];
 // A preference that tracks browser action toolbar configuration. This is a list
 // object stored in the Preferences file. The extensions are stored by ID.
 extern const char kToolbar[];
-
-// Integer pref that tracks the number of browser actions visible in the browser
-// actions toolbar.
-extern const char kToolbarSize[];
-
-// Indicates whether extensions have been migrated from BrowserActionsContainer
-// to the ExtensionsToolbarContainer.
-extern const char kPinnedExtensionsMigrationComplete[];
 
 // A preference for a list of Component extensions that have been
 // uninstalled/removed and should not be reloaded.

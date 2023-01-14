@@ -7,19 +7,20 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "media/base/media_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
 struct MEDIA_EXPORT OverlayInfo {
   // An unset routing token indicates "do not use any routing token".  A null
   // routing token isn't serializable, else we'd probably use that instead.
-  using RoutingToken = base::Optional<base::UnguessableToken>;
+  using RoutingToken = absl::optional<base::UnguessableToken>;
 
   OverlayInfo();
   OverlayInfo(const OverlayInfo&);
+  OverlayInfo& operator=(const OverlayInfo&);
 
   // Convenience functions to return true if and only if this specifies a
   // surface ID / routing token that is not kNoSurfaceID / empty.  I.e., if we

@@ -11,7 +11,6 @@
 #include <set>
 
 #include "base/compiler_specific.h"
-#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -45,7 +44,8 @@ class VIEWS_EXPORT MenuRunnerImpl : public MenuRunnerImplInterface,
                  MenuButtonController* button_controller,
                  const gfx::Rect& bounds,
                  MenuAnchorPosition anchor,
-                 int32_t run_types) override;
+                 int32_t run_types,
+                 gfx::NativeView native_view_for_gestures) override;
   void Cancel() override;
   base::TimeTicks GetClosingEventTime() const override;
 

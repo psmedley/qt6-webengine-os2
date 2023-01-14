@@ -10,12 +10,12 @@
 #include <stdint.h>
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/mach_logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/color_space.h"
@@ -240,8 +240,8 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size,
     for (size_t plane = 0; plane < num_planes; ++plane) {
       const size_t factor =
           gfx::SubsamplingFactorForBufferFormat(format, plane);
-      const size_t plane_width = size.width() / factor;
-      const size_t plane_height = size.height() / factor;
+      const size_t plane_width = (size.width() + factor - 1) / factor;
+      const size_t plane_height = (size.height() + factor - 1) / factor;
       const size_t plane_bytes_per_element = BytesPerElement(format, plane);
       const size_t plane_bytes_per_row = IOSurfaceAlignProperty(
           kIOSurfacePlaneBytesPerRow, plane_width * plane_bytes_per_element);

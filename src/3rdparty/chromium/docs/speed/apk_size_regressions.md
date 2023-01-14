@@ -67,7 +67,7 @@ Otherwise, file a bug (TODO: [Make this template automatic](https://github.com/c
 > [https://ci.chromium.org/p/chromium/builders/luci.chromium.try/android-binary-size/**$TRYJOB_NUMBER**](https://ci.chromium.org/p/chromium/builders/luci.chromium.try/android-binary-size/11111)
 >
 > Debugging size regressions is documented at:
-> https://chromium.googlesource.com/chromium/src/+/master/docs/speed/apk_size_regressions.md#Debugging-Apk-Size-Increase
+> https://chromium.googlesource.com/chromium/src/+/main/docs/speed/apk_size_regressions.md#Debugging-Apk-Size-Increase
 >
 > Based on the trybot result: **20kb of native code, 8kb of pngs. *(or some other explanation as to what caused the growth).***
 >
@@ -135,6 +135,8 @@ and [calendar](https://calendar.google.com/calendar/embed?src=c_188b8oq5puj67tl3
    and `Performance-Size` [here](https://bugs.chromium.org/p/chromium/issues/list?q=label:Performance-Sheriff%20label:Performance-Size&sort=-modified).
  * After resolving the bug by finding an owner or debugging or commenting,
    remove the `Performance-Sheriff` label.
+ * Process for Chrome OS bugs is at [go/cros-image-size-triage](https://goto.google.com/cros-image-size-triage).
+   * Generally just expected to ignore these.
 
 ## Step 2: Check Alerts Regularly
 

@@ -6,7 +6,7 @@ import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/features.gni")
 import("//printing/buildflags/buildflags.gni")
 
-assert(!is_chromeos_ash)
+assert(enable_print_preview)
 
 static_library("service") {
   sources = [
@@ -95,6 +95,9 @@ static_library("service") {
       "service_utility_process_host.h",
       "service_utility_process_host_receiver_bindings.cc",
     ]
-    deps += [ "//sandbox/win:sandbox" ]
+    deps += [
+      "//chrome/common:cloud_print_utility_mojom",
+      "//sandbox/win:sandbox",
+    ]
   }
 }

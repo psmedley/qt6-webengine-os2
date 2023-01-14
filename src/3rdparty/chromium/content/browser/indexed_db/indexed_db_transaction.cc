@@ -13,7 +13,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
@@ -547,9 +547,9 @@ base::TimeDelta IndexedDBTransaction::GetInactivityTimeout() const {
 }
 
 void IndexedDBTransaction::Timeout() {
-  leveldb::Status result = Abort(IndexedDBDatabaseError(
-      blink::mojom::IDBException::kTimeoutError,
-      base::ASCIIToUTF16("Transaction timed out due to inactivity.")));
+  leveldb::Status result = Abort(
+      IndexedDBDatabaseError(blink::mojom::IDBException::kTimeoutError,
+                             u"Transaction timed out due to inactivity."));
   if (!result.ok())
     tear_down_callback_.Run(result);
 }

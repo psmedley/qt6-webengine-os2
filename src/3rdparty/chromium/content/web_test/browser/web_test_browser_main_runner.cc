@@ -92,18 +92,10 @@ void RunTests(content::BrowserMainRunner* main_runner) {
 
   content::TestInfoExtractor test_extractor(
       *base::CommandLine::ForCurrentProcess());
-  bool ran_at_least_once = false;
   std::unique_ptr<content::TestInfo> test_info;
   while ((test_info = test_extractor.GetNextTest())) {
-    ran_at_least_once = true;
     if (!RunOneTest(*test_info, &test_controller, main_runner))
       break;
-  }
-  if (!ran_at_least_once) {
-    // CloseAllWindows will cause the |main_runner| loop to quit.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&content::Shell::CloseAllWindows));
-    main_runner->Run();
   }
 }
 
@@ -147,9 +139,12 @@ void WebTestBrowserMainRunner::Initialize() {
   // only default to a software GL if the flag isn't already specified.
   if (!command_line.HasSwitch(switches::kUseGpuInTests) &&
       !command_line.HasSwitch(switches::kUseGL)) {
-    command_line.AppendSwitchASCII(
-        switches::kUseGL,
-        gl::GetGLImplementationName(gl::GetSoftwareGLImplementation()));
+    bool legacy_software_gl = true;
+#if defined(OS_LINUX) || defined(OS_WIN)
+    // This setting makes web tests run on SwANGLE instead of SwiftShader GL.
+    legacy_software_gl = false;
+#endif
+    gl::SetSoftwareGLCommandLineSwitches(&command_line, legacy_software_gl);
   }
   command_line.AppendSwitchASCII(switches::kTouchEventFeatureDetection,
                                  switches::kTouchEventFeatureDetectionEnabled);
@@ -190,6 +185,13 @@ void WebTestBrowserMainRunner::Initialize() {
                                  "MAP nonexistent.*.test ~NOTFOUND,"
                                  "MAP *.test. 127.0.0.1,"
                                  "MAP *.test 127.0.0.1");
+
+  // These must be kept in sync with //third_party/wpt_tools/wpt.config.json.
+  command_line.AppendSwitchASCII(network::switches::kIpAddressSpaceOverrides,
+                                 "127.0.0.1:8082=private,"
+                                 "127.0.0.1:8083=public,"
+                                 "127.0.0.1:8446=private,"
+                                 "127.0.0.1:8447=public");
 
   // We want to know determanistically from command line flags if the Gpu
   // process will provide gpu raster in its capabilities or not.
@@ -238,9 +240,11 @@ void WebTestBrowserMainRunner::RunBrowserMain(
       << "BrowserMainRunner::Initialize failed in WebTestBrowserMainRunner";
 
   RunTests(main_runner.get());
-  base::RunLoop().RunUntilIdle();
 
-  content::Shell::CloseAllWindows();
+  // Shell::Shutdown() will cause the |main_runner| loop to quit.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&Shell::Shutdown));
+  main_runner->Run();
 
   main_runner->Shutdown();
 }

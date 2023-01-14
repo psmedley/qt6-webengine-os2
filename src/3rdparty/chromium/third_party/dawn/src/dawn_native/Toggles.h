@@ -50,7 +50,14 @@ namespace dawn_native {
         DisallowUnsafeAPIs,
         UseTintGenerator,
         FlushBeforeClientWaitSync,
-        ConvertTimestampsToNanoseconds,
+        UseTempBufferInSmallFormatTextureToTextureCopyFromGreaterToLessMipLevel,
+        EmitHLSLDebugSymbols,
+        DisallowSpirv,
+        DumpShaders,
+        DEPRECATED_DumpTranslatedShaders,  // Use DumpShaders
+        ForceWGSLStep,
+        DisableWorkgroupInit,
+        DisableSymbolRenaming,
 
         EnumCount,
         InvalidEnum = EnumCount,

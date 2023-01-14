@@ -9,12 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/security_interstitials/core/common_string_util.h"
-#include "components/security_state/content/ssl_status_input_event_data.h"
 #include "components/security_state/core/security_state.h"
 #include "components/strings/grit/components_chromium_strings.h"
 #include "components/strings/grit/components_strings.h"
@@ -74,12 +72,6 @@ void ExplainHTTPSecurity(
       security_style_explanations->summary =
           l10n_util::GetStringUTF8(IDS_HTTP_NONSECURE_SUMMARY);
     }
-    if (visible_security_state.insecure_input_events.insecure_field_edited) {
-      security_style_explanations->insecure_explanations.push_back(
-          content::SecurityStyleExplanation(
-              l10n_util::GetStringUTF8(IDS_EDITED_NONSECURE),
-              l10n_util::GetStringUTF8(IDS_EDITED_NONSECURE_DESCRIPTION)));
-    }
   }
 }
 
@@ -138,7 +130,7 @@ void ExplainCertificateSecurity(
       net::IsCertStatusError(visible_security_state.cert_status);
 
   if (is_cert_status_error) {
-    base::string16 error_string = base::UTF8ToUTF16(net::ErrorToString(
+    std::u16string error_string = base::UTF8ToUTF16(net::ErrorToString(
         net::MapCertStatusToNetError(visible_security_state.cert_status)));
 
     content::SecurityStyleExplanation explanation(
@@ -154,13 +146,13 @@ void ExplainCertificateSecurity(
     // If the certificate does not have errors and is not using SHA1, then add
     // an explanation that the certificate is valid.
 
-    base::string16 issuer_name;
+    std::u16string issuer_name;
     if (visible_security_state.certificate) {
       // This results in the empty string if there is no relevant display name.
       issuer_name = base::UTF8ToUTF16(
           visible_security_state.certificate->issuer().GetDisplayName());
     } else {
-      issuer_name = base::string16();
+      issuer_name = std::u16string();
     }
     if (issuer_name.empty()) {
       issuer_name.assign(
@@ -225,16 +217,16 @@ void ExplainConnectionSecurity(
       visible_security_state.connection_status);
   net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead,
                                &is_tls13, cipher_suite);
-  const base::string16 protocol_name = base::ASCIIToUTF16(protocol);
-  const base::string16 cipher_name = base::ASCIIToUTF16(cipher);
-  const base::string16 cipher_full_name =
+  const std::u16string protocol_name = base::ASCIIToUTF16(protocol);
+  const std::u16string cipher_name = base::ASCIIToUTF16(cipher);
+  const std::u16string cipher_full_name =
       (mac == nullptr) ? cipher_name
                        : l10n_util::GetStringFUTF16(IDS_CIPHER_WITH_MAC,
                                                     base::ASCIIToUTF16(cipher),
                                                     base::ASCIIToUTF16(mac));
 
   // Include the key exchange group (previously known as curve) if specified.
-  base::string16 key_exchange_name;
+  std::u16string key_exchange_name;
   if (is_tls13) {
     key_exchange_name = base::ASCIIToUTF16(
         SSL_get_curve_name(visible_security_state.key_exchange_group));
@@ -318,6 +310,7 @@ void ExplainSafetyTipSecurity(
       NOTREACHED();
       return;
 
+    case security_state::SafetyTipStatus::kDigitalAssetLinkMatch:
     case security_state::SafetyTipStatus::kNone:
     case security_state::SafetyTipStatus::kUnknown:
       return;
@@ -455,16 +448,6 @@ std::unique_ptr<security_state::VisibleSecurityState> GetVisibleSecurityState(
   state->contained_mixed_form =
       !!(ssl.content_status &
          content::SSLStatus::DISPLAYED_FORM_WITH_INSECURE_ACTION);
-  state->connection_used_legacy_tls =
-      !!(net::ObsoleteSSLStatus(ssl.connection_status,
-                                ssl.peer_signature_algorithm) &
-         net::OBSOLETE_SSL_MASK_PROTOCOL);
-
-  SSLStatusInputEventData* input_events =
-      static_cast<SSLStatusInputEventData*>(ssl.user_data.get());
-
-  if (input_events)
-    state->insecure_input_events = *input_events->input_events();
 
   return state;
 }

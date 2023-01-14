@@ -14,7 +14,6 @@
 #include "base/compiler_specific.h"
 #include "base/containers/id_map.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -26,6 +25,7 @@
 #include "mojo/public/cpp/bindings/shared_remote.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
@@ -42,7 +42,12 @@ class WebThreadScheduler;
 class WebGraphicsContext3DProvider;
 class WebSecurityOrigin;
 enum class ProtocolHandlerSecurityLevel;
+struct WebContentSecurityPolicyHeader;
 }  // namespace blink
+
+namespace gpu {
+struct GPUInfo;
+}
 
 namespace media {
 class GpuVideoAcceleratorFactories;
@@ -73,7 +78,6 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
 
   // blink::Platform implementation.
   blink::WebSandboxSupport* GetSandboxSupport() override;
-  blink::WebThemeEngine* ThemeEngine() override;
   virtual bool sandboxEnabled();
   uint64_t VisitedLinkHash(const char* canonicalURL, size_t length) override;
   bool IsLinkVisited(uint64_t linkHash) override;
@@ -100,9 +104,14 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   blink::WebResourceRequestSenderDelegate* GetResourceRequestSenderDelegate()
       override;
   void AppendVariationsThrottles(
-      int routing_id,
+      const url::Origin& top_origin,
       std::vector<std::unique_ptr<blink::URLLoaderThrottle>>* throttles)
       override;
+  std::unique_ptr<blink::URLLoaderThrottleProvider>
+  CreateURLLoaderThrottleProviderForWorker(
+      blink::URLLoaderThrottleProviderType provider_type) override;
+  std::unique_ptr<blink::WebSocketHandshakeThrottleProvider>
+  CreateWebSocketHandshakeThrottleProvider() override;
   blink::WebString DefaultLocale() override;
   void SuddenTerminationChanged(bool enabled) override;
   blink::WebString DatabaseCreateOriginIdentifier(
@@ -112,7 +121,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   blink::WebString FileSystemCreateOriginIdentifier(
       const blink::WebSecurityOrigin& origin) override;
   bool IsThreadedAnimationEnabled() override;
-  bool IsGpuCompositingDisabled() override;
+  bool IsGpuCompositingDisabled() const override;
 #if defined(OS_ANDROID)
   bool IsSynchronousCompositingEnabledForAndroidWebView() override;
   bool IsZeroCopySynchronousSwDrawEnabledForAndroidWebView() override;
@@ -122,6 +131,9 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   bool IsLcdTextEnabled() override;
   bool IsElasticOverscrollEnabled() override;
   bool IsScrollAnimatorEnabled() override;
+  cc::TaskGraphRunner* GetTaskGraphRunner() override;
+  gfx::RenderingPipeline* GetMainThreadPipeline() override;
+  gfx::RenderingPipeline* GetCompositorThreadPipeline() override;
   double AudioHardwareSampleRate() override;
   size_t AudioHardwareBufferSize() override;
   unsigned AudioHardwareOutputChannels() override;
@@ -145,19 +157,17 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync() override;
 #if BUILDFLAG(ENABLE_WEBRTC)
   bool RTCSmoothnessAlgorithmEnabled() override;
-  base::Optional<double> GetWebRtcMaxCaptureFrameRate() override;
+  absl::optional<double> GetWebRtcMaxCaptureFrameRate() override;
   scoped_refptr<media::AudioRendererSink> NewAudioRendererSink(
       blink::WebAudioDeviceSourceType source_type,
       blink::WebLocalFrame* web_frame,
       const media::AudioSinkParameters& params) override;
   media::AudioLatency::LatencyType GetAudioSourceLatencyType(
       blink::WebAudioDeviceSourceType source_type) override;
-  base::Optional<std::string> GetWebRTCAudioProcessingConfiguration() override;
+  absl::optional<std::string> GetWebRTCAudioProcessingConfiguration() override;
   bool ShouldEnforceWebRTCRoutingPreferences() override;
   bool UsesFakeCodecForPeerConnection() override;
   bool IsWebRtcEncryptionEnabled() override;
-  bool IsWebRtcStunOriginEnabled() override;
-  base::Optional<blink::WebString> WebRtcStunProbeTrialParameter() override;
   media::MediaPermission* GetWebRTCMediaPermission(
       blink::WebLocalFrame* web_frame) override;
   void GetWebRTCRendererPreferences(blink::WebLocalFrame* web_frame,
@@ -165,7 +175,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
                                     uint16_t* udp_min_port,
                                     uint16_t* udp_max_port,
                                     bool* allow_mdns_obfuscation) override;
-  base::Optional<int> GetAgcStartupMinimumVolume() override;
+  absl::optional<int> GetAgcStartupMinimumVolume() override;
   bool IsWebRtcHWH264DecodingEnabled(
       webrtc::VideoCodecType video_coded_type) override;
   bool IsWebRtcHWEncodingEnabled() override;
@@ -205,8 +215,29 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
       override;
   bool IsExcludedHeaderForServiceWorkerFetchEvent(
       const blink::WebString& header_name) override;
+  bool OriginCanAccessServiceWorkers(const blink::WebURL& url) override;
+  std::tuple<blink::CrossVariantMojoRemote<
+                 blink::mojom::ServiceWorkerContainerHostInterfaceBase>,
+             blink::CrossVariantMojoRemote<
+                 blink::mojom::ServiceWorkerContainerHostInterfaceBase>>
+  CloneServiceWorkerContainerHost(
+      blink::CrossVariantMojoRemote<
+          blink::mojom::ServiceWorkerContainerHostInterfaceBase>
+          service_worker_container_host) override;
+  void CreateServiceWorkerSubresourceLoaderFactory(
+      blink::CrossVariantMojoRemote<
+          blink::mojom::ServiceWorkerContainerHostInterfaceBase>
+          service_worker_container_host,
+      const blink::WebString& client_id,
+      std::unique_ptr<network::PendingSharedURLLoaderFactory> fallback_factory,
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+      scoped_refptr<base::SequencedTaskRunner> task_runner,
+      scoped_refptr<base::SequencedTaskRunner>
+          worker_timing_callback_task_runner,
+      base::RepeatingCallback<
+          void(int, mojo::PendingReceiver<blink::mojom::WorkerTimingContainer>)>
+          worker_timing_callback) override;
   void RecordMetricsForBackgroundedRendererPurge() override;
-  std::unique_ptr<blink::WebCodeCacheLoader> CreateCodeCacheLoader() override;
   std::unique_ptr<blink::WebURLLoaderFactory> WrapURLLoaderFactory(
       blink::CrossVariantMojoRemote<
           network::mojom::URLLoaderFactoryInterfaceBase> url_loader_factory)
@@ -215,13 +246,21 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
       scoped_refptr<network::SharedURLLoaderFactory> factory) override;
   std::unique_ptr<media::MediaLog> GetMediaLog(
       blink::MediaInspectorContext* inspector_context,
-      scoped_refptr<base::SingleThreadTaskRunner> owner_task_runner) override;
+      scoped_refptr<base::SingleThreadTaskRunner> owner_task_runner,
+      bool is_on_worker) override;
   media::GpuVideoAcceleratorFactories* GetGpuFactories() override;
   scoped_refptr<base::SingleThreadTaskRunner> MediaThreadTaskRunner() override;
   media::DecoderFactory* GetMediaDecoderFactory() override;
   void SetRenderingColorSpace(const gfx::ColorSpace& color_space) override;
+  gfx::ColorSpace GetRenderingColorSpace() const override;
   void SetActiveURL(const blink::WebURL& url,
                     const blink::WebString& top_url) override;
+  SkBitmap* GetSadPageBitmap() override;
+  std::unique_ptr<blink::WebV8ValueConverter> CreateWebV8ValueConverter()
+      override;
+  void AppendContentSecurityPolicy(
+      const blink::WebURL& url,
+      blink::WebVector<blink::WebContentSecurityPolicyHeader>* csp) override;
 
   // Tells this platform that the renderer is locked to a site (i.e., a scheme
   // plus eTLD+1, such as https://google.com), or to a more specific origin.
@@ -232,6 +271,9 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
 
   // Return the mojo interface for making CodeCache calls.
   blink::mojom::CodeCacheHost& GetCodeCacheHost();
+
+  void Collect3DContextInformation(blink::Platform::GraphicsInfo* gl_info,
+                                   const gpu::GPUInfo& gpu_info) const;
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
   std::unique_ptr<blink::WebSandboxSupport> sandbox_support_;

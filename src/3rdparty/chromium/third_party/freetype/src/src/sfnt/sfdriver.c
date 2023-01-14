@@ -501,7 +501,7 @@
     FT_UNUSED( error );
 
 
-    if ( FT_ALLOC( result, entry->stringLength / 2 + 1 ) )
+    if ( FT_QALLOC( result, entry->stringLength / 2 + 1 ) )
       return NULL;
 
     if ( FT_STREAM_SEEK( entry->stringOffset ) ||
@@ -560,7 +560,7 @@
     FT_UNUSED( error );
 
 
-    if ( FT_ALLOC( result, entry->stringLength + 1 ) )
+    if ( FT_QALLOC( result, entry->stringLength + 1 ) )
       return NULL;
 
     if ( FT_STREAM_SEEK( entry->stringOffset ) ||
@@ -928,8 +928,8 @@
 
         /* after the prefix we have character `-' followed by the   */
         /* subfamily name (using only characters a-z, A-Z, and 0-9) */
-        if ( FT_ALLOC( result, face->var_postscript_prefix_len +
-                               1 + ft_strlen( subfamily_name ) + 1 ) )
+        if ( FT_QALLOC( result, face->var_postscript_prefix_len +
+                                1 + ft_strlen( subfamily_name ) + 1 ) )
           return NULL;
 
         ft_strcpy( result, face->var_postscript_prefix );
@@ -957,9 +957,9 @@
     construct_instance_name:
       axis = mm_var->axis;
 
-      if ( FT_ALLOC( result,
-                     face->var_postscript_prefix_len +
-                       num_coords * MAX_VALUE_DESCRIPTOR_LEN + 1 ) )
+      if ( FT_QALLOC( result,
+                      face->var_postscript_prefix_len +
+                        num_coords * MAX_VALUE_DESCRIPTOR_LEN + 1 ) )
         return NULL;
 
       p = result;
@@ -993,6 +993,7 @@
         if ( t != ' ' && ft_isalnum( t ) )
           *p++ = t;
       }
+      *p++ = '\0';
     }
 
   check_length:
@@ -1291,13 +1292,15 @@
                             /* TT_Get_Colr_Layer_Func  get_colr_layer  */
 
     PUT_COLOR_LAYERS_V1( tt_face_get_colr_glyph_paint ),
-                 /* TT_Get_Colr_Glyph_Paint_Func  get_colr_glyph_paint */
+              /* TT_Get_Color_Glyph_Paint_Func    get_colr_glyph_paint */
+    PUT_COLOR_LAYERS_V1( tt_face_get_color_glyph_clipbox ),
+              /* TT_Get_Color_Glyph_ClipBox_Func  get_clipbox          */
     PUT_COLOR_LAYERS_V1( tt_face_get_paint_layers ),
-                 /* TT_Get_Paint_Layers_Func      get_paint_layers     */
+              /* TT_Get_Paint_Layers_Func         get_paint_layers     */
     PUT_COLOR_LAYERS_V1( tt_face_get_colorline_stops ),
-                 /* TT_Get_Paint                  get_paint            */
+              /* TT_Get_Paint                     get_paint            */
     PUT_COLOR_LAYERS_V1( tt_face_get_paint ),
-                 /* TT_Get_Colorline_Stops_Func   get_colorline_stops  */
+              /* TT_Get_Colorline_Stops_Func      get_colorline_stops  */
 
     PUT_COLOR_LAYERS( tt_face_colr_blend_layer ),
                             /* TT_Blend_Colr_Func      colr_blend      */

@@ -15,8 +15,9 @@ include(${WEBENGINE_ROOT_SOURCE_DIR}/cmake/Functions.cmake)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR})
 
 find_package(Gn ${QT_REPO_MODULE_VERSION} EXACT)
-find_package(Python2 2.7.5 REQUIRED)
-
+if(NOT Python3_EXECUTABLE)
+    find_package(Python3 3.6 REQUIRED)
+endif()
 set(gnCmd ${Gn_EXECUTABLE})
 set(buildDir ${BUILD_DIR})
 set(sourceDir ${SOURCE_DIR})
@@ -31,6 +32,7 @@ endif()
 init_gn_config(${buildDir}/gn_config_target.cmake)
 read_gn_config(${buildDir}/gn_config_cxx.cmake)
 read_gn_config(${buildDir}/gn_config_c.cmake)
+read_gn_config(${buildDir}/gn_static.cmake)
 
 configure_gn_target(
    "${sourceDir}"
@@ -39,8 +41,12 @@ configure_gn_target(
 )
 
 list(APPEND gnArg
-     --script-executable=${Python2_EXECUTABLE}
+     --script-executable=${Python3_EXECUTABLE}
      --root=${WEBENGINE_ROOT_SOURCE_DIR}/src/3rdparty/chromium)
+
+if(GN_THREADS)
+   list(APPEND gnArg --threads=${GN_THREADS})
+endif()
 
 STRING(REGEX REPLACE "\n" ";" printArgArg "${gnArgArg}")
 LIST(SORT printArgArg)

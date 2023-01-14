@@ -11,7 +11,6 @@
 
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
-#include "base/observer_list.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/platform/drm/gpu/drm_display.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_controller.h"
@@ -50,7 +49,7 @@ class ScreenManager {
     const uint32_t crtc;
     const uint32_t connector;
     const gfx::Point origin;
-    std::unique_ptr<drmModeModeInfo> mode = nullptr;
+    std::unique_ptr<drmModeModeInfo> mode;
   };
   using ControllerConfigsList = std::vector<ControllerConfigParams>;
 

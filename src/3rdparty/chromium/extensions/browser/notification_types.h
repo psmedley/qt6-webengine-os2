@@ -5,8 +5,6 @@
 #ifndef EXTENSIONS_BROWSER_NOTIFICATION_TYPES_H_
 #define EXTENSIONS_BROWSER_NOTIFICATION_TYPES_H_
 
-#include <string>
-
 #include "content/public/browser/notification_types.h"
 #include "extensions/buildflags/buildflags.h"
 
@@ -84,12 +82,6 @@ enum NotificationType {
   // TODO(https://crbug.com/1174741): Remove.
   NOTIFICATION_EXTENSION_HOST_DID_STOP_FIRST_LOAD,
 
-  // Sent by an ExtensionHost* when its render view requests closing through
-  // window.close(). The details are an ExtensionHost* and the source is a
-  // BrowserContext*.
-  // TODO(https://crbug.com/1174742): Remove.
-  NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-
   // Sent when extension render process ends (whether it crashes or closes). The
   // details are an ExtensionHost* and the source is a BrowserContext*. Not sent
   // during browser shutdown.
@@ -118,12 +110,6 @@ enum NotificationType {
   // details are a pointer to the const BookmarksFunction in question.
   // TODO(https://crbug.com/1174748): Remove.
   NOTIFICATION_EXTENSION_BOOKMARKS_API_INVOKED,
-
-  // Sent when a downloads extensions API event is fired. The source is an
-  // ExtensionDownloadsEventRouter::NotificationSource, and the details is a
-  // std::string containing json. Used for testing.
-  // TODO(https://crbug.com/1174749): Remove.
-  NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
 
   // Sent when an omnibox extension has sent back omnibox suggestions. The
   // source is the BrowserContext*, and the details are an

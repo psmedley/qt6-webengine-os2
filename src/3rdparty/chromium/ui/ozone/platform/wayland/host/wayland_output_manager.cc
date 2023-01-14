@@ -10,10 +10,12 @@
 
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_output.h"
+#include "ui/ozone/platform/wayland/host/wayland_window.h"
 
 namespace ui {
 
-WaylandOutputManager::WaylandOutputManager() = default;
+WaylandOutputManager::WaylandOutputManager(WaylandConnection* connection)
+    : connection_(connection) {}
 
 WaylandOutputManager::~WaylandOutputManager() = default;
 
@@ -56,11 +58,14 @@ void WaylandOutputManager::RemoveWaylandOutput(uint32_t output_id) {
   output_list_.erase(output_it);
 }
 
-std::unique_ptr<WaylandScreen> WaylandOutputManager::CreateWaylandScreen(
-    WaylandConnection* connection) {
-  auto wayland_screen = std::make_unique<WaylandScreen>(connection);
+std::unique_ptr<WaylandScreen> WaylandOutputManager::CreateWaylandScreen() {
+  auto wayland_screen = std::make_unique<WaylandScreen>(connection_);
   wayland_screen_ = wayland_screen->GetWeakPtr();
 
+  return wayland_screen;
+}
+
+void WaylandOutputManager::InitWaylandScreen(WaylandScreen* screen) {
   // As long as |wl_output| sends geometry and other events asynchronously (that
   // is, the initial configuration is sent once the interface is bound), we'll
   // have to tell each output to manually inform the delegate about available
@@ -71,21 +76,11 @@ std::unique_ptr<WaylandScreen> WaylandOutputManager::CreateWaylandScreen(
   // changes.
   for (const auto& output : output_list_) {
     if (output->is_ready()) {
-      wayland_screen->OnOutputAddedOrUpdated(
-          output->output_id(), output->bounds(), output->scale_factor());
+      screen->OnOutputAddedOrUpdated(output->output_id(), output->bounds(),
+                                     output->scale_factor(),
+                                     output->transform());
     }
   }
-
-  return wayland_screen;
-}
-
-uint32_t WaylandOutputManager::GetIdForOutput(wl_output* output) const {
-  auto output_it = std::find_if(
-      output_list_.begin(), output_list_.end(),
-      [output](const auto& item) { return item->has_output(output); });
-  // This is unlikely to happen, but better to be explicit here.
-  DCHECK(output_it != output_list_.end());
-  return output_it->get()->output_id();
 }
 
 WaylandOutput* WaylandOutputManager::GetOutput(uint32_t id) const {
@@ -95,13 +90,23 @@ WaylandOutput* WaylandOutputManager::GetOutput(uint32_t id) const {
   return output_it->get();
 }
 
+WaylandOutput* WaylandOutputManager::GetPrimaryOutput() const {
+  if (wayland_screen_)
+    return GetOutput(wayland_screen_->GetPrimaryDisplay().id());
+  return nullptr;
+}
+
 void WaylandOutputManager::OnOutputHandleMetrics(uint32_t output_id,
                                                  const gfx::Rect& new_bounds,
-                                                 int32_t scale_factor) {
+                                                 int32_t scale_factor,
+                                                 int32_t transform) {
   if (wayland_screen_) {
     wayland_screen_->OnOutputAddedOrUpdated(output_id, new_bounds,
-                                            scale_factor);
+                                            scale_factor, transform);
   }
+  auto* wayland_window_manager = connection_->wayland_window_manager();
+  for (auto* window : wayland_window_manager->GetWindowsOnOutput(output_id))
+    window->UpdateWindowScale(true);
 }
 
 WaylandOutputManager::OutputList::const_iterator

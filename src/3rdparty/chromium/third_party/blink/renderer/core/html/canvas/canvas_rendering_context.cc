@@ -38,13 +38,15 @@ namespace blink {
 
 CanvasRenderingContext::CanvasRenderingContext(
     CanvasRenderingContextHost* host,
-    const CanvasContextCreationAttributesCore& attrs)
+    const CanvasContextCreationAttributesCore& attrs,
+    CanvasRenderingAPI canvas_rendering_API)
     : host_(host),
       color_params_(attrs.color_space, attrs.pixel_format, attrs.alpha),
-      creation_attributes_(attrs) {}
+      creation_attributes_(attrs),
+      canvas_rendering_type_(canvas_rendering_API) {}
 
 void CanvasRenderingContext::Dispose() {
-  StopListeningForDidProcessTask();
+  RenderTaskEnded();
 
   // HTMLCanvasElement and CanvasRenderingContext have a circular reference.
   // When the pair is no longer reachable, their destruction order is non-
@@ -58,19 +60,24 @@ void CanvasRenderingContext::Dispose() {
   }
 }
 
-void CanvasRenderingContext::DidDraw(const SkIRect& dirty_rect) {
-  Host()->DidDraw(SkRect::Make(dirty_rect));
-  StartListeningForDidProcessTask();
-}
+void CanvasRenderingContext::DidDraw(
+    const SkIRect& dirty_rect,
+    CanvasPerformanceMonitor::DrawType draw_type) {
+  Host()->DidDraw(dirty_rect);
 
-void CanvasRenderingContext::DidDraw() {
-  Host()->DidDraw();
-  StartListeningForDidProcessTask();
+  auto& monitor = GetCanvasPerformanceMonitor();
+  monitor.DidDraw(draw_type);
+  if (did_draw_in_current_task_)
+    return;
+
+  monitor.CurrentTaskDrawsToContext(this);
+  did_draw_in_current_task_ = true;
+  Thread::Current()->AddTaskObserver(this);
 }
 
 void CanvasRenderingContext::DidProcessTask(
     const base::PendingTask& /* pending_task */) {
-  StopListeningForDidProcessTask();
+  RenderTaskEnded();
 
   // The end of a script task that drew content to the canvas is the point
   // at which the current frame may be considered complete.
@@ -81,40 +88,40 @@ void CanvasRenderingContext::DidProcessTask(
     Host()->PostFinalizeFrame();
 }
 
-void CanvasRenderingContext::RecordUKMCanvasRenderingAPI(
-    CanvasRenderingAPI canvasRenderingAPI) {
+void CanvasRenderingContext::RecordUKMCanvasRenderingAPI() {
   DCHECK(Host());
   const auto& ukm_params = Host()->GetUkmParameters();
   if (Host()->IsOffscreenCanvas()) {
     ukm::builders::ClientRenderingAPI(ukm_params.source_id)
         .SetOffscreenCanvas_RenderingContext(
-            static_cast<int>(canvasRenderingAPI))
+            static_cast<int>(canvas_rendering_type_))
         .Record(ukm_params.ukm_recorder);
   } else {
     ukm::builders::ClientRenderingAPI(ukm_params.source_id)
-        .SetCanvas_RenderingContext(static_cast<int>(canvasRenderingAPI))
+        .SetCanvas_RenderingContext(static_cast<int>(canvas_rendering_type_))
         .Record(ukm_params.ukm_recorder);
   }
 }
 
-void CanvasRenderingContext::RecordUKMCanvasDrawnToRenderingAPI(
-    CanvasRenderingAPI canvasRenderingAPI) {
+void CanvasRenderingContext::RecordUKMCanvasDrawnToRenderingAPI() {
   DCHECK(Host());
   const auto& ukm_params = Host()->GetUkmParameters();
   if (Host()->IsOffscreenCanvas()) {
     ukm::builders::ClientRenderingAPI(ukm_params.source_id)
         .SetOffscreenCanvas_RenderingContextDrawnTo(
-            static_cast<int>(canvasRenderingAPI))
+            static_cast<int>(canvas_rendering_type_))
         .Record(ukm_params.ukm_recorder);
   } else {
     ukm::builders::ClientRenderingAPI(ukm_params.source_id)
-        .SetCanvas_RenderingContextDrawnTo(static_cast<int>(canvasRenderingAPI))
+        .SetCanvas_RenderingContextDrawnTo(
+            static_cast<int>(canvas_rendering_type_))
         .Record(ukm_params.ukm_recorder);
   }
 }
 
 CanvasRenderingContext::ContextType CanvasRenderingContext::ContextTypeFromId(
-    const String& id) {
+    const String& id,
+    const ExecutionContext* execution_context) {
   if (id == "2d")
     return kContext2D;
   if (id == "experimental-webgl")
@@ -125,8 +132,10 @@ CanvasRenderingContext::ContextType CanvasRenderingContext::ContextTypeFromId(
     return kContextWebgl2;
   if (id == "bitmaprenderer")
     return kContextImageBitmap;
-  if (id == "gpupresent" && RuntimeEnabledFeatures::WebGPUEnabled())
-    return kContextGPUPresent;
+  // TODO(crbug.com/1229274): Remove 'gpupresent' type after deprecation period.
+  if ((id == "webgpu" || id == "gpupresent") &&
+      RuntimeEnabledFeatures::WebGPUEnabled(execution_context))
+    return kContextWebGPU;
   return kContextTypeUnknown;
 }
 
@@ -157,22 +166,22 @@ bool CanvasRenderingContext::WouldTaintOrigin(CanvasImageSource* image_source) {
 void CanvasRenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(host_);
   ScriptWrappable::Trace(visitor);
+  ActiveScriptWrappable::Trace(visitor);
 }
 
-void CanvasRenderingContext::StartListeningForDidProcessTask() {
-  if (listening_for_did_process_task_)
-    return;
-
-  listening_for_did_process_task_ = true;
-  Thread::Current()->AddTaskObserver(this);
-}
-
-void CanvasRenderingContext::StopListeningForDidProcessTask() {
-  if (!listening_for_did_process_task_)
+void CanvasRenderingContext::RenderTaskEnded() {
+  if (!did_draw_in_current_task_)
     return;
 
   Thread::Current()->RemoveTaskObserver(this);
-  listening_for_did_process_task_ = false;
+  did_draw_in_current_task_ = false;
+}
+
+CanvasPerformanceMonitor&
+CanvasRenderingContext::GetCanvasPerformanceMonitor() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<CanvasPerformanceMonitor>,
+                                  monitor, ());
+  return *monitor;
 }
 
 }  // namespace blink

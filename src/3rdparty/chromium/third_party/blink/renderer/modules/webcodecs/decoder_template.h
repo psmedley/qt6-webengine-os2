@@ -20,15 +20,22 @@
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/webcodecs/codec_config_eval.h"
 #include "third_party/blink/renderer/modules/webcodecs/codec_logger.h"
+#include "third_party/blink/renderer/modules/webcodecs/codec_trace_names.h"
 #include "third_party/blink/renderer/modules/webcodecs/hardware_preference.h"
+#include "third_party/blink/renderer/modules/webcodecs/reclaimable_codec.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
 namespace media {
 class GpuVideoAcceleratorFactories;
+class ScopedDecodeTrace;
 }
 
 namespace blink {
@@ -37,6 +44,7 @@ template <typename Traits>
 class MODULES_EXPORT DecoderTemplate
     : public ScriptWrappable,
       public ActiveScriptWrappable<DecoderTemplate<Traits>>,
+      public ReclaimableCodec,
       public ExecutionContextLifecycleObserver {
  public:
   typedef typename Traits::ConfigType ConfigType;
@@ -47,6 +55,8 @@ class MODULES_EXPORT DecoderTemplate
   typedef typename Traits::MediaOutputType MediaOutputType;
   typedef typename Traits::OutputType OutputType;
   typedef typename Traits::OutputCallbackType OutputCallbackType;
+
+  static const CodecTraceNames* GetTraceNames();
 
   DecoderTemplate(ScriptState*, const InitType*, ExceptionState&);
   ~DecoderTemplate() override;
@@ -78,6 +88,10 @@ class MODULES_EXPORT DecoderTemplate
   // If derived classes do not override this, this will default to kAllow.
   virtual HardwarePreference GetHardwarePreference(const ConfigType& config);
 
+  // Get the low delay preference from a config.
+  // If derived classes do not override this, this will default to false.
+  virtual bool GetLowDelayPreference(const ConfigType& config);
+
   // Sets the HardwarePreference on the |decoder_|.
   // The default implementation does nothing and must be overridden by derived
   // classes if needed.
@@ -91,8 +105,12 @@ class MODULES_EXPORT DecoderTemplate
   // |chunk|. If there is an error in the conversion process, the resulting
   // DecoderBuffer will be null, and |out_status| will contain a description of
   // the error.
+  //
+  // When |verify_key_frame| is true, clients are expected to verify and set the
+  // DecoderBuffer::is_key_frame() value. I.e., they must process the encoded
+  // data to ensure the value is actually what the chunk says it is.
   virtual media::StatusOr<scoped_refptr<media::DecoderBuffer>>
-  MakeDecoderBuffer(const InputType& chunk) = 0;
+  MakeDecoderBuffer(const InputType& chunk, bool verify_key_frame) = 0;
 
  private:
   struct Request final : public GarbageCollected<Request> {
@@ -105,11 +123,22 @@ class MODULES_EXPORT DecoderTemplate
 
     void Trace(Visitor*) const;
 
+    // Starts an async trace event.
+    void StartTracing();
+
+    // Ends the async trace event associated with |this|.
+    void EndTracing(bool shutting_down = false);
+
+    // Get a trace event name from DecoderTemplate::GetTraceNames() and |type|.
+    const char* TraceNameFromType();
+
     Type type;
 
-    // For kConfigure Requests.
+    // For kConfigure Requests. Prefer absl::optional<> to ensure values are
+    // only accessed on the proper request type.
     std::unique_ptr<MediaConfigType> media_config;
-    HardwarePreference hw_pref = HardwarePreference::kAllow;
+    absl::optional<HardwarePreference> hw_pref;
+    absl::optional<bool> low_delay;
 
     // For kDecode Requests.
     scoped_refptr<media::DecoderBuffer> decoder_buffer;
@@ -123,10 +152,21 @@ class MODULES_EXPORT DecoderTemplate
     // The value of |reset_generation_| at the time of this request. Used to
     // abort pending requests following a reset().
     uint32_t reset_generation = 0;
+
+    // Used for tracing kDecode requests.
+    std::unique_ptr<media::ScopedDecodeTrace> decode_trace;
+
+#if DCHECK_IS_ON()
+    // Tracks the state of tracing for debug purposes.
+    bool is_tracing;
+#endif
   };
 
   void ProcessRequests();
   bool ProcessConfigureRequest(Request* request);
+  void ContinueConfigureWithGpuFactories(
+      Request* request,
+      media::GpuVideoAcceleratorFactories* factories);
   bool ProcessDecodeRequest(Request* request);
   bool ProcessFlushRequest(Request* request);
   bool ProcessResetRequest(Request* request);
@@ -137,12 +177,16 @@ class MODULES_EXPORT DecoderTemplate
   void OnInitializeDone(media::Status status);
   void OnDecodeDone(uint32_t id, media::Status);
   void OnFlushDone(media::Status);
-  void OnConfigureFlushDone(media::Status);
   void OnResetDone();
   void OnOutput(uint32_t reset_generation, scoped_refptr<MediaOutputType>);
 
   // Helper function making it easier to check |state_|.
   bool IsClosed();
+
+  // ReclaimableCodec implementation.
+  void OnCodecReclaimed(DOMException*) override;
+
+  void TraceQueueSizes() const;
 
   Member<ScriptState> script_state_;
   Member<OutputCallbackType> output_cb_;
@@ -163,7 +207,14 @@ class MODULES_EXPORT DecoderTemplate
 
   std::unique_ptr<CodecLogger> logger_;
 
-  media::GpuVideoAcceleratorFactories* gpu_factories_ = nullptr;
+  // Empty - GPU factories haven't been retrieved yet.
+  // nullptr - We tried to get GPU factories, but acceleration is unavailable.
+  absl::optional<media::GpuVideoAcceleratorFactories*> gpu_factories_;
+
+  // Cached config from the last kConfigure request which successfully completed
+  // initialization.
+  bool low_delay_ = false;
+  std::unique_ptr<MediaConfigType> active_config_;
 
   // TODO(sandersd): Store the last config, flush, and reset so that
   // duplicates can be elided.
@@ -172,7 +223,17 @@ class MODULES_EXPORT DecoderTemplate
 
   // TODO(sandersd): Can this just be a HashSet by ptr comparison?
   uint32_t pending_decode_id_ = 0;
+
+  // Used to differentiate Decoders' counters during tracing.
+  int trace_counter_id_;
+
   HeapHashMap<uint32_t, Member<Request>> pending_decodes_;
+
+  // Keyframes are required after configure(), flush(), and reset().
+  bool require_key_frame_ = true;
+
+  // Task runner for main thread.
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 };
 
 }  // namespace blink

@@ -6,6 +6,7 @@
 
 [
     Exposed=(Window,DedicatedWorker),
+    SecureContext,
     RuntimeEnabled=WebCodecs,
     ActiveScriptWrappable
 ] interface VideoEncoder {
@@ -48,4 +49,8 @@
 
     // Which state the encoder is in, indicating which methods can be called.
     readonly attribute CodecState state;
+
+    // Call prior to configure() to determine whether config will be supported.
+    [CallWith=ScriptState, RaisesException]
+    static Promise<VideoEncoderSupport> isConfigSupported(VideoEncoderConfig config);
 };

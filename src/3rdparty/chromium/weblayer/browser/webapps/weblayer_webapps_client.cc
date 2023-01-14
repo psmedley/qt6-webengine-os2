@@ -4,17 +4,18 @@
 
 #include "weblayer/browser/webapps/weblayer_webapps_client.h"
 
+#include <string>
+
 #include "base/logging.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/security_state/content/content_utils.h"
 #include "components/webapps/browser/installable/installable_metrics.h"
-#include "weblayer/browser/infobar_service.h"
 #include "weblayer/browser/java/jni/WebappsHelper_jni.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/guid.h"
-#include "base/strings/string16.h"
 #include "components/webapps/browser/android/add_to_homescreen_params.h"
 #include "components/webapps/browser/android/shortcut_info.h"
 #include "ui/android/color_helpers.h"
@@ -47,7 +48,7 @@ WebLayerWebappsClient::GetSecurityLevelForWebContents(
 infobars::ContentInfoBarManager*
 WebLayerWebappsClient::GetInfoBarManagerForWebContents(
     content::WebContents* web_contents) {
-  return InfoBarService::FromWebContents(web_contents);
+  return infobars::ContentInfoBarManager::FromWebContents(web_contents);
 }
 
 webapps::WebappInstallSource WebLayerWebappsClient::GetInstallSource(

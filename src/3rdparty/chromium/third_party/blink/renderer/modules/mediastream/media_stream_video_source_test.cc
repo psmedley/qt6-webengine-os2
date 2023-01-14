@@ -52,6 +52,8 @@ class MediaStreamVideoSourceTest : public testing::Test {
         String::FromUTF8("dummy_source_name"), false /* remote */);
     stream_source_->SetPlatformSource(
         base::WrapUnique(mock_stream_video_source_));
+    ON_CALL(*mock_stream_video_source_, SetCanDiscardAlpha)
+        .WillByDefault(Return());
     ON_CALL(*mock_stream_video_source_, SupportsEncodedOutput)
         .WillByDefault(Return(true));
   }
@@ -79,14 +81,14 @@ class MediaStreamVideoSourceTest : public testing::Test {
   WebMediaStreamTrack CreateTrack(
       const std::string& id,
       const VideoTrackAdapterSettings& adapter_settings,
-      const base::Optional<bool>& noise_reduction,
+      const absl::optional<bool>& noise_reduction,
       bool is_screencast,
       double min_frame_rate) {
     bool enabled = true;
     return MediaStreamVideoTrack::CreateVideoTrack(
         mock_stream_video_source_, adapter_settings, noise_reduction,
-        is_screencast, min_frame_rate, base::nullopt, base::nullopt,
-        base::nullopt, false,
+        is_screencast, min_frame_rate, absl::nullopt, absl::nullopt,
+        absl::nullopt, false,
         WTF::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
                   base::Unretained(this)),
         enabled);
@@ -95,7 +97,7 @@ class MediaStreamVideoSourceTest : public testing::Test {
   WebMediaStreamTrack CreateTrack() {
     return CreateTrack("123",
                        VideoTrackAdapterSettings(gfx::Size(100, 100), 30.0),
-                       base::Optional<bool>(), false, 0.0);
+                       absl::optional<bool>(), false, 0.0);
   }
 
   WebMediaStreamTrack CreateTrackAndStartSource(int width,
@@ -104,7 +106,7 @@ class MediaStreamVideoSourceTest : public testing::Test {
                                                 bool detect_rotation = false) {
     WebMediaStreamTrack track = CreateTrack(
         "123", VideoTrackAdapterSettings(gfx::Size(width, height), frame_rate),
-        base::Optional<bool>(), false, 0.0);
+        absl::optional<bool>(), false, 0.0);
 
     EXPECT_EQ(0, NumberOfSuccessConstraintsCallbacks());
     mock_stream_video_source_->StartMockedSource();
@@ -204,7 +206,7 @@ class MediaStreamVideoSourceTest : public testing::Test {
         "dummy",
         VideoTrackAdapterSettings(gfx::Size(expected_width2, expected_height2),
                                   MediaStreamVideoSource::kDefaultFrameRate),
-        base::Optional<bool>(), false, 0.0);
+        absl::optional<bool>(), false, 0.0);
 
     MockMediaStreamVideoSink sink1;
     sink1.ConnectToTrack(track1);
@@ -785,6 +787,66 @@ TEST_F(MediaStreamVideoSourceTest, CapturingLinkSecureTracksAndEncodedSinks) {
   EXPECT_CALL(*mock_source(), OnCapturingLinkSecured(false));
   mock_source()->UpdateCapturingLinkSecure(MediaStreamVideoTrack::From(track),
                                            false);
+}
+
+TEST_F(MediaStreamVideoSourceTest, CanDiscardAlpha) {
+  InSequence s;
+  WebMediaStreamTrack track = CreateTrack();
+
+  MockMediaStreamVideoSink sink_no_alpha;
+  sink_no_alpha.SetUsesAlpha(MediaStreamVideoSink::UsesAlpha::kNo);
+  MockMediaStreamVideoSink sink_alpha;
+  sink_alpha.SetUsesAlpha(MediaStreamVideoSink::UsesAlpha::kDefault);
+
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(true));
+  sink_no_alpha.ConnectToTrack(track);
+
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(false));
+  sink_alpha.ConnectToTrack(track);
+
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(false));
+  sink_no_alpha.DisconnectFromTrack();
+
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(true));
+  sink_alpha.DisconnectFromTrack();
+}
+
+TEST_F(MediaStreamVideoSourceTest, CanDiscardAlphaIfOtherSinksDiscard) {
+  InSequence s;
+  WebMediaStreamTrack track = CreateTrack();
+
+  MockMediaStreamVideoSink sink_no_alpha;
+  sink_no_alpha.SetUsesAlpha(MediaStreamVideoSink::UsesAlpha::kNo);
+  MockMediaStreamVideoSink sink_depends;
+  sink_depends.SetUsesAlpha(
+      MediaStreamVideoSink::UsesAlpha::kDependsOnOtherSinks);
+  MockMediaStreamVideoSink sink_alpha;
+  sink_alpha.SetUsesAlpha(MediaStreamVideoSink::UsesAlpha::kDefault);
+
+  // Keep alpha if the only sink is DependsOnOtherSinks.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(false));
+  sink_depends.ConnectToTrack(track);
+
+  // Now alpha can be dropped since other sink drops alpha.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(true));
+  sink_no_alpha.ConnectToTrack(track);
+
+  // Alpha can not longer be dropped since a sink uses it.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(false));
+  sink_alpha.ConnectToTrack(track);
+
+  // Now that alpha track is removes, alpha can be discarded again.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(true));
+  sink_alpha.DisconnectFromTrack();
+
+  // Now that the alpha dropping track is disconnected, we keep alpha since the
+  // only sink depends on other sinks, which keeps alpha by default.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(false));
+  sink_no_alpha.DisconnectFromTrack();
+
+  // Alpha is discarded if there are no sinks connected.
+  EXPECT_CALL(*mock_source(), SetCanDiscardAlpha(true));
+  sink_depends.DisconnectFromTrack();
 }
 
 }  // namespace blink

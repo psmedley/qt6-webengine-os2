@@ -33,7 +33,6 @@
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/html/html_summary_element.h"
-#include "third_party/blink/renderer/core/html/shadow/details_marker_control.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
@@ -93,14 +92,23 @@ void HTMLDetailsElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   HTMLSlotElement* content_slot =
       HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument());
   content_slot->SetIdAttribute(shadow_element_names::kIdDetailsContent);
-  content_slot->SetInlineStyleProperty(CSSPropertyID::kDisplay,
-                                       CSSValueID::kNone);
+  if (RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled()) {
+    content_slot->SetInlineStyleProperty(CSSPropertyID::kContentVisibility,
+                                         CSSValueID::kHidden);
+    content_slot->EnsureDisplayLockContext().SetForDetailsElement(true);
+    content_slot->SetInlineStyleProperty(CSSPropertyID::kDisplay,
+                                         CSSValueID::kBlock);
+  } else {
+    content_slot->SetInlineStyleProperty(CSSPropertyID::kDisplay,
+                                         CSSValueID::kNone);
+  }
   root.AppendChild(content_slot);
 
-  if (RuntimeEnabledFeatures::SummaryListItemEnabled()) {
-    auto* default_summary_style = MakeGarbageCollected<HTMLStyleElement>(
-        GetDocument(), CreateElementFlags::ByCreateElement());
-    default_summary_style->setTextContent(R"CSS(
+  auto* default_summary_style = MakeGarbageCollected<HTMLStyleElement>(
+      GetDocument(), CreateElementFlags::ByCreateElement());
+  // This style is required only if this <details> shows the UA-provided
+  // <summary>, not a light child <summary>.
+  default_summary_style->setTextContent(R"CSS(
 :host summary {
   display: list-item;
   counter-increment: list-item 0;
@@ -110,8 +118,7 @@ void HTMLDetailsElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   list-style-type: disclosure-open;
 }
 )CSS");
-    root.AppendChild(default_summary_style);
-  }
+  root.AppendChild(default_summary_style);
 }
 
 Element* HTMLDetailsElement::FindMainSummary() const {
@@ -144,23 +151,26 @@ void HTMLDetailsElement::ParseAttribute(
     Element* content = EnsureUserAgentShadowRoot().getElementById(
         shadow_element_names::kIdDetailsContent);
     DCHECK(content);
-    if (is_open_) {
-      content->RemoveInlineStyleProperty(CSSPropertyID::kDisplay);
+
+    if (RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled()) {
+      if (is_open_) {
+        content->RemoveInlineStyleProperty(CSSPropertyID::kContentVisibility);
+        content->RemoveInlineStyleProperty(CSSPropertyID::kDisplay);
+      } else {
+        content->SetInlineStyleProperty(CSSPropertyID::kDisplay,
+                                        CSSValueID::kBlock);
+        content->SetInlineStyleProperty(CSSPropertyID::kContentVisibility,
+                                        CSSValueID::kHidden);
+        content->EnsureDisplayLockContext().SetForDetailsElement(true);
+      }
     } else {
-      content->SetInlineStyleProperty(CSSPropertyID::kDisplay,
-                                      CSSValueID::kNone);
+      if (is_open_) {
+        content->RemoveInlineStyleProperty(CSSPropertyID::kDisplay);
+      } else {
+        content->SetInlineStyleProperty(CSSPropertyID::kDisplay,
+                                        CSSValueID::kNone);
+      }
     }
-
-    if (RuntimeEnabledFeatures::SummaryListItemEnabled())
-      return;
-    // Invalidate the LayoutDetailsMarker in order to turn the arrow signifying
-    // if the details element is open or closed.
-    Element* summary = FindMainSummary();
-    DCHECK(summary);
-
-    auto* control = To<HTMLSummaryElement>(summary)->MarkerControl();
-    if (control && control->GetLayoutObject())
-      control->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
 
     return;
   }

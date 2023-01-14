@@ -23,16 +23,22 @@ class Profile;
 
 namespace content {
 class WebContents;
+class WebUIDataSource;
 }  // namespace content
 
 namespace gfx {
 class Image;
+struct VectorIcon;
 }  // namespace gfx
 
 // Handles bidirectional communication between NTP realbox JS and the browser.
 class RealboxHandler : public realbox::mojom::PageHandler,
                        public AutocompleteController::Observer {
  public:
+  static void SetupWebUIDataSource(content::WebUIDataSource* source);
+  static std::string AutocompleteMatchVectorIconToResourceName(
+      const gfx::VectorIcon& icon);
+
   RealboxHandler(
       mojo::PendingReceiver<realbox::mojom::PageHandler> pending_page_handler,
       Profile* profile,
@@ -41,7 +47,7 @@ class RealboxHandler : public realbox::mojom::PageHandler,
 
   // realbox::mojom::PageHandler:
   void SetPage(mojo::PendingRemote<realbox::mojom::Page> pending_page) override;
-  void QueryAutocomplete(const base::string16& input,
+  void QueryAutocomplete(const std::u16string& input,
                          bool prevent_inline_autocomplete) override;
   void StopAutocomplete(bool clear_result) override;
   void OpenAutocompleteMatch(uint8_t line,

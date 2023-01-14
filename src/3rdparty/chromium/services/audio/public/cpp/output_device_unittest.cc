@@ -87,7 +87,7 @@ class MockAudioOutputIPC : public media::AudioOutputIPC {
       CreateStream,
       void(media::AudioOutputIPCDelegate* delegate,
            const media::AudioParameters& params,
-           const base::Optional<base::UnguessableToken>& processing_id));
+           const absl::optional<base::UnguessableToken>& processing_id));
   MOCK_METHOD0(PlayStream, void());
   MOCK_METHOD0(PauseStream, void());
   MOCK_METHOD0(FlushStream, void());
@@ -95,10 +95,10 @@ class MockAudioOutputIPC : public media::AudioOutputIPC {
   MOCK_METHOD1(SetVolume, void(double volume));
 };
 
-class FakeOutputStreamFactory : public audio::FakeStreamFactory {
+class FakeOutputStreamFactory final : public audio::FakeStreamFactory {
  public:
   FakeOutputStreamFactory() : stream_(), stream_receiver_(&stream_) {}
-  ~FakeOutputStreamFactory() final {}
+  ~FakeOutputStreamFactory() override {}
 
   void CreateOutputStream(
       mojo::PendingReceiver<media::mojom::AudioOutputStream> stream_receiver,
@@ -119,8 +119,8 @@ class FakeOutputStreamFactory : public audio::FakeStreamFactory {
   }
 
   void Bind(mojo::ScopedMessagePipeHandle handle) {
-    receiver_.Bind(
-        mojo::PendingReceiver<audio::mojom::StreamFactory>(std::move(handle)));
+    receiver_.Bind(mojo::PendingReceiver<media::mojom::AudioStreamFactory>(
+        std::move(handle)));
   }
 
   StrictMock<MockStream> stream_;
@@ -177,7 +177,7 @@ class AudioServiceOutputDeviceTest : public testing::Test {
     task_env_.RunUntilIdle();
   }
 
-  mojo::PendingRemote<audio::mojom::StreamFactory> MakeFactoryRemote() {
+  mojo::PendingRemote<media::mojom::AudioStreamFactory> MakeFactoryRemote() {
     return stream_factory_->receiver_.BindNewPipeAndPassRemote();
   }
 

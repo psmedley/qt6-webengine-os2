@@ -12,7 +12,6 @@
 
 #include "base/callback_forward.h"
 #include "base/files/scoped_file.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "components/arc/mojom/video_decode_accelerator.mojom.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
@@ -20,6 +19,7 @@
 #include "media/video/video_decode_accelerator.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace arc {
 
@@ -74,30 +74,12 @@ class GpuArcVideoDecodeAccelerator
   void ImportBufferForPicture(int32_t picture_buffer_id,
                               mojom::HalPixelFormat format,
                               mojo::ScopedHandle handle,
-                              std::vector<VideoFramePlane> planes) override;
+                              std::vector<VideoFramePlane> planes,
+                              mojom::BufferModifierPtr modifier) override;
   void ReusePictureBuffer(int32_t picture_buffer_id) override;
   void Flush(FlushCallback callback) override;
   void Reset(ResetCallback callback) override;
  private:
-  // The calling flow of changing resolution is:
-  // 1. VDA calls Client::ProvidePictureBuffers()
-  // 2. Client calls VDA::AssignPictureBuffers()
-  // 3. Client calls VDA::ImportBufferForPicture() for N times
-  // 4. Client calls VDA::ReusePictureBuffer() when a buffer is recycled.
-  //
-  // The enum state is used to check these two situations:
-  // 1. Client should not call VDA::AssignPictureBuffers() twice without calling
-  //    VDA::ImportBufferForPicture() between them.
-  // 2. If VDA::ImportBufferForPicture() or VDA::ReusePictureBuffer() is
-  //    called right after calling Client::ProvidePictureBuffers() without
-  //    VDA::AssignPictureBuffers() be called, then the buffer contains previous
-  //    resolution and should be ignored.
-  enum class DecoderState {
-    kAwaitingAssignPictureBuffers,
-    kAwaitingFirstImport,
-    kDecoding,
-  };
-
   using PendingCallback =
       base::OnceCallback<void(mojom::VideoDecodeAccelerator::Result)>;
   static_assert(std::is_same<ResetCallback, PendingCallback>::value,
@@ -132,6 +114,16 @@ class GpuArcVideoDecodeAccelerator
   void DecodeRequest(media::BitstreamBuffer bitstream_buffer,
                      PendingCallback cb,
                      media::VideoDecodeAccelerator* vda);
+
+  // Call the ProvidePictureBuffers() to the client.
+  void HandleProvidePictureBuffers(uint32_t requested_num_of_buffers,
+                                   const gfx::Size& dimensions,
+                                   const gfx::Rect& visible_rect);
+  // Call the pending ProvidePictureBuffers() to the client if needed.
+  bool CallPendingProvidePictureBuffers();
+  // Called when the AssignPictureBuffers() is called by the client.
+  void OnAssignPictureBuffersCalled(const gfx::Size& dimensions,
+                                    uint32_t count);
 
   // Global counter that keeps track of the number of active clients (i.e., how
   // many VDAs in use by this class).
@@ -174,12 +166,18 @@ class GpuArcVideoDecodeAccelerator
 
   scoped_refptr<ProtectedBufferManager> protected_buffer_manager_;
 
-  size_t protected_input_buffer_count_ = 0;
-
-  base::Optional<bool> secure_mode_ = base::nullopt;
+  absl::optional<bool> secure_mode_ = absl::nullopt;
   size_t output_buffer_count_ = 0;
 
-  DecoderState decoder_state_ = DecoderState::kDecoding;
+  // When the client resets VDA during requesting new buffers, then VDA will
+  // request new buffers again. These variables are used to handle multiple
+  // ProvidePictureBuffers() requests.
+  // The pending ProvidePictureBuffers() requests.
+  std::queue<base::OnceClosure> pending_provide_picture_buffers_requests_;
+  // The callback of the current ProvidePictureBuffers() requests.
+  base::OnceCallback<void(uint32_t)> current_provide_picture_buffers_cb_;
+  // Set to true when the last ProvidePictureBuffers() is replied.
+  bool awaiting_first_import_ = false;
 
   THREAD_CHECKER(thread_checker_);
   DISALLOW_COPY_AND_ASSIGN(GpuArcVideoDecodeAccelerator);

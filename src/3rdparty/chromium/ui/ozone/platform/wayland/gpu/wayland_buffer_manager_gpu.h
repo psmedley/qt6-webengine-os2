@@ -51,6 +51,7 @@ class WaylandBufferManagerGpu : public ozone::mojom::WaylandBufferManagerGpu {
       const base::flat_map<::gfx::BufferFormat, std::vector<uint64_t>>&
           buffer_formats_with_modifiers,
       bool supports_dma_buf,
+      bool supports_viewporter,
       bool supports_acquire_fence) override;
 
   // These two calls get the surface, which backs the |widget| and notifies it
@@ -58,7 +59,8 @@ class WaylandBufferManagerGpu : public ozone::mojom::WaylandBufferManagerGpu {
   // OnSubmission call, it can schedule a new buffer for swap.
   void OnSubmission(gfx::AcceleratedWidget widget,
                     uint32_t buffer_id,
-                    gfx::SwapResult swap_result) override;
+                    gfx::SwapResult swap_result,
+                    gfx::GpuFenceHandle release_fence_handle) override;
   void OnPresentation(gfx::AcceleratedWidget widget,
                       uint32_t buffer_id,
                       const gfx::PresentationFeedback& feedback) override;
@@ -128,6 +130,7 @@ class WaylandBufferManagerGpu : public ozone::mojom::WaylandBufferManagerGpu {
 #endif
 
   bool supports_acquire_fence() const { return supports_acquire_fence_; }
+  bool supports_viewporter() const { return supports_viewporter_; }
 
   // Adds a WaylandBufferManagerGpu binding.
   void AddBindingWaylandBufferManagerGpu(
@@ -170,7 +173,8 @@ class WaylandBufferManagerGpu : public ozone::mojom::WaylandBufferManagerGpu {
   // presentation results.
   void SubmitSwapResultOnOriginThread(gfx::AcceleratedWidget widget,
                                       uint32_t buffer_id,
-                                      gfx::SwapResult swap_result);
+                                      gfx::SwapResult swap_result,
+                                      gfx::GpuFenceHandle release_fence);
   void SubmitPresentationOnOriginThread(
       gfx::AcceleratedWidget widget,
       uint32_t buffer_id,
@@ -183,7 +187,11 @@ class WaylandBufferManagerGpu : public ozone::mojom::WaylandBufferManagerGpu {
   // Whether Wayland server allows buffer submission with acquire fence.
   bool supports_acquire_fence_ = false;
 
-  mojo::Receiver<ozone::mojom::WaylandBufferManagerGpu> receiver_{this};
+  // Whether Wayland server implements wp_viewporter extension to support
+  // cropping and scaling buffers.
+  bool supports_viewporter_ = false;
+
+  mojo::ReceiverSet<ozone::mojom::WaylandBufferManagerGpu> receiver_set_;
 
   // A pointer to a WaylandBufferManagerHost object, which always lives on a
   // browser process side. It's used for a multi-process mode.

@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "ui/base/ui_base_types.h"
@@ -34,8 +33,7 @@ namespace views {
 
 // Base class for tests. Also acts as the dialog delegate and contents view for
 // TestDialogClientView.
-class DialogClientViewTest : public test::WidgetTest,
-                             public DialogDelegateView {
+class DialogClientViewTest : public test::WidgetTest {
  public:
   DialogClientViewTest() = default;
 
@@ -43,16 +41,16 @@ class DialogClientViewTest : public test::WidgetTest,
   void SetUp() override {
     WidgetTest::SetUp();
 
-    DialogDelegate::set_use_custom_frame(false);
-    DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+    delegate_ = new TestDialogDelegateView(this);
+    delegate_->set_use_custom_frame(false);
+    delegate_->SetButtons(ui::DIALOG_BUTTON_NONE);
 
     // Note: not using DialogDelegate::CreateDialogWidget(..), since that can
     // alter the frame type according to the platform.
     widget_ = new Widget;
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
-    params.delegate = this;
+    params.delegate = delegate_;
     widget_->Init(std::move(params));
-    EXPECT_EQ(this, GetContentsView());
     layout_provider_ = std::make_unique<test::TestLayoutProvider>();
     layout_provider_->SetDistanceMetric(DISTANCE_BUTTON_MAX_LINKABLE_WIDTH,
                                         200);
@@ -61,15 +59,6 @@ class DialogClientViewTest : public test::WidgetTest,
   void TearDown() override {
     widget_->CloseNow();
     WidgetTest::TearDown();
-  }
-
-  // DialogDelegateView:
-  gfx::Size CalculatePreferredSize() const override { return preferred_size_; }
-  gfx::Size GetMinimumSize() const override { return min_size_; }
-  gfx::Size GetMaximumSize() const override { return max_size_; }
-
-  void DeleteDelegate() override {
-    // DialogDelegateView would delete this, but |this| is owned by the test.
   }
 
  protected:
@@ -83,22 +72,23 @@ class DialogClientViewTest : public test::WidgetTest,
   // the requested amount, but height should always match exactly.
   void CheckContentsIsSetToPreferredSize() {
     const gfx::Rect client_bounds = GetUpdatedClientBounds();
-    const gfx::Size preferred_size = this->GetPreferredSize();
-    EXPECT_EQ(preferred_size.height(), this->bounds().height());
-    EXPECT_LE(preferred_size.width(), this->bounds().width());
-    EXPECT_EQ(gfx::Point(), this->origin());
-    EXPECT_EQ(client_bounds.width(), this->width());
+    const gfx::Size preferred_size = delegate_->GetPreferredSize();
+    EXPECT_EQ(preferred_size.height(), delegate_->bounds().height());
+    EXPECT_LE(preferred_size.width(), delegate_->bounds().width());
+    EXPECT_EQ(gfx::Point(), delegate_->origin());
+    EXPECT_EQ(client_bounds.width(), delegate_->width());
   }
 
   // Sets the buttons to show in the dialog and refreshes the dialog.
   void SetDialogButtons(int dialog_buttons) {
-    DialogDelegate::SetButtons(dialog_buttons);
-    DialogModelChanged();
+    delegate_->SetButtons(dialog_buttons);
+    delegate_->DialogModelChanged();
   }
 
-  void SetDialogButtonLabel(ui::DialogButton button, const std::string& label) {
-    DialogDelegate::SetButtonLabel(button, base::UTF8ToUTF16(label));
-    DialogModelChanged();
+  void SetDialogButtonLabel(ui::DialogButton button,
+                            const std::u16string& label) {
+    delegate_->SetButtonLabel(button, label);
+    delegate_->DialogModelChanged();
   }
 
   // Sets the view to provide to DisownExtraView() and updates the dialog. This
@@ -106,8 +96,8 @@ class DialogClientViewTest : public test::WidgetTest,
   // of DisownExtraView() and never calls it again.
   template <typename T>
   T* SetExtraView(std::unique_ptr<T> view) {
-    T* passed_view = DialogDelegate::SetExtraView(std::move(view));
-    DialogModelChanged();
+    T* passed_view = delegate_->SetExtraView(std::move(view));
+    delegate_->DialogModelChanged();
     return passed_view;
   }
 
@@ -122,20 +112,20 @@ class DialogClientViewTest : public test::WidgetTest,
   View* FocusableViewAfter(View* view) {
     const bool dont_loop = false;
     const bool reverse = false;
-    return GetFocusManager()->GetNextFocusableView(view, GetWidget(), reverse,
-                                                   dont_loop);
+    return delegate_->GetFocusManager()->GetNextFocusableView(
+        view, delegate_->GetWidget(), reverse, dont_loop);
   }
 
   // Set a longer than normal Cancel label so that the minimum button width is
   // exceeded. The resulting width is around 160 pixels, but depends on system
   // fonts.
   void SetLongCancelLabel() {
-    DialogDelegate::SetButtonLabel(
-        ui::DIALOG_BUTTON_CANCEL, base::ASCIIToUTF16("Cancel Cancel Cancel"));
-    DialogModelChanged();
+    delegate_->SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                              u"Cancel Cancel Cancel");
+    delegate_->DialogModelChanged();
   }
 
-  Button* GetButtonByAccessibleName(View* root, const base::string16& name) {
+  Button* GetButtonByAccessibleName(View* root, const std::u16string& name) {
     Button* button = Button::AsButton(root);
     if (button && button->GetAccessibleName() == name)
       return button;
@@ -147,22 +137,40 @@ class DialogClientViewTest : public test::WidgetTest,
     return nullptr;
   }
 
-  Button* GetButtonByAccessibleName(const std::string& label) {
-    return GetButtonByAccessibleName(widget_->GetRootView(),
-                                     base::UTF8ToUTF16(label));
+  Button* GetButtonByAccessibleName(const std::u16string& name) {
+    return GetButtonByAccessibleName(widget_->GetRootView(), name);
   }
 
   DialogClientView* client_view() {
     return static_cast<DialogClientView*>(widget_->client_view());
   }
 
+  DialogDelegateView* delegate() { return delegate_; }
+
   Widget* widget() { return widget_; }
   test::TestLayoutProvider* layout_provider() { return layout_provider_.get(); }
 
  private:
+  class TestDialogDelegateView : public DialogDelegateView {
+   public:
+    explicit TestDialogDelegateView(DialogClientViewTest* parent)
+        : parent_(parent) {}
+
+    // DialogDelegateView:
+    gfx::Size CalculatePreferredSize() const override {
+      return parent_->preferred_size_;
+    }
+    gfx::Size GetMinimumSize() const override { return parent_->min_size_; }
+    gfx::Size GetMaximumSize() const override { return parent_->max_size_; }
+
+   private:
+    DialogClientViewTest* const parent_;
+  };
+
   // The dialog Widget.
   std::unique_ptr<test::TestLayoutProvider> layout_provider_;
   Widget* widget_ = nullptr;
+  DialogDelegateView* delegate_ = nullptr;
 
   gfx::Size preferred_size_;
   gfx::Size min_size_;
@@ -173,7 +181,7 @@ class DialogClientViewTest : public test::WidgetTest,
 
 TEST_F(DialogClientViewTest, UpdateButtons) {
   // This dialog should start with no buttons.
-  EXPECT_EQ(GetDialogButtons(), ui::DIALOG_BUTTON_NONE);
+  EXPECT_EQ(delegate()->GetDialogButtons(), ui::DIALOG_BUTTON_NONE);
   EXPECT_EQ(nullptr, client_view()->ok_button());
   EXPECT_EQ(nullptr, client_view()->cancel_button());
   const int height_without_buttons = GetUpdatedClientBounds().height();
@@ -223,26 +231,27 @@ TEST_F(DialogClientViewTest, RemoveAndUpdateButtons) {
 TEST_F(DialogClientViewTest, SetupFocusChain) {
   const bool kIsOkButtonOnLeftSide = PlatformStyle::kIsOkButtonLeading;
 
-  GetContentsView()->SetFocusBehavior(View::FocusBehavior::ALWAYS);
+  delegate()->GetContentsView()->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   // Initially the dialog client view only contains the content view.
-  EXPECT_EQ(GetContentsView(), FocusableViewAfter(GetContentsView()));
+  EXPECT_EQ(delegate()->GetContentsView(),
+            FocusableViewAfter(delegate()->GetContentsView()));
 
   // Add OK and cancel buttons.
   SetDialogButtons(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL);
 
   if (kIsOkButtonOnLeftSide) {
     EXPECT_EQ(client_view()->ok_button(),
-              FocusableViewAfter(GetContentsView()));
+              FocusableViewAfter(delegate()->GetContentsView()));
     EXPECT_EQ(client_view()->cancel_button(),
               FocusableViewAfter(client_view()->ok_button()));
-    EXPECT_EQ(GetContentsView(),
+    EXPECT_EQ(delegate()->GetContentsView(),
               FocusableViewAfter(client_view()->cancel_button()));
   } else {
     EXPECT_EQ(client_view()->cancel_button(),
-              FocusableViewAfter(GetContentsView()));
+              FocusableViewAfter(delegate()->GetContentsView()));
     EXPECT_EQ(client_view()->ok_button(),
               FocusableViewAfter(client_view()->cancel_button()));
-    EXPECT_EQ(GetContentsView(),
+    EXPECT_EQ(delegate()->GetContentsView(),
               FocusableViewAfter(client_view()->ok_button()));
   }
 
@@ -252,16 +261,16 @@ TEST_F(DialogClientViewTest, SetupFocusChain) {
   extra_view->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   SetDialogButtons(ui::DIALOG_BUTTON_CANCEL);
 
-  EXPECT_EQ(extra_view, FocusableViewAfter(GetContentsView()));
+  EXPECT_EQ(extra_view, FocusableViewAfter(delegate()->GetContentsView()));
   EXPECT_EQ(client_view()->cancel_button(), FocusableViewAfter(extra_view));
-  EXPECT_EQ(GetContentsView(), FocusableViewAfter(client_view()));
+  EXPECT_EQ(delegate()->GetContentsView(), FocusableViewAfter(client_view()));
 
   // Add a dummy view to the contents view. Consult the FocusManager for the
   // traversal order since it now spans different levels of the view hierarchy.
   View* dummy_view = new StaticSizedView(gfx::Size(200, 200));
   dummy_view->SetFocusBehavior(View::FocusBehavior::ALWAYS);
-  GetContentsView()->SetFocusBehavior(View::FocusBehavior::NEVER);
-  GetContentsView()->AddChildView(dummy_view);
+  delegate()->GetContentsView()->SetFocusBehavior(View::FocusBehavior::NEVER);
+  delegate()->GetContentsView()->AddChildView(dummy_view);
   EXPECT_EQ(dummy_view, FocusableViewAfter(client_view()->cancel_button()));
   EXPECT_EQ(extra_view, FocusableViewAfter(dummy_view));
   EXPECT_EQ(client_view()->cancel_button(), FocusableViewAfter(extra_view));
@@ -275,7 +284,7 @@ TEST_F(DialogClientViewTest, SetupFocusChain) {
 // configuration.
 TEST_F(DialogClientViewTest, ContentsSize) {
   CheckContentsIsSetToPreferredSize();
-  EXPECT_EQ(GetContentsView()->size(), client_view()->size());
+  EXPECT_EQ(delegate()->GetContentsView()->size(), client_view()->size());
   // There's nothing in the contents view (i.e. |this|), so it should be 0x0.
   EXPECT_EQ(gfx::Size(), client_view()->size());
 }
@@ -285,7 +294,7 @@ TEST_F(DialogClientViewTest, LayoutWithButtons) {
   SetDialogButtons(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL);
   CheckContentsIsSetToPreferredSize();
 
-  EXPECT_LT(GetContentsView()->bounds().bottom(),
+  EXPECT_LT(delegate()->GetContentsView()->bounds().bottom(),
             client_view()->bounds().bottom());
   const gfx::Size no_extra_view_size = client_view()->bounds().size();
 
@@ -364,7 +373,7 @@ TEST_F(DialogClientViewTest, LinkedWidthDoesLink) {
 
   // Ensure there is no default button since getting a bold font can throw off
   // the cached sizes.
-  SetDefaultButton(ui::DIALOG_BUTTON_NONE);
+  delegate()->SetDefaultButton(ui::DIALOG_BUTTON_NONE);
 
   SetDialogButtons(ui::DIALOG_BUTTON_OK);
   CheckContentsIsSetToPreferredSize();
@@ -392,14 +401,14 @@ TEST_F(DialogClientViewTest, LinkedWidthDoesLink) {
   layout_provider()->SetDistanceMetric(DISTANCE_BUTTON_MAX_LINKABLE_WIDTH, 100);
   EXPECT_GT(cancel_button_width, 100);
 
-  DialogModelChanged();
+  delegate()->DialogModelChanged();
   CheckContentsIsSetToPreferredSize();
   EXPECT_EQ(ok_button_only_width, client_view()->ok_button()->width());
   layout_provider()->SetDistanceMetric(DISTANCE_BUTTON_MAX_LINKABLE_WIDTH, 200);
 
   // The extra view should also match, if it's a matching button type.
   View* extra_button = SetExtraView(std::make_unique<LabelButton>(
-      Button::PressedCallback(), base::string16()));
+      Button::PressedCallback(), std::u16string()));
   CheckContentsIsSetToPreferredSize();
   EXPECT_EQ(cancel_button_width, extra_button->width());
 }
@@ -409,7 +418,7 @@ TEST_F(DialogClientViewTest, LinkedWidthDoesntLink) {
 
   // Ensure there is no default button since getting a bold font can throw off
   // the cached sizes.
-  SetDefaultButton(ui::DIALOG_BUTTON_NONE);
+  delegate()->SetDefaultButton(ui::DIALOG_BUTTON_NONE);
 
   SetDialogButtons(ui::DIALOG_BUTTON_OK);
   CheckContentsIsSetToPreferredSize();
@@ -437,14 +446,14 @@ TEST_F(DialogClientViewTest, LinkedWidthDoesntLink) {
   layout_provider()->SetDistanceMetric(DISTANCE_BUTTON_MAX_LINKABLE_WIDTH, 100);
   EXPECT_GT(cancel_button_width, 100);
 
-  DialogModelChanged();
+  delegate()->DialogModelChanged();
   CheckContentsIsSetToPreferredSize();
   EXPECT_EQ(ok_button_only_width, client_view()->ok_button()->width());
   layout_provider()->SetDistanceMetric(DISTANCE_BUTTON_MAX_LINKABLE_WIDTH, 200);
 
   // Checkbox extends LabelButton, but it should not participate in linking.
   View* extra_button =
-      SetExtraView(std::make_unique<Checkbox>(base::string16()));
+      SetExtraView(std::make_unique<Checkbox>(std::u16string()));
   CheckContentsIsSetToPreferredSize();
   EXPECT_NE(cancel_button_width, extra_button->width());
 }
@@ -462,7 +471,7 @@ TEST_F(DialogClientViewTest, ButtonPosition) {
   EXPECT_EQ(contents_width - button_row_inset,
             client_view()->ok_button()->bounds().right());
   EXPECT_EQ(contents_height + button_row_inset,
-            height() + client_view()->ok_button()->y());
+            delegate()->height() + client_view()->ok_button()->y());
 }
 
 // Ensures that the focus of the button remains after a dialog update.
@@ -473,7 +482,7 @@ TEST_F(DialogClientViewTest, FocusUpdate) {
   EXPECT_FALSE(client_view()->ok_button()->HasFocus());
   client_view()->ok_button()->RequestFocus();  // Set focus.
   EXPECT_TRUE(client_view()->ok_button()->HasFocus());
-  DialogModelChanged();
+  delegate()->DialogModelChanged();
   EXPECT_TRUE(client_view()->ok_button()->HasFocus());
 }
 
@@ -488,7 +497,7 @@ TEST_F(DialogClientViewTest, FocusMultipleButtons) {
   client_view()->cancel_button()->RequestFocus();  // Set focus.
   EXPECT_FALSE(client_view()->ok_button()->HasFocus());
   EXPECT_TRUE(client_view()->cancel_button()->HasFocus());
-  DialogModelChanged();
+  delegate()->DialogModelChanged();
   EXPECT_TRUE(client_view()->cancel_button()->HasFocus());
 }
 
@@ -498,7 +507,7 @@ TEST_F(DialogClientViewTest, FocusChangingButtons) {
   widget()->Show();
   SetDialogButtons(ui::DIALOG_BUTTON_CANCEL | ui::DIALOG_BUTTON_OK);
   client_view()->cancel_button()->RequestFocus();  // Set focus.
-  FocusManager* focus_manager = GetFocusManager();
+  FocusManager* focus_manager = delegate()->GetFocusManager();
   EXPECT_EQ(client_view()->cancel_button(), focus_manager->GetFocusedView());
 
   // Remove buttons.
@@ -580,16 +589,16 @@ TEST_F(DialogClientViewTest, ButtonLayoutWithExtra) {
   // Note that cancel & ok may swap order depending on
   // PlatformStyle::kIsOkButtonLeading; these invariants hold for either order.
   SetDialogButtons(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL);
-  SetDialogButtonLabel(ui::DIALOG_BUTTON_OK, "ok");
-  SetDialogButtonLabel(ui::DIALOG_BUTTON_CANCEL, "cancel");
-  SetExtraView(std::make_unique<LabelButton>(Button::PressedCallback(),
-                                             base::UTF8ToUTF16("extra")));
+  SetDialogButtonLabel(ui::DIALOG_BUTTON_OK, u"ok");
+  SetDialogButtonLabel(ui::DIALOG_BUTTON_CANCEL, u"cancel");
+  SetExtraView(
+      std::make_unique<LabelButton>(Button::PressedCallback(), u"extra"));
 
   widget()->Show();
 
-  Button* ok = GetButtonByAccessibleName("ok");
-  Button* cancel = GetButtonByAccessibleName("cancel");
-  Button* extra = GetButtonByAccessibleName("extra");
+  Button* ok = GetButtonByAccessibleName(u"ok");
+  Button* cancel = GetButtonByAccessibleName(u"cancel");
+  Button* extra = GetButtonByAccessibleName(u"extra");
 
   ASSERT_NE(ok, cancel);
   ASSERT_NE(ok, extra);
@@ -602,9 +611,9 @@ TEST_F(DialogClientViewTest, ButtonLayoutWithExtra) {
   auto bounds_right = [](View* v) { return v->GetBoundsInScreen().right(); };
 
   // (1): left inset == right inset (and they shouldn't be 0):
-  int left_inset = bounds_left(extra) - bounds_left(this);
-  int right_inset =
-      bounds_right(this) - std::max(bounds_right(ok), bounds_right(cancel));
+  int left_inset = bounds_left(extra) - bounds_left(delegate());
+  int right_inset = bounds_right(delegate()) -
+                    std::max(bounds_right(ok), bounds_right(cancel));
   EXPECT_EQ(left_inset, right_inset);
   EXPECT_GT(left_inset, 0);
 
@@ -629,7 +638,8 @@ TEST_F(DialogClientViewTest, ButtonLayoutWithExtra) {
   int old_margin = get_margin();
   int old_flex_margin = get_flex_margin();
 
-  SetSizeConstraints(gfx::Size(), gfx::Size(width() + 100, 0), gfx::Size());
+  SetSizeConstraints(gfx::Size(), gfx::Size(delegate()->width() + 100, 0),
+                     gfx::Size());
   client_view()->SizeToPreferredSize();
   client_view()->Layout();
 

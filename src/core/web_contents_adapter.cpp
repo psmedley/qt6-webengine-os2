@@ -76,6 +76,7 @@
 #include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_entry_restore_context.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/common/content_switches.h"
@@ -149,21 +150,19 @@ static QVariant fromJSValue(const base::Value *result)
     }
     case base::Value::Type::INTEGER:
     {
-        int out;
-        if (result->GetAsInteger(&out))
-            ret.setValue(out);
+        if (auto out = result->GetIfInt())
+            ret.setValue(*out);
         break;
     }
     case base::Value::Type::DOUBLE:
     {
-        double out;
-        if (result->GetAsDouble(&out))
-            ret.setValue(out);
+        if (auto out = result->GetIfDouble())
+            ret.setValue(*out);
         break;
     }
     case base::Value::Type::STRING:
     {
-        base::string16 out;
+        std::u16string out;
         if (result->GetAsString(&out))
             ret.setValue(toQt(out));
         break;
@@ -297,6 +296,8 @@ static void deserializeNavigationHistory(QDataStream &input, int *currentIndex, 
     int count;
     input >> count >> *currentIndex;
 
+    std::unique_ptr<content::NavigationEntryRestoreContext> context = content::NavigationEntryRestoreContext::Create(); // FIXME?
+
     entries->reserve(count);
     // Logic taken from SerializedNavigationEntry::ReadFromPickle and ToNavigationEntries.
     for (int i = 0; i < count; ++i) {
@@ -336,7 +337,7 @@ static void deserializeNavigationHistory(QDataStream &input, int *currentIndex, 
         std::unique_ptr<content::NavigationEntry> entry = content::NavigationController::CreateNavigationEntry(
             toGurl(virtualUrl),
             content::Referrer(toGurl(referrerUrl), static_cast<network::mojom::ReferrerPolicy>(referrerPolicy)),
-            base::nullopt, // optional initiator_origin
+            absl::nullopt, // optional initiator_origin
             // Use a transition type of reload so that we don't incorrectly
             // increase the typed count.
             ui::PAGE_TRANSITION_RELOAD,
@@ -347,7 +348,7 @@ static void deserializeNavigationHistory(QDataStream &input, int *currentIndex, 
             nullptr);
 
         entry->SetTitle(toString16(title));
-        entry->SetPageState(blink::PageState::CreateFromEncodedData(std::string(pageState.data(), pageState.size())));
+        entry->SetPageState(blink::PageState::CreateFromEncodedData(std::string(pageState.data(), pageState.size())), context.get());
         entry->SetHasPostData(hasPostData);
         entry->SetOriginalRequestURL(toGurl(originalRequestUrl));
         entry->SetIsOverridingUserAgent(isOverridingUserAgent);
@@ -527,7 +528,7 @@ void WebContentsAdapter::initialize(content::SiteInstance *site)
     Q_ASSERT(rvh);
     if (!rvh->IsRenderViewLive())
         static_cast<content::WebContentsImpl*>(m_webContents.get())->CreateRenderViewForRenderManager(
-                rvh, base::nullopt, nullptr);
+                rvh, absl::nullopt, nullptr);
 
     m_webContentsDelegate->RenderViewHostChanged(nullptr, rvh);
 
@@ -1114,7 +1115,7 @@ void WebContentsAdapter::download(const QUrl &url, const QString &suggestedFileN
 {
     CHECK_INITIALIZED();
     content::BrowserContext *bctx = m_webContents->GetBrowserContext();
-    content::DownloadManager *dlm =  content::BrowserContext::GetDownloadManager(bctx);
+    content::DownloadManager *dlm =  bctx->GetDownloadManager();
     DownloadManagerDelegateQt *dlmd = m_profileAdapter->downloadManagerDelegate();
 
     if (!dlm)
@@ -1317,17 +1318,17 @@ void WebContentsAdapter::printToPDF(const QPageLayout &pageLayout, const QPageRa
 {
 #if QT_CONFIG(webengine_printing_and_pdf)
     CHECK_INITIALIZED();
-    PrintViewManagerQt::PrintToPDFFileCallback callback = base::Bind(&callbackOnPdfSavingFinished,
-                                                                m_adapterClient,
-                                                                filePath);
+    PrintViewManagerQt::PrintToPDFFileCallback callback = base::BindOnce(&callbackOnPdfSavingFinished,
+                                                                         m_adapterClient,
+                                                                         filePath);
     content::WebContents *webContents = m_webContents.get();
     if (content::WebContents *guest = guestWebContents())
         webContents = guest;
     PrintViewManagerQt::FromWebContents(webContents)->PrintToPDFFileWithCallback(pageLayout,
-                                                                                 pageRanges,
-                                                                                 true,
-                                                                                 filePath,
-                                                                                 callback);
+                                                                                         pageRanges,
+                                                                                         true,
+                                                                                         filePath,
+                                                                                         std::move(callback));
 #endif // QT_CONFIG(webengine_printing_and_pdf)
 }
 
@@ -1338,17 +1339,17 @@ quint64 WebContentsAdapter::printToPDFCallbackResult(const QPageLayout &pageLayo
 {
 #if QT_CONFIG(webengine_printing_and_pdf)
     CHECK_INITIALIZED(0);
-    PrintViewManagerQt::PrintToPDFCallback callback = base::Bind(&callbackOnPrintingFinished,
-                                                                 m_adapterClient,
-                                                                 m_nextRequestId);
+    PrintViewManagerQt::PrintToPDFCallback callback = base::BindOnce(&callbackOnPrintingFinished,
+                                                                     m_adapterClient,
+                                                                     m_nextRequestId);
     content::WebContents *webContents = m_webContents.get();
     if (content::WebContents *guest = guestWebContents())
         webContents = guest;
     PrintViewManagerQt::FromWebContents(webContents)->PrintToPDFWithCallback(pageLayout,
-                                                                             pageRanges,
-                                                                             colorMode,
-                                                                             useCustomMargins,
-                                                                             callback);
+                                                                                     pageRanges,
+                                                                                     colorMode,
+                                                                                     useCustomMargins,
+                                                                                     std::move(callback));
     return m_nextRequestId++;
 #else
     Q_UNUSED(pageLayout);
@@ -1430,8 +1431,10 @@ void WebContentsAdapter::setBackgroundColor(const QColor &color)
 {
     CHECK_INITIALIZED();
     SkColor c = toSk(color);
-    if (content::RenderWidgetHostView *rwhv = m_webContents->GetRenderWidgetHostView())
+    if (content::RenderWidgetHostView *rwhv = m_webContents->GetRenderWidgetHostView()) {
         rwhv->SetBackgroundColor(c);
+        ((content::RenderWidgetHostViewBase *)rwhv)->SetContentBackgroundColor(c);
+    }
     if (color != Qt::transparent)
         m_pageHost->SetBackgroundColor(c);
 }
@@ -1487,8 +1490,10 @@ static QMimeData *mimeDataFromDropData(const content::DropData &dropData)
         mimeData->setText(toQt(*dropData.text));
     if (dropData.html.has_value())
         mimeData->setHtml(toQt(*dropData.html));
-    if (dropData.url.is_valid())
+    if (dropData.url.is_valid()) {
         mimeData->setUrls(QList<QUrl>() << toQt(dropData.url));
+        mimeData->setText(toQt(dropData.url_title));
+    }
     if (!dropData.custom_data.empty()) {
         base::Pickle pickle;
         ui::WriteCustomDataToPickle(dropData.custom_data, &pickle);
@@ -1561,7 +1566,8 @@ void WebContentsAdapter::startDragging(QObject *dragSource, const content::DropD
             if (rvh) {
                 rvh->GetWidget()->DragSourceEndedAt(gfx::PointF(m_lastDragClientPos.x(), m_lastDragClientPos.y()),
                                                     gfx::PointF(m_lastDragScreenPos.x(), m_lastDragScreenPos.y()),
-                                                    ui::mojom::DragOperation(m_currentDropAction));
+                                                    ui::mojom::DragOperation(m_currentDropAction),
+                                                    base::DoNothing());
                 rvh->GetWidget()->DragSourceSystemDragEnded();
             }
         }
@@ -1612,6 +1618,11 @@ static void fillDropDataFromMimeData(content::DropData *dropData, const QMimeDat
     }
     if (!dropData->filenames.empty())
         return;
+    if (mimeData->hasUrls()) {
+        dropData->url = toGurl(urls.first());
+        if (mimeData->hasText())
+            dropData->url_title = toString16(mimeData->text());
+    }
     if (mimeData->hasHtml())
         dropData->html = toOptionalString16(mimeData->html());
     if (mimeData->hasText())
@@ -1673,7 +1684,8 @@ void WebContentsAdapter::enterDrag(QDragEnterEvent *e, const QPointF &screenPos)
     rvh->GetWidget()->FilterDropData(m_currentDropData.get());
     rvh->GetWidget()->DragTargetDragEnter(*m_currentDropData, toGfx(e->position()), toGfx(screenPos),
                                           toWeb(e->possibleActions()),
-                                          toWeb(e->buttons()) | toWeb(e->modifiers()));
+                                          toWeb(e->buttons()) | toWeb(e->modifiers()),
+                                          base::DoNothing());
 }
 
 Qt::DropAction WebContentsAdapter::updateDragPosition(QDragMoveEvent *e, const QPointF &screenPos)
@@ -1683,7 +1695,7 @@ Qt::DropAction WebContentsAdapter::updateDragPosition(QDragMoveEvent *e, const Q
     m_lastDragClientPos = e->position();
     m_lastDragScreenPos = screenPos;
     rvh->GetWidget()->DragTargetDragOver(toGfx(m_lastDragClientPos), toGfx(m_lastDragScreenPos), toWeb(e->possibleActions()),
-                                         toWeb(e->buttons()) | toWeb(e->modifiers()));
+                                         toWeb(e->buttons()) | toWeb(e->modifiers()), base::DoNothing());
     waitForUpdateDragActionCalled();
     return toQt(ui::mojom::DragOperation(m_currentDropAction));
 }
@@ -1729,7 +1741,7 @@ void WebContentsAdapter::endDragging(QDropEvent *e, const QPointF &screenPos)
     m_lastDragClientPos = e->position();
     m_lastDragScreenPos = screenPos;
     rvh->GetWidget()->DragTargetDrop(*m_currentDropData, toGfx(m_lastDragClientPos), toGfx(m_lastDragScreenPos),
-                                     toWeb(e->buttons()) | toWeb(e->modifiers()));
+                                     toWeb(e->buttons()) | toWeb(e->modifiers()), base::DoNothing());
 
     m_currentDropData.reset();
 }
@@ -1773,7 +1785,7 @@ void WebContentsAdapter::resetSelection()
     if (auto rwhv = static_cast<RenderWidgetHostViewQt *>(m_webContents->GetRenderWidgetHostView())) {
         if (auto mgr = rwhv->GetTextInputManager())
             if (auto selection = const_cast<content::TextInputManager::TextSelection *>(mgr->GetTextSelection(rwhv)))
-                selection->SetSelection(base::string16(), 0, gfx::Range(), false);
+                selection->SetSelection(std::u16string(), 0, gfx::Range(), false);
     }
 }
 
@@ -2044,7 +2056,7 @@ void WebContentsAdapter::undiscard()
     Q_ASSERT(rvh);
     if (!rvh->IsRenderViewLive())
         static_cast<content::WebContentsImpl *>(m_webContents.get())
-                ->CreateRenderViewForRenderManager(rvh, base::nullopt, nullptr);
+                ->CreateRenderViewForRenderManager(rvh, absl::nullopt, nullptr);
     m_webContentsDelegate->RenderViewHostChanged(nullptr, rvh);
     m_adapterClient->initializationFinished();
     m_adapterClient->selectionChanged();

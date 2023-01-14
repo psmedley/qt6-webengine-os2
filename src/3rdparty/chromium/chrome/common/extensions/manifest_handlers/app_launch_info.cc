@@ -15,6 +15,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "components/cloud_devices/common/cloud_devices_urls.h"
+#include "components/services/app_service/public/mojom/types.mojom-shared.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_constants.h"
@@ -31,8 +32,8 @@ bool ReadLaunchDimension(const extensions::Manifest* manifest,
                          const char* key,
                          int* target,
                          bool is_valid_container,
-                         base::string16* error) {
-  const base::Value* temp = NULL;
+                         std::u16string* error) {
+  const base::Value* temp = nullptr;
   if (manifest->Get(key, &temp)) {
     if (!is_valid_container) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
@@ -40,13 +41,14 @@ bool ReadLaunchDimension(const extensions::Manifest* manifest,
           key);
       return false;
     }
-    if (!temp->GetAsInteger(target) || *target < 0) {
+    if (!temp->is_int() || temp->GetInt() < 0) {
       *target = 0;
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidLaunchValue,
           key);
       return false;
     }
+    *target = temp->GetInt();
   }
   return true;
 }
@@ -95,8 +97,7 @@ const std::string& AppLaunchInfo::GetLaunchLocalPath(
 }
 
 // static
-const GURL& AppLaunchInfo::GetLaunchWebURL(
-    const Extension* extension) {
+const GURL& AppLaunchInfo::GetLaunchWebURL(const Extension* extension) {
   return GetAppLaunchInfo(extension).launch_web_url_;
 }
 
@@ -125,36 +126,36 @@ GURL AppLaunchInfo::GetFullLaunchURL(const Extension* extension) {
     return extension->url().Resolve(info.launch_local_path_);
 }
 
-bool AppLaunchInfo::Parse(Extension* extension, base::string16* error) {
+bool AppLaunchInfo::Parse(Extension* extension, std::u16string* error) {
   if (!LoadLaunchURL(extension, error) ||
       !LoadLaunchContainer(extension, error))
     return false;
   return true;
 }
 
-bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
+bool AppLaunchInfo::LoadLaunchURL(Extension* extension, std::u16string* error) {
   const base::Value* temp = NULL;
 
   // Launch URL can be either local (to chrome-extension:// root) or an absolute
   // web URL.
   if (extension->manifest()->Get(keys::kLaunchLocalPath, &temp)) {
     if (extension->manifest()->Get(keys::kLaunchWebURL, NULL)) {
-      *error = base::ASCIIToUTF16(errors::kLaunchPathAndURLAreExclusive);
+      *error = errors::kLaunchPathAndURLAreExclusive;
       return false;
     }
 
     if (extension->manifest()->Get(keys::kWebURLs, NULL)) {
-      *error = base::ASCIIToUTF16(errors::kLaunchPathAndExtentAreExclusive);
+      *error = errors::kLaunchPathAndExtentAreExclusive;
       return false;
     }
 
-    std::string launch_path;
-    if (!temp->GetAsString(&launch_path)) {
+    if (!temp->is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidLaunchValue,
           keys::kLaunchLocalPath);
       return false;
     }
+    const std::string launch_path = temp->GetString();
 
     // Ensure the launch path is a valid relative URL.
     GURL resolved = extension->url().Resolve(launch_path);
@@ -167,8 +168,7 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
 
     launch_local_path_ = launch_path;
   } else if (extension->manifest()->Get(keys::kLaunchWebURL, &temp)) {
-    std::string launch_url;
-    if (!temp->GetAsString(&launch_url)) {
+    if (!temp->is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidLaunchValue,
           keys::kLaunchWebURL);
@@ -180,7 +180,7 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
                                                    keys::kLaunchWebURL);
     };
     // Ensure the launch web URL is a valid absolute URL and web extent scheme.
-    GURL url(launch_url);
+    GURL url(temp->GetString());
     if (!url.is_valid()) {
       set_launch_web_url_error();
       return false;
@@ -193,7 +193,8 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
         set_launch_web_url_error();
         return false;
       }
-    } else if (extension->location() != Manifest::EXTERNAL_COMPONENT) {
+    } else if (extension->location() !=
+               mojom::ManifestLocation::kExternalComponent) {
       // For non-component Bookmark Apps we only accept
       // kValidBookmarkAppSchemes.
       URLPattern pattern(Extension::kValidBookmarkAppSchemes);
@@ -210,7 +211,7 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
 
     launch_web_url_ = url;
   } else if (extension->is_legacy_packaged_app()) {
-    *error = base::ASCIIToUTF16(errors::kLaunchURLRequired);
+    *error = errors::kLaunchURLRequired;
     return false;
   }
 
@@ -264,24 +265,25 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
 }
 
 bool AppLaunchInfo::LoadLaunchContainer(Extension* extension,
-                                        base::string16* error) {
+                                        std::u16string* error) {
   const base::Value* tmp_launcher_container = NULL;
   if (!extension->manifest()->Get(keys::kLaunchContainer,
                                   &tmp_launcher_container))
     return true;
 
-  std::string launch_container_string;
-  if (!tmp_launcher_container->GetAsString(&launch_container_string)) {
-    *error = base::ASCIIToUTF16(errors::kInvalidLaunchContainer);
+  if (!tmp_launcher_container->is_string()) {
+    *error = errors::kInvalidLaunchContainer;
     return false;
   }
+  const std::string launch_container_string =
+      tmp_launcher_container->GetString();
 
   if (launch_container_string == values::kLaunchContainerPanelDeprecated) {
     launch_container_ = LaunchContainer::kLaunchContainerPanelDeprecated;
   } else if (launch_container_string == values::kLaunchContainerTab) {
     launch_container_ = LaunchContainer::kLaunchContainerTab;
   } else {
-    *error = base::ASCIIToUTF16(errors::kInvalidLaunchContainer);
+    *error = errors::kInvalidLaunchContainer;
     return false;
   }
 
@@ -342,7 +344,7 @@ AppLaunchManifestHandler::~AppLaunchManifestHandler() {
 }
 
 bool AppLaunchManifestHandler::Parse(Extension* extension,
-                                     base::string16* error) {
+                                     std::u16string* error) {
   std::unique_ptr<AppLaunchInfo> info(new AppLaunchInfo);
   if (!info->Parse(extension, error))
     return false;

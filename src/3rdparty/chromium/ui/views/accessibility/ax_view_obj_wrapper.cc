@@ -27,11 +27,13 @@ AXViewObjWrapper::AXViewObjWrapper(AXAuraObjCache* aura_obj_cache, View* view)
 AXViewObjWrapper::~AXViewObjWrapper() = default;
 
 AXAuraObjWrapper* AXViewObjWrapper::GetParent() {
-  if (!view_)
-    return nullptr;
+  if (view_->parent()) {
+    if (view_->parent()->GetViewAccessibility().GetChildTreeID() !=
+        ui::AXTreeIDUnknown())
+      return nullptr;
 
-  if (view_->parent())
     return aura_obj_cache_->GetOrCreate(view_->parent());
+  }
 
   if (view_->GetWidget())
     return aura_obj_cache_->GetOrCreate(view_->GetWidget());
@@ -41,10 +43,12 @@ AXAuraObjWrapper* AXViewObjWrapper::GetParent() {
 
 void AXViewObjWrapper::GetChildren(
     std::vector<AXAuraObjWrapper*>* out_children) {
-  if (!view_)
+  const ViewAccessibility& view_accessibility = view_->GetViewAccessibility();
+
+  // Ignore this view's descendants if it has a child tree.
+  if (view_accessibility.GetChildTreeID() != ui::AXTreeIDUnknown())
     return;
 
-  const ViewAccessibility& view_accessibility = view_->GetViewAccessibility();
   if (view_accessibility.IsLeaf())
     return;
 
@@ -59,9 +63,6 @@ void AXViewObjWrapper::GetChildren(
 }
 
 void AXViewObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
-  if (!view_)
-    return;
-
   ViewAccessibility& view_accessibility = view_->GetViewAccessibility();
   view_accessibility.GetAccessibleNodeData(out_node_data);
 
@@ -79,21 +80,22 @@ void AXViewObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
 }
 
 ui::AXNodeID AXViewObjWrapper::GetUniqueId() const {
-  return view_ ? view_->GetViewAccessibility().GetUniqueId()
-               : ui::kInvalidAXNodeID;
+  return view_->GetViewAccessibility().GetUniqueId();
 }
 
 bool AXViewObjWrapper::HandleAccessibleAction(const ui::AXActionData& action) {
-  return view_ ? view_->HandleAccessibleAction(action) : false;
+  return view_->HandleAccessibleAction(action);
 }
 
 std::string AXViewObjWrapper::ToString() const {
-  return std::string(view_ ? view_->GetClassName() : "Null view");
+  return std::string(view_->GetClassName());
 }
 
 void AXViewObjWrapper::OnViewIsDeleting(View* observed_view) {
+  DCHECK_EQ(view_, observed_view);
   observation_.Reset();
-  view_ = nullptr;
+  // Remove() deletes |this|, so this should be the last line in the function.
+  aura_obj_cache_->Remove(observed_view);
 }
 
 }  // namespace views

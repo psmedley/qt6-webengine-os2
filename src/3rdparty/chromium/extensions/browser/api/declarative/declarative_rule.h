@@ -19,7 +19,6 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "components/url_matcher/url_matcher.h"
 #include "extensions/common/api/events.h"
@@ -373,7 +372,7 @@ DeclarativeActionSet<ActionT>::Create(content::BrowserContext* browser_context,
     scoped_refptr<const ActionT> action =
         ActionT::Create(browser_context, extension, *value, error, bad_message);
     if (!error->empty() || *bad_message)
-      return std::unique_ptr<DeclarativeActionSet>();
+      return nullptr;
     result.push_back(action);
   }
 

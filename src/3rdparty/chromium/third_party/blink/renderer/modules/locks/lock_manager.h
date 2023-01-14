@@ -6,10 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_LOCKS_LOCK_MANAGER_H_
 
 #include "base/macros.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/feature_observer/feature_observer.mojom-blink.h"
 #include "third_party/blink/public/mojom/locks/lock_manager.mojom-blink-forward.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_string_sequence.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_lock_options.h"
 #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
 #include "third_party/blink/renderer/modules/locks/lock.h"
@@ -83,14 +82,10 @@ class LockManager final : public ScriptWrappable,
   HeapHashSet<Member<LockRequestImpl>> pending_requests_;
   HeapHashSet<Member<Lock>> held_locks_;
 
-  HeapMojoRemote<mojom::blink::LockManager,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      service_;
-  HeapMojoRemote<mojom::blink::FeatureObserver,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      observer_;
+  HeapMojoRemote<mojom::blink::LockManager> service_;
+  HeapMojoRemote<mojom::blink::FeatureObserver> observer_;
 
-  base::Optional<bool> cached_allowed_;
+  absl::optional<bool> cached_allowed_;
 
   DISALLOW_COPY_AND_ASSIGN(LockManager);
 };

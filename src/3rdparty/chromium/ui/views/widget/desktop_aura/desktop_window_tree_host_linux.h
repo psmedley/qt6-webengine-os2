@@ -24,7 +24,9 @@ class ScopedWindowTargeter;
 }  // namespace aura
 
 namespace ui {
+class DeskExtension;
 class X11Extension;
+class WaylandExtension;
 }  // namespace ui
 
 namespace views {
@@ -50,6 +52,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostLinux
   // internal list of open windows.
   static void CleanUpWindowList(void (*func)(aura::Window* window));
 
+  // Casts from a base WindowTreeHost instance.
+  static DesktopWindowTreeHostLinux* From(WindowTreeHost* wth);
+
   // Returns the current bounds in terms of the X11 Root Window including the
   // borders provided by the window manager (if any). Not in use for Wayland.
   gfx::Rect GetXRootWindowOuterBounds() const;
@@ -65,6 +70,12 @@ class VIEWS_EXPORT DesktopWindowTreeHostLinux
 
   // Disables event listening to make |dialog| modal.
   base::OnceClosure DisableEventListening();
+
+  ui::WaylandExtension* GetWaylandExtension();
+  const ui::WaylandExtension* GetWaylandExtension() const;
+
+  ui::DeskExtension* GetDeskExtension();
+  const ui::DeskExtension* GetDeskExtension() const;
 
  protected:
   // Overridden from DesktopWindowTreeHost:
@@ -108,7 +119,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostLinux
 #if BUILDFLAG(USE_ATK)
   bool OnAtkKeyEvent(AtkKeyEventStruct* atk_key_event, bool transient) override;
 #endif
-  bool IsOverrideRedirect(bool is_tiling_wm) const override;
+  bool IsOverrideRedirect() const override;
 
   // Enables event listening after closing |dialog|.
   void EnableEventListening();

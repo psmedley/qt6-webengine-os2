@@ -56,6 +56,17 @@ static void ValidateStateHelper(const FunctionsGL *functions,
 
 }  // anonymous namespace
 
+VertexArrayStateGL::VertexArrayStateGL(size_t maxAttribs, size_t maxBindings)
+    : attributes(std::min<size_t>(maxAttribs, gl::MAX_VERTEX_ATTRIBS)),
+      bindings(std::min<size_t>(maxBindings, gl::MAX_VERTEX_ATTRIBS))
+{
+    // Set the cached vertex attribute array and vertex attribute binding array size
+    for (GLuint i = 0; i < attributes.size(); i++)
+    {
+        attributes[i].bindingIndex = i;
+    }
+}
+
 StateManagerGL::IndexedBufferBinding::IndexedBufferBinding() : offset(0), size(0), buffer(0) {}
 
 StateManagerGL::StateManagerGL(const FunctionsGL *functions,
@@ -67,6 +78,8 @@ StateManagerGL::StateManagerGL(const FunctionsGL *functions,
       mProgram(0),
       mVAO(0),
       mVertexAttribCurrentValues(rendererCaps.maxVertexAttributes),
+      mDefaultVAOState(rendererCaps.maxVertexAttributes, rendererCaps.maxVertexAttribBindings),
+      mVAOState(&mDefaultVAOState),
       mBuffers(),
       mIndexedBuffers(),
       mTextureUnitIndex(0),
@@ -135,6 +148,8 @@ StateManagerGL::StateManagerGL(const FunctionsGL *functions,
       mClearStencil(0),
       mFramebufferSRGBAvailable(extensions.sRGBWriteControl),
       mFramebufferSRGBEnabled(false),
+      mHasSeparateFramebufferBindings(mFunctions->isAtLeastGL(gl::Version(3, 0)) ||
+                                      mFunctions->isAtLeastGLES(gl::Version(3, 0))),
       mDitherEnabled(true),
       mTextureCubemapSeamlessEnabled(false),
       mMultisamplingEnabled(true),
@@ -180,9 +195,26 @@ StateManagerGL::StateManagerGL(const FunctionsGL *functions,
         mFunctions->primitiveRestartIndex(primitiveRestartIndex);
         mPrimitiveRestartIndex = primitiveRestartIndex;
     }
+
+    // It's possible we've enabled the emulated VAO feature for testing but we're on a core profile.
+    // Use a generated VAO as the default VAO so we can still test.
+    if (features.syncVertexArraysToDefault.enabled &&
+        !nativegl::CanUseDefaultVertexArrayObject(mFunctions))
+    {
+        ASSERT(nativegl::SupportsVertexArrayObjects(mFunctions));
+        mFunctions->genVertexArrays(1, &mDefaultVAO);
+        mFunctions->bindVertexArray(mDefaultVAO);
+        mVAO = mDefaultVAO;
+    }
 }
 
-StateManagerGL::~StateManagerGL() {}
+StateManagerGL::~StateManagerGL()
+{
+    if (mDefaultVAO != 0)
+    {
+        mFunctions->deleteVertexArrays(1, &mDefaultVAO);
+    }
+}
 
 void StateManagerGL::deleteProgram(GLuint program)
 {
@@ -203,7 +235,7 @@ void StateManagerGL::deleteVertexArray(GLuint vao)
     {
         if (mVAO == vao)
         {
-            bindVertexArray(0, 0);
+            bindVertexArray(0, &mDefaultVAOState);
         }
         mFunctions->deleteVertexArrays(1, &vao);
     }
@@ -279,6 +311,22 @@ void StateManagerGL::deleteBuffer(GLuint buffer)
         }
     }
 
+    if (mVAOState)
+    {
+        if (mVAOState->elementArrayBuffer == buffer)
+        {
+            mVAOState->elementArrayBuffer = 0;
+        }
+
+        for (VertexBindingGL &binding : mVAOState->bindings)
+        {
+            if (binding.buffer == buffer)
+            {
+                binding.buffer = 0;
+            }
+        }
+    }
+
     mFunctions->deleteBuffers(1, &buffer);
 }
 
@@ -286,13 +334,25 @@ void StateManagerGL::deleteFramebuffer(GLuint fbo)
 {
     if (fbo != 0)
     {
-        for (size_t binding = 0; binding < mFramebuffers.size(); ++binding)
+        if (mHasSeparateFramebufferBindings)
         {
-            if (mFramebuffers[binding] == fbo)
+            for (size_t binding = 0; binding < mFramebuffers.size(); ++binding)
             {
-                GLenum enumValue = angle::FramebufferBindingToEnum(
-                    static_cast<angle::FramebufferBinding>(binding));
-                bindFramebuffer(enumValue, 0);
+                if (mFramebuffers[binding] == fbo)
+                {
+                    GLenum enumValue = angle::FramebufferBindingToEnum(
+                        static_cast<angle::FramebufferBinding>(binding));
+                    bindFramebuffer(enumValue, 0);
+                }
+            }
+        }
+        else
+        {
+            ASSERT(mFramebuffers[angle::FramebufferBindingRead] ==
+                   mFramebuffers[angle::FramebufferBindingDraw]);
+            if (mFramebuffers[angle::FramebufferBindingRead] == fbo)
+            {
+                bindFramebuffer(GL_FRAMEBUFFER, 0);
             }
         }
         mFunctions->deleteFramebuffers(1, &fbo);
@@ -346,12 +406,17 @@ void StateManagerGL::forceUseProgram(GLuint program)
     mLocalDirtyBits.set(gl::State::DIRTY_BIT_PROGRAM_BINDING);
 }
 
-void StateManagerGL::bindVertexArray(GLuint vao, GLuint elementArrayBuffer)
+void StateManagerGL::bindVertexArray(GLuint vao, VertexArrayStateGL *vaoState)
 {
+    ASSERT(vaoState);
     if (mVAO != vao)
     {
+        ASSERT(!mFeatures.syncVertexArraysToDefault.enabled);
+
         mVAO                                      = vao;
-        mBuffers[gl::BufferBinding::ElementArray] = elementArrayBuffer;
+        mVAOState                                 = vaoState;
+        mBuffers[gl::BufferBinding::ElementArray] = vaoState ? vaoState->elementArrayBuffer : 0;
+
         mFunctions->bindVertexArray(vao);
 
         mLocalDirtyBits.set(gl::State::DIRTY_BIT_VERTEX_ARRAY_BINDING);
@@ -592,6 +657,7 @@ angle::Result StateManagerGL::setPixelPackBuffer(const gl::Context *context,
 
 void StateManagerGL::bindFramebuffer(GLenum type, GLuint framebuffer)
 {
+    bool framebufferChanged = false;
     switch (type)
     {
         case GL_FRAMEBUFFER:
@@ -604,32 +670,45 @@ void StateManagerGL::bindFramebuffer(GLenum type, GLuint framebuffer)
 
                 mLocalDirtyBits.set(gl::State::DIRTY_BIT_READ_FRAMEBUFFER_BINDING);
                 mLocalDirtyBits.set(gl::State::DIRTY_BIT_DRAW_FRAMEBUFFER_BINDING);
+
+                framebufferChanged = true;
             }
             break;
 
         case GL_READ_FRAMEBUFFER:
+            ASSERT(mHasSeparateFramebufferBindings);
             if (mFramebuffers[angle::FramebufferBindingRead] != framebuffer)
             {
                 mFramebuffers[angle::FramebufferBindingRead] = framebuffer;
                 mFunctions->bindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
 
                 mLocalDirtyBits.set(gl::State::DIRTY_BIT_READ_FRAMEBUFFER_BINDING);
+
+                framebufferChanged = true;
             }
             break;
 
         case GL_DRAW_FRAMEBUFFER:
+            ASSERT(mHasSeparateFramebufferBindings);
             if (mFramebuffers[angle::FramebufferBindingDraw] != framebuffer)
             {
                 mFramebuffers[angle::FramebufferBindingDraw] = framebuffer;
                 mFunctions->bindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
 
                 mLocalDirtyBits.set(gl::State::DIRTY_BIT_DRAW_FRAMEBUFFER_BINDING);
+
+                framebufferChanged = true;
             }
             break;
 
         default:
             UNREACHABLE();
             break;
+    }
+
+    if (framebufferChanged && mFeatures.flushOnFramebufferChange.enabled)
+    {
+        mFunctions->flush();
     }
 }
 
@@ -1901,7 +1980,9 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
                     continue;
 
                 FramebufferGL *framebufferGL = GetImplAs<FramebufferGL>(framebuffer);
-                bindFramebuffer(GL_READ_FRAMEBUFFER, framebufferGL->getFramebufferID());
+                bindFramebuffer(
+                    mHasSeparateFramebufferBindings ? GL_READ_FRAMEBUFFER : GL_FRAMEBUFFER,
+                    framebufferGL->getFramebufferID());
                 break;
             }
             case gl::State::DIRTY_BIT_DRAW_FRAMEBUFFER_BINDING:
@@ -1913,7 +1994,9 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
                     continue;
 
                 FramebufferGL *framebufferGL = GetImplAs<FramebufferGL>(framebuffer);
-                bindFramebuffer(GL_DRAW_FRAMEBUFFER, framebufferGL->getFramebufferID());
+                bindFramebuffer(
+                    mHasSeparateFramebufferBindings ? GL_DRAW_FRAMEBUFFER : GL_FRAMEBUFFER,
+                    framebufferGL->getFramebufferID());
 
                 const gl::Program *program = state.getProgram();
                 if (program)
@@ -1922,10 +2005,7 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
                 }
 
                 // Changing the draw framebuffer binding sometimes requires resetting srgb blending.
-                if (mFunctions->standard == STANDARD_GL_DESKTOP)
-                {
-                    iter.setLaterBit(gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB);
-                }
+                iter.setLaterBit(gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE);
 
                 // If the framebuffer is emulating RGB on top of RGBA, the color mask has to be
                 // updated
@@ -1937,11 +2017,37 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
                 break;
             case gl::State::DIRTY_BIT_VERTEX_ARRAY_BINDING:
             {
-                const VertexArrayGL *vaoGL = GetImplAs<VertexArrayGL>(state.getVertexArray());
-                bindVertexArray(vaoGL->getVertexArrayID(), vaoGL->getAppliedElementArrayBufferID());
+                VertexArrayGL *vaoGL = GetImplAs<VertexArrayGL>(state.getVertexArray());
+                bindVertexArray(vaoGL->getVertexArrayID(), vaoGL->getNativeState());
 
                 propagateProgramToVAO(context, state.getProgram(),
                                       GetImplAs<VertexArrayGL>(state.getVertexArray()));
+
+                if (mFeatures.syncVertexArraysToDefault.enabled)
+                {
+                    // Re-sync the vertex array because all frontend VAOs share the same backend
+                    // state. Only sync bits that can be set in ES2.0 or 3.0
+                    gl::VertexArray::DirtyBits dirtyBits;
+                    gl::VertexArray::DirtyAttribBitsArray dirtyAttribBits;
+                    gl::VertexArray::DirtyBindingBitsArray dirtBindingBits;
+
+                    dirtyBits.set(gl::VertexArray::DIRTY_BIT_ELEMENT_ARRAY_BUFFER);
+                    for (size_t attrib = 0; attrib < mDefaultVAOState.attributes.size(); attrib++)
+                    {
+                        dirtyBits.set(gl::VertexArray::DIRTY_BIT_ATTRIB_0 + attrib);
+                        dirtyAttribBits[attrib].set(gl::VertexArray::DIRTY_ATTRIB_ENABLED);
+                        dirtyAttribBits[attrib].set(gl::VertexArray::DIRTY_ATTRIB_POINTER);
+                        dirtyAttribBits[attrib].set(gl::VertexArray::DIRTY_ATTRIB_POINTER_BUFFER);
+                    }
+                    for (size_t binding = 0; binding < mDefaultVAOState.bindings.size(); binding++)
+                    {
+                        dirtyBits.set(gl::VertexArray::DIRTY_BIT_BINDING_0 + binding);
+                        dirtBindingBits[binding].set(gl::VertexArray::DIRTY_BINDING_DIVISOR);
+                    }
+
+                    ANGLE_TRY(
+                        vaoGL->syncState(context, dirtyBits, &dirtyAttribBits, &dirtBindingBits));
+                }
                 break;
             }
             case gl::State::DIRTY_BIT_DRAW_INDIRECT_BUFFER_BINDING:
@@ -2033,7 +2139,7 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
             case gl::State::DIRTY_BIT_COVERAGE_MODULATION:
                 setCoverageModulation(state.getCoverageModulation());
                 break;
-            case gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB:
+            case gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE:
                 setFramebufferSRGBEnabledForFramebuffer(
                     context, state.getFramebufferSRGB(),
                     GetImplAs<FramebufferGL>(state.getDrawFramebuffer()));
@@ -2108,7 +2214,7 @@ void StateManagerGL::setFramebufferSRGBEnabled(const gl::Context *context, bool 
         {
             mFunctions->disable(GL_FRAMEBUFFER_SRGB);
         }
-        mLocalDirtyBits.set(gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB);
+        mLocalDirtyBits.set(gl::State::DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE);
     }
 }
 
@@ -2116,10 +2222,10 @@ void StateManagerGL::setFramebufferSRGBEnabledForFramebuffer(const gl::Context *
                                                              bool enabled,
                                                              const FramebufferGL *framebuffer)
 {
-    if (mFunctions->standard == STANDARD_GL_DESKTOP && framebuffer->isDefault())
+    if (framebuffer->isDefault())
     {
         // Obey the framebuffer sRGB state for blending on all framebuffers except the default
-        // framebuffer on Desktop OpenGL.
+        // framebuffer.
         // When SRGB blending is enabled, only SRGB capable formats will use it but the default
         // framebuffer will always use it if it is enabled.
         // TODO(geofflang): Update this when the framebuffer binding dirty changes, when it exists.
@@ -2400,6 +2506,16 @@ void StateManagerGL::syncTransformFeedbackState(const gl::Context *context)
         bindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
         mCurrentTransformFeedback = nullptr;
     }
+}
+
+GLuint StateManagerGL::getDefaultVAO() const
+{
+    return mDefaultVAO;
+}
+
+VertexArrayStateGL *StateManagerGL::getDefaultVAOState()
+{
+    return &mDefaultVAOState;
 }
 
 void StateManagerGL::validateState() const
@@ -3048,6 +3164,11 @@ void StateManagerGL::restoreVertexArraysNativeContext(const gl::Extensions &exte
                                                       const ExternalContextState *state)
 {
     bindVertexArray(state->vertexArrayBinding, 0);
+}
+
+void StateManagerGL::setDefaultVAOStateDirty()
+{
+    mLocalDirtyBits.set(gl::State::DIRTY_BIT_VERTEX_ARRAY_BINDING);
 }
 
 }  // namespace rx

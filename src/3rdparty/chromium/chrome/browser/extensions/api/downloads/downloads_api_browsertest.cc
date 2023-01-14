@@ -7,16 +7,18 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/scoped_observation.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
@@ -48,7 +50,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
@@ -61,16 +62,15 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/notification_types.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "net/base/data_url.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/network/public/cpp/features.h"
 #include "storage/browser/file_system/file_system_context.h"
 #include "storage/browser/file_system/file_system_operation_runner.h"
 #include "storage/browser/file_system/file_system_url.h"
-#include "third_party/blink/public/common/features.h"
 #include "ui/base/page_transition_types.h"
 #include "url/origin.h"
 
@@ -114,20 +114,12 @@ void OnOpenPromptCreated(download::DownloadItem* item,
                      base::Unretained(prompt)));
 }
 
-class DownloadsEventsListener : public content::NotificationObserver {
+class DownloadsEventsListener : public EventRouter::TestObserver {
  public:
-  DownloadsEventsListener()
-    : waiting_(false) {
-    registrar_.Add(this,
-                   extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
-                   content::NotificationService::AllSources());
-  }
+  explicit DownloadsEventsListener(Profile* profile)
+      : waiting_(false), profile_(profile) {}
 
-  ~DownloadsEventsListener() override {
-    registrar_.Remove(this,
-                      extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
-                      content::NotificationService::AllSources());
-  }
+  ~DownloadsEventsListener() override = default;
 
   void ClearEvents() { events_.clear(); }
 
@@ -135,12 +127,11 @@ class DownloadsEventsListener : public content::NotificationObserver {
    public:
     Event(Profile* profile,
           const std::string& event_name,
-          const std::string& json_args,
+          const base::Value& args,
           base::Time caught)
         : profile_(profile),
           event_name_(event_name),
-          json_args_(json_args),
-          args_(base::JSONReader::ReadDeprecated(json_args).release()),
+          args_(args.Clone()),
           caught_(caught) {}
 
     const base::Time& caught() { return caught_; }
@@ -150,95 +141,83 @@ class DownloadsEventsListener : public content::NotificationObserver {
     }
 
     bool SatisfiedBy(const Event& other) const {
-      if ((profile_ != other.profile_) ||
+      // Only match profile iff restrict_to_browser_context is non-null when
+      // the event is dispatched from
+      // ExtensionDownloadsEventRouter::DispatchEvent. Event names always have
+      // to match.
+      if ((profile_ && other.profile_ && profile_ != other.profile_) ||
           (event_name_ != other.event_name_))
         return false;
+
       if (((event_name_ == downloads::OnDeterminingFilename::kEventName) ||
            (event_name_ == downloads::OnCreated::kEventName) ||
-           (event_name_ == downloads::OnChanged::kEventName)) &&
-          args_.get() && other.args_.get()) {
-        base::ListValue* left_list = NULL;
-        base::DictionaryValue* left_dict = NULL;
-        base::ListValue* right_list = NULL;
-        base::DictionaryValue* right_dict = NULL;
-        if (!args_->GetAsList(&left_list) ||
-            !other.args_->GetAsList(&right_list) ||
-            !left_list->GetDictionary(0, &left_dict) ||
-            !right_list->GetDictionary(0, &right_dict))
+           (event_name_ == downloads::OnChanged::kEventName))) {
+        // We expect a non-empty list for these events.
+        if (!args_.is_list() || !other.args_.is_list() ||
+            args_.GetList().empty() || other.args_.GetList().empty())
           return false;
-        for (base::DictionaryValue::Iterator iter(*left_dict);
-             !iter.IsAtEnd(); iter.Advance()) {
-          base::Value* right_value = NULL;
-          if (!right_dict->HasKey(iter.key()) ||
-              (right_dict->Get(iter.key(), &right_value) &&
-               !iter.value().Equals(right_value))) {
+        const base::Value& left_dict = args_.GetList()[0];
+        const base::Value& right_dict = other.args_.GetList()[0];
+        if (!left_dict.is_dict() || !right_dict.is_dict())
+          return false;
+        // Expect that all keys present in both dictionaries are equal. If a key
+        // is only present in one of the dictionaries, ignore it. This allows us
+        // to verify the properties we care about in the test without needing to
+        // specify each.
+        for (auto it : left_dict.DictItems()) {
+          const base::Value* right_value = right_dict.FindKey(it.first);
+          if (!right_value || *right_value != it.second)
             return false;
-          }
         }
         return true;
-      } else if ((event_name_ == downloads::OnErased::kEventName) &&
-                 args_.get() && other.args_.get()) {
-        int my_id = -1, other_id = -1;
-        return (args_->GetAsInteger(&my_id) &&
-                other.args_->GetAsInteger(&other_id) &&
-                my_id == other_id);
       }
-      return json_args_ == other.json_args_;
+      return args_ == other.args_;
     }
 
     std::string Debug() {
-      return base::StringPrintf("Event(%p, %s, %s, %f)",
-                                profile_,
-                                event_name_.c_str(),
-                                json_args_.c_str(),
-                                caught_.ToJsTime());
+      return base::StringPrintf("Event(%p, %s, %f)", profile_,
+                                event_name_.c_str(), caught_.ToJsTime());
     }
 
    private:
     Profile* profile_;
     std::string event_name_;
     std::string json_args_;
-    std::unique_ptr<base::Value> args_;
+    base::Value args_;
     base::Time caught_;
 
     DISALLOW_COPY_AND_ASSIGN(Event);
   };
 
-  typedef ExtensionDownloadsEventRouter::DownloadsNotificationSource
-    DownloadsNotificationSource;
+  // extensions::EventRouter::TestObserver:
+  void OnWillDispatchEvent(const extensions::Event& event) override {
+    // TestObserver receives notifications for all events but only needs to
+    // check download events.
+    if (!base::StartsWith(event.event_name, "downloads"))
+      return;
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    switch (type) {
-      case extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT: {
-          DownloadsNotificationSource* dns =
-              content::Source<DownloadsNotificationSource>(source).ptr();
-          Event* new_event = new Event(
-              dns->profile, dns->event_name,
-              *content::Details<std::string>(details).ptr(), base::Time::Now());
-          events_.push_back(base::WrapUnique(new_event));
-          if (waiting_ &&
-              waiting_for_.get() &&
-              new_event->Satisfies(*waiting_for_)) {
-            waiting_ = false;
-            base::RunLoop::QuitCurrentWhenIdleDeprecated();
-          }
-          break;
-        }
-      default:
-        NOTREACHED();
+    Event* new_event = new Event(
+        Profile::FromBrowserContext(event.restrict_to_browser_context),
+        event.event_name, *event.event_args.get(), base::Time::Now());
+    events_.push_back(base::WrapUnique(new_event));
+    if (waiting_ && waiting_for_.get() && new_event->Satisfies(*waiting_for_)) {
+      waiting_ = false;
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
     }
   }
+
+  // extensions::EventRouter::TestObserver:
+  void OnDidDispatchEventToProcess(const extensions::Event& event) override {}
 
   bool WaitFor(Profile* profile,
                const std::string& event_name,
                const std::string& json_args) {
-    waiting_for_.reset(new Event(profile, event_name, json_args, base::Time()));
+    base::Value args = base::JSONReader::Read(json_args).value();
+    waiting_for_ =
+        std::make_unique<Event>(profile, event_name, args, base::Time());
     for (const auto& event : events_) {
-      if (event->Satisfies(*waiting_for_)) {
+      if (event->Satisfies(*waiting_for_))
         return true;
-      }
     }
     waiting_ = true;
     content::RunMessageLoop();
@@ -262,14 +241,16 @@ class DownloadsEventsListener : public content::NotificationObserver {
     return success;
   }
 
+  void UpdateProfile(Profile* profile) { profile_ = profile; }
+
   base::circular_deque<std::unique_ptr<Event>>* events() { return &events_; }
 
  private:
   bool waiting_;
   base::Time last_wait_;
   std::unique_ptr<Event> waiting_for_;
-  content::NotificationRegistrar registrar_;
   base::circular_deque<std::unique_ptr<Event>> events_;
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadsEventsListener);
 };
@@ -277,9 +258,8 @@ class DownloadsEventsListener : public content::NotificationObserver {
 // Object waiting for a download open event.
 class DownloadOpenObserver : public download::DownloadItem::Observer {
  public:
-  explicit DownloadOpenObserver(download::DownloadItem* item)
-      : open_observer_(this), item_(item) {
-    open_observer_.Add(item);
+  explicit DownloadOpenObserver(download::DownloadItem* item) : item_(item) {
+    open_observation_.Observe(item);
   }
 
   ~DownloadOpenObserver() override = default;
@@ -300,17 +280,21 @@ class DownloadOpenObserver : public download::DownloadItem::Observer {
   }
 
   void OnDownloadDestroyed(download::DownloadItem* item) override {
-    open_observer_.Remove(item);
+    DCHECK(open_observation_.IsObservingSource(item));
+    open_observation_.Reset();
     item_ = nullptr;
   }
 
-  ScopedObserver<download::DownloadItem, download::DownloadItem::Observer>
-      open_observer_;
+  base::ScopedObservation<download::DownloadItem,
+                          download::DownloadItem::Observer>
+      open_observation_{this};
   download::DownloadItem* item_;
   base::OnceClosure completion_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadOpenObserver);
 };
+
+}  // namespace
 
 class DownloadExtensionTest : public ExtensionApiTest {
  public:
@@ -385,7 +369,11 @@ class DownloadExtensionTest : public ExtensionApiTest {
     GoOnTheRecord();
     current_browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kPromptForDownload, false);
-    events_listener_.reset(new DownloadsEventsListener());
+    // Create event listener using current profile.
+    events_listener_ =
+        std::make_unique<DownloadsEventsListener>(current_browser()->profile());
+    extensions::EventRouter::Get(current_browser()->profile())
+        ->AddObserverForTesting(events_listener());
     // Disable file chooser for current profile.
     DownloadTestFileActivityObserver observer(current_browser()->profile());
     observer.EnableFileChooser(false);
@@ -400,7 +388,18 @@ class DownloadExtensionTest : public ExtensionApiTest {
     host_resolver()->AddRule("*", "127.0.0.1");
   }
 
-  void GoOnTheRecord() { current_browser_ = browser(); }
+  // InProcessBrowserTest
+  void TearDownOnMainThread() override {
+    EventRouter::Get(current_browser()->profile())
+        ->RemoveObserverForTesting(events_listener_.get());
+    ExtensionApiTest::TearDownOnMainThread();
+  }
+
+  void GoOnTheRecord() {
+    current_browser_ = browser();
+    if (events_listener_.get())
+      events_listener_->UpdateProfile(current_browser()->profile());
+  }
 
   void GoOffTheRecord() {
     if (!incognito_browser_) {
@@ -410,6 +409,8 @@ class DownloadExtensionTest : public ExtensionApiTest {
       observer.EnableFileChooser(false);
     }
     current_browser_ = incognito_browser_;
+    if (events_listener_.get())
+      events_listener_->UpdateProfile(current_browser()->profile());
   }
 
   bool WaitFor(const std::string& event_name, const std::string& json_args) {
@@ -460,11 +461,13 @@ class DownloadExtensionTest : public ExtensionApiTest {
   }
 
   DownloadManager* GetOnRecordManager() {
-    return BrowserContext::GetDownloadManager(browser()->profile());
+    return browser()->profile()->GetDownloadManager();
   }
   DownloadManager* GetOffRecordManager() {
-    return BrowserContext::GetDownloadManager(
-        browser()->profile()->GetPrimaryOTRProfile());
+    return browser()
+        ->profile()
+        ->GetPrimaryOTRProfile(/*create_if_needed=*/true)
+        ->GetDownloadManager();
   }
   DownloadManager* GetCurrentManager() {
     return (current_browser_ == incognito_browser_) ?
@@ -506,7 +509,8 @@ class DownloadExtensionTest : public ExtensionApiTest {
                : download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED),
           false,    // opened
           current,  // last_access_time
-          false, std::vector<DownloadItem::ReceivedSlice>());
+          false, std::vector<DownloadItem::ReceivedSlice>(),
+          download::DownloadItemRerouteInfo());
       items->push_back(item);
     }
 
@@ -641,7 +645,11 @@ class DownloadExtensionTest : public ExtensionApiTest {
     std::unique_ptr<base::Value> result(
         RunFunctionAndReturnResult(function, args));
     EXPECT_TRUE(result.get());
-    return result.get() && result->GetAsString(result_string);
+    if (result.get() && result->is_string()) {
+      *result_string = result->GetString();
+      return true;
+    }
+    return false;
   }
 
   std::string DownloadItemIdAsArgList(const DownloadItem* download_item) {
@@ -683,6 +691,8 @@ class DownloadExtensionTest : public ExtensionApiTest {
 
   DISALLOW_COPY_AND_ASSIGN(DownloadExtensionTest);
 };
+
+namespace {
 
 class MockIconExtractorImpl : public DownloadFileIconExtractor {
  public:
@@ -930,7 +940,6 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadExtensionTest_Open) {
   base::Value args_list(base::Value::Type::LIST);
   args_list.Append(static_cast<int>(download_item->GetId()));
   scoped_open->SetArgs(std::move(args_list));
-  scoped_open->set_browser_context(current_browser()->profile());
   scoped_open->set_extension(extension());
   DownloadsOpenFunction::OnPromptCreatedCallback callback =
       base::BindOnce(&OnOpenPromptCreated, base::Unretained(download_item));
@@ -938,7 +947,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadExtensionTest_Open) {
   api_test_utils::SendResponseHelper response_helper(scoped_open.get());
   std::unique_ptr<ExtensionFunctionDispatcher> dispatcher(
       new ExtensionFunctionDispatcher(current_browser()->profile()));
-  scoped_open->set_dispatcher(dispatcher->AsWeakPtr());
+  scoped_open->SetDispatcher(dispatcher->AsWeakPtr());
   scoped_open->RunWithValidation()->Execute();
   response_helper.WaitForResponse();
   EXPECT_TRUE(response_helper.has_response());
@@ -1029,12 +1038,11 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   EXPECT_EQ(0UL, items.size());
   ASSERT_TRUE(result);
   download_item = NULL;
-  base::ListValue* result_list = NULL;
-  ASSERT_TRUE(result->GetAsList(&result_list));
-  ASSERT_EQ(1UL, result_list->GetSize());
-  int element = -1;
-  ASSERT_TRUE(result_list->GetInteger(0, &element));
-  EXPECT_EQ(id, element);
+  ASSERT_TRUE(result->is_list());
+  base::Value::ListView result_list = result->GetList();
+  ASSERT_EQ(1UL, result_list.size());
+  ASSERT_TRUE(result_list[0].is_int());
+  EXPECT_EQ(id, result_list[0].GetInt());
 }
 
 scoped_refptr<ExtensionFunction> MockedGetFileIconFunction(
@@ -1120,9 +1128,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   // Once the download item is deleted, we should return kInvalidId.
   int id = download_item->GetId();
   download_item->Remove();
-  download_item = NULL;
-  EXPECT_EQ(static_cast<DownloadItem*>(NULL),
-            GetCurrentManager()->GetDownload(id));
+  download_item = nullptr;
+  EXPECT_EQ(nullptr, GetCurrentManager()->GetDownload(id));
   error = RunFunctionAndReturnError(new DownloadsGetFileIconFunction(), args32);
   EXPECT_STREQ(errors::kInvalidId,
                error.c_str());
@@ -1450,9 +1457,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_EQ(1UL, result_list->GetSize());
   base::DictionaryValue* item_value = NULL;
   ASSERT_TRUE(result_list->GetDictionary(0, &item_value));
-  base::FilePath::StringType item_name;
+  std::string item_name;
   ASSERT_TRUE(item_value->GetString("filename", &item_name));
-  ASSERT_EQ(items[2]->GetTargetFilePath().value(), item_name);
+  ASSERT_EQ(items[2]->GetTargetFilePath().AsUTF8Unsafe(), item_name);
 }
 
 // Test that incognito downloads are only visible in incognito contexts, and
@@ -1465,7 +1472,7 @@ IN_PROC_BROWSER_TEST_F(
   std::unique_ptr<base::Value> result_value;
   base::ListValue* result_list = NULL;
   base::DictionaryValue* result_dict = NULL;
-  base::FilePath::StringType filename;
+  std::string filename;
   bool is_incognito = false;
   std::string error;
   std::string on_item_arg;
@@ -1498,12 +1505,14 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(result_list->GetDictionary(0, &result_dict));
   ASSERT_TRUE(result_dict->GetString("filename", &filename));
   ASSERT_TRUE(result_dict->GetBoolean("incognito", &is_incognito));
-  EXPECT_TRUE(on_item->GetTargetFilePath() == base::FilePath(filename));
+  EXPECT_TRUE(on_item->GetTargetFilePath() ==
+              base::FilePath::FromUTF8Unsafe(filename));
   EXPECT_FALSE(is_incognito);
   ASSERT_TRUE(result_list->GetDictionary(1, &result_dict));
   ASSERT_TRUE(result_dict->GetString("filename", &filename));
   ASSERT_TRUE(result_dict->GetBoolean("incognito", &is_incognito));
-  EXPECT_TRUE(off_item->GetTargetFilePath() == base::FilePath(filename));
+  EXPECT_TRUE(off_item->GetTargetFilePath() ==
+              base::FilePath::FromUTF8Unsafe(filename));
   EXPECT_TRUE(is_incognito);
 
   // Extensions running in the on-record window should have access only to the
@@ -1516,7 +1525,8 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_EQ(1UL, result_list->GetSize());
   ASSERT_TRUE(result_list->GetDictionary(0, &result_dict));
   ASSERT_TRUE(result_dict->GetString("filename", &filename));
-  EXPECT_TRUE(on_item->GetTargetFilePath() == base::FilePath(filename));
+  EXPECT_TRUE(on_item->GetTargetFilePath() ==
+              base::FilePath::FromUTF8Unsafe(filename));
   ASSERT_TRUE(result_dict->GetBoolean("incognito", &is_incognito));
   EXPECT_FALSE(is_incognito);
 
@@ -1602,8 +1612,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -1653,8 +1663,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.spec().c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -1701,8 +1711,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(GetCurrentManager()->GetBrowserContext()->IsOffTheRecord());
   ASSERT_TRUE(item);
@@ -1803,8 +1813,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.spec().c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -1939,8 +1949,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"sub/dir/ect/ory.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -1987,20 +1997,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       download_url.c_str())).c_str());
 }
 
-class DownloadExtensionTestWithFtp : public DownloadExtensionTest {
- public:
-  DownloadExtensionTestWithFtp() {
-    // DownloadExtensionTest_Download_InvalidURLs2 requires FTP support.
-    // TODO(https://crbug.com/333943): Remove FTP tests and FTP feature flags.
-    scoped_feature_list_.InitAndEnableFeature(blink::features::kFtpProtocol);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
 // Test that downloading invalid URLs immediately returns kInvalidURLError.
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTestWithFtp,
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadExtensionTest_Download_InvalidURLs1) {
   static constexpr const char* kInvalidURLs[] = {
       "foo bar", "../hello",          "/hello",      "http://",
@@ -2018,7 +2016,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTestWithFtp,
 }
 
 // Test various failure modes for downloading invalid URLs.
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTestWithFtp,
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadExtensionTest_Download_InvalidURLs2) {
   LoadExtension("downloads_split");
   GoOnTheRecord();
@@ -2028,7 +2026,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTestWithFtp,
       new DownloadsDownloadFunction(),
       "[{\"url\": \"javascript:document.write(\\\"hello\\\");\"}]"));
   ASSERT_TRUE(result.get());
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ASSERT_TRUE(WaitForInterruption(
@@ -2040,29 +2039,15 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTestWithFtp,
       RunFunctionAndReturnResult(new DownloadsDownloadFunction(),
                                  "[{\"url\": \"javascript:return false;\"}]"));
   ASSERT_TRUE(result.get());
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ASSERT_TRUE(WaitForInterruption(
       item, download::DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST,
       "[{\"state\": \"in_progress\","
       "  \"url\": \"javascript:return false;\"}]"));
-
-  result.reset(RunFunctionAndReturnResult(
-      new DownloadsDownloadFunction(),
-      "[{\"url\": \"ftp://example.com/example.txt\"}]"));
-  ASSERT_TRUE(result.get());
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
-  item = GetCurrentManager()->GetDownload(result_id);
-  ASSERT_TRUE(item);
-  ASSERT_TRUE(WaitForInterruption(
-      item, download::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED,
-      "[{\"state\": \"in_progress\","
-      "  \"url\": \"ftp://example.com/example.txt\"}]"));
 }
-
-// TODO(benjhayden): Set up a test ftp server, add ftp://localhost* to
-// permissions, test downloading from ftp.
 
 // Valid URLs plus fragments are still valid URLs.
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
@@ -2077,8 +2062,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2120,8 +2105,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2156,8 +2141,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
           "[{\"url\": \"%s\",  \"conflictAction\": \"overwrite\"}]",
           download_url.c_str())));
   ASSERT_TRUE(result.get());
-  result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller2(item);
@@ -2201,8 +2186,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"data.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2257,8 +2242,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"file.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2307,8 +2292,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"auth-basic-fail.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2345,8 +2330,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "    {\"name\": \"Qx\", \"value\":\"yo\"}]}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2399,8 +2384,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"headers-fail.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2412,7 +2397,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"incognito\": false,"
                          "  \"bytesReceived\": 0.0,"
                          "  \"fileSize\": 0.0,"
-                         "  \"mime\": \"\","
+                         "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
@@ -2439,8 +2424,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "    \"value\": \"Basic %s\"}]}]",
                          download_url.c_str(), kAuthorization)));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2485,8 +2470,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"body\": \"BODY\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2540,8 +2525,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"post-get.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2551,7 +2536,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       item, download::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
-                         "  \"mime\": \"\","
+                         "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"id\": %d,"
                          "  \"url\": \"%s\"}]",
@@ -2581,8 +2566,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"filename\": \"post-nobody.txt\"}]",
                          download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2592,7 +2577,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       item, download::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
-                         "  \"mime\": \"\","
+                         "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"id\": %d,"
                          "  \"url\": \"%s\"}]",
@@ -2617,8 +2602,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2667,7 +2652,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
   // Setup a file in the filesystem which we can download.
   ASSERT_TRUE(HTML5FileWriter::CreateFileForTesting(
-      BrowserContext::GetDefaultStoragePartition(current_browser()->profile())
+      current_browser()
+          ->profile()
+          ->GetDefaultStoragePartition()
           ->GetFileSystemContext(),
       storage::FileSystemURL::CreateForTest(GURL(download_url)), kPayloadData,
       strlen(kPayloadData)));
@@ -2677,8 +2664,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
 
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
@@ -2727,8 +2714,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2795,8 +2782,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2851,8 +2838,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -2968,8 +2955,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3026,8 +3013,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3099,8 +3086,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3161,8 +3148,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3223,8 +3210,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3292,8 +3279,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3354,8 +3341,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3416,8 +3403,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3478,8 +3465,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3542,8 +3529,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3606,8 +3593,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3657,8 +3644,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(), base::StringPrintf(
           "[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller2(item);
@@ -3722,8 +3709,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3773,8 +3760,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(), base::StringPrintf(
           "[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller2(item);
@@ -3849,8 +3836,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
@@ -3913,8 +3900,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_FALSE(GetCurrentManager()->GetBrowserContext()->IsOffTheRecord());
   ASSERT_TRUE(item);
@@ -3976,8 +3963,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(), base::StringPrintf(
           "[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(GetCurrentManager()->GetBrowserContext()->IsOffTheRecord());
   ASSERT_TRUE(item);
@@ -4054,8 +4041,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_FALSE(GetCurrentManager()->GetBrowserContext()->IsOffTheRecord());
   ASSERT_TRUE(item);
@@ -4117,8 +4104,8 @@ IN_PROC_BROWSER_TEST_F(
       new DownloadsDownloadFunction(), base::StringPrintf(
           "[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  result_id = result->GetInt();
   item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(GetCurrentManager()->GetBrowserContext()->IsOffTheRecord());
   ASSERT_TRUE(item);
@@ -4364,8 +4351,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       "[{\"url\": \"data:application/x-shockwave-flash,\", \"filename\": "
       "\"dangerous.swf\"}]"));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
@@ -4385,7 +4372,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       base::BindOnce(&OnDangerPromptCreated);
   DownloadsAcceptDangerFunction::OnPromptCreatedForTesting(
       &callback);
-  ExtensionActionTestHelper::Create(current_browser())->Press(0);
+  ExtensionActionTestHelper::Create(current_browser())->Press(GetExtensionId());
   observer->WaitForFinished();
 }
 
@@ -4403,8 +4390,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsDownloadFunction(),
       base::StringPrintf("[{\"url\": \"%s\"}]", download_url.c_str())));
   ASSERT_TRUE(result.get());
-  int result_id = -1;
-  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  ASSERT_TRUE(result->is_int());
+  int result_id = result->GetInt();
   DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);

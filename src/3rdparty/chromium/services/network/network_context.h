@@ -20,7 +20,6 @@
 #include "base/containers/flat_set.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -36,6 +35,7 @@
 #include "net/dns/host_resolver.h"
 #include "net/dns/public/dns_config_overrides.h"
 #include "net/http/http_auth_preferences.h"
+#include "net/net_buildflags.h"
 #include "services/network/cors/preflight_controller.h"
 #include "services/network/http_cache_data_counter.h"
 #include "services/network/http_cache_data_remover.h"
@@ -59,6 +59,7 @@
 #include "services/network/socket_factory.h"
 #include "services/network/url_request_context_owner.h"
 #include "services/network/web_bundle_manager.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "crypto/scoped_nss_types.h"
@@ -82,6 +83,7 @@ class URLRequestContext;
 
 namespace certificate_transparency {
 class ChromeRequireCTDelegate;
+class ChromeCTPolicyEnforcer;
 }  // namespace certificate_transparency
 
 namespace domain_reliability {
@@ -100,12 +102,12 @@ class NetworkServiceProxyDelegate;
 class P2PSocketManager;
 class PendingTrustTokenStore;
 class ProxyLookupRequest;
-class QuicTransport;
 class ResourceScheduler;
 class ResourceSchedulerClient;
 class SessionCleanupCookieStore;
 class SQLiteTrustTokenPersister;
 class WebSocketFactory;
+class WebTransport;
 
 namespace cors {
 class CorsURLLoaderFactory;
@@ -210,6 +212,9 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
                            base::OnceClosure done) override;
   void GetStoredTrustTokenCounts(
       GetStoredTrustTokenCountsCallback callback) override;
+  void DeleteStoredTrustTokens(
+      const url::Origin& issuer,
+      DeleteStoredTrustTokensCallback callback) override;
   void ClearNetworkingHistoryBetween(
       base::Time start_time,
       base::Time end_time,
@@ -274,6 +279,9 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const net::SignedCertificateTimestampAndStatusList&
           signed_certificate_timestamps);
   void SetSCTAuditingEnabled(bool enabled) override;
+  void OnCTLogListUpdated(
+      const std::vector<network::mojom::CTLogInfoPtr>& log_list,
+      base::Time update_time);
   bool is_sct_auditing_enabled() { return is_sct_auditing_enabled_; }
 #endif  // BUILDFLAG(IS_CT_SUPPORTED)
   void CreateUDPSocket(
@@ -286,7 +294,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       mojo::PendingReceiver<mojom::TCPServerSocket> receiver,
       CreateTCPServerSocketCallback callback) override;
   void CreateTCPConnectedSocket(
-      const base::Optional<net::IPEndPoint>& local_addr,
+      const absl::optional<net::IPEndPoint>& local_addr,
       const net::AddressList& remote_addr_list,
       mojom::TCPConnectedSocketOptionsPtr tcp_connected_socket_options,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
@@ -318,16 +326,18 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       uint32_t options,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
       mojo::PendingRemote<mojom::WebSocketHandshakeClient> handshake_client,
-      mojo::PendingRemote<mojom::AuthenticationAndCertificateObserver>
-          auth_cert_observer,
+      mojo::PendingRemote<mojom::URLLoaderNetworkServiceObserver>
+          url_loader_network_observer,
       mojo::PendingRemote<mojom::WebSocketAuthenticationHandler> auth_handler,
-      mojo::PendingRemote<mojom::TrustedHeaderClient> header_client) override;
-  void CreateQuicTransport(
+      mojo::PendingRemote<mojom::TrustedHeaderClient> header_client,
+      const absl::optional<base::UnguessableToken>& throttling_profile_id)
+      override;
+  void CreateWebTransport(
       const GURL& url,
       const url::Origin& origin,
       const net::NetworkIsolationKey& network_isolation_key,
-      std::vector<mojom::QuicTransportCertificateFingerprintPtr> fingerprints,
-      mojo::PendingRemote<mojom::QuicTransportHandshakeClient> handshake_client)
+      std::vector<mojom::WebTransportCertificateFingerprintPtr> fingerprints,
+      mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client)
       override;
   void CreateNetLogExporter(
       mojo::PendingReceiver<mojom::NetLogExporter> receiver) override;
@@ -337,7 +347,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       mojom::ResolveHostParametersPtr optional_parameters,
       mojo::PendingRemote<mojom::ResolveHostClient> response_client) override;
   void CreateHostResolver(
-      const base::Optional<net::DnsConfigOverrides>& config_overrides,
+      const absl::optional<net::DnsConfigOverrides>& config_overrides,
       mojo::PendingReceiver<mojom::HostResolver> receiver) override;
   void VerifyCertForSignedExchange(
       const scoped_refptr<net::X509Certificate>& certificate,
@@ -346,9 +356,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const std::string& ocsp_result,
       const std::string& sct_list,
       VerifyCertForSignedExchangeCallback callback) override;
-  void ParseHeaders(const GURL& url,
-                    const scoped_refptr<net::HttpResponseHeaders>& headers,
-                    ParseHeadersCallback callback) override;
   void AddHSTS(const std::string& host,
                base::Time expiry,
                bool include_subdomains,
@@ -387,11 +394,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       override;
   void CreateMdnsResponder(
       mojo::PendingReceiver<mojom::MdnsResponder> responder_receiver) override;
+  void SetDocumentReportingEndpoints(
+      const url::Origin& origin,
+      const net::NetworkIsolationKey& network_isolation_key,
+      const base::flat_map<std::string, std::string>& endpoints) override;
   void QueueReport(const std::string& type,
                    const std::string& group,
                    const GURL& url,
                    const net::NetworkIsolationKey& network_isolation_key,
-                   const base::Optional<std::string>& user_agent,
+                   const absl::optional<std::string>& user_agent,
                    base::Value body) override;
   void QueueSignedExchangeReport(
       mojom::SignedExchangeReportPtr report,
@@ -440,7 +451,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   void DestroyURLLoaderFactory(cors::CorsURLLoaderFactory* url_loader_factory);
 
   // Removes |transport| and destroys it.
-  void Remove(QuicTransport* transport);
+  void Remove(WebTransport* transport);
 
   // The following methods are used to track the number of requests per process
   // and ensure it doesn't go over a reasonable limit.
@@ -497,9 +508,9 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const mojom::HttpAuthDynamicParams*
           http_auth_dynamic_network_service_params);
 
-  const net::HttpAuthPreferences* GetHttpAuthPreferences() const noexcept;
+  const net::HttpAuthPreferences* GetHttpAuthPreferences() const;
 
-  size_t NumOpenQuicTransports() const;
+  size_t NumOpenWebTransports() const;
 
   size_t num_url_loader_factories_for_testing() const {
     return url_loader_factories_.size();
@@ -646,8 +657,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   std::set<std::unique_ptr<ProxyLookupRequest>, base::UniquePtrComparator>
       proxy_lookup_requests_;
 
-  std::set<std::unique_ptr<QuicTransport>, base::UniquePtrComparator>
-      quic_transports_;
+  std::set<std::unique_ptr<WebTransport>, base::UniquePtrComparator>
+      web_transports_;
 
   // A count of outstanding requests per initiating process.
   std::map<uint32_t, uint32_t> loader_count_per_process_;
@@ -686,6 +697,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
 
   std::queue<SetExpectCTTestReportCallback>
       outstanding_set_expect_ct_callbacks_;
+
+  // Owned by the URLRequestContext.
+  certificate_transparency::ChromeCTPolicyEnforcer* ct_policy_enforcer_ =
+      nullptr;
 
   bool is_sct_auditing_enabled_ = false;
 #endif  // BUILDFLAG(IS_CT_SUPPORTED)

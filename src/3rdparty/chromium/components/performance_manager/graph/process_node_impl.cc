@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/graph_impl_util.h"
@@ -14,8 +15,41 @@
 #include "components/performance_manager/graph/worker_node_impl.h"
 #include "components/performance_manager/public/execution_context/execution_context_registry.h"
 #include "components/performance_manager/v8_memory/v8_context_tracker.h"
+#include "content/public/browser/background_tracing_manager.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace performance_manager {
+
+namespace {
+
+void FireBackgroundTracingTriggerOnUI(
+    const std::string& trigger_name,
+    content::BackgroundTracingManager* manager) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Don't fire a trigger unless we're in an active tracing scenario.
+  // Renderer-initiated background tracing triggers are always "preemptive"
+  // traces so we expect a scenario to be active.
+  if (!manager)
+    manager = content::BackgroundTracingManager::GetInstance();
+  if (!manager->HasActiveScenario())
+    return;
+
+  static content::BackgroundTracingManager::TriggerHandle trigger_handle = -1;
+  if (trigger_handle == -1) {
+    trigger_handle = manager->RegisterTriggerType(
+        content::BackgroundTracingManager::kContentTriggerConfig);
+  }
+
+  // Actually fire the trigger. We don't need to know when the trace is being
+  // finalized so pass an empty callback.
+  manager->TriggerNamedEvent(
+      trigger_handle,
+      content::BackgroundTracingManager::StartedFinalizingCallback());
+}
+
+}  // namespace
 
 ProcessNodeImpl::ProcessNodeImpl(content::ProcessType process_type,
                                  RenderProcessHostProxy render_process_proxy)
@@ -31,6 +65,8 @@ ProcessNodeImpl::~ProcessNodeImpl() {
   // TODO(https://crbug.com/1058705): Turn this into a DCHECK once the issue is
   //                                  resolved.
   CHECK(worker_nodes_.empty());
+  DCHECK(!frozen_frame_data_);
+  DCHECK(!process_priority_data_);
 }
 
 void ProcessNodeImpl::Bind(
@@ -109,6 +145,14 @@ void ProcessNodeImpl::OnRemoteIframeDetached(
           remote_frame_token);
     }
   }
+}
+
+void ProcessNodeImpl::FireBackgroundTracingTrigger(
+    const std::string& trigger_name) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&FireBackgroundTracingTriggerOnUI, trigger_name, nullptr));
 }
 
 void ProcessNodeImpl::SetProcessExitStatus(int32_t exit_status) {
@@ -190,6 +234,13 @@ void ProcessNodeImpl::set_priority(base::TaskPriority priority) {
   priority_.SetAndMaybeNotify(this, priority);
 }
 
+// static
+void ProcessNodeImpl::FireBackgroundTracingTriggerOnUIForTesting(
+    const std::string& trigger_name,
+    content::BackgroundTracingManager* manager) {
+  FireBackgroundTracingTriggerOnUI(trigger_name, manager);
+}
+
 base::WeakPtr<ProcessNodeImpl> ProcessNodeImpl::GetWeakPtrOnUIThread() {
   // TODO(siggi): Validate thread context.
   return weak_this_;
@@ -242,7 +293,7 @@ base::Time ProcessNodeImpl::GetLaunchTime() const {
   return launch_time();
 }
 
-base::Optional<int32_t> ProcessNodeImpl::GetExitStatus() const {
+absl::optional<int32_t> ProcessNodeImpl::GetExitStatus() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return exit_status();
 }
@@ -313,6 +364,12 @@ void ProcessNodeImpl::OnBeforeLeavingGraph() {
 
   // All child frames should have been removed before the process is removed.
   DCHECK(frame_nodes_.empty());
+}
+
+void ProcessNodeImpl::RemoveNodeAttachedData() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  frozen_frame_data_.Reset();
+  process_priority_data_.reset();
 }
 
 }  // namespace performance_manager

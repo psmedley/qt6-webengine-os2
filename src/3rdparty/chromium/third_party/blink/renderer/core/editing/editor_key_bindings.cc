@@ -26,7 +26,6 @@
 
 #include "third_party/blink/renderer/core/editing/editor.h"
 
-#include "base/i18n/uchar.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/renderer/core/editing/commands/editor_command.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
@@ -46,7 +45,7 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
     return false;
 
   String command_name = Behavior().InterpretKeyEvent(*evt);
-  const EditorCommand command = this->CreateCommand(command_name);
+  const EditorCommand command = CreateCommand(command_name);
 
   if (key_event->GetType() == WebInputEvent::Type::kRawKeyDown) {
     // WebKit doesn't have enough information about mode to decide how
@@ -67,9 +66,13 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
 
   // If EditContext is active, redirect text to EditContext, otherwise, send
   // text to the focused element.
-  auto* edit_context =
-      GetFrame().GetInputMethodController().GetActiveEditContext();
-  if (edit_context) {
+  if (auto* edit_context =
+          GetFrame().GetInputMethodController().GetActiveEditContext()) {
+    if (DispatchBeforeInputInsertText(evt->target()->ToNode(),
+                                      key_event->text) !=
+        DispatchEventResult::kNotCanceled)
+      return true;
+
     WebString text(WTF::String(key_event->text));
     edit_context->InsertText(text);
     return true;
@@ -90,12 +93,11 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
     return false;
 
   // Return true to prevent default action. e.g. Space key scroll.
-  if (DispatchBeforeInputInsertText(evt->target()->ToNode(),
-                                    base::i18n::ToUCharPtr(key_event->text)) !=
+  if (DispatchBeforeInputInsertText(evt->target()->ToNode(), key_event->text) !=
       DispatchEventResult::kNotCanceled)
     return true;
 
-  return InsertText(base::i18n::ToUCharPtr(key_event->text), evt);
+  return InsertText(key_event->text, evt);
 }
 
 void Editor::HandleKeyboardEvent(KeyboardEvent* evt) {

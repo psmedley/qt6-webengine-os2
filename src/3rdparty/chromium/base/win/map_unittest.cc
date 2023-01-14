@@ -6,10 +6,12 @@
 
 #include <windows.foundation.h>
 
+#include "base/containers/contains.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/core_winrt_util.h"
 #include "base/win/hstring_reference.h"
 #include "base/win/scoped_hstring.h"
+#include "base/win/scoped_winrt_initializer.h"
 #include "base/win/windows_version.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -509,7 +511,8 @@ TEST(MapTest, Properties) {
     return;
 
   ASSERT_TRUE(ResolveCoreWinRT());
-  ASSERT_HRESULT_SUCCEEDED(base::win::RoInitialize(RO_INIT_MULTITHREADED));
+  ScopedWinrtInitializer winrt_initializer;
+  ASSERT_TRUE(winrt_initializer.Succeeded());
 
   auto map = Make<Map<HSTRING, IInspectable*>>();
 

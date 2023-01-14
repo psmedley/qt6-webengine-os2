@@ -4,8 +4,9 @@
 
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 
+#include <memory>
+
 #include "base/containers/contains.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tab_groups/tab_group_id.h"
@@ -30,11 +32,12 @@
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_builder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/display/test/scoped_screen_override.h"
 #include "ui/display/test/test_screen.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/policy/dlp/mock_dlp_content_manager.h"
+#include "chrome/browser/ash/policy/dlp/mock_dlp_content_manager.h"
 #include "chromeos/ui/base/window_pin_type.h"
 #include "chromeos/ui/base/window_properties.h"
 #endif
@@ -64,21 +67,26 @@ scoped_refptr<const Extension> CreateTabsExtension() {
       .Build();
 }
 
-// Creates an WebContents with |urls| as history.
-std::unique_ptr<content::WebContents> CreateWebContentsWithHistory(
+// Creates a WebContents, attaches it to the tab strip, and navigates so we
+// have |urls| as history.
+content::WebContents* CreateAndAppendWebContentsWithHistory(
     Profile* profile,
+    TabStripModel* tab_strip_model,
     const std::vector<GURL>& urls) {
   std::unique_ptr<content::WebContents> web_contents =
       content::WebContentsTester::CreateTestWebContents(profile, nullptr);
+  content::WebContents* raw_web_contents = web_contents.get();
+
+  tab_strip_model->AppendWebContents(std::move(web_contents), true);
 
   for (const auto& url : urls) {
-    content::NavigationSimulator::NavigateAndCommitFromBrowser(
-        web_contents.get(), url);
-    EXPECT_EQ(url, web_contents->GetLastCommittedURL());
-    EXPECT_EQ(url, web_contents->GetVisibleURL());
+    content::NavigationSimulator::NavigateAndCommitFromBrowser(raw_web_contents,
+                                                               url);
+    EXPECT_EQ(url, raw_web_contents->GetLastCommittedURL());
+    EXPECT_EQ(url, raw_web_contents->GetVisibleURL());
   }
 
-  return web_contents;
+  return raw_web_contents;
 }
 
 }  // namespace
@@ -116,7 +124,7 @@ void TabsApiUnitTest::SetUp() {
   ExtensionServiceTestBase::SetUp();
   InitializeEmptyExtensionService();
 
-  browser_window_.reset(new TestBrowserWindow());
+  browser_window_ = std::make_unique<TestBrowserWindow>();
   Browser::CreateParams params(profile(), true);
   params.type = Browser::TYPE_NORMAL;
   params.window = browser_window_.get();
@@ -241,7 +249,7 @@ TEST_F(TabsApiUnitTest, IsTabStripEditable) {
 
   // Clean up.
   while (!browser()->tab_strip_model()->empty())
-    browser()->tab_strip_model()->DetachWebContentsAt(0);
+    browser()->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
 }
 
 TEST_F(TabsApiUnitTest, QueryWithoutTabsPermission) {
@@ -302,7 +310,7 @@ TEST_F(TabsApiUnitTest, QueryWithoutTabsPermission) {
   EXPECT_EQ(ExtensionTabUtil::GetTabId(web_contentses[2]), third_tab_id);
 
   while (!browser()->tab_strip_model()->empty())
-    browser()->tab_strip_model()->DetachWebContentsAt(0);
+    browser()->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
 }
 
 TEST_F(TabsApiUnitTest, QueryWithHostPermission) {
@@ -386,7 +394,7 @@ TEST_F(TabsApiUnitTest, QueryWithHostPermission) {
     EXPECT_TRUE(base::Contains(expected_tabs_ids, third_tab_id));
   }
   while (!browser()->tab_strip_model()->empty())
-    browser()->tab_strip_model()->DetachWebContentsAt(0);
+    browser()->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
 }
 
 // Test that using the PDF extension for tab updates is treated as a
@@ -409,6 +417,8 @@ TEST_F(TabsApiUnitTest, PDFExtensionNavigation) {
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   content::WebContents* raw_web_contents = web_contents.get();
   ASSERT_TRUE(raw_web_contents);
+  browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
+                                                  true);
   content::WebContentsTester* web_contents_tester =
       content::WebContentsTester::For(raw_web_contents);
   const GURL kGoogle("http://www.google.com");
@@ -418,12 +428,9 @@ TEST_F(TabsApiUnitTest, PDFExtensionNavigation) {
 
   CreateSessionServiceTabHelper(raw_web_contents);
   int tab_id = sessions::SessionTabHelper::IdForTab(raw_web_contents).id();
-  browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
-                                                  true);
 
   scoped_refptr<TabsUpdateFunction> function = new TabsUpdateFunction();
   function->set_extension(extension.get());
-  function->set_browser_context(profile());
   std::unique_ptr<base::ListValue> args(
       extension_function_test_utils::ParseList(
           base::StringPrintf(R"([%d, {"url":"http://example.com"}])", tab_id)));
@@ -696,7 +703,7 @@ TEST_F(TabsApiUnitTest, TabsGroupWithinWindow) {
   EXPECT_EQ(tab_strip_model->GetWebContentsAt(3), web_contentses[1]);
   EXPECT_EQ(tab_strip_model->GetWebContentsAt(4), web_contentses[3]);
 
-  base::Optional<tab_groups::TabGroupId> group =
+  absl::optional<tab_groups::TabGroupId> group =
       tab_strip_model->GetTabGroupForTab(0);
   EXPECT_TRUE(group.has_value());
   EXPECT_EQ(group, tab_strip_model->GetTabGroupForTab(1));
@@ -748,7 +755,7 @@ TEST_F(TabsApiUnitTest, TabsGroupMixedTabIds) {
   EXPECT_EQ(tab_strip_model->GetWebContentsAt(3), web_contentses[3]);
   EXPECT_EQ(tab_strip_model->GetWebContentsAt(4), web_contentses[4]);
 
-  base::Optional<tab_groups::TabGroupId> group =
+  absl::optional<tab_groups::TabGroupId> group =
       tab_strip_model->GetTabGroupForTab(1);
   EXPECT_TRUE(group.has_value());
   EXPECT_FALSE(tab_strip_model->GetTabGroupForTab(0));
@@ -999,16 +1006,12 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBack) {
 
   const std::vector<GURL> urls = {GURL("http://www.foo.com"),
                                   GURL("http://www.bar.com")};
-  std::unique_ptr<content::WebContents> web_contents =
-      CreateWebContentsWithHistory(profile(), urls);
-  content::WebContents* raw_web_contents = web_contents.get();
-  ASSERT_TRUE(raw_web_contents);
+  content::WebContents* web_contents = CreateAndAppendWebContentsWithHistory(
+      profile(), GetTabStripModel(), urls);
+  ASSERT_TRUE(web_contents);
 
-  CreateSessionServiceTabHelper(raw_web_contents);
-  const int tab_id =
-      sessions::SessionTabHelper::IdForTab(raw_web_contents).id();
-  browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
-                                                  /* foreground */ true);
+  CreateSessionServiceTabHelper(web_contents);
+  const int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
   // Go back with chrome.tabs.goBack.
   auto goback_function = base::MakeRefCounted<TabsGoBackFunction>();
   goback_function->set_extension(extension_with_tabs_permission.get());
@@ -1021,8 +1024,8 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBack) {
   content::NavigationController& controller =
       active_webcontent->GetController();
   content::RenderFrameHostTester::CommitPendingLoad(&controller);
-  EXPECT_EQ(urls[0], raw_web_contents->GetLastCommittedURL());
-  EXPECT_EQ(urls[0], raw_web_contents->GetVisibleURL());
+  EXPECT_EQ(urls[0], web_contents->GetLastCommittedURL());
+  EXPECT_EQ(urls[0], web_contents->GetVisibleURL());
   EXPECT_TRUE(ui::PAGE_TRANSITION_FORWARD_BACK &
               controller.GetLastCommittedEntry()->GetTransitionType());
 
@@ -1035,8 +1038,8 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBack) {
 
   content::RenderFrameHostTester::CommitPendingLoad(
       &active_webcontent->GetController());
-  EXPECT_EQ(urls[1], raw_web_contents->GetLastCommittedURL());
-  EXPECT_EQ(urls[1], raw_web_contents->GetVisibleURL());
+  EXPECT_EQ(urls[1], web_contents->GetLastCommittedURL());
+  EXPECT_EQ(urls[1], web_contents->GetVisibleURL());
   EXPECT_TRUE(ui::PAGE_TRANSITION_FORWARD_BACK &
               controller.GetLastCommittedEntry()->GetTransitionType());
 
@@ -1047,8 +1050,8 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBack) {
       goforward_function2.get(), base::StringPrintf("[%d]", tab_id), browser(),
       api_test_utils::NONE);
   EXPECT_EQ(tabs_constants::kNotFoundNextPageError, error);
-  EXPECT_EQ(urls[1], raw_web_contents->GetLastCommittedURL());
-  EXPECT_EQ(urls[1], raw_web_contents->GetVisibleURL());
+  EXPECT_EQ(urls[1], web_contents->GetLastCommittedURL());
+  EXPECT_EQ(urls[1], web_contents->GetVisibleURL());
 
   // Clean up.
   while (!browser()->tab_strip_model()->empty())
@@ -1059,33 +1062,31 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBack) {
 TEST_F(TabsApiUnitTest, TabsGoForwardAndBackWithoutTabId) {
   scoped_refptr<const Extension> extension_with_tabs_permission =
       CreateTabsExtension();
+  TabStripModel* tab_strip_model = browser()->tab_strip_model();
 
   // Create first tab with history.
   const std::vector<GURL> tab1_urls = {GURL("http://www.foo.com"),
                                        GURL("http://www.bar.com")};
-  std::unique_ptr<content::WebContents> tab1_webcontents =
-      CreateWebContentsWithHistory(profile(), tab1_urls);
-  content::WebContents* tab1_raw_webcontents = tab1_webcontents.get();
-  ASSERT_TRUE(tab1_raw_webcontents);
-  EXPECT_EQ(tab1_urls[1], tab1_raw_webcontents->GetLastCommittedURL());
-  EXPECT_EQ(tab1_urls[1], tab1_raw_webcontents->GetVisibleURL());
-  TabStripModel* tab_strip_model = browser()->tab_strip_model();
-  tab_strip_model->AppendWebContents(std::move(tab1_webcontents), true);
+  content::WebContents* tab1_webcontents =
+      CreateAndAppendWebContentsWithHistory(profile(), tab_strip_model,
+                                            tab1_urls);
+  ASSERT_TRUE(tab1_webcontents);
+  EXPECT_EQ(tab1_urls[1], tab1_webcontents->GetLastCommittedURL());
+  EXPECT_EQ(tab1_urls[1], tab1_webcontents->GetVisibleURL());
   const int tab1_index =
-      tab_strip_model->GetIndexOfWebContents(tab1_raw_webcontents);
+      tab_strip_model->GetIndexOfWebContents(tab1_webcontents);
 
   // Create second tab with history.
   const std::vector<GURL> tab2_urls = {GURL("http://www.chrome.com"),
                                        GURL("http://www.google.com")};
-  std::unique_ptr<content::WebContents> tab2_webcontents =
-      CreateWebContentsWithHistory(profile(), tab2_urls);
-  content::WebContents* tab2_raw_webcontents = tab2_webcontents.get();
-  ASSERT_TRUE(tab2_raw_webcontents);
-  EXPECT_EQ(tab2_urls[1], tab2_raw_webcontents->GetLastCommittedURL());
-  EXPECT_EQ(tab2_urls[1], tab2_raw_webcontents->GetVisibleURL());
-  tab_strip_model->AppendWebContents(std::move(tab2_webcontents), true);
+  content::WebContents* tab2_webcontents =
+      CreateAndAppendWebContentsWithHistory(profile(), tab_strip_model,
+                                            tab2_urls);
+  ASSERT_TRUE(tab2_webcontents);
+  EXPECT_EQ(tab2_urls[1], tab2_webcontents->GetLastCommittedURL());
+  EXPECT_EQ(tab2_urls[1], tab2_webcontents->GetVisibleURL());
   const int tab2_index =
-      tab_strip_model->GetIndexOfWebContents(tab2_raw_webcontents);
+      tab_strip_model->GetIndexOfWebContents(tab2_webcontents);
   ASSERT_EQ(2, tab_strip_model->count());
 
   // Activate first tab.
@@ -1100,11 +1101,10 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBackWithoutTabId) {
                                              browser(),
                                              api_test_utils::INCLUDE_INCOGNITO);
 
-  content::NavigationController& controller =
-      tab1_raw_webcontents->GetController();
+  content::NavigationController& controller = tab1_webcontents->GetController();
   content::RenderFrameHostTester::CommitPendingLoad(&controller);
-  EXPECT_EQ(tab1_urls[0], tab1_raw_webcontents->GetLastCommittedURL());
-  EXPECT_EQ(tab1_urls[0], tab1_raw_webcontents->GetVisibleURL());
+  EXPECT_EQ(tab1_urls[0], tab1_webcontents->GetLastCommittedURL());
+  EXPECT_EQ(tab1_urls[0], tab1_webcontents->GetVisibleURL());
   EXPECT_TRUE(ui::PAGE_TRANSITION_FORWARD_BACK &
               controller.GetLastCommittedEntry()->GetTransitionType());
 
@@ -1116,8 +1116,8 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBackWithoutTabId) {
                                              api_test_utils::INCLUDE_INCOGNITO);
 
   content::RenderFrameHostTester::CommitPendingLoad(&controller);
-  EXPECT_EQ(tab1_urls[1], tab1_raw_webcontents->GetLastCommittedURL());
-  EXPECT_EQ(tab1_urls[1], tab1_raw_webcontents->GetVisibleURL());
+  EXPECT_EQ(tab1_urls[1], tab1_webcontents->GetLastCommittedURL());
+  EXPECT_EQ(tab1_urls[1], tab1_webcontents->GetVisibleURL());
   EXPECT_TRUE(ui::PAGE_TRANSITION_FORWARD_BACK &
               controller.GetLastCommittedEntry()->GetTransitionType());
 
@@ -1132,10 +1132,10 @@ TEST_F(TabsApiUnitTest, TabsGoForwardAndBackWithoutTabId) {
                                              api_test_utils::INCLUDE_INCOGNITO);
 
   content::NavigationController& controller2 =
-      tab2_raw_webcontents->GetController();
+      tab2_webcontents->GetController();
   content::RenderFrameHostTester::CommitPendingLoad(&controller2);
-  EXPECT_EQ(tab2_urls[0], tab2_raw_webcontents->GetLastCommittedURL());
-  EXPECT_EQ(tab2_urls[0], tab2_raw_webcontents->GetVisibleURL());
+  EXPECT_EQ(tab2_urls[0], tab2_webcontents->GetLastCommittedURL());
+  EXPECT_EQ(tab2_urls[0], tab2_webcontents->GetVisibleURL());
   EXPECT_TRUE(ui::PAGE_TRANSITION_FORWARD_BACK &
               controller2.GetLastCommittedEntry()->GetTransitionType());
 
@@ -1181,9 +1181,9 @@ TEST_F(TabsApiUnitTest, ScreenshotsRestricted) {
   content::WebContentsTester* web_contents_tester =
       content::WebContentsTester::For(web_contents.get());
   const GURL kGoogle("http://www.google.com");
-  web_contents_tester->NavigateAndCommit(kGoogle);
   browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
                                                   /*foreground=*/true);
+  web_contents_tester->NavigateAndCommit(kGoogle);
 
   // Setup Data Leak Prevention restriction.
   policy::MockDlpContentManager mock_dlp_content_manager;
@@ -1192,6 +1192,39 @@ TEST_F(TabsApiUnitTest, ScreenshotsRestricted) {
   EXPECT_CALL(mock_dlp_content_manager, IsScreenshotRestricted(testing::_))
       .Times(1)
       .WillOnce(testing::Return(true));
+
+  // Run the function and check result.
+  std::string error = extension_function_test_utils::RunFunctionAndReturnError(
+      function.get(), "[{}]", browser(), api_test_utils::NONE);
+  EXPECT_EQ(tabs_constants::kScreenshotsDisabledByDlp, error);
+
+  // Clean up.
+  browser()->tab_strip_model()->CloseAllTabs();
+}
+
+// Screenshot should return an error when disabled in user profile preferences.
+TEST_F(TabsApiUnitTest, ScreenshotDisabledInProfilePreferences) {
+  // Setup the function and extension.
+  scoped_refptr<const Extension> extension = ExtensionBuilder("Screenshot")
+                                                 .AddPermission("tabs")
+                                                 .AddPermission("<all_urls>")
+                                                 .Build();
+  auto function = base::MakeRefCounted<TabsCaptureVisibleTabFunction>();
+  function->set_extension(extension.get());
+
+  // Add a visible tab.
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+  content::WebContentsTester* web_contents_tester =
+      content::WebContentsTester::For(web_contents.get());
+  const GURL kGoogle("http://www.google.com");
+  browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
+                                                  /*foreground=*/true);
+  web_contents_tester->NavigateAndCommit(kGoogle);
+
+  // Disable screenshot.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kDisableScreenshots,
+                                               true);
 
   // Run the function and check result.
   std::string error = extension_function_test_utils::RunFunctionAndReturnError(

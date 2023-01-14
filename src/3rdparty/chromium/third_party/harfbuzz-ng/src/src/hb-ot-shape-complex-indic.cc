@@ -106,7 +106,8 @@ indic_features[] =
 {
   /*
    * Basic features.
-   * These features are applied in order, one at a time, after initial_reordering.
+   * These features are applied in order, one at a time, after initial_reordering,
+   * constrained to the syllable.
    */
   {HB_TAG('n','u','k','t'), F_GLOBAL_MANUAL_JOINERS},
   {HB_TAG('a','k','h','n'), F_GLOBAL_MANUAL_JOINERS},
@@ -121,8 +122,8 @@ indic_features[] =
   {HB_TAG('c','j','c','t'), F_GLOBAL_MANUAL_JOINERS},
   /*
    * Other features.
-   * These features are applied all at once, after final_reordering
-   * but before clearing syllables.
+   * These features are applied all at once, after final_reordering, constrained
+   * to the syllable.
    * Default Bengali font in Windows for example has intermixed
    * lookups for init,pres,abvs,blws features.
    */
@@ -257,7 +258,7 @@ struct indic_shape_plan_t
 static void *
 data_create_indic (const hb_ot_shape_plan_t *plan)
 {
-  indic_shape_plan_t *indic_plan = (indic_shape_plan_t *) calloc (1, sizeof (indic_shape_plan_t));
+  indic_shape_plan_t *indic_plan = (indic_shape_plan_t *) hb_calloc (1, sizeof (indic_shape_plan_t));
   if (unlikely (!indic_plan))
     return nullptr;
 
@@ -300,7 +301,7 @@ data_create_indic (const hb_ot_shape_plan_t *plan)
 static void
 data_destroy_indic (void *data)
 {
-  free (data);
+  hb_free (data);
 }
 
 static indic_position_t
@@ -752,7 +753,28 @@ initial_reordering_consonant_syllable (const hb_ot_shape_plan_t *plan,
      * We could use buffer->sort() for this, if there was no special
      * reordering of pre-base stuff happening later...
      * We don't want to merge_clusters all of that, which buffer->sort()
-     * would.
+     * would.  Here's a concrete example:
+     *
+     * Assume there's a pre-base consonant and explicit Halant before base,
+     * followed by a prebase-reordering (left) Matra:
+     *
+     *   C,H,ZWNJ,B,M
+     *
+     * At this point in reordering we would have:
+     *
+     *   M,C,H,ZWNJ,B
+     *
+     * whereas in final reordering we will bring the Matra closer to Base:
+     *
+     *   C,H,ZWNJ,M,B
+     *
+     * That's why we don't want to merge-clusters anything before the Base
+     * at this point.  But if something moved from after Base to before it,
+     * we should merge clusters from base to them.  In final-reordering, we
+     * only move things around before base, and merge-clusters up to base.
+     * These two merge-clusters from the two sides of base will interlock
+     * to merge things correctly.  See:
+     * https://github.com/harfbuzz/harfbuzz/issues/2272
      */
     if (indic_plan->is_old_spec || end - start > 127)
       buffer->merge_clusters (base, end);
@@ -762,17 +784,18 @@ initial_reordering_consonant_syllable (const hb_ot_shape_plan_t *plan,
       for (unsigned int i = base; i < end; i++)
 	if (info[i].syllable() != 255)
 	{
+	  unsigned int min = i;
 	  unsigned int max = i;
 	  unsigned int j = start + info[i].syllable();
 	  while (j != i)
 	  {
+	    min = hb_min (min, j);
 	    max = hb_max (max, j);
 	    unsigned int next = start + info[j].syllable();
 	    info[j].syllable() = 255; /* So we don't process j later again. */
 	    j = next;
 	  }
-	  if (i != max)
-	    buffer->merge_clusters (i, max + 1);
+	  buffer->merge_clusters (hb_max (base, min), max + 1);
 	}
     }
 
@@ -938,7 +961,8 @@ initial_reordering_indic (const hb_ot_shape_plan_t *plan,
   hb_syllabic_insert_dotted_circles (font, buffer,
 				     indic_broken_cluster,
 				     OT_DOTTEDCIRCLE,
-				     OT_Repha);
+				     OT_Repha,
+				     POS_END);
 
   foreach_syllable (buffer, start, end)
     initial_reordering_syllable_indic (plan, font->face, buffer, start, end);

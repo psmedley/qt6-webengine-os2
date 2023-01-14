@@ -17,12 +17,12 @@
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/cookie_controls_handler.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
-#include "chrome/browser/ui/webui/ntp/ephemeral_guest_signin_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/ui/webui/theme_handler.h"
+#include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
-#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
@@ -42,7 +42,7 @@ namespace {
 const char kRTLHtmlTextDirection[] = "rtl";
 const char kLTRHtmlTextDirection[] = "ltr";
 
-const char* GetHtmlTextDirection(const base::string16& text) {
+const char* GetHtmlTextDirection(const std::u16string& text) {
   if (base::i18n::IsRTL() && base::i18n::StringContainsStrongRTLChars(text))
     return kRTLHtmlTextDirection;
   return kLTRHtmlTextDirection;
@@ -54,42 +54,33 @@ const char* GetHtmlTextDirection(const base::string16& text) {
 // NewTabUI
 
 NewTabUI::NewTabUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
-  web_ui->OverrideTitle(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
-
   Profile* profile = GetProfile();
 
-  if (!profile->IsGuestSession() && !profile->IsEphemeralGuestProfile()) {
+  // The title should be "New Tab" for regular mode and guest mode, while it
+  // should be "New Incognito Tab" for incognito mode.
+  const int title_resource_id =
+      base::FeatureList::IsEnabled(
+          features::kUpdateHistoryEntryPointsInIncognito) &&
+              profile->IsOffTheRecord() && !profile->IsGuestSession()
+          ? IDS_NEW_INCOGNITO_TAB_TITLE
+          : IDS_NEW_TAB_TITLE;
+  web_ui->OverrideTitle(l10n_util::GetStringUTF16(title_resource_id));
+
+  if (!profile->IsGuestSession()) {
     web_ui->AddMessageHandler(std::make_unique<ThemeHandler>());
     if (profile->IsOffTheRecord()) {
       web_ui->AddMessageHandler(
           std::make_unique<CookieControlsHandler>(profile));
     }
-  } else if (profile->IsEphemeralGuestProfile()) {
-    web_ui->AddMessageHandler(
-        std::make_unique<EphemeralGuestSigninHandler>(profile));
   }
 
   // content::URLDataSource assumes the ownership of the html source.
   content::URLDataSource::Add(profile, std::make_unique<NewTabHTMLSource>(
                                            profile->GetOriginalProfile()));
-
-  pref_change_registrar_.Init(profile->GetPrefs());
-  pref_change_registrar_.Add(
-      bookmarks::prefs::kShowBookmarkBar,
-      base::BindRepeating(&NewTabUI::OnShowBookmarkBarChanged,
-                          base::Unretained(this)));
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
 }
 
 NewTabUI::~NewTabUI() {}
-
-void NewTabUI::OnShowBookmarkBarChanged() {
-  base::Value attached(
-      GetProfile()->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar)
-          ? "true"
-          : "false");
-  web_ui()->CallJavascriptFunctionUnsafe("ntp.setBookmarkBarAttached",
-                                         attached);
-}
 
 // static
 void NewTabUI::RegisterProfilePrefs(
@@ -105,12 +96,12 @@ bool NewTabUI::IsNewTab(const GURL& url) {
 
 // static
 void NewTabUI::SetUrlTitleAndDirection(base::Value* dictionary,
-                                       const base::string16& title,
+                                       const std::u16string& title,
                                        const GURL& gurl) {
   dictionary->SetStringKey("url", gurl.spec());
 
   bool using_url_as_the_title = false;
-  base::string16 title_to_set(title);
+  std::u16string title_to_set(title);
   if (title_to_set.empty()) {
     using_url_as_the_title = true;
     title_to_set = base::UTF8ToUTF16(gurl.spec());
@@ -138,7 +129,7 @@ void NewTabUI::SetUrlTitleAndDirection(base::Value* dictionary,
 }
 
 // static
-void NewTabUI::SetFullNameAndDirection(const base::string16& full_name,
+void NewTabUI::SetFullNameAndDirection(const std::u16string& full_name,
                                        base::DictionaryValue* dictionary) {
   dictionary->SetString("full_name", full_name);
   dictionary->SetString("full_name_direction", GetHtmlTextDirection(full_name));
@@ -152,8 +143,7 @@ Profile* NewTabUI::GetProfile() const {
 // NewTabHTMLSource
 
 NewTabUI::NewTabHTMLSource::NewTabHTMLSource(Profile* profile)
-    : profile_(profile) {
-}
+    : profile_(profile) {}
 
 std::string NewTabUI::NewTabHTMLSource::GetSource() {
   return chrome::kChromeUINewTabHost;
@@ -174,14 +164,19 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(
     return;
   }
 
+  // Sometimes the |profile_| is the parent (non-incognito) version of the user
+  // so we check the |web_contents| if it is provided.
   content::WebContents* web_contents = wc_getter.Run();
-  content::RenderProcessHost* render_host =
-      web_contents ? web_contents->GetMainFrame()->GetProcess() : nullptr;
-  NTPResourceCache::WindowType win_type = NTPResourceCache::GetWindowType(
-      profile_, render_host);
+  Profile* profile_for_window_type =
+      web_contents
+          ? Profile::FromBrowserContext(web_contents->GetBrowserContext())
+          : profile_;
+
+  NTPResourceCache::WindowType win_type =
+      NTPResourceCache::GetWindowType(profile_for_window_type);
   scoped_refptr<base::RefCountedMemory> html_bytes(
-      NTPResourceCacheFactory::GetForProfile(profile_)->
-      GetNewTabHTML(win_type));
+      NTPResourceCacheFactory::GetForProfile(profile_)->GetNewTabHTML(
+          win_type));
 
   std::move(callback).Run(html_bytes.get());
 }

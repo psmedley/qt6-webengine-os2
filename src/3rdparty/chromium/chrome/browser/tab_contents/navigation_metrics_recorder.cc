@@ -8,8 +8,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_metrics.h"
 #include "components/navigation_metrics/navigation_metrics.h"
+#include "components/profile_metrics/browser_profile_type.h"
 #include "components/site_engagement/content/site_engagement_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -56,8 +56,8 @@ void NavigationMetricsRecorder::DidFinishNavigation(
 
   // See if the navigation committed for a site that required a dedicated
   // process and register a synthetic field trial if so.  Note that this needs
-  // to go before the IsInMainFrame() check, as we want to register navigations
-  // to isolated sites from both main frames and subframes.
+  // to go before the IsInPrimaryMainFrame() check, as we want to register
+  // navigations to isolated sites from both main frames and subframes.
   if (is_synthetic_isolation_trial_enabled_ &&
       navigation_handle->GetRenderFrameHost()
           ->GetSiteInstance()
@@ -74,7 +74,10 @@ void NavigationMetricsRecorder::DidFinishNavigation(
         "OutOfProcessIframesActive", "Enabled");
   }
 
-  if (!navigation_handle->IsInMainFrame())
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (!navigation_handle->IsInPrimaryMainFrame())
     return;
 
   content::BrowserContext* context = web_contents()->GetBrowserContext();
@@ -85,7 +88,7 @@ void NavigationMetricsRecorder::DidFinishNavigation(
   Profile* profile = Profile::FromBrowserContext(context);
   navigation_metrics::RecordMainFrameNavigation(
       url, navigation_handle->IsSameDocument(), profile->IsOffTheRecord(),
-      ProfileMetrics::GetBrowserProfileType(profile));
+      profile_metrics::GetBrowserProfileType(context));
   profile->RecordMainFrameNavigation();
 
   if (url.SchemeIsHTTPOrHTTPS() && !navigation_handle->IsSameDocument() &&

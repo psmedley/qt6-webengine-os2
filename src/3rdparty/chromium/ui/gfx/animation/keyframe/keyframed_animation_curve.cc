@@ -11,147 +11,75 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/numerics/ranges.h"
+#include "base/time/time.h"
+#include "ui/gfx/animation/keyframe/keyframed_animation_curve-inl.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/box_f.h"
 
 namespace gfx {
-
 namespace {
 
-template <class KeyframeType>
-void InsertKeyframe(std::unique_ptr<KeyframeType> keyframe,
-                    std::vector<std::unique_ptr<KeyframeType>>* keyframes) {
-  // Usually, the keyframes will be added in order, so this loop would be
-  // unnecessary and we should skip it if possible.
-  if (!keyframes->empty() && keyframe->Time() < keyframes->back()->Time()) {
-    for (size_t i = 0; i < keyframes->size(); ++i) {
-      if (keyframe->Time() < keyframes->at(i)->Time()) {
-        keyframes->insert(keyframes->begin() + i, std::move(keyframe));
-        return;
-      }
-    }
+static constexpr float kTolerance = 1e-5f;
+
+template <typename KeyframeType, typename ValueType, typename TargetType>
+std::unique_ptr<AnimationCurve> RetargettedCurve(
+    std::vector<std::unique_ptr<KeyframeType>>& keyframes,
+    base::TimeDelta t,
+    const ValueType& value_at_t,
+    const ValueType& new_target_value,
+    double scaled_duration,
+    TargetType* target,
+    const TimingFunction* timing_function) {
+  if (SufficientlyEqual(keyframes.back()->Value(), new_target_value))
+    return nullptr;
+
+  DCHECK_GE(keyframes.size(), 2u);
+  DCHECK_GT(scaled_duration, 0.f);
+
+  // If we haven't progressed to animating between the last 2 keyframes, simply
+  // clobber the value for the last keyframe.
+  const bool at_last_keyframe =
+      (keyframes[keyframes.size() - 2]->Time() * scaled_duration) <= t;
+  if (!at_last_keyframe) {
+    auto& last_keyframe = keyframes.back();
+    auto* keyframe_timing_function = last_keyframe->timing_function();
+    last_keyframe = KeyframeType::Create(
+        last_keyframe->Time(), new_target_value,
+        keyframe_timing_function ? keyframe_timing_function->Clone() : nullptr);
+    return nullptr;
   }
 
-  keyframes->push_back(std::move(keyframe));
-}
+  // Ensure that `t` happens between the last two keyframes.
+  DCHECK_GE(keyframes[keyframes.size() - 1]->Time() * scaled_duration, t);
 
-struct TimeValues {
-  base::TimeDelta start_time;
-  base::TimeDelta duration;
-  double progress;
-};
+  // TODO(crbug.com/1198305): This can be changed to a different / special
+  // interpolation curve type to maintain c2 continuity.
+  auto curve = AnimationTraits<ValueType>::KeyframedCurveType::Create();
+  curve->set_scaled_duration(scaled_duration);
+  curve->set_target(target);
 
-template <typename KeyframeType>
-TimeValues GetTimeValues(const KeyframeType& start_frame,
-                         const KeyframeType& end_frame,
-                         double scaled_duration,
-                         base::TimeDelta time) {
-  TimeValues values;
-  values.start_time = start_frame.Time() * scaled_duration;
-  values.duration = (end_frame.Time() * scaled_duration) - values.start_time;
-  const base::TimeDelta elapsed = time - values.start_time;
-  values.progress = (elapsed.is_inf() || values.duration.is_zero())
-                        ? 1.0
-                        : (elapsed / values.duration);
-  return values;
-}
+  auto generate_timing_function =
+      [timing_function]() -> std::unique_ptr<gfx::TimingFunction> {
+    if (timing_function)
+      return timing_function->Clone();
+    return nullptr;
+  };
 
-template <typename KeyframeType>
-base::TimeDelta TransformedAnimationTime(
-    const std::vector<std::unique_ptr<KeyframeType>>& keyframes,
-    const std::unique_ptr<TimingFunction>& timing_function,
-    double scaled_duration,
-    base::TimeDelta time) {
-  if (timing_function) {
-    const auto values = GetTimeValues(*keyframes.front(), *keyframes.back(),
-                                      scaled_duration, time);
-    time = (values.duration * timing_function->GetValue(values.progress)) +
-           values.start_time;
-  }
+  // Keep the curve duration the same by adding the same first frame.
+  curve->AddKeyframe(KeyframeType::Create(keyframes.front()->Time(),
+                                          keyframes.front()->Value(),
+                                          generate_timing_function()));
 
-  return time;
-}
+  // Snap the current value at `t` so that the current value stays the same.
+  curve->AddKeyframe(KeyframeType::Create(t / scaled_duration, value_at_t,
+                                          generate_timing_function()));
 
-template <typename KeyframeType>
-size_t GetActiveKeyframe(
-    const std::vector<std::unique_ptr<KeyframeType>>& keyframes,
-    double scaled_duration,
-    base::TimeDelta time) {
-  DCHECK_GE(keyframes.size(), 2ul);
-  size_t i = 0;
-  while ((i < keyframes.size() - 2) &&  // Last keyframe is never active.
-         (time >= (keyframes[i + 1]->Time() * scaled_duration)))
-    ++i;
+  // Add a new target at the same time as the last frame.
+  curve->AddKeyframe(KeyframeType::Create(
+      keyframes.back()->Time(), new_target_value, generate_timing_function()));
 
-  return i;
-}
-
-template <typename KeyframeType>
-double TransformedKeyframeProgress(
-    const std::vector<std::unique_ptr<KeyframeType>>& keyframes,
-    double scaled_duration,
-    base::TimeDelta time,
-    size_t i) {
-  const double progress =
-      GetTimeValues(*keyframes[i], *keyframes[i + 1], scaled_duration, time)
-          .progress;
-  return keyframes[i]->timing_function()
-             ? keyframes[i]->timing_function()->GetValue(progress)
-             : progress;
-}
-
-int GetTimingFunctionSteps(const TimingFunction* timing_function) {
-  DCHECK(timing_function &&
-         timing_function->GetType() == TimingFunction::Type::STEPS);
-  const StepsTimingFunction* steps_timing_function =
-      reinterpret_cast<const StepsTimingFunction*>(timing_function);
-  DCHECK(steps_timing_function);
-  return steps_timing_function->steps();
-}
-
-template <class KeyframeType>
-base::TimeDelta ComputeTickInterval(
-    const std::unique_ptr<TimingFunction>& timing_function,
-    double scaled_duration,
-    const std::vector<std::unique_ptr<KeyframeType>>& keyframes) {
-  // TODO(crbug.com/1140603): include animation progress in order to pinpoint
-  // which keyframe's timing function is in effect at any point in time.
-  DCHECK_LT(0u, keyframes.size());
-  TimingFunction::Type timing_function_type =
-      timing_function ? timing_function->GetType()
-                      : TimingFunction::Type::LINEAR;
-  // Even if the keyframe's have step timing functions, a non-linear
-  // animation-wide timing function results in unevenly timed steps.
-  switch (timing_function_type) {
-    case TimingFunction::Type::LINEAR: {
-      base::TimeDelta min_interval = base::TimeDelta::Max();
-      // If any keyframe uses non-step "easing", return 0, except for the last
-      // keyframe, whose "easing" is never used.
-      for (size_t ii = 0; ii < keyframes.size() - 1; ++ii) {
-        KeyframeType* keyframe = keyframes[ii].get();
-        if (!keyframe->timing_function() ||
-            keyframe->timing_function()->GetType() !=
-                TimingFunction::Type::STEPS) {
-          return base::TimeDelta();
-        }
-        KeyframeType* next_keyframe = keyframes[ii + 1].get();
-        int steps = GetTimingFunctionSteps(keyframe->timing_function());
-        DCHECK_LT(0, steps);
-        base::TimeDelta interval = (next_keyframe->Time() - keyframe->Time()) *
-                                   scaled_duration / steps;
-        if (interval < min_interval)
-          min_interval = interval;
-      }
-      return min_interval;
-    }
-    case TimingFunction::Type::STEPS: {
-      return (keyframes.back()->Time() - keyframes.front()->Time()) *
-             scaled_duration / GetTimingFunctionSteps(timing_function.get());
-    }
-    case TimingFunction::Type::CUBIC_BEZIER:
-      break;
-  }
-  return base::TimeDelta();
+  return curve;
 }
 
 }  // namespace
@@ -271,6 +199,32 @@ std::unique_ptr<SizeKeyframe> SizeKeyframe::Clone() const {
   return SizeKeyframe::Create(Time(), Value(), std::move(func));
 }
 
+std::unique_ptr<RectKeyframe> RectKeyframe::Create(
+    base::TimeDelta time,
+    const gfx::Rect& value,
+    std::unique_ptr<TimingFunction> timing_function) {
+  return base::WrapUnique(
+      new RectKeyframe(time, value, std::move(timing_function)));
+}
+
+RectKeyframe::RectKeyframe(base::TimeDelta time,
+                           const gfx::Rect& value,
+                           std::unique_ptr<TimingFunction> timing_function)
+    : Keyframe(time, std::move(timing_function)), value_(value) {}
+
+RectKeyframe::~RectKeyframe() = default;
+
+const gfx::Rect& RectKeyframe::Value() const {
+  return value_;
+}
+
+std::unique_ptr<RectKeyframe> RectKeyframe::Clone() const {
+  std::unique_ptr<TimingFunction> func;
+  if (timing_function())
+    func = timing_function()->Clone();
+  return RectKeyframe::Create(Time(), Value(), std::move(func));
+}
+
 std::unique_ptr<KeyframedColorAnimationCurve>
 KeyframedColorAnimationCurve::Create() {
   return base::WrapUnique(new KeyframedColorAnimationCurve);
@@ -326,6 +280,14 @@ SkColor KeyframedColorAnimationCurve::GetValue(base::TimeDelta t) const {
                                        keyframes_[i + 1]->Value());
 }
 
+std::unique_ptr<AnimationCurve> KeyframedColorAnimationCurve::Retarget(
+    base::TimeDelta t,
+    SkColor new_target) {
+  DCHECK(!keyframes_.empty());
+  return RetargettedCurve(keyframes_, t, GetValue(t), new_target,
+                          scaled_duration(), target(), timing_function_.get());
+}
+
 std::unique_ptr<KeyframedFloatAnimationCurve>
 KeyframedFloatAnimationCurve::Create() {
   return base::WrapUnique(new KeyframedFloatAnimationCurve);
@@ -362,6 +324,14 @@ std::unique_ptr<AnimationCurve> KeyframedFloatAnimationCurve::Clone() const {
   to_return->set_scaled_duration(scaled_duration());
 
   return std::move(to_return);
+}
+
+std::unique_ptr<AnimationCurve> KeyframedFloatAnimationCurve::Retarget(
+    base::TimeDelta t,
+    float new_target) {
+  DCHECK(!keyframes_.empty());
+  return RetargettedCurve(keyframes_, t, GetValue(t), new_target,
+                          scaled_duration(), target(), timing_function_.get());
 }
 
 float KeyframedFloatAnimationCurve::GetValue(base::TimeDelta t) const {
@@ -457,6 +427,14 @@ bool KeyframedTransformAnimationCurve::MaximumScale(float* max_scale) const {
   return *max_scale > 0.f;
 }
 
+std::unique_ptr<AnimationCurve> KeyframedTransformAnimationCurve::Retarget(
+    base::TimeDelta t,
+    const gfx::TransformOperations& new_target) {
+  DCHECK(!keyframes_.empty());
+  return RetargettedCurve(keyframes_, t, GetValue(t), new_target,
+                          scaled_duration(), target(), timing_function_.get());
+}
+
 std::unique_ptr<KeyframedSizeAnimationCurve>
 KeyframedSizeAnimationCurve::Create() {
   return base::WrapUnique(new KeyframedSizeAnimationCurve);
@@ -510,6 +488,99 @@ gfx::SizeF KeyframedSizeAnimationCurve::GetValue(base::TimeDelta t) const {
 
   return gfx::Tween::SizeFValueBetween(progress, keyframes_[i]->Value(),
                                        keyframes_[i + 1]->Value());
+}
+
+std::unique_ptr<AnimationCurve> KeyframedSizeAnimationCurve::Retarget(
+    base::TimeDelta t,
+    const gfx::SizeF& new_target) {
+  DCHECK(!keyframes_.empty());
+  return RetargettedCurve(keyframes_, t, GetValue(t), new_target,
+                          scaled_duration(), target(), timing_function_.get());
+}
+
+std::unique_ptr<KeyframedRectAnimationCurve>
+KeyframedRectAnimationCurve::Create() {
+  return base::WrapUnique(new KeyframedRectAnimationCurve);
+}
+
+KeyframedRectAnimationCurve::KeyframedRectAnimationCurve()
+    : scaled_duration_(1.0) {}
+
+KeyframedRectAnimationCurve::~KeyframedRectAnimationCurve() = default;
+
+void KeyframedRectAnimationCurve::AddKeyframe(
+    std::unique_ptr<RectKeyframe> keyframe) {
+  InsertKeyframe(std::move(keyframe), &keyframes_);
+}
+
+base::TimeDelta KeyframedRectAnimationCurve::Duration() const {
+  return (keyframes_.back()->Time() - keyframes_.front()->Time()) *
+         scaled_duration();
+}
+
+base::TimeDelta KeyframedRectAnimationCurve::TickInterval() const {
+  return ComputeTickInterval(timing_function_, scaled_duration(), keyframes_);
+}
+
+std::unique_ptr<AnimationCurve> KeyframedRectAnimationCurve::Clone() const {
+  std::unique_ptr<KeyframedRectAnimationCurve> to_return =
+      KeyframedRectAnimationCurve::Create();
+  for (const auto& keyframe : keyframes_)
+    to_return->AddKeyframe(keyframe->Clone());
+
+  if (timing_function_)
+    to_return->SetTimingFunction(timing_function_->Clone());
+
+  to_return->set_scaled_duration(scaled_duration());
+
+  return std::move(to_return);
+}
+
+gfx::Rect KeyframedRectAnimationCurve::GetValue(base::TimeDelta t) const {
+  if (t <= (keyframes_.front()->Time() * scaled_duration()))
+    return keyframes_.front()->Value();
+
+  if (t >= (keyframes_.back()->Time() * scaled_duration()))
+    return keyframes_.back()->Value();
+
+  t = TransformedAnimationTime(keyframes_, timing_function_, scaled_duration(),
+                               t);
+  size_t i = GetActiveKeyframe(keyframes_, scaled_duration(), t);
+  double progress =
+      TransformedKeyframeProgress(keyframes_, scaled_duration(), t, i);
+
+  return gfx::Tween::RectValueBetween(progress, keyframes_[i]->Value(),
+                                      keyframes_[i + 1]->Value());
+}
+
+std::unique_ptr<AnimationCurve> KeyframedRectAnimationCurve::Retarget(
+    base::TimeDelta t,
+    const gfx::Rect& new_target) {
+  DCHECK(!keyframes_.empty());
+  return RetargettedCurve(keyframes_, t, GetValue(t), new_target,
+                          scaled_duration(), target(), timing_function_.get());
+}
+
+bool SufficientlyEqual(float lhs, float rhs) {
+  return base::IsApproximatelyEqual(lhs, rhs, kTolerance);
+}
+
+bool SufficientlyEqual(const TransformOperations& lhs,
+                       const TransformOperations& rhs) {
+  return lhs.ApproximatelyEqual(rhs, kTolerance);
+}
+
+bool SufficientlyEqual(const SizeF& lhs, const SizeF& rhs) {
+  return base::IsApproximatelyEqual(lhs.width(), rhs.width(), kTolerance) &&
+         base::IsApproximatelyEqual(lhs.height(), rhs.height(), kTolerance);
+}
+
+bool SufficientlyEqual(SkColor lhs, SkColor rhs) {
+  return lhs == rhs;
+}
+
+bool SufficientlyEqual(const Rect& lhs, const Rect& rhs) {
+  return lhs == rhs;
 }
 
 }  // namespace gfx

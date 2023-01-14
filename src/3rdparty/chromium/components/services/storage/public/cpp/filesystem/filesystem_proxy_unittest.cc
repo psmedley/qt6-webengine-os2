@@ -7,14 +7,14 @@
 #include <memory>
 
 #include "base/check.h"
+#include "base/cxx17_backports.h"
+#include "base/files/file_error_or.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/test/task_environment.h"
-#include "components/services/storage/public/cpp/filesystem/file_error_or.h"
 #include "components/services/storage/public/cpp/filesystem/filesystem_impl.h"
 #include "components/services/storage/public/mojom/filesystem/directory.mojom.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -22,6 +22,9 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+template <typename ValueType>
+using FileErrorOr = base::FileErrorOr<ValueType>;
 
 namespace storage {
 
@@ -359,22 +362,22 @@ TEST_P(FilesystemProxyTest, DeletePathRecursively) {
 TEST_P(FilesystemProxyTest, GetMaximumPathComponentLength) {
   // This has different values on different platforms, so merely smoke test
   // this to make sure it returns a reasonable valid value.
-  base::Optional<int> max = proxy().GetMaximumPathComponentLength(kDir1);
+  absl::optional<int> max = proxy().GetMaximumPathComponentLength(kDir1);
   ASSERT_TRUE(max.has_value());
   EXPECT_GT(*max, 50);
 }
 
 TEST_P(FilesystemProxyTest, GetFileInfo) {
-  base::Optional<base::File::Info> file1_info = proxy().GetFileInfo(kFile1);
+  absl::optional<base::File::Info> file1_info = proxy().GetFileInfo(kFile1);
   ASSERT_TRUE(file1_info.has_value());
   EXPECT_FALSE(file1_info->is_directory);
   EXPECT_EQ(static_cast<int>(base::size(kFile1Contents) - 1), file1_info->size);
 
-  base::Optional<base::File::Info> dir1_info = proxy().GetFileInfo(kDir1);
+  absl::optional<base::File::Info> dir1_info = proxy().GetFileInfo(kDir1);
   ASSERT_TRUE(dir1_info.has_value());
   EXPECT_TRUE(dir1_info->is_directory);
 
-  base::Optional<base::File::Info> dir1_file1_info =
+  absl::optional<base::File::Info> dir1_file1_info =
       proxy().GetFileInfo(kDir1.Append(kDir1File1));
   ASSERT_TRUE(dir1_file1_info.has_value());
   EXPECT_FALSE(dir1_file1_info->is_directory);

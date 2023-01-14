@@ -11,11 +11,13 @@
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/common/common_export.h"
+#include "third_party/blink/public/common/origin_trials/origin_trial_public_key.h"
 #include "url/origin.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size);
 
 namespace blink {
+
 // The enum entries below are written to histograms and thus cannot be deleted
 // or reordered.
 // New entries must be added immediately before the end.
@@ -60,9 +62,10 @@ class BLINK_COMMON_EXPORT TrialToken {
   // appropriate for a given origin / feature. It only means that it is
   // correctly formatted and signed by the supplied public key, and can be
   // parsed.
-  static std::unique_ptr<TrialToken> From(base::StringPiece token_text,
-                                          base::StringPiece public_key,
-                                          OriginTrialTokenStatus* out_status);
+  static std::unique_ptr<TrialToken> From(
+      base::StringPiece token_text,
+      const OriginTrialPublicKey& public_key,
+      OriginTrialTokenStatus* out_status);
 
   // Returns success if this token is appropriate for use by the given origin
   // and has not yet expired. Otherwise, the return value indicates why the
@@ -70,13 +73,21 @@ class BLINK_COMMON_EXPORT TrialToken {
   OriginTrialTokenStatus IsValid(const url::Origin& origin,
                                  const base::Time& now) const;
 
-  url::Origin origin() { return origin_; }
+  url::Origin origin() const { return origin_; }
   bool match_subdomains() const { return match_subdomains_; }
-  std::string feature_name() { return feature_name_; }
-  base::Time expiry_time() { return expiry_time_; }
-  std::string signature() { return signature_; }
+  std::string feature_name() const { return feature_name_; }
+  base::Time expiry_time() const { return expiry_time_; }
+  std::string signature() const { return signature_; }
   bool is_third_party() const { return is_third_party_; }
-  UsageRestriction usage_restriction() { return usage_restriction_; }
+  UsageRestriction usage_restriction() const { return usage_restriction_; }
+
+  static std::unique_ptr<TrialToken> CreateTrialTokenForTesting(
+      const url::Origin& origin,
+      bool match_subdomains,
+      const std::string& feature_name,
+      base::Time expiry_time,
+      bool is_third_party,
+      UsageRestriction usage_restriction);
 
  protected:
   // Tests can access the Parse method directly to validate it, and so are
@@ -93,7 +104,7 @@ class BLINK_COMMON_EXPORT TrialToken {
   // wrong with the string, and |out_token_payload|, |out_token_signature| and
   // |out_token_version| are unchanged.
   static OriginTrialTokenStatus Extract(base::StringPiece token_text,
-                                        base::StringPiece public_key,
+                                        const OriginTrialPublicKey& public_key,
                                         std::string* out_token_payload,
                                         std::string* out_token_signature,
                                         uint8_t* out_token_version);
@@ -109,13 +120,13 @@ class BLINK_COMMON_EXPORT TrialToken {
 
   static bool ValidateSignature(base::StringPiece signature_text,
                                 const std::string& data,
-                                base::StringPiece public_key);
+                                const OriginTrialPublicKey& public_key);
 
  private:
   TrialToken(const url::Origin& origin,
              bool match_subdomains,
              const std::string& feature_name,
-             uint64_t expiry_timestamp,
+             base::Time expiry_time,
              bool is_third_party,
              UsageRestriction usage_restriction);
 

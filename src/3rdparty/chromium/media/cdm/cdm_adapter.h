@@ -13,12 +13,12 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_native_library.h"
 #include "base/threading/thread.h"
+#include "components/crash/core/common/crash_key.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/callback_registry.h"
 #include "media/base/cdm_config.h"
@@ -28,6 +28,7 @@
 #include "media/base/content_decryption_module.h"
 #include "media/base/decryptor.h"
 #include "media/base/media_export.h"
+#include "media/base/video_aspect_ratio.h"
 #include "media/cdm/api/content_decryption_module.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -94,7 +95,7 @@ class MEDIA_EXPORT CdmAdapter final : public ContentDecryptionModule,
   // CdmContext implementation.
   std::unique_ptr<CallbackRegistration> RegisterEventCB(EventCB event_cb) final;
   Decryptor* GetDecryptor() final;
-  base::Optional<base::UnguessableToken> GetCdmId() const final;
+  absl::optional<base::UnguessableToken> GetCdmId() const final;
 
   // Decryptor implementation.
   void Decrypt(StreamType stream_type,
@@ -220,8 +221,9 @@ class MEDIA_EXPORT CdmAdapter final : public ContentDecryptionModule,
   SessionKeysChangeCB session_keys_change_cb_;
   SessionExpirationUpdateCB session_expiration_update_cb_;
 
-  // CDM origin used in crash reporting.
+  // CDM origin and crash key to be used in crash reporting.
   const std::string cdm_origin_;
+  crash_reporter::ScopedCrashKeyString scoped_crash_key_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<AudioBufferMemoryPool> pool_;
@@ -240,7 +242,7 @@ class MEDIA_EXPORT CdmAdapter final : public ContentDecryptionModule,
   ChannelLayout audio_channel_layout_ = CHANNEL_LAYOUT_NONE;
 
   // Keep track of aspect ratio from the latest configuration.
-  double pixel_aspect_ratio_ = 0.0;
+  VideoAspectRatio aspect_ratio_;
 
   // Whether the current video config is encrypted.
   bool is_video_encrypted_ = false;

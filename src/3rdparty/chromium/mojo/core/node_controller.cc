@@ -15,9 +15,8 @@
 #include "base/macros.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
+#include "base/strings/string_piece.h"
 #include "base/task/current_thread.h"
-#include "base/time/time.h"
-#include "base/timer/elapsed_timer.h"
 #include "mojo/core/broker.h"
 #include "mojo/core/broker_host.h"
 #include "mojo/core/configuration.h"
@@ -190,14 +189,13 @@ void NodeController::SendBrokerClientInvitation(
 
 void NodeController::AcceptBrokerClientInvitation(
     ConnectionParams connection_params) {
-  base::Optional<PlatformHandle> broker_host_handle;
+  absl::optional<PlatformHandle> broker_host_handle;
   DCHECK(!GetConfiguration().is_broker_process);
 #if !defined(OS_APPLE) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA) && !defined(OS_OS2)
   if (!connection_params.is_async()) {
     // Use the bootstrap channel for the broker and receive the node's channel
     // synchronously as the first message from the broker.
     DCHECK(connection_params.endpoint().is_valid());
-    base::ElapsedTimer timer;
     broker_ = std::make_unique<Broker>(
         connection_params.TakeEndpoint().TakePlatformHandle(),
         /*wait_for_channel_handle=*/true);
@@ -246,7 +244,7 @@ void NodeController::ConnectIsolated(ConnectionParams connection_params,
       FROM_HERE,
       base::BindOnce(&NodeController::ConnectIsolatedOnIOThread,
                      base::Unretained(this), std::move(connection_params), port,
-                     connection_name.as_string()));
+                     std::string(connection_name)));
 }
 
 void NodeController::SetPortObserver(const ports::PortRef& port,
@@ -427,7 +425,7 @@ void NodeController::SendBrokerClientInvitationOnIOThread(
 
 void NodeController::AcceptBrokerClientInvitationOnIOThread(
     ConnectionParams connection_params,
-    base::Optional<PlatformHandle> broker_host_handle) {
+    absl::optional<PlatformHandle> broker_host_handle) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
   {

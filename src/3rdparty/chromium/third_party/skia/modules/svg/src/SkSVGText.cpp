@@ -473,7 +473,9 @@ void SkSVGTextContext::commitRunBuffer(const RunInfo& ri) {
 
 void SkSVGTextFragment::renderText(const SkSVGRenderContext& ctx, SkSVGTextContext* tctx,
                                    SkSVGXmlSpace xs) const {
-    SkSVGRenderContext localContext(ctx, this);
+    // N.B.: unlike regular elements, text fragments do not establish a new OBB scope -- they
+    // always defer to the root <text> element for OBB resolution.
+    SkSVGRenderContext localContext(ctx);
 
     if (this->onPrepareToRender(&localContext)) {
         this->onShapeText(localContext, tctx, xs);
@@ -572,8 +574,6 @@ SkRect SkSVGText::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
 
             SkAutoSTArray<64, SkRect> glyphBounds;
 
-            SkTextBlobRunIterator it(blob.get());
-
             for (SkTextBlobRunIterator it(blob.get()); !it.done(); it.next()) {
                 glyphBounds.reset(SkToInt(it.glyphCount()));
                 it.font().getBounds(it.glyphs(), it.glyphCount(), glyphBounds.get(), nullptr);
@@ -605,7 +605,6 @@ SkPath SkSVGText::onAsPath(const SkSVGRenderContext& ctx) const {
                 return;
             }
 
-            SkTextBlobRunIterator it(blob.get());
             for (SkTextBlobRunIterator it(blob.get()); !it.done(); it.next()) {
                 struct GetPathsCtx {
                     SkPathBuilder&   builder;

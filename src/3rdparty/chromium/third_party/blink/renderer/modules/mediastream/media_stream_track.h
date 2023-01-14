@@ -27,14 +27,17 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_MEDIA_STREAM_TRACK_H_
 
 #include <memory>
+
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_capture_handle.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -54,7 +57,7 @@ class MODULES_EXPORT MediaStreamTrack
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  class MODULES_EXPORT Observer : public GarbageCollectedMixin {
+  class MODULES_EXPORT Observer : public cppgc::GarbageCollectedMixin {
    public:
     virtual ~Observer() = default;
     virtual void TrackChangedState() = 0;
@@ -85,6 +88,7 @@ class MODULES_EXPORT MediaStreamTrack
   MediaTrackCapabilities* getCapabilities() const;
   MediaTrackConstraints* getConstraints() const;
   MediaTrackSettings* getSettings() const;
+  CaptureHandle* getCaptureHandle() const;
   ScriptPromise applyConstraints(ScriptState*, const MediaTrackConstraints*);
 
   // This function is called when constrains have been successfully applied.
@@ -94,6 +98,7 @@ class MODULES_EXPORT MediaStreamTrack
   DEFINE_ATTRIBUTE_EVENT_LISTENER(mute, kMute)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(unmute, kUnmute)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(ended, kEnded)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(capturehandlechange, kCapturehandlechange)
 
   // Returns the enum value of the ready state.
   MediaStreamSource::ReadyState GetReadyState() { return ready_state_; }
@@ -107,6 +112,8 @@ class MODULES_EXPORT MediaStreamTrack
   // EventTarget
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
+  void AddedEventListener(const AtomicString&,
+                          RegisteredEventListener&) override;
 
   // ScriptWrappable
   bool HasPendingActivity() const final;
@@ -123,14 +130,15 @@ class MODULES_EXPORT MediaStreamTrack
  private:
   friend class CanvasCaptureMediaStreamTrack;
 
-  // MediaStreamSourceObserver
+  // MediaStreamSource::Observer
   void SourceChangedState() override;
+  void SourceChangedCaptureHandle(media::mojom::CaptureHandlePtr) override;
 
   void PropagateTrackEnded();
   void applyConstraintsImageCapture(ScriptPromiseResolver*,
                                     const MediaTrackConstraints*);
 
-  std::string GetTrackLogString() const;
+  void SendLogMessage(const WTF::String& message);
 
   // Ensures that |feature_handle_for_scheduler_| is initialized.
   void EnsureFeatureHandleForScheduler();

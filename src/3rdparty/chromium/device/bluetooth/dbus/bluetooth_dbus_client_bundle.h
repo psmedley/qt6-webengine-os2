@@ -14,6 +14,8 @@
 namespace bluez {
 
 class BluetoothAdapterClient;
+class BluetoothAdminPolicyClient;
+class BluetoothAdvertisementMonitorManagerClient;
 class BluetoothAgentManagerClient;
 class BluetoothBatteryClient;
 class BluetoothDebugManagerClient;
@@ -41,9 +43,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDBusClientBundle {
     return bluetooth_adapter_client_.get();
   }
 
+  BluetoothAdminPolicyClient* bluetooth_admin_policy_client() {
+    return bluetooth_admin_policy_client_.get();
+  }
+
   BluetoothLEAdvertisingManagerClient*
   bluetooth_le_advertising_manager_client() {
     return bluetooth_le_advertising_manager_client_.get();
+  }
+
+  BluetoothAdvertisementMonitorManagerClient*
+  bluetooth_advertisement_monitor_manager_client() {
+    return bluetooth_advertisement_monitor_manager_client_.get();
   }
 
   BluetoothAgentManagerClient* bluetooth_agent_manager_client() {
@@ -100,6 +111,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDBusClientBundle {
   bool use_fakes_;
 
   std::unique_ptr<BluetoothAdapterClient> bluetooth_adapter_client_;
+  std::unique_ptr<BluetoothAdminPolicyClient> bluetooth_admin_policy_client_;
+  std::unique_ptr<BluetoothAdvertisementMonitorManagerClient>
+      bluetooth_advertisement_monitor_manager_client_;
   std::unique_ptr<BluetoothLEAdvertisingManagerClient>
       bluetooth_le_advertising_manager_client_;
   std::unique_ptr<BluetoothAgentManagerClient> bluetooth_agent_manager_client_;

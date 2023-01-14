@@ -5,11 +5,15 @@
 template("html_to_js") {
   action(target_name) {
     script = "//tools/polymer/html_to_js.py"
+    forward_variables_from(invoker, [ "visibility" ])
 
     inputs = []
     outputs = []
 
     foreach(js_file, invoker.js_files) {
+      extension = get_path_info(js_file, "extension")
+      assert(extension == "js" || extension == "ts")
+
       html_file = get_path_info(js_file, "name") + ".html"
       inputs += [
         js_file,

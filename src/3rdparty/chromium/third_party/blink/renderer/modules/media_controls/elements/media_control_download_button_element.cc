@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/user_metrics_action.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -40,7 +41,8 @@ bool MediaControlDownloadButtonElement::ShouldDisplayDownloadButton() const {
   // The attribute disables the download button.
   // This is run after `SupportSave()` to guarantee that it is recorded only if
   // it blocks the download button from showing up.
-  if (MediaElement().ControlsListInternal()->ShouldHideDownload()) {
+  if (MediaElement().ControlsListInternal()->ShouldHideDownload() &&
+      !MediaElement().UserWantsControlsVisible()) {
     UseCounter::Count(MediaElement().GetDocument(),
                       WebFeature::kHTMLMediaElementControlsListNoDownload);
     return false;

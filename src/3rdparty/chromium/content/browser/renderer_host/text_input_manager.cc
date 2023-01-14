@@ -4,6 +4,10 @@
 
 #include "content/browser/renderer_host/text_input_manager.h"
 
+#include <algorithm>
+
+#include "base/numerics/clamped_math.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "ui/gfx/geometry/rect.h"
@@ -16,7 +20,8 @@ namespace {
 bool ShouldUpdateTextInputState(const ui::mojom::TextInputState& old_state,
                                 const ui::mojom::TextInputState& new_state) {
 #if defined(USE_AURA)
-  return old_state.type != new_state.type || old_state.mode != new_state.mode ||
+  return old_state.node_id != new_state.node_id ||
+         old_state.type != new_state.type || old_state.mode != new_state.mode ||
          old_state.flags != new_state.flags ||
          old_state.can_compose_inline != new_state.can_compose_inline;
 #elif defined(OS_MAC)
@@ -82,6 +87,27 @@ gfx::Range TextInputManager::GetAutocorrectRange() const {
     }
   }
   return gfx::Range();
+}
+
+absl::optional<ui::GrammarFragment> TextInputManager::GetGrammarFragment(
+    gfx::Range range) const {
+  if (!active_view_)
+    return absl::nullopt;
+
+  for (const auto& ime_text_span_info :
+       text_input_state_map_.at(active_view_)->ime_text_spans_info) {
+    if (ime_text_span_info->span.type ==
+            ui::ImeTextSpan::Type::kGrammarSuggestion &&
+        ime_text_span_info->span.suggestions.size() > 0) {
+      auto span_range = gfx::Range(ime_text_span_info->span.start_offset,
+                                   ime_text_span_info->span.end_offset);
+      if (span_range.Contains(range)) {
+        return ui::GrammarFragment(span_range,
+                                   ime_text_span_info->span.suggestions[0]);
+      }
+    }
+  }
+  return absl::nullopt;
 }
 
 const TextInputManager::SelectionRegion* TextInputManager::GetSelectionRegion(
@@ -194,6 +220,7 @@ void TextInputManager::SelectionBoundsChanged(
     base::i18n::TextDirection anchor_dir,
     const gfx::Rect& focus_rect,
     base::i18n::TextDirection focus_dir,
+    const gfx::Rect& bounding_box,
     bool is_anchor_first) {
   DCHECK(IsRegistered(view));
   // Converting the anchor point to root's coordinate space (for child frame
@@ -232,12 +259,42 @@ void TextInputManager::SelectionBoundsChanged(
     }
   }
 
+  // Transform `bounding_box` to the top-level frame's coordinate space.
+  std::vector<gfx::Point> bounding_box_vertice = {
+      bounding_box.origin(), bounding_box.top_right(),
+      bounding_box.bottom_left(), bounding_box.bottom_right()};
+  std::vector<int> x_after_transform;
+  std::vector<int> y_after_transform;
+  for (const auto& vertex : bounding_box_vertice) {
+    const gfx::Point vertex_after_transform =
+        view->TransformPointToRootCoordSpace(vertex);
+    x_after_transform.push_back(vertex_after_transform.x());
+    y_after_transform.push_back(vertex_after_transform.y());
+  }
+
+  std::sort(x_after_transform.begin(), x_after_transform.end());
+  std::sort(y_after_transform.begin(), y_after_transform.end());
+
+  const gfx::Point bounding_box_origin_after_transform(x_after_transform[0],
+                                                       y_after_transform[0]);
+  const gfx::Point bounding_box_bottom_right_after_transform(
+      x_after_transform.back(), y_after_transform.back());
+  const gfx::Rect bounding_box_transformed(
+      bounding_box_origin_after_transform,
+      gfx::Size(base::ClampSub(bounding_box_bottom_right_after_transform.x(),
+                               bounding_box_origin_after_transform.x()),
+                base::ClampSub(bounding_box_bottom_right_after_transform.y(),
+                               bounding_box_origin_after_transform.y())));
+
   if (anchor_bound == selection_region_map_[view].anchor &&
-      focus_bound == selection_region_map_[view].focus)
+      focus_bound == selection_region_map_[view].focus &&
+      bounding_box_transformed == selection_region_map_[view].bounding_box) {
     return;
+  }
 
   selection_region_map_[view].anchor = anchor_bound;
   selection_region_map_[view].focus = focus_bound;
+  selection_region_map_[view].bounding_box = bounding_box_transformed;
 
   if (anchor_rect == focus_rect) {
     selection_region_map_[view].caret_rect.set_origin(
@@ -282,7 +339,7 @@ void TextInputManager::ImeCompositionRangeChanged(
 }
 
 void TextInputManager::SelectionChanged(RenderWidgetHostViewBase* view,
-                                        const base::string16& text,
+                                        const std::u16string& text,
                                         size_t offset,
                                         const gfx::Range& range,
                                         bool user_initiated) {
@@ -354,17 +411,20 @@ void TextInputManager::NotifyObserversAboutInputStateUpdate(
     observer.OnUpdateTextInputStateCalled(this, updated_view, did_update_state);
 }
 
-TextInputManager::SelectionRegion::SelectionRegion() {}
+TextInputManager::SelectionRegion::SelectionRegion() = default;
 
 TextInputManager::SelectionRegion::SelectionRegion(
     const SelectionRegion& other) = default;
 
-TextInputManager::CompositionRangeInfo::CompositionRangeInfo() {}
+TextInputManager::SelectionRegion& TextInputManager::SelectionRegion::operator=(
+    const SelectionRegion& other) = default;
+
+TextInputManager::CompositionRangeInfo::CompositionRangeInfo() = default;
 
 TextInputManager::CompositionRangeInfo::CompositionRangeInfo(
     const CompositionRangeInfo& other) = default;
 
-TextInputManager::CompositionRangeInfo::~CompositionRangeInfo() {}
+TextInputManager::CompositionRangeInfo::~CompositionRangeInfo() = default;
 
 TextInputManager::TextSelection::TextSelection()
     : offset_(0), range_(gfx::Range::InvalidRange()) {}
@@ -372,9 +432,9 @@ TextInputManager::TextSelection::TextSelection()
 TextInputManager::TextSelection::TextSelection(const TextSelection& other) =
     default;
 
-TextInputManager::TextSelection::~TextSelection() {}
+TextInputManager::TextSelection::~TextSelection() = default;
 
-void TextInputManager::TextSelection::SetSelection(const base::string16& text,
+void TextInputManager::TextSelection::SetSelection(const std::u16string& text,
                                                    size_t offset,
                                                    const gfx::Range& range,
                                                    bool user_initiated) {

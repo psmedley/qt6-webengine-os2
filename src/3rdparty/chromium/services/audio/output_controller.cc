@@ -23,6 +23,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/audio_timestamp_helper.h"
+#include "services/audio/concurrent_stream_metric_reporter.h"
 #include "services/audio/stream_monitor.h"
 
 using base::TimeDelta;
@@ -91,8 +92,8 @@ const char* ErrorTypeToString(
 }  // namespace
 
 OutputController::ErrorStatisticsTracker::ErrorStatisticsTracker(
-    EventHandler* handler)
-    : handler_(handler),
+    OutputController* controller)
+    : controller_(controller),
       start_time_(base::TimeTicks::Now()),
       on_more_io_data_called_(0) {
   // WedgeCheck() will look to see if |on_more_io_data_called_| is true after
@@ -107,13 +108,11 @@ OutputController::ErrorStatisticsTracker::~ErrorStatisticsTracker() {
   UMA_HISTOGRAM_LONG_TIMES("Media.OutputStreamDuration", duration);
   UMA_HISTOGRAM_BOOLEAN("Media.AudioOutputController.CallbackError",
                         error_during_callback_);
-  if (handler_) {
-    handler_->OnLog(base::StringPrintf(
-        "AOC::StopStream => (stream duration=%" PRId64 " seconds%s",
-        duration.InSeconds(), ")"));
-    handler_->OnLog(
-        base::StringPrintf("AOC::StopStream => (error_during_callback=%s)",
-                           error_during_callback_ ? "true" : "false"));
+  if (controller_) {
+    controller_->SendLogMessage("StopStream => (duration=%" PRId64 " sec)",
+                                duration.InSeconds());
+    controller_->SendLogMessage("StopStream => (error_during_callback=%s)",
+                                error_during_callback_ ? "true" : "false");
   }
 }
 
@@ -134,20 +133,22 @@ void OutputController::ErrorStatisticsTracker::WedgeCheck() {
   UMA_HISTOGRAM_BOOLEAN("Media.AudioOutputControllerPlaybackStartupSuccess",
                         on_more_io_data_called_.IsOne());
   if (on_more_io_data_called_.IsOne()) {
-    if (handler_)
-      handler_->OnLog(
-          base::StringPrintf("AOC::%s => (stream is alive)", __func__));
+    if (controller_)
+      controller_->SendLogMessage("WedgeCheck => (stream is alive)");
   }
 }
 
-OutputController::OutputController(media::AudioManager* audio_manager,
-                                   EventHandler* handler,
-                                   const media::AudioParameters& params,
-                                   const std::string& output_device_id,
-                                   SyncReader* sync_reader)
+OutputController::OutputController(
+    media::AudioManager* audio_manager,
+    EventHandler* handler,
+    OutputStreamActivityMonitor* activity_monitor,
+    const media::AudioParameters& params,
+    const std::string& output_device_id,
+    SyncReader* sync_reader)
     : audio_manager_(audio_manager),
       params_(params),
       handler_(handler),
+      activity_monitor_(activity_monitor),
       task_runner_(audio_manager->GetTaskRunner()),
       construction_time_(base::TimeTicks::Now()),
       output_device_id_(output_device_id),
@@ -161,6 +162,7 @@ OutputController::OutputController(media::AudioManager* audio_manager,
           TimeDelta::FromMilliseconds(kPowerMeasurementTimeConstantMillis)) {
   DCHECK(audio_manager);
   DCHECK(handler_);
+  DCHECK(activity_monitor_);
   DCHECK(sync_reader_);
   DCHECK(task_runner_.get());
 }
@@ -307,6 +309,15 @@ void OutputController::Play() {
   if (state_ != kCreated && state_ != kPaused)
     return;
 
+  StartStream();
+  if (StreamIsActive())
+    activity_monitor_->OnOutputStreamActive();
+}
+
+void OutputController::StartStream() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(state_ == kCreated || state_ == kPaused);
+
   // Ask for first packet.
   sync_reader_->RequestMoreData(base::TimeDelta(), base::TimeTicks(), 0);
 
@@ -317,7 +328,7 @@ void OutputController::Play() {
     last_audio_level_log_time_ = base::TimeTicks::Now();
   }
 
-  stats_tracker_.emplace(handler_);
+  stats_tracker_.emplace(this);
 
   stream_->Start(this);
 
@@ -349,6 +360,8 @@ void OutputController::Pause() {
   TRACE_EVENT0("audio", "OutputController::Pause");
   SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
 
+  if (StreamIsActive())
+    activity_monitor_->OnOutputStreamInactive();
   StopStream();
 
   if (state_ != kPaused)
@@ -385,6 +398,8 @@ void OutputController::Close() {
   SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
 
   if (state_ != kClosed) {
+    if (StreamIsActive())
+      activity_monitor_->OnOutputStreamInactive();
     StopCloseAndClearStream();
     sync_reader_->Close();
     state_ = kClosed;
@@ -481,7 +496,9 @@ void OutputController::SendLogMessage(const char* format, ...) {
     return;
   va_list args;
   va_start(args, format);
-  handler_->OnLog("AOC::" + base::StringPrintV(format, args));
+  handler_->OnLog("AOC::" + base::StringPrintV(format, args) +
+                  base::StringPrintf(" [this=0x%" PRIXPTR "]",
+                                     reinterpret_cast<uintptr_t>(this)));
   va_end(args);
 }
 
@@ -490,6 +507,10 @@ void OutputController::LogAudioPowerLevel(const char* call_name) {
       power_monitor_.ReadCurrentPowerAndClip();
   SendLogMessage("%s => (average audio level=%.2f dBFS)", call_name,
                  power_and_clip.first);
+}
+
+bool OutputController::StreamIsActive() {
+  return (state_ == kPlaying) && !disable_local_output_;
 }
 
 void OutputController::OnError(ErrorType type) {
@@ -537,12 +558,6 @@ const media::AudioParameters& OutputController::GetAudioParameters() const {
   return params_;
 }
 
-std::string OutputController::GetDeviceId() const {
-  return output_device_id_.empty()
-             ? media::AudioDeviceDescription::kDefaultDeviceId
-             : output_device_id_;
-}
-
 void OutputController::StartSnooping(Snooper* snooper) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(snooper);
@@ -571,16 +586,22 @@ void OutputController::StartMuting() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
 
-  if (!disable_local_output_)
+  if (!disable_local_output_) {
+    if (StreamIsActive())
+      activity_monitor_->OnOutputStreamInactive();
     ToggleLocalOutput();
+  }
 }
 
 void OutputController::StopMuting() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
 
-  if (disable_local_output_)
+  if (disable_local_output_) {
     ToggleLocalOutput();
+    if (StreamIsActive())
+      activity_monitor_->OnOutputStreamActive();
+  }
 }
 
 void OutputController::ToggleLocalOutput() {
@@ -598,7 +619,7 @@ void OutputController::ToggleLocalOutput() {
     const bool restore_playback = (state_ == kPlaying);
     RecreateStream(RecreateReason::LOCAL_OUTPUT_TOGGLE);
     if (state_ == kCreated && restore_playback)
-      Play();
+      StartStream();
   }
 }
 
@@ -620,7 +641,7 @@ void OutputController::OnDeviceChange() {
   // "Media.AudioOutputController.ChangeTime" which maybe is not desired?
   RecreateStreamWithTimingUMA(RecreateReason::DEVICE_CHANGE);
   if (state_ == kCreated && restore_playback)
-    Play();
+    StartStream();
 }
 
 std::pair<float, bool> OutputController::ReadCurrentPowerAndClip() {

@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "cc/animation/animation_export.h"
 #include "cc/paint/element_id.h"
@@ -43,7 +42,10 @@ class CC_ANIMATION_EXPORT KeyframeModel : public gfx::KeyframeModel {
         int target_property_type,
         PaintWorkletInput::NativePropertyType native_property_type);
     TargetPropertyId(const TargetPropertyId&);
+    TargetPropertyId(TargetPropertyId&&);
     ~TargetPropertyId();
+
+    TargetPropertyId& operator=(TargetPropertyId&& other);
 
     int target_property_type() const { return target_property_type_; }
     const std::string& custom_property_name() const {

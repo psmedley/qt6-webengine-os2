@@ -20,8 +20,8 @@
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/ash/login/demo_mode/demo_setup_controller.h"
-#include "chrome/browser/chromeos/login/ui/fake_login_display_host.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/ash/login/ui/fake_login_display_host.h"
+#include "chrome/browser/ash/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/demo_preferences_screen_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
@@ -53,9 +53,8 @@ class TestDataReceiver {
 
   void OnDataReceived(scoped_refptr<base::RefCountedMemory> bytes) {
     data_received_ = true;
-    data_ = base::StringPiece(reinterpret_cast<const char*>(bytes->front()),
-                              bytes->size())
-                .as_string();
+    data_ = std::string(base::StringPiece(
+        reinterpret_cast<const char*>(bytes->front()), bytes->size()));
   }
 
  private:
@@ -171,8 +170,7 @@ class DemoModeChromeOSTermsTest : public ChromeOSTermsTest {
 
     // Simulate Demo Mode setup.
     chromeos::DBusThreadManager::Initialize();
-    fake_login_display_host_ =
-        std::make_unique<chromeos::FakeLoginDisplayHost>();
+    fake_login_display_host_ = std::make_unique<ash::FakeLoginDisplayHost>();
     fake_login_display_host_->StartWizard(
         chromeos::DemoPreferencesScreenView::kScreenId);
     fake_login_display_host_->GetWizardController()
@@ -225,7 +223,7 @@ class DemoModeChromeOSTermsTest : public ChromeOSTermsTest {
   }
 
  private:
-  std::unique_ptr<chromeos::FakeLoginDisplayHost> fake_login_display_host_;
+  std::unique_ptr<ash::FakeLoginDisplayHost> fake_login_display_host_;
 
   DISALLOW_COPY_AND_ASSIGN(DemoModeChromeOSTermsTest);
 };

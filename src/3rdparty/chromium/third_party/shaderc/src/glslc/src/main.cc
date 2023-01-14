@@ -28,7 +28,7 @@
 #include "file_compiler.h"
 #include "libshaderc_util/args.h"
 #include "libshaderc_util/compiler.h"
-#include "libshaderc_util/io.h"
+#include "libshaderc_util/io_shaderc.h"
 #include "libshaderc_util/string_piece.h"
 #include "resource_parse.h"
 #include "shader_stage.h"
@@ -61,6 +61,9 @@ Options:
                     Automatically assign locations to uniform variables that
                     don't have an explicit 'location' layout in the shader
                     source.
+  -fauto-combined-image-sampler
+                    Removes sampler variables and converts existing textures
+                    to combined image-samplers.
   -fentry-point=<name>
                     Specify the entry point name for HLSL compilation, for
                     all subsequent source files.  Default is "main".
@@ -124,7 +127,6 @@ Options:
                     Valid stages are vertex, vert, fragment, frag, tesscontrol,
                     tesc, tesseval, tese, geometry, geom, compute, and comp.
   -g                Generate source-level debug information.
-                    Currently this option has no effect.
   -h                Display available options.
   --help            Display available options.
   -I <value>        Add directory to include search path.
@@ -307,6 +309,8 @@ int main(int argc, char** argv) {
       }
     } else if (arg == "-fauto-bind-uniforms") {
       compiler.options().SetAutoBindUniforms(true);
+    } else if (arg == "-fauto-combined-image-sampler") {
+      compiler.options().SetAutoSampledTextures(true);
     } else if (arg == "-fauto-map-locations") {
       compiler.options().SetAutoMapLocations(true);
     } else if (arg == "-fhlsl-iomap") {
@@ -441,6 +445,9 @@ int main(int argc, char** argv) {
         version = shaderc_env_version_opengl_4_5;
       } else if (target_env_str == "opengl_compat") {
         target_env = shaderc_target_env_opengl_compat;
+        std::cerr << "glslc: error: opengl_compat is no longer supported"
+                  << std::endl;
+        return 1;
       } else {
         std::cerr << "glslc: error: invalid value '" << target_env_str
                   << "' in '--target-env=" << target_env_str << "'"

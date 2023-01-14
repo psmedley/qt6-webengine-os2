@@ -39,6 +39,13 @@ using ui::AtkRoleToString;
 using ui::ATSPIStateToString;
 using ui::FindAccessible;
 
+// Used in dictionary to disambiguate property vs object attribute when they
+// have the same name, e.g. "description".
+// In the final output, they will show up differently:
+// description='xxx' (property)
+// description:xxx (object attribute)
+static constexpr char kObjectAttributePrefix[] = "@";
+
 AccessibilityTreeFormatterAuraLinux::AccessibilityTreeFormatterAuraLinux() = default;
 
 AccessibilityTreeFormatterAuraLinux::~AccessibilityTreeFormatterAuraLinux() {}
@@ -64,23 +71,34 @@ base::Value AccessibilityTreeFormatterAuraLinux::BuildTreeForSelector(
   return std::move(dict);
 }
 
+AtkObject* GetAtkObject(ui::AXPlatformNodeDelegate* node) {
+  DCHECK(node);
+
+  BrowserAccessibility* node_internal =
+      BrowserAccessibility::FromAXPlatformNodeDelegate(node);
+  DCHECK(node_internal);
+
+  BrowserAccessibilityAuraLinux* platform_node =
+      ToBrowserAccessibilityAuraLinux(node_internal);
+  DCHECK(platform_node);
+
+  AtkObject* atk_node = platform_node->GetNativeViewAccessible();
+  DCHECK(atk_node);
+
+  return atk_node;
+}
+
 base::Value AccessibilityTreeFormatterAuraLinux::BuildTree(
     ui::AXPlatformNodeDelegate* root) const {
-  DCHECK(root);
-
-  BrowserAccessibility* root_internal =
-      BrowserAccessibility::FromAXPlatformNodeDelegate(root);
-  DCHECK(root_internal);
-
-  BrowserAccessibilityAuraLinux* platform_root =
-      ToBrowserAccessibilityAuraLinux(root_internal);
-  DCHECK(platform_root);
-
-  AtkObject* atk_root = platform_root->GetNativeViewAccessible();
-  DCHECK(atk_root);
-
   base::DictionaryValue dict;
-  RecursiveBuildTree(atk_root, &dict);
+  RecursiveBuildTree(GetAtkObject(root), &dict);
+  return std::move(dict);
+}
+
+base::Value AccessibilityTreeFormatterAuraLinux::BuildNode(
+    ui::AXPlatformNodeDelegate* node) const {
+  base::DictionaryValue dict;
+  AddProperties(GetAtkObject(node), &dict);
   return std::move(dict);
 }
 
@@ -158,7 +176,20 @@ AtspiAccessible* AccessibilityTreeFormatterAuraLinux::FindActiveDocument(
 void AccessibilityTreeFormatterAuraLinux::RecursiveBuildTree(
     AtkObject* atk_node,
     base::DictionaryValue* dict) const {
+  ui::AXPlatformNodeAuraLinux* platform_node =
+      ui::AXPlatformNodeAuraLinux::FromAtkObject(atk_node);
+  DCHECK(platform_node);
+
+  BrowserAccessibility* node = BrowserAccessibility::FromAXPlatformNodeDelegate(
+      platform_node->GetDelegate());
+  DCHECK(node);
+
+  if (!ShouldDumpNode(*node))
+    return;
+
   AddProperties(atk_node, dict);
+  if (!ShouldDumpChildren(*node))
+    return;
 
   auto child_count = atk_object_get_n_accessible_children(atk_node);
   if (child_count <= 0)
@@ -480,7 +511,8 @@ void AccessibilityTreeFormatterAuraLinux::AddProperties(
   AtkAttributeSet* attributes = atk_object_get_attributes(atk_object);
   for (AtkAttributeSet* attr = attributes; attr; attr = attr->next) {
     AtkAttribute* attribute = static_cast<AtkAttribute*>(attr->data);
-    dict->SetString(attribute->name, attribute->value);
+    dict->SetString(std::string(kObjectAttributePrefix) + attribute->name,
+                    attribute->value);
   }
   atk_attribute_set_free(attributes);
 
@@ -557,6 +589,8 @@ const char* const ATK_OBJECT_ATTRIBUTES[] = {
     "container-live",
     "container-relevant",
     "current",
+    "description",
+    "description-from",
     "details-roles",
     "display",
     "dropeffect",
@@ -584,6 +618,7 @@ const char* const ATK_OBJECT_ATTRIBUTES[] = {
     "text-align",
     "text-indent",
     "text-input-type",
+    "text-position",
     "valuemin",
     "valuemax",
     "valuenow",
@@ -617,9 +652,9 @@ std::string AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
 
   const base::ListValue* states_value;
   if (node.GetList("states", &states_value)) {
-    for (auto it = states_value->begin(); it != states_value->end(); ++it) {
+    for (const auto& entry : states_value->GetList()) {
       std::string state_value;
-      if (it->GetAsString(&state_value))
+      if (entry.GetAsString(&state_value))
         WriteAttribute(false, state_value, &line);
     }
   }
@@ -627,10 +662,9 @@ std::string AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
   const base::ListValue* action_names_list;
   std::vector<std::string> action_names;
   if (node.GetList("actions", &action_names_list)) {
-    for (auto it = action_names_list->begin(); it != action_names_list->end();
-         ++it) {
+    for (const auto& entry : action_names_list->GetList()) {
       std::string action_name;
-      if (it->GetAsString(&action_name))
+      if (entry.GetAsString(&action_name))
         action_names.push_back(action_name);
     }
     std::string actions_str = base::JoinString(action_names, ", ");
@@ -643,10 +677,9 @@ std::string AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
 
   const base::ListValue* relations_value;
   if (node.GetList("relations", &relations_value)) {
-    for (auto it = relations_value->begin(); it != relations_value->end();
-         ++it) {
+    for (const auto& entry : relations_value->GetList()) {
       std::string relation_value;
-      if (it->GetAsString(&relation_value)) {
+      if (entry.GetAsString(&relation_value)) {
         // By default, exclude embedded-by because that should appear on every
         // top-level document object. The other relation types are less common
         // and thus almost always of interest when testing.
@@ -657,7 +690,10 @@ std::string AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
 
   for (const char* attribute_name : ATK_OBJECT_ATTRIBUTES) {
     std::string attribute_value;
-    if (node.GetString(attribute_name, &attribute_value)) {
+    // ATK object attributes are stored with a prefix, in order to disambiguate
+    // from other properties with the same name (e.g. description).
+    if (node.GetString(std::string(kObjectAttributePrefix) + attribute_name,
+                       &attribute_value)) {
       WriteAttribute(
           false,
           base::StringPrintf("%s:%s", attribute_name, attribute_value.c_str()),
@@ -667,36 +703,36 @@ std::string AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
 
   const base::ListValue* value_info;
   if (node.GetList("value", &value_info)) {
-    for (auto it = value_info->begin(); it != value_info->end(); ++it) {
+    for (const auto& entry : value_info->GetList()) {
       std::string value_property;
-      if (it->GetAsString(&value_property))
+      if (entry.GetAsString(&value_property))
         WriteAttribute(true, value_property, &line);
     }
   }
 
   const base::ListValue* table_info;
   if (node.GetList("table", &table_info)) {
-    for (auto it = table_info->begin(); it != table_info->end(); ++it) {
+    for (const auto& entry : table_info->GetList()) {
       std::string table_property;
-      if (it->GetAsString(&table_property))
+      if (entry.GetAsString(&table_property))
         WriteAttribute(true, table_property, &line);
     }
   }
 
   const base::ListValue* cell_info;
   if (node.GetList("cell", &cell_info)) {
-    for (auto it = cell_info->begin(); it != cell_info->end(); ++it) {
+    for (const auto& entry : cell_info->GetList()) {
       std::string cell_property;
-      if (it->GetAsString(&cell_property))
+      if (entry.GetAsString(&cell_property))
         WriteAttribute(true, cell_property, &line);
     }
   }
 
   const base::ListValue* text_info;
   if (node.GetList("text", &text_info)) {
-    for (auto it = text_info->begin(); it != text_info->end(); ++it) {
+    for (const auto& entry : text_info->GetList()) {
       std::string cell_property;
-      if (it->GetAsString(&cell_property))
+      if (entry.GetAsString(&cell_property))
         WriteAttribute(false, cell_property, &line);
     }
   }

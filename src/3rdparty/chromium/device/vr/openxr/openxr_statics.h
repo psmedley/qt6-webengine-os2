@@ -6,13 +6,16 @@
 #define DEVICE_VR_OPENXR_OPENXR_STATICS_H_
 
 #include <d3d11.h>
-#include <memory>
 
 #include "build/build_config.h"
 #include "device/vr/openxr/openxr_util.h"
 #include "device/vr/vr_export.h"
 #include "third_party/openxr/src/include/openxr/openxr.h"
 #include "third_party/openxr/src/include/openxr/openxr_platform.h"
+
+#if defined(OS_WIN)
+#include "base/win/windows_types.h"
+#endif
 
 namespace device {
 
@@ -33,7 +36,7 @@ class DEVICE_VR_EXPORT OpenXrStatics {
   bool IsApiAvailable();
 
 #if defined(OS_WIN)
-  LUID GetLuid(const OpenXrExtensionHelper& extension_helper);
+  CHROME_LUID GetLuid(const OpenXrExtensionHelper& extension_helper);
 #endif
 
  private:

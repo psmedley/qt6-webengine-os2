@@ -5,8 +5,6 @@
 #ifndef COMPONENTS_REPORTING_STORAGE_STORAGE_MODULE_INTERFACE_H_
 #define COMPONENTS_REPORTING_STORAGE_STORAGE_MODULE_INTERFACE_H_
 
-#include <utility>
-
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
@@ -29,6 +27,13 @@ class StorageModuleInterface
   virtual void AddRecord(Priority priority,
                          Record record,
                          base::OnceCallback<void(Status)> callback) = 0;
+
+  // Initiates upload of collected records according to the priority.
+  // Called usually for a queue with an infinite or very large upload period.
+  // Multiple |Flush| calls can safely run in parallel.
+  // Returns error if cannot start upload.
+  virtual void Flush(Priority priority,
+                     base::OnceCallback<void(Status)> callback) = 0;
 
   // Once a record has been successfully uploaded, the sequencing information
   // can be passed back to the StorageModuleInterface here for record deletion.

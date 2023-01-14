@@ -26,7 +26,7 @@ namespace raster {
 class GrCacheControllerTest : public testing::Test {
  public:
   void SetUp() override {
-    gl::GLSurfaceTestSupport::InitializeOneOff();
+    gl::GLSurfaceTestSupport::InitializeOneOffWithStubBindings();
     gpu::GpuDriverBugWorkarounds workarounds;
 
     scoped_refptr<gl::GLShareGroup> share_group = new gl::GLShareGroup();
@@ -45,8 +45,8 @@ class GrCacheControllerTest : public testing::Test {
         base::MakeRefCounted<gles2::FeatureInfo>(workarounds, GpuFeatureInfo());
     context_state_->InitializeGL(GpuPreferences(), std::move(feature_info));
 
-    controller_ =
-        std::make_unique<GrCacheController>(context_state_.get(), task_runner_);
+    controller_ = base::WrapUnique(
+        new GrCacheController(context_state_.get(), task_runner_));
   }
 
   void TearDown() override {

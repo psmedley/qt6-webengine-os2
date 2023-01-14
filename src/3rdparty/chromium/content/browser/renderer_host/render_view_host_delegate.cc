@@ -10,35 +10,7 @@ RenderViewHostDelegateView* RenderViewHostDelegate::GetDelegateView() {
   return nullptr;
 }
 
-bool RenderViewHostDelegate::OnMessageReceived(
-    RenderViewHostImpl* render_view_host,
-    const IPC::Message& message) {
-  return false;
-}
-
-WebContents* RenderViewHostDelegate::GetAsWebContents() {
-  return nullptr;
-}
-
-SessionStorageNamespace* RenderViewHostDelegate::GetSessionStorageNamespace(
-    SiteInstance* instance) {
-  return nullptr;
-}
-
-SessionStorageNamespaceMap
-RenderViewHostDelegate::GetSessionStorageNamespaceMap() {
-  return SessionStorageNamespaceMap();
-}
-
-bool RenderViewHostDelegate::IsWebPreferencesSet() const {
-  return false;
-}
-
 bool RenderViewHostDelegate::IsNeverComposited() {
-  return false;
-}
-
-bool RenderViewHostDelegate::IsOverridingUserAgent() {
   return false;
 }
 
@@ -50,20 +22,16 @@ bool RenderViewHostDelegate::ShouldIgnoreUnresponsiveRenderer() {
   return false;
 }
 
-bool RenderViewHostDelegate::HideDownloadUI() const {
-  return false;
-}
-
-bool RenderViewHostDelegate::HasPersistentVideo() const {
-  return false;
-}
-
-bool RenderViewHostDelegate::IsSpatialNavigationDisabled() const {
+bool RenderViewHostDelegate::IsGuest() {
   return false;
 }
 
 bool RenderViewHostDelegate::IsPortal() {
   return false;
+}
+
+absl::optional<SkColor> RenderViewHostDelegate::GetBaseBackgroundColor() {
+  return absl::nullopt;
 }
 
 }  // namespace content

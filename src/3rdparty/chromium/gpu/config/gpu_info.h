@@ -13,18 +13,21 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/containers/span.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "gpu/config/dx_diag_node.h"
 #include "gpu/gpu_export.h"
 #include "gpu/vulkan/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 #if defined(OS_WIN)
 #include <dxgi.h>
+
+#include "base/win/windows_types.h"
 #endif
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -252,7 +255,7 @@ struct GPU_EXPORT GPUInfo {
     // unique relative its vendor, not to each other. If there are more than one
     // of the same exact graphics card, they all have the same vendor id and
     // device id but different LUIDs.
-    LUID luid;
+    CHROME_LUID luid;
 #endif  // OS_WIN
 
     // Whether this GPU is the currently used one.
@@ -395,7 +398,10 @@ struct GPU_EXPORT GPUInfo {
   OverlayInfo overlay_info;
 #endif
 
+  // Video decoding uses two backends: the legacy VDA and the new VideoDecoder.
   VideoDecodeAcceleratorCapabilities video_decode_accelerator_capabilities;
+  VideoDecodeAcceleratorSupportedProfiles video_decoder_capabilities;
+
   VideoEncodeAcceleratorSupportedProfiles
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
@@ -407,8 +413,10 @@ struct GPU_EXPORT GPUInfo {
 
   bool subpixel_font_rendering;
 
+  uint32_t visibility_callback_call_count = 0;
+
 #if BUILDFLAG(ENABLE_VULKAN)
-  base::Optional<VulkanInfo> vulkan_info;
+  absl::optional<VulkanInfo> vulkan_info;
 #endif
 
   // Note: when adding new members, please remember to update EnumerateFields

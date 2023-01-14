@@ -9,9 +9,7 @@
 #include <sstream>
 
 #include "base/containers/circular_deque.h"
-#include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
-#include "base/optional.h"
 #include "cc/cc_export.h"
 #include "cc/metrics/frame_sequence_metrics.h"
 
@@ -156,7 +154,8 @@ class CC_EXPORT FrameSequenceTracker {
 
   void UpdateTrackedFrameData(TrackedFrameData* frame_data,
                               uint64_t source_id,
-                              uint64_t sequence_number);
+                              uint64_t sequence_number,
+                              uint64_t throttled_frame_count);
 
   bool ShouldIgnoreBeginFrameSource(uint64_t source_id) const;
 

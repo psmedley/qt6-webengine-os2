@@ -45,7 +45,8 @@ bool CanEnableAudioDebugRecordingsFromExtension(
   if (extension) {
     enabled_by_permissions =
         extension->permissions_data()->active_permissions().HasAPIPermission(
-            extensions::APIPermission::kWebrtcLoggingPrivateAudioDebug);
+            extensions::mojom::APIPermissionID::
+                kWebrtcLoggingPrivateAudioDebug);
   }
 #endif
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -105,7 +106,7 @@ content::RenderProcessHost* WebrtcLoggingPrivateFunction::RphFromRequest(
 
   // If |target_webview| is set, lookup the guest content's render process in
   // the sender's web contents. There should be exactly 1 guest.
-  if (request.target_webview.get()) {
+  if (request.target_webview && *request.target_webview) {
     content::RenderProcessHost* target_host = nullptr;
     int guests_found = 0;
     auto get_guest = [](int* guests_found,
@@ -117,10 +118,17 @@ content::RenderProcessHost* WebrtcLoggingPrivateFunction::RphFromRequest(
       // there are.
       return false;
     };
-    guest_view::GuestViewManager::FromBrowserContext(browser_context())
-        ->ForEachGuest(
-            GetSenderWebContents(),
-            base::BindRepeating(get_guest, &guests_found, &target_host));
+    auto* guest_view_manager =
+        guest_view::GuestViewManager::FromBrowserContext(browser_context());
+    if (!guest_view_manager) {
+      // Called from a context without guest views. Bail with an appropriate
+      // error.
+      *error = "No guest view manager found";
+      return nullptr;
+    }
+    guest_view_manager->ForEachGuest(
+        GetSenderWebContents(),
+        base::BindRepeating(get_guest, &guests_found, &target_host));
     if (!target_host) {
       *error = "No webview render process found";
       return nullptr;

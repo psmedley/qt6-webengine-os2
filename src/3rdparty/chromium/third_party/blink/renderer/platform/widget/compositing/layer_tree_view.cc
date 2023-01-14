@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/post_task.h"
@@ -31,13 +32,16 @@
 #include "cc/metrics/web_vital_metrics.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_mutator.h"
+#include "cc/trees/paint_holding_reason.h"
 #include "cc/trees/render_frame_metadata_observer.h"
 #include "cc/trees/swap_promise.h"
 #include "cc/trees/ukm_manager.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/quads/compositor_frame_metadata.h"
-#include "components/viz/common/resources/single_release_callback.h"
+#include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_filter.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings_builder.h"
@@ -49,6 +53,27 @@ class Layer;
 }
 
 namespace blink {
+
+namespace {
+// This factory is used to defer binding of the InterfacePtr to the compositor
+// thread.
+class UkmRecorderFactoryImpl : public cc::UkmRecorderFactory {
+ public:
+  UkmRecorderFactoryImpl() = default;
+  ~UkmRecorderFactoryImpl() override = default;
+
+  // This method gets called on the compositor thread.
+  std::unique_ptr<ukm::UkmRecorder> CreateRecorder() override {
+    mojo::PendingRemote<ukm::mojom::UkmRecorderInterface> recorder;
+
+    // Calling these methods on the compositor thread are thread safe.
+    Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+        recorder.InitWithNewPipeAndPassReceiver());
+    return std::make_unique<ukm::MojoUkmRecorder>(std::move(recorder));
+  }
+};
+
+}  // namespace
 
 LayerTreeView::LayerTreeView(LayerTreeViewDelegate* delegate,
                              scheduler::WebThreadScheduler* scheduler)
@@ -65,7 +90,8 @@ void LayerTreeView::Initialize(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_thread,
     cc::TaskGraphRunner* task_graph_runner,
-    std::unique_ptr<cc::UkmRecorderFactory> ukm_recorder_factory) {
+    gfx::RenderingPipeline* main_thread_pipeline,
+    gfx::RenderingPipeline* compositor_thread_pipeline) {
   DCHECK(delegate_);
   const bool is_threaded = !!compositor_thread;
 
@@ -77,7 +103,9 @@ void LayerTreeView::Initialize(
   params.main_task_runner = std::move(main_thread);
   params.mutator_host = animation_host_.get();
   params.dark_mode_filter = dark_mode_filter_.get();
-  params.ukm_recorder_factory = std::move(ukm_recorder_factory);
+  params.ukm_recorder_factory = std::make_unique<UkmRecorderFactoryImpl>();
+  params.main_thread_pipeline = main_thread_pipeline;
+  params.compositor_thread_pipeline = compositor_thread_pipeline;
   if (base::ThreadPoolInstance::Get()) {
     // The image worker thread needs to allow waiting since it makes discardable
     // shared memory allocations which need to make synchronous calls to the
@@ -175,10 +203,11 @@ void LayerTreeView::OnDeferMainFrameUpdatesChanged(bool status) {
   delegate_->OnDeferMainFrameUpdatesChanged(status);
 }
 
-void LayerTreeView::OnDeferCommitsChanged(bool status) {
+void LayerTreeView::OnDeferCommitsChanged(bool status,
+                                          cc::PaintHoldingReason reason) {
   if (!delegate_)
     return;
-  delegate_->OnDeferCommitsChanged(status);
+  delegate_->OnDeferCommitsChanged(status, reason);
 }
 
 void LayerTreeView::BeginMainFrameNotExpectedSoon() {
@@ -282,6 +311,9 @@ void LayerTreeView::DidPresentCompositorFrame(
   DCHECK(layer_tree_host_->GetTaskRunnerProvider()
              ->MainThreadTaskRunner()
              ->RunsTasksInCurrentSequence());
+  // Only run callbacks on successful presentations.
+  if (feedback.failed())
+    return;
   while (!presentation_callbacks_.empty()) {
     const auto& front = presentation_callbacks_.begin();
     if (viz::FrameTokenGT(front->first, frame_token))
@@ -356,6 +388,13 @@ void LayerTreeView::DidSubmitCompositorFrame() {}
 
 void LayerTreeView::DidLoseLayerTreeFrameSink() {}
 
+void LayerTreeView::ScheduleAnimationForWebTests() {
+  if (!delegate_)
+    return;
+
+  delegate_->ScheduleAnimationForWebTests();
+}
+
 void LayerTreeView::AddPresentationCallback(
     uint32_t frame_token,
     base::OnceCallback<void(base::TimeTicks)> callback) {
@@ -372,7 +411,7 @@ void LayerTreeView::AddPresentationCallback(
   }
   std::vector<base::OnceCallback<void(base::TimeTicks)>> callbacks;
   callbacks.push_back(std::move(callback));
-  presentation_callbacks_.push_back({frame_token, std::move(callbacks)});
+  presentation_callbacks_.emplace_back(frame_token, std::move(callbacks));
   DCHECK_LE(presentation_callbacks_.size(), 25u);
 }
 

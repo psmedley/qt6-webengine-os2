@@ -13,6 +13,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/profiler.h"
 #include "base/files/file_path.h"
@@ -37,6 +38,7 @@
 #include "content/public/renderer/chrome_object_extensions_utils.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/v8_value_converter.h"
+#include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/skia_benchmarking_extension.h"
@@ -44,7 +46,6 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
-#include "gpu/ipc/common/gpu_messages.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
@@ -120,7 +121,6 @@ using blink::GpuBenchmarkingContext;
 using blink::WebImageCache;
 using blink::WebLocalFrame;
 using blink::WebPrivatePtr;
-using blink::WebSize;
 using blink::WebView;
 
 namespace content {
@@ -299,7 +299,7 @@ bool ThrowIfPointOutOfBounds(GpuBenchmarkingContext* context,
   return false;
 }
 
-base::Optional<gfx::Vector2dF> ToVector(const std::string& direction,
+absl::optional<gfx::Vector2dF> ToVector(const std::string& direction,
                                         float distance) {
   if (direction == "down") {
     return gfx::Vector2dF(0, distance);
@@ -318,7 +318,7 @@ base::Optional<gfx::Vector2dF> ToVector(const std::string& direction,
   } else if (direction == "downright") {
     return gfx::Vector2dF(distance, distance);
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 int ToKeyModifiers(const base::StringPiece& key) {
@@ -491,7 +491,7 @@ static void PrintDocument(blink::WebLocalFrame* frame, SkDocument* doc) {
   const float kMarginLeft = 29.0f;   // 0.40 inch
   const int kContentWidth = 555;     // 7.71 inch
   const int kContentHeight = 735;    // 10.21 inch
-  blink::WebPrintParams params(blink::WebSize(kContentWidth, kContentHeight));
+  blink::WebPrintParams params(gfx::Size(kContentWidth, kContentHeight));
   params.printer_dpi = 300;
   uint32_t page_count = frame->PrintBegin(params, blink::WebNode());
   for (uint32_t i = 0; i < page_count; ++i) {
@@ -788,7 +788,7 @@ bool GpuBenchmarking::SmoothScrollBy(gin::Arguments* args) {
   // Scroll by percentage does not require speed in pixels
   DCHECK(!scroll_by_percentage || (speed_in_pixels_s == 800));
 
-  base::Optional<gfx::Vector2dF> pixels_to_scrol_vector =
+  absl::optional<gfx::Vector2dF> pixels_to_scrol_vector =
       ToVector(direction, pixels_to_scroll);
   if (!pixels_to_scrol_vector.has_value())
     return false;
@@ -967,9 +967,9 @@ bool GpuBenchmarking::Swipe(gin::Arguments* args) {
     fling_velocity = 1000;
   }
 
-  base::Optional<gfx::Vector2dF> pixels_to_scrol_vector =
+  absl::optional<gfx::Vector2dF> pixels_to_scrol_vector =
       ToVector(direction, pixels_to_scroll);
-  base::Optional<gfx::Vector2dF> fling_velocity_vector =
+  absl::optional<gfx::Vector2dF> fling_velocity_vector =
       ToVector(direction, fling_velocity);
   if (!pixels_to_scrol_vector.has_value() ||
       !fling_velocity_vector.has_value()) {

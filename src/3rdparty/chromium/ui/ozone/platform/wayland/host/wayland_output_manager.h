@@ -24,7 +24,7 @@ class WaylandOutput;
 
 class WaylandOutputManager : public WaylandOutput::Delegate {
  public:
-  WaylandOutputManager();
+  explicit WaylandOutputManager(WaylandConnection* connection);
   ~WaylandOutputManager() override;
 
   // Says if at least one output has already been announced by a Wayland
@@ -34,12 +34,14 @@ class WaylandOutputManager : public WaylandOutput::Delegate {
   void AddWaylandOutput(const uint32_t output_id, wl_output* output);
   void RemoveWaylandOutput(const uint32_t output_id);
 
-  // Creates a platform screen and feeds it with existing outputs.
-  std::unique_ptr<WaylandScreen> CreateWaylandScreen(
-      WaylandConnection* connection);
+  // Creates a platform screen.
+  std::unique_ptr<WaylandScreen> CreateWaylandScreen();
 
-  uint32_t GetIdForOutput(wl_output* output) const;
+  // Feeds a new platform screen with existing outputs.
+  void InitWaylandScreen(WaylandScreen* screen);
+
   WaylandOutput* GetOutput(uint32_t id) const;
+  WaylandOutput* GetPrimaryOutput() const;
 
   WaylandScreen* wayland_screen() const { return wayland_screen_.get(); }
 
@@ -47,13 +49,16 @@ class WaylandOutputManager : public WaylandOutput::Delegate {
   // WaylandOutput::Delegate:
   void OnOutputHandleMetrics(uint32_t output_id,
                              const gfx::Rect& new_bounds,
-                             int32_t scale_factor) override;
+                             int32_t scale_factor,
+                             int32_t transform) override;
 
   using OutputList = std::vector<std::unique_ptr<WaylandOutput>>;
 
   OutputList::const_iterator GetOutputItById(uint32_t id) const;
 
   OutputList output_list_;
+
+  WaylandConnection* const connection_;
 
   // Non-owned wayland screen instance.
   base::WeakPtr<WaylandScreen> wayland_screen_;

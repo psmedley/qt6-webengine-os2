@@ -7,6 +7,7 @@
 #include "xfa/fxfa/parser/cxfa_fill.h"
 
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fgas/graphics/cfgas_gegraphics.h"
 #include "xfa/fxfa/parser/cxfa_color.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_linear.h"
@@ -18,14 +19,14 @@
 namespace {
 
 const CXFA_Node::PropertyData kFillPropertyData[] = {
-    {XFA_Element::Pattern, 1, XFA_PROPERTYFLAG_OneOf},
+    {XFA_Element::Pattern, 1, XFA_PropertyFlag_OneOf},
     {XFA_Element::Solid, 1,
-     XFA_PROPERTYFLAG_OneOf | XFA_PROPERTYFLAG_DefaultOneOf},
-    {XFA_Element::Stipple, 1, XFA_PROPERTYFLAG_OneOf},
+     XFA_PropertyFlag_OneOf | XFA_PropertyFlag_DefaultOneOf},
+    {XFA_Element::Stipple, 1, XFA_PropertyFlag_OneOf},
     {XFA_Element::Color, 1, 0},
-    {XFA_Element::Linear, 1, XFA_PROPERTYFLAG_OneOf},
+    {XFA_Element::Linear, 1, XFA_PropertyFlag_OneOf},
     {XFA_Element::Extras, 1, 0},
-    {XFA_Element::Radial, 1, XFA_PROPERTYFLAG_OneOf},
+    {XFA_Element::Radial, 1, XFA_PropertyFlag_OneOf},
 };
 
 const CXFA_Node::AttributeData kFillAttributeData[] = {
@@ -88,7 +89,7 @@ XFA_Element CXFA_Fill::GetType() const {
 }
 
 void CXFA_Fill::Draw(CFGAS_GEGraphics* pGS,
-                     CFGAS_GEPath* fillPath,
+                     const CFGAS_GEPath& fillPath,
                      const CFX_RectF& rtWidget,
                      const CFX_Matrix& matrix) {
   pGS->SaveGraphState();
@@ -109,7 +110,7 @@ void CXFA_Fill::Draw(CFGAS_GEGraphics* pGS,
     default:
       pGS->SetFillColor(CFGAS_GEColor(GetColor(false)));
       pGS->FillPath(fillPath, CFX_FillRenderOptions::FillType::kWinding,
-                    &matrix);
+                    matrix);
       break;
   }
 
@@ -117,7 +118,7 @@ void CXFA_Fill::Draw(CFGAS_GEGraphics* pGS,
 }
 
 void CXFA_Fill::DrawStipple(CFGAS_GEGraphics* pGS,
-                            CFGAS_GEPath* fillPath,
+                            const CFGAS_GEPath& fillPath,
                             const CFX_RectF& rtWidget,
                             const CFX_Matrix& matrix) {
   CXFA_Stipple* stipple =
@@ -127,7 +128,7 @@ void CXFA_Fill::DrawStipple(CFGAS_GEGraphics* pGS,
 }
 
 void CXFA_Fill::DrawRadial(CFGAS_GEGraphics* pGS,
-                           CFGAS_GEPath* fillPath,
+                           const CFGAS_GEPath& fillPath,
                            const CFX_RectF& rtWidget,
                            const CFX_Matrix& matrix) {
   CXFA_Radial* radial =
@@ -137,7 +138,7 @@ void CXFA_Fill::DrawRadial(CFGAS_GEGraphics* pGS,
 }
 
 void CXFA_Fill::DrawLinear(CFGAS_GEGraphics* pGS,
-                           CFGAS_GEPath* fillPath,
+                           const CFGAS_GEPath& fillPath,
                            const CFX_RectF& rtWidget,
                            const CFX_Matrix& matrix) {
   CXFA_Linear* linear =
@@ -147,7 +148,7 @@ void CXFA_Fill::DrawLinear(CFGAS_GEGraphics* pGS,
 }
 
 void CXFA_Fill::DrawPattern(CFGAS_GEGraphics* pGS,
-                            CFGAS_GEPath* fillPath,
+                            const CFGAS_GEPath& fillPath,
                             const CFX_RectF& rtWidget,
                             const CFX_Matrix& matrix) {
   CXFA_Pattern* pattern =

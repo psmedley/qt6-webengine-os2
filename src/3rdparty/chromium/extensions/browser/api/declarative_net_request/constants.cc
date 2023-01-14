@@ -14,6 +14,8 @@ const char* const kAllowedTransformSchemes[4] = {
     url::kHttpScheme, url::kHttpsScheme, url::kFtpScheme,
     extensions::kExtensionScheme};
 
+const char kErrorRequestMethodDuplicated[] =
+    "Rule with id * includes and excludes the same request method.";
 const char kErrorResourceTypeDuplicated[] =
     "Rule with id * includes and excludes the same resource.";
 const char kErrorInvalidRuleKey[] =
@@ -72,6 +74,12 @@ const char kErrorHeaderValuePresent[] =
     "removed.";
 const char kErrorCannotAppendRequestHeader[] =
     "Rule with id * must not specify a request header to be appended.";
+const char kErrorTabIdsOnNonSessionRule[] =
+    "Rule with id * specifies a value for \"*\" or \"*\" key. These are only "
+    "supported for session-scoped rules.";
+const char kErrorTabIdDuplicated[] =
+    "Rule with id * includes and excludes the same tab ID.";
+
 const char kErrorListNotPassed[] = "Rules file must contain a list.";
 
 const char kRuleCountExceeded[] =
@@ -109,6 +117,9 @@ const char kEnabledRulesetsRegexRuleCountExceeded[] =
     "The set of enabled rulesets exceeds the regular expression rule count "
     "limit.";
 const char kInternalErrorUpdatingEnabledRulesets[] = "Internal error.";
+const char kEnabledRulesetCountExceeded[] =
+    "The number of enabled static rulesets exceeds the enabled ruleset count "
+    "limit.";
 
 const char kTabNotFoundError[] = "No tab with id: *.";
 const char kIncrementActionCountWithoutUseAsBadgeTextError[] =
@@ -137,6 +148,8 @@ const char kErrorGetMatchedRulesMissingPermissions[] =
     "The extension must have the declarativeNetRequestFeedback permission or "
     "have activeTab granted for the specified tab ID in order to call this "
     "function.";
+
+const char kEmbedderConditionsBufferIdentifier[] = "EMBR";
 
 }  // namespace declarative_net_request
 }  // namespace extensions

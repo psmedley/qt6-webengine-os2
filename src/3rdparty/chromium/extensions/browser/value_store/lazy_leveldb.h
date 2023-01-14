@@ -11,9 +11,9 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_base.h"
-#include "base/optional.h"
 #include "base/values.h"
 #include "extensions/browser/value_store/value_store.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
@@ -27,6 +27,9 @@ class Iterator;
 // calling any other *protected* method.
 class LazyLevelDb {
  public:
+  LazyLevelDb(const LazyLevelDb&) = delete;
+  LazyLevelDb& operator=(const LazyLevelDb&) = delete;
+
   // Creates a new database iterator. This iterator *must* be deleted before
   // this database is closed.
   ValueStore::Status CreateIterator(
@@ -57,7 +60,7 @@ class LazyLevelDb {
   // be returned and value will be unchanged. Caller must ensure the database is
   // open before calling this method.
   ValueStore::Status Read(const std::string& key,
-                          base::Optional<base::Value>* value);
+                          absl::optional<base::Value>* value);
 
   // Opens the underlying database if not yet open. If the open fails due to
   // corruption will attempt to repair the database. Failing that, will attempt
@@ -95,8 +98,6 @@ class LazyLevelDb {
   base::HistogramBase* open_histogram_ = nullptr;
   base::HistogramBase* db_restore_histogram_ = nullptr;
   base::HistogramBase* value_restore_histogram_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(LazyLevelDb);
 };
 
 #endif  // EXTENSIONS_BROWSER_VALUE_STORE_LAZY_LEVELDB_H_

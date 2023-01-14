@@ -9,8 +9,8 @@
 #include "base/notreached.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
+#include "components/feedback/content/feedback_uploader_factory.h"
 #include "components/feedback/feedback_uploader.h"
-#include "components/feedback/feedback_uploader_factory.h"
 #include "components/feedback/system_logs/system_logs_fetcher.h"
 #include "components/feedback/system_logs/system_logs_source.h"
 #include "content/public/browser/browser_context.h"
@@ -28,10 +28,12 @@ std::unique_ptr<base::DictionaryValue> ShellFeedbackPrivateDelegate::GetStrings(
   return nullptr;
 }
 
-system_logs::SystemLogsFetcher*
-ShellFeedbackPrivateDelegate::CreateSystemLogsFetcher(
-    content::BrowserContext* context) const {
-  return system_logs::BuildShellSystemLogsFetcher(context);
+void ShellFeedbackPrivateDelegate::FetchSystemInformation(
+    content::BrowserContext* context,
+    system_logs::SysLogsFetcherCallback callback) const {
+  // self-deleting object
+  auto* fetcher = system_logs::BuildShellSystemLogsFetcher(context);
+  fetcher->Fetch(std::move(callback));
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)

@@ -8,9 +8,11 @@
 #include "base/test/scoped_feature_list.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/client_side_detection_service.h"
+#include "components/safe_browsing/content/browser/client_side_model_loader.h"
+#include "components/safe_browsing/content/browser/client_side_phishing_model.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/core/common/proto/client_model.pb.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/core/proto/client_model.pb.h"
 #include "content/public/test/browser_test.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
@@ -27,32 +29,10 @@ namespace weblayer {
 
 using safe_browsing::ClientSideDetectionService;
 using safe_browsing::ClientSideModel;
-using safe_browsing::ModelLoader;
+using safe_browsing::ClientSidePhishingModel;
 using ::testing::_;
 using ::testing::ReturnRef;
 using ::testing::StrictMock;
-
-namespace {
-
-class FakeModelLoader : public ModelLoader {
- public:
-  explicit FakeModelLoader(const std::string& model_str)
-      : ModelLoader(base::RepeatingClosure(),
-                    nullptr,
-                    /*is_extended_reporting=*/false) {
-    model_str_ = model_str;
-  }
-  ~FakeModelLoader() override = default;
-
-  void ScheduleFetch(int64_t delay) override {}
-  void CancelFetcher() override {}
-};
-
-std::unique_ptr<ModelLoader> CreateFakeModelLoader(std::string model_str) {
-  return std::make_unique<FakeModelLoader>(model_str);
-}
-
-}  // namespace
 
 class ClientSideDetectionServiceBrowserTest : public WebLayerBrowserTest {
  public:
@@ -71,21 +51,20 @@ class ClientSideDetectionServiceBrowserTest : public WebLayerBrowserTest {
   base::test::ScopedFeatureList feature_list_;
 };
 
+// TODO(crbug.com/1217128): Re-enable this test, once we have a more reliable
+// method of ensuring the SetPhishingModel IPC comes before the
+// StartPhishingDetection IPC.
 IN_PROC_BROWSER_TEST_F(ClientSideDetectionServiceBrowserTest,
-                       NewHostGetsModel) {
+                       DISABLED_NewHostGetsModel) {
   PrefService* prefs = GetProfile()->GetBrowserContext()->pref_service();
   prefs->SetBoolean(::prefs::kSafeBrowsingEnabled, false);
-  ClientSideDetectionService* csd_service =
-      ClientSideDetectionServiceFactory::GetForBrowserContext(
-          GetProfile()->GetBrowserContext());
 
   ClientSideModel model;
   model.set_max_words_per_term(0);
   std::string model_str;
   model.SerializeToString(&model_str);
 
-  csd_service->SetModelLoaderFactoryForTesting(
-      base::BindRepeating(&CreateFakeModelLoader, model_str));
+  ClientSidePhishingModel::GetInstance()->SetModelStrForTesting(model_str);
 
   // Enable Safe Browsing and the CSD service.
   prefs->SetBoolean(::prefs::kSafeBrowsingEnabled, true);

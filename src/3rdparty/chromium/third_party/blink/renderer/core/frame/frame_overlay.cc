@@ -51,6 +51,11 @@ FrameOverlay::FrameOverlay(LocalFrame* local_frame,
                            std::unique_ptr<FrameOverlay::Delegate> delegate)
     : frame_(local_frame), delegate_(std::move(delegate)) {
   DCHECK(frame_);
+  frame_->View()->SetVisualViewportOrOverlayNeedsRepaint();
+}
+
+FrameOverlay::~FrameOverlay() {
+  frame_->View()->SetVisualViewportOrOverlayNeedsRepaint();
 }
 
 void FrameOverlay::UpdatePrePaint() {
@@ -120,6 +125,10 @@ void FrameOverlay::PaintContents(const GraphicsLayer* graphics_layer,
 
 void FrameOverlay::GraphicsLayersDidChange() {
   frame_->View()->SetPaintArtifactCompositorNeedsUpdate();
+}
+
+PaintArtifactCompositor* FrameOverlay::GetPaintArtifactCompositor() {
+  return frame_->View()->GetPaintArtifactCompositor();
 }
 
 void FrameOverlay::ServiceScriptedAnimations(

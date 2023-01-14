@@ -27,6 +27,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_COMPOSITING_COMPOSITED_LAYER_MAPPING_H_
 
 #include <memory>
+
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/paint/compositing/graphics_layer_updater.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_painting_info.h"
@@ -45,6 +47,8 @@ class PaintLayerCompositor;
 // subtree of Layers into a GraphicsLayer.
 struct GraphicsLayerPaintInfo {
   DISALLOW_NEW();
+
+ public:
   PaintLayer* paint_layer;
 
   PhysicalRect composited_bounds;
@@ -136,9 +140,6 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   // a no-change paint.
   void SetNeedsCheckRasterInvalidation();
 
-  // Notification from the layoutObject that its content changed.
-  void ContentChanged(ContentChangeType);
-
   PhysicalRect CompositedBounds() const { return composited_bounds_; }
 
   void PositionOverflowControlsLayers();
@@ -179,6 +180,7 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   bool ShouldSkipPaintingSubtree() const override;
   bool IsTrackingRasterInvalidations() const override;
   void GraphicsLayersDidChange() override;
+  PaintArtifactCompositor* GetPaintArtifactCompositor() override;
 
 #if DCHECK_IS_ON()
   void VerifyNotPainting() override;

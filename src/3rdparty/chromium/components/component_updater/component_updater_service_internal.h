@@ -10,11 +10,12 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "components/component_updater/update_scheduler.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class TimeTicks;
@@ -76,11 +77,11 @@ class CrxUpdateService : public ComponentUpdateService,
 
   bool DoUnregisterComponent(const CrxComponent& component);
 
-  base::Optional<CrxComponent> GetComponent(const std::string& id) const;
+  absl::optional<CrxComponent> GetComponent(const std::string& id) const;
 
   const CrxUpdateItem* GetComponentState(const std::string& id) const;
 
-  std::vector<base::Optional<CrxComponent>> GetCrxComponents(
+  std::vector<absl::optional<CrxComponent>> GetCrxComponents(
       const std::vector<std::string>& ids);
   void OnUpdateComplete(Callback callback,
                         const base::TimeTicks& start_time,
@@ -94,7 +95,7 @@ class CrxUpdateService : public ComponentUpdateService,
   scoped_refptr<UpdateClient> update_client_;
 
   // A collection of every registered component.
-  using Components = std::map<std::string, CrxComponent>;
+  using Components = base::flat_map<std::string, CrxComponent>;
   Components components_;
 
   // Maintains the order in which components have been registered. The position

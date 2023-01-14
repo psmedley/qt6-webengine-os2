@@ -94,11 +94,8 @@ preprocess_if_expr("preprocess") {
     "data/coordinate2d.js",
     "data/destination.js",
     "data/destination_match.js",
-    "data/destination_policies.js",
     "data/destination_store.js",
     "data/document_info.js",
-    "data/invitation.js",
-    "data/invitation_store.js",
     "data/local_parsers.js",
     "data/margins.js",
     "data/measurement_system.js",
@@ -115,7 +112,7 @@ preprocess_if_expr("preprocess") {
     "ui/settings_behavior.js",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     in_files += [
       "data/print_server_store.js",
       "data/printer_status_cros.js",
@@ -146,7 +143,6 @@ preprocess_if_expr("preprocess_generated") {
     "ui/duplex_settings.js",
     "ui/header.js",
     "ui/icons.js",
-    "ui/invitation_promo.js",
     "ui/layout_settings.js",
     "ui/margin_control.js",
     "ui/margin_control_container.js",
@@ -168,7 +164,7 @@ preprocess_if_expr("preprocess_generated") {
     "ui/throbber_css.js",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     in_files += [
       "ui/destination_dropdown_cros.js",
       "ui/destination_select_cros.js",
@@ -217,7 +213,7 @@ preprocess_if_expr("preprocess_pdf_generated") {
   in_files = [
     "pdf/elements/icons.js",
     "pdf/elements/shared-vars.js",
-    "pdf/elements/viewer-error-screen.js",
+    "pdf/elements/viewer-error-dialog.js",
     "pdf/elements/viewer-page-indicator.js",
     "pdf/elements/viewer-zoom-button.js",
     "pdf/elements/viewer-zoom-toolbar.js",
@@ -278,7 +274,7 @@ js_library("print_preview") {
     "ui:settings_select",
   ]
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     deps += [ "data:print_server_store" ]
   }
 }
@@ -297,9 +293,10 @@ js_library("metrics") {
 
 js_library("cloud_print_interface") {
   deps = [
+    ":metrics",
     ":native_layer",
     "data:destination",
-    "data:invitation",
+    "data:destination_match",
     "//ui/webui/resources/js/cr:event_target.m",
   ]
 }
@@ -310,7 +307,6 @@ js_library("cloud_print_interface_impl") {
     ":native_layer_cros",
     "data:cloud_parsers",
     "data:destination",
-    "data:invitation",
     "//ui/webui/resources/js:assert.m",
     "//ui/webui/resources/js:cr.m",
     "//ui/webui/resources/js/cr:event_target.m",
@@ -330,7 +326,6 @@ js_library("native_layer") {
 
 js_library("native_layer_cros") {
   deps = [
-    "data:destination_policies",
     "data:printer_status_cros",
     "//ui/webui/resources/js:assert.m",
     "//ui/webui/resources/js:cr.m",

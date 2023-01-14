@@ -30,7 +30,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
@@ -147,7 +147,7 @@ bool CanAccessWindowInternal(
                    : WebFeature::kDocumentDomainBlockedCrossOriginAccess);
   }
   if (!can_access) {
-    // Ensure that if we got a cluster mismatch that it was due to a feature
+    // Ensure that if we got a cluster mismatch that it was due to a permissions
     // policy being enabled and not a logic bug.
     if (detail == SecurityOrigin::AccessResultDomainDetail::
                       kDomainNotRelevantAgentClusterMismatch) {
@@ -486,9 +486,7 @@ void BindingSecurity::FailedAccessCheckFor(v8::Isolate* isolate,
   auto* local_dom_window = CurrentDOMWindow(isolate);
   // Determine if the access check failure was because of cross-origin or if the
   // WindowAgentFactory is different. If the WindowAgentFactories are different
-  // it indicates that the "disallowdocumentaccess" attribute was used on an
-  // iframe somewhere in the ancestor chain so report the error as "restricted"
-  // instead of "cross-origin".
+  // so report the error as "restricted" instead of "cross-origin".
   DOMWindow::CrossDocumentAccessPolicy cross_document_access =
       (!target->ToLocalDOMWindow() ||
        IsSameWindowAgentFactory(local_dom_window, target->ToLocalDOMWindow()))

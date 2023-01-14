@@ -7,6 +7,7 @@
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scopes.h"
@@ -20,6 +21,7 @@
 #include "content/browser/indexed_db/indexed_db_reporting.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "storage/common/database/database_identifier.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 using base::StringPiece;
@@ -36,7 +38,7 @@ class LDBComparator : public leveldb::Comparator {
   int Compare(const leveldb::Slice& a, const leveldb::Slice& b) const override {
     return content::Compare(leveldb_env::MakeStringPiece(a),
                             leveldb_env::MakeStringPiece(b),
-                            false /*index_keys*/);
+                            /*index_keys=*/false);
   }
   const char* Name() const override { return "idb_cmp1"; }
   void FindShortestSeparator(std::string* start,
@@ -52,31 +54,37 @@ const base::FilePath::CharType kLevelDBExtension[] =
     FILE_PATH_LITERAL(".leveldb");
 
 // static
-base::FilePath GetBlobStoreFileName(const url::Origin& origin) {
-  std::string origin_id = storage::GetIdentifierFromOrigin(origin);
+base::FilePath GetBlobStoreFileName(const blink::StorageKey& storage_key) {
+  // TODO(crbug.com/1199077): This will be replaced when the new storage is
+  // implemented.
+  std::string storage_key_id =
+      storage::GetIdentifierFromOrigin(storage_key.origin());
   return base::FilePath()
-      .AppendASCII(origin_id)
+      .AppendASCII(storage_key_id)
       .AddExtension(kIndexedDBExtension)
       .AddExtension(kBlobExtension);
 }
 
 // static
-base::FilePath GetLevelDBFileName(const url::Origin& origin) {
-  std::string origin_id = storage::GetIdentifierFromOrigin(origin);
+base::FilePath GetLevelDBFileName(const blink::StorageKey& storage_key) {
+  // TODO(crbug.com/1199077): This will be replaced when the new storage is
+  // implemented.
+  std::string storage_key_id =
+      storage::GetIdentifierFromOrigin(storage_key.origin());
   return base::FilePath()
-      .AppendASCII(origin_id)
+      .AppendASCII(storage_key_id)
       .AddExtension(kIndexedDBExtension)
       .AddExtension(kLevelDBExtension);
 }
 
-base::FilePath ComputeCorruptionFileName(const url::Origin& origin) {
-  return GetLevelDBFileName(origin).Append(
-      FILE_PATH_LITERAL("corruption_info.json"));
+base::FilePath ComputeCorruptionFileName(const blink::StorageKey& storage_key) {
+  return GetLevelDBFileName(storage_key)
+      .Append(FILE_PATH_LITERAL("corruption_info.json"));
 }
 
 bool IsPathTooLong(storage::FilesystemProxy* filesystem,
                    const base::FilePath& leveldb_dir) {
-  base::Optional<int> limit =
+  absl::optional<int> limit =
       filesystem->GetMaximumPathComponentLength(leveldb_dir.DirName());
   if (!limit.has_value()) {
     DLOG(WARNING) << "GetMaximumPathComponentLength returned -1";
@@ -105,16 +113,16 @@ bool IsPathTooLong(storage::FilesystemProxy* filesystem,
 
 std::string ReadCorruptionInfo(storage::FilesystemProxy* filesystem_proxy,
                                const base::FilePath& path_base,
-                               const url::Origin& origin) {
+                               const blink::StorageKey& storage_key) {
   const base::FilePath info_path =
-      path_base.Append(indexed_db::ComputeCorruptionFileName(origin));
+      path_base.Append(indexed_db::ComputeCorruptionFileName(storage_key));
   std::string message;
   if (IsPathTooLong(filesystem_proxy, info_path))
     return message;
 
   const int64_t kMaxJsonLength = 4096;
 
-  base::Optional<base::File::Info> file_info =
+  absl::optional<base::File::Info> file_info =
       filesystem_proxy->GetFileInfo(info_path);
   if (!file_info.has_value())
     return message;
@@ -123,7 +131,7 @@ std::string ReadCorruptionInfo(storage::FilesystemProxy* filesystem_proxy,
     return message;
   }
 
-  storage::FileErrorOr<base::File> file_or_error = filesystem_proxy->OpenFile(
+  base::FileErrorOr<base::File> file_or_error = filesystem_proxy->OpenFile(
       info_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!file_or_error.is_error()) {
     auto& file = file_or_error.value();
@@ -131,7 +139,7 @@ std::string ReadCorruptionInfo(storage::FilesystemProxy* filesystem_proxy,
       std::string input_js(file_info->size, '\0');
       if (file_info->size ==
           file.Read(0, base::data(input_js), file_info->size)) {
-        base::Optional<base::Value> val = base::JSONReader::Read(input_js);
+        absl::optional<base::Value> val = base::JSONReader::Read(input_js);
         if (val && val->is_dict()) {
           std::string* s = val->FindStringKey("message");
           if (s)
@@ -218,7 +226,7 @@ template leveldb::Status PutVarInt<LevelDBWriteBatch>(
 template <typename DBOrTransaction>
 Status GetString(DBOrTransaction* db,
                  const StringPiece& key,
-                 base::string16* found_string,
+                 std::u16string* found_string,
                  bool* found) {
   std::string result;
   *found = false;
@@ -236,17 +244,17 @@ Status GetString(DBOrTransaction* db,
 template Status GetString<TransactionalLevelDBTransaction>(
     TransactionalLevelDBTransaction* txn,
     const StringPiece& key,
-    base::string16* found_string,
+    std::u16string* found_string,
     bool* found);
 template Status GetString<TransactionalLevelDBDatabase>(
     TransactionalLevelDBDatabase* db,
     const StringPiece& key,
-    base::string16* found_string,
+    std::u16string* found_string,
     bool* found);
 
 leveldb::Status PutString(TransactionalLevelDBTransaction* transaction,
                           const StringPiece& key,
-                          const base::string16& value) {
+                          const std::u16string& value) {
   std::string buffer;
   EncodeString(value, &buffer);
   return transaction->Put(key, &buffer);
@@ -500,7 +508,7 @@ bool FindGreatestKeyLessThanOrEqual(
   }
 
   do {
-    *found_key = it->Key().as_string();
+    *found_key = std::string(it->Key());
 
     // There can be several index keys that compare equal. We want the last one.
     *s = it->Next();
@@ -591,6 +599,42 @@ leveldb::Status SetEarliestSweepTime(Transaction* txn,
   const std::string earliest_sweep_time_key = EarliestSweepKey::Encode();
   int64_t time_micros = (earliest_sweep - base::Time()).InMicroseconds();
   return indexed_db::PutInt(txn, earliest_sweep_time_key, time_micros);
+}
+
+Status GetEarliestCompactionTime(TransactionalLevelDBDatabase* db,
+                                 base::Time* earliest_compaction) {
+  const std::string earliest_compaction_time_key =
+      EarliestCompactionKey::Encode();
+  *earliest_compaction = base::Time();
+  bool found = false;
+  int64_t time_micros = 0;
+  Status s = indexed_db::GetInt(db, earliest_compaction_time_key, &time_micros,
+                                &found);
+  if (!s.ok())
+    return s;
+  if (!found)
+    time_micros = 0;
+
+  DCHECK_GE(time_micros, 0);
+  *earliest_compaction += base::TimeDelta::FromMicroseconds(time_micros);
+
+  return s;
+}
+
+template leveldb::Status SetEarliestCompactionTime<
+    TransactionalLevelDBTransaction>(TransactionalLevelDBTransaction* db,
+                                     base::Time earliest_compaction);
+template leveldb::Status SetEarliestCompactionTime<LevelDBDirectTransaction>(
+    LevelDBDirectTransaction* db,
+    base::Time earliest_compaction);
+
+template <typename Transaction>
+leveldb::Status SetEarliestCompactionTime(Transaction* txn,
+                                          base::Time earliest_compaction) {
+  const std::string earliest_compaction_time_key =
+      EarliestCompactionKey::Encode();
+  int64_t time_micros = (earliest_compaction - base::Time()).InMicroseconds();
+  return indexed_db::PutInt(txn, earliest_compaction_time_key, time_micros);
 }
 
 const leveldb::Comparator* GetDefaultLevelDBComparator() {

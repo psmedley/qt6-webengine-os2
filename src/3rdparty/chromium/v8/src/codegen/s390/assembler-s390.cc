@@ -159,6 +159,14 @@ static bool supportsSTFLE() {
 #endif
 }
 
+bool CpuFeatures::SupportsWasmSimd128() {
+#if V8_ENABLE_WEBASSEMBLY
+  return CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1);
+#else
+  return false;
+#endif  // V8_ENABLE_WEBASSEMBLY
+}
+
 void CpuFeatures::ProbeImpl(bool cross_compile) {
   supported_ |= CpuFeaturesImpliedByCompiler();
   icache_line_size_ = 256;
@@ -239,6 +247,7 @@ void CpuFeatures::ProbeImpl(bool cross_compile) {
   USE(supportsCPUFeature);
   supported_ |= (1u << VECTOR_FACILITY);
   supported_ |= (1u << VECTOR_ENHANCE_FACILITY_1);
+  supported_ |= (1u << VECTOR_ENHANCE_FACILITY_2);
 #endif
   supported_ |= (1u << FPU);
 
@@ -741,6 +750,18 @@ void Assembler::dumy(int r1, int x2, int b2, int d2) {
 #endif
 }
 
+void Assembler::FixOnHeapReferences(bool update_embedded_objects) {
+  // TODO(v8:11872) This function should never be called if Sparkplug on heap
+  // compilation is not supported.
+  UNREACHABLE();
+}
+
+void Assembler::FixOnHeapReferencesToHandles() {
+  // TODO(v8:11872) This function should never be called if Sparkplug on heap
+  // compilation is not supported.
+  UNREACHABLE();
+}
+
 void Assembler::GrowBuffer(int needed) {
   DCHECK_EQ(buffer_start_, buffer_->start());
 
@@ -790,7 +811,8 @@ void Assembler::db(uint8_t data) {
 void Assembler::dd(uint32_t data, RelocInfo::Mode rmode) {
   CheckBuffer();
   if (!RelocInfo::IsNone(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode));
+    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
+           RelocInfo::IsLiteralConstant(rmode));
     RecordRelocInfo(rmode);
   }
   *reinterpret_cast<uint32_t*>(pc_) = data;
@@ -800,7 +822,8 @@ void Assembler::dd(uint32_t data, RelocInfo::Mode rmode) {
 void Assembler::dq(uint64_t value, RelocInfo::Mode rmode) {
   CheckBuffer();
   if (!RelocInfo::IsNone(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode));
+    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
+           RelocInfo::IsLiteralConstant(rmode));
     RecordRelocInfo(rmode);
   }
   *reinterpret_cast<uint64_t*>(pc_) = value;
@@ -810,7 +833,8 @@ void Assembler::dq(uint64_t value, RelocInfo::Mode rmode) {
 void Assembler::dp(uintptr_t data, RelocInfo::Mode rmode) {
   CheckBuffer();
   if (!RelocInfo::IsNone(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode));
+    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
+           RelocInfo::IsLiteralConstant(rmode));
     RecordRelocInfo(rmode);
   }
   *reinterpret_cast<uintptr_t*>(pc_) = data;

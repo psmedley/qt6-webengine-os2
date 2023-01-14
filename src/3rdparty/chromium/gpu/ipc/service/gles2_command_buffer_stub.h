@@ -12,8 +12,8 @@
 #include "gpu/ipc/service/image_transport_surface_delegate.h"
 #include "ui/gfx/gpu_fence_handle.h"
 
-struct GpuCommandBufferMsg_CreateImage_Params;
 namespace gpu {
+
 struct Mailbox;
 
 class GPU_IPC_SERVICE_EXPORT GLES2CommandBufferStub
@@ -22,7 +22,7 @@ class GPU_IPC_SERVICE_EXPORT GLES2CommandBufferStub
       public base::SupportsWeakPtr<GLES2CommandBufferStub> {
  public:
   GLES2CommandBufferStub(GpuChannel* channel,
-                         const GPUCreateCommandBufferConfig& init_params,
+                         const mojom::CreateCommandBufferParams& init_params,
                          CommandBufferId command_buffer_id,
                          SequenceId sequence_id,
                          int32_t stream_id,
@@ -35,7 +35,7 @@ class GPU_IPC_SERVICE_EXPORT GLES2CommandBufferStub
   // the gpu::Capabilities.
   gpu::ContextResult Initialize(
       CommandBufferStub* share_group,
-      const GPUCreateCommandBufferConfig& init_params,
+      const mojom::CreateCommandBufferParams& init_params,
       base::UnsafeSharedMemoryRegion shared_state_shm) override;
   MemoryTracker* GetContextGroupMemoryTracker() const override;
 
@@ -48,7 +48,8 @@ class GPU_IPC_SERVICE_EXPORT GLES2CommandBufferStub
       SurfaceHandle parent_window,
       SurfaceHandle child_window) override;
 #endif
-  void DidSwapBuffersComplete(SwapBuffersCompleteParams params) override;
+  void DidSwapBuffersComplete(SwapBuffersCompleteParams params,
+                              gfx::GpuFenceHandle release_fence) override;
   const gles2::FeatureInfo* GetFeatureInfo() const override;
   const GpuPreferences& GetGpuPreferences() const override;
   void BufferPresented(const gfx::PresentationFeedback& feedback) override;
@@ -56,14 +57,15 @@ class GPU_IPC_SERVICE_EXPORT GLES2CommandBufferStub
   base::TimeDelta GetGpuBlockedTimeSinceLastSwap() override;
 
  private:
-  bool HandleMessage(const IPC::Message& message) override;
-  void OnTakeFrontBuffer(const Mailbox& mailbox);
-  void OnReturnFrontBuffer(const Mailbox& mailbox, bool is_lost);
-  void OnCreateGpuFenceFromHandle(uint32_t gpu_fence_id,
-                                  gfx::GpuFenceHandle handle);
-  void OnGetGpuFenceHandle(uint32_t gpu_fence_id);
-  void OnCreateImage(GpuCommandBufferMsg_CreateImage_Params params);
-  void OnDestroyImage(int32_t id);
+  // CommandBufferStub overrides:
+  void OnTakeFrontBuffer(const Mailbox& mailbox) override;
+  void OnReturnFrontBuffer(const Mailbox& mailbox, bool is_lost) override;
+  void CreateGpuFenceFromHandle(uint32_t id,
+                                gfx::GpuFenceHandle handle) override;
+  void GetGpuFenceHandle(uint32_t gpu_fence_id,
+                         GetGpuFenceHandleCallback callback) override;
+  void CreateImage(mojom::CreateImageParamsPtr params) override;
+  void DestroyImage(int32_t id) override;
 
   void OnSwapBuffers(uint64_t swap_id, uint32_t flags) override;
 

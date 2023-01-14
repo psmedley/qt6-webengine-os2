@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # Copyright 2017 The ANGLE Project Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -101,7 +101,7 @@ const UniformTypeInfo &GetUniformTypeInfo(GLenum uniformType)
 }}  // namespace gl
 """
 
-type_info_data_template = """{{{type}, {component_type}, {texture_type}, {transposed_type}, {bool_type}, {sampler_format}, {rows}, {columns}, {components}, {component_size}, {internal_size}, {external_size}, {is_sampler}, {is_matrix}, {is_image}, {glsl_asfloat} }}"""
+type_info_data_template = """{{{type}, {component_type}, {texture_type}, {transposed_type}, {bool_type}, {sampler_format}, {rows}, {columns}, {components}, {component_size}, {internal_size}, {external_size}, {is_sampler}, {is_matrix}, {is_image} }}"""
 type_index_case_template = """case {enum_value}: return {index_value};"""
 
 
@@ -224,22 +224,6 @@ def get_is_image(uniform_type):
     return cpp_bool("_VIDEO_" not in uniform_type and "_IMAGE_" in uniform_type)
 
 
-def get_glsl_asfloat(uniform_type):
-    component_type = get_component_type(uniform_type)
-    if component_type == "GL_BOOL":
-        return '""'
-    elif component_type == "GL_FLOAT":
-        return '""'
-    elif component_type == "GL_INT":
-        return '"intBitsToFloat"'
-    elif component_type == "GL_UNSIGNED_INT":
-        return '"uintBitsToFloat"'
-    elif component_type == "GL_NONE":
-        return '""'
-    else:
-        raise "Invalid component type: " + component_type
-
-
 def gen_type_info(uniform_type):
     return type_info_data_template.format(
         type=uniform_type,
@@ -256,8 +240,7 @@ def gen_type_info(uniform_type):
         external_size=get_external_size(uniform_type),
         is_sampler=get_is_sampler(uniform_type),
         is_matrix=get_is_matrix(uniform_type),
-        is_image=get_is_image(uniform_type),
-        glsl_asfloat=get_glsl_asfloat(uniform_type))
+        is_image=get_is_image(uniform_type))
 
 
 def gen_type_index_case(index, uniform_type):
@@ -272,9 +255,9 @@ def main():
         outputs = ['uniform_type_info_autogen.cpp']
 
         if sys.argv[1] == 'inputs':
-            print ','.join(inputs)
+            print(','.join(inputs))
         elif sys.argv[1] == 'outputs':
-            print ','.join(outputs)
+            print(','.join(outputs))
         else:
             print('Invalid script parameters')
             return 1

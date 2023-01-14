@@ -39,7 +39,6 @@
 #include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-forward.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
-#include "third_party/blink/public/platform/web_size.h"
 
 namespace blink {
 
@@ -173,7 +172,6 @@ class WebSettings {
   virtual void SetMinimumLogicalFontSize(int) = 0;
   virtual void SetHideScrollbars(bool) = 0;
   virtual void SetOfflineWebApplicationCacheEnabled(bool) = 0;
-  virtual void SetPassiveEventListenerDefault(PassiveEventListenerDefault) = 0;
   virtual void SetPasswordEchoDurationInSeconds(double) = 0;
   virtual void SetPasswordEchoEnabled(bool) = 0;
   virtual void SetPictographFontFamily(const WebString&,
@@ -286,6 +284,7 @@ class WebSettings {
   virtual void SetSelectionClipboardBufferAvailable(bool) = 0;
   virtual void SetAccessibilityIncludeSvgGElement(bool) = 0;
   virtual void SetWebXRImmersiveArAllowed(bool) = 0;
+  virtual void SetLitePageSubresourceRedirectOrigin(const WebString&) = 0;
 
  protected:
   ~WebSettings() = default;
@@ -293,4 +292,4 @@ class WebSettings {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_SETTINGS_H_

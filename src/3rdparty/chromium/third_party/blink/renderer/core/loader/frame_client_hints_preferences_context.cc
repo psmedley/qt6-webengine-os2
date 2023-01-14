@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
@@ -32,6 +32,9 @@ static constexpr WebFeature kWebFeatureMapping[] = {
     WebFeature::kClientHintsUAMobile,
     WebFeature::kClientHintsUAFullVersion,
     WebFeature::kClientHintsUAPlatformVersion,
+    WebFeature::kClientHintsPrefersColorScheme,
+    WebFeature::kClientHintsUABitness,
+    WebFeature::kClientHintsUAReduced,
 };
 
 static_assert(static_cast<int>(network::mojom::WebClientHintsType::kMaxValue) +

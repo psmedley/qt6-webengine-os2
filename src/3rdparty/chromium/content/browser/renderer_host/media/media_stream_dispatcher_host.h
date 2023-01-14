@@ -24,7 +24,7 @@ class MediaStreamManager;
 
 // MediaStreamDispatcherHost is a delegate for Media Stream API messages used by
 // MediaStreamImpl.  There is one MediaStreamDispatcherHost per
-// RenderProcessHost, the former owned by the latter.
+// RenderFrameHost, the former owned by the latter.
 class CONTENT_EXPORT MediaStreamDispatcherHost
     : public blink::mojom::MediaStreamDispatcherHost {
  public:
@@ -65,14 +65,14 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
   void CancelRequest(int32_t request_id) override;
   void StopStreamDevice(
       const std::string& device_id,
-      const base::Optional<base::UnguessableToken>& session_id) override;
+      const absl::optional<base::UnguessableToken>& session_id) override;
   void OpenDevice(int32_t request_id,
                   const std::string& device_id,
                   blink::mojom::MediaStreamType type,
                   OpenDeviceCallback callback) override;
   void CloseDevice(const std::string& label) override;
   void SetCapturingLinkSecured(
-      const base::Optional<base::UnguessableToken>& session_id,
+      const absl::optional<base::UnguessableToken>& session_id,
       blink::mojom::MediaStreamType type,
       bool is_secure) override;
   void OnStreamStarted(const std::string& label) override;
@@ -99,6 +99,8 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
       const std::string& label,
       const blink::MediaStreamDevice& device,
       const blink::mojom::MediaStreamStateChange new_state);
+  void OnDeviceCaptureHandleChange(const std::string& label,
+                                   const blink::MediaStreamDevice& device);
 
   static int next_requester_id_;
 

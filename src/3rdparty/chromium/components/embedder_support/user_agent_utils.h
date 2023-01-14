@@ -23,16 +23,20 @@ namespace embedder_support {
 // Returns the product used in building the user-agent.
 std::string GetProduct();
 
-// Returns the user agent string for Chrome.
+// Returns the user agent string for Chrome. If the ReduceUserAgent
+// feature is enabled, this will return |GetReducedUserAgent|
 std::string GetUserAgent();
+
+// Returns the reduced user agent string for Chrome.
+std::string GetReducedUserAgent();
 
 blink::UserAgentMetadata GetUserAgentMetadata();
 
 blink::UserAgentBrandList GenerateBrandVersionList(
     int seed,
-    base::Optional<std::string> brand,
+    absl::optional<std::string> brand,
     std::string major_version,
-    base::Optional<std::string> maybe_greasey_brand);
+    absl::optional<std::string> maybe_greasey_brand);
 
 #if defined(OS_ANDROID)
 // This sets a user agent string to simulate a desktop user agent on mobile.

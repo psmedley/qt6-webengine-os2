@@ -19,8 +19,6 @@ source_set("lib") {
     "push_video_stream_subscription_impl.h",
     "receiver_mojo_to_media_adapter.cc",
     "receiver_mojo_to_media_adapter.h",
-    "scoped_access_permission_media_to_mojo_adapter.cc",
-    "scoped_access_permission_media_to_mojo_adapter.h",
     "shared_memory_virtual_device_mojo_adapter.cc",
     "shared_memory_virtual_device_mojo_adapter.h",
     "testing_controls_impl.cc",
@@ -58,8 +56,25 @@ source_set("lib") {
     "//media/capture:capture_switches",
   ]
 
+  if (is_chromeos) {
+    deps += [ "//chromeos/crosapi/mojom" ]
+  }
+
   if (is_chromeos_ash) {
     public_deps += [ "//media/capture/video/chromeos/mojom:cros_camera" ]
+  }
+
+  if (is_chromeos_lacros) {
+    sources += [
+      "lacros/device_factory_adapter_lacros.cc",
+      "lacros/device_factory_adapter_lacros.h",
+      "lacros/device_proxy_lacros.cc",
+      "lacros/device_proxy_lacros.h",
+      "lacros/video_frame_handler_proxy_lacros.cc",
+      "lacros/video_frame_handler_proxy_lacros.h",
+    ]
+
+    deps += [ "//chromeos/lacros" ]
   }
 }
 

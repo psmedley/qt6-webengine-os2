@@ -29,8 +29,8 @@
 
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue.h"
 
-#include "base/stl_util.h"
-#include "third_party/blink/renderer/bindings/core/v8/double_or_auto_keyword.h"
+#include "base/cxx17_backports.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_autokeyword_double.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
@@ -72,11 +72,6 @@ static const CSSValueID kDisplayAlignmentMap[] = {
 static_assert(base::size(kDisplayAlignmentMap) == VTTCue::kNumberOfAlignments,
               "displayAlignmentMap should have the same number of elements as "
               "VTTCue::NumberOfAlignments");
-
-static const String& AutoKeyword() {
-  DEFINE_STATIC_LOCAL(const String, auto_string, ("auto"));
-  return auto_string;
-}
 
 static const String& StartKeyword() {
   DEFINE_STATIC_LOCAL(const String, start, ("start"));
@@ -320,29 +315,35 @@ bool VTTCue::LineIsAuto() const {
   return std::isnan(line_position_);
 }
 
-void VTTCue::line(DoubleOrAutoKeyword& result) const {
-  if (LineIsAuto())
-    result.SetAutoKeyword(AutoKeyword());
-  else
-    result.SetDouble(line_position_);
+V8UnionAutoKeywordOrDouble* VTTCue::line() const {
+  if (LineIsAuto()) {
+    return MakeGarbageCollected<V8UnionAutoKeywordOrDouble>(
+        V8AutoKeyword(V8AutoKeyword::Enum::kAuto));
+  }
+  return MakeGarbageCollected<V8UnionAutoKeywordOrDouble>(line_position_);
 }
 
-void VTTCue::setLine(const DoubleOrAutoKeyword& position) {
+void VTTCue::setLine(const V8UnionAutoKeywordOrDouble* position) {
   // http://dev.w3.org/html5/webvtt/#dfn-vttcue-line
   // On setting, the WebVTT cue line must be set to the new value; if the new
   // value is the string "auto", then it must be interpreted as the special
   // value auto.  ("auto" is translated to NaN.)
-  double line_position;
-  if (position.IsAutoKeyword()) {
-    if (LineIsAuto())
-      return;
-    line_position = std::numeric_limits<double>::quiet_NaN();
-  } else {
-    DCHECK(position.IsDouble());
-    line_position = position.GetAsDouble();
-    if (line_position_ == line_position)
-      return;
+  double line_position = 0;
+  switch (position->GetContentType()) {
+    case V8UnionAutoKeywordOrDouble::ContentType::kAutoKeyword: {
+      if (LineIsAuto())
+        return;
+      line_position = std::numeric_limits<double>::quiet_NaN();
+      break;
+    }
+    case V8UnionAutoKeywordOrDouble::ContentType::kDouble: {
+      line_position = position->GetAsDouble();
+      if (line_position_ == line_position)
+        return;
+      break;
+    }
   }
+
   CueWillChange();
   line_position_ = line_position;
   CueDidChange();
@@ -352,32 +353,37 @@ bool VTTCue::TextPositionIsAuto() const {
   return std::isnan(text_position_);
 }
 
-void VTTCue::position(DoubleOrAutoKeyword& result) const {
-  if (TextPositionIsAuto())
-    result.SetAutoKeyword(AutoKeyword());
-  else
-    result.SetDouble(text_position_);
+V8UnionAutoKeywordOrDouble* VTTCue::position() const {
+  if (TextPositionIsAuto()) {
+    return MakeGarbageCollected<V8UnionAutoKeywordOrDouble>(
+        V8AutoKeyword(V8AutoKeyword::Enum::kAuto));
+  }
+  return MakeGarbageCollected<V8UnionAutoKeywordOrDouble>(text_position_);
 }
 
-void VTTCue::setPosition(const DoubleOrAutoKeyword& position,
+void VTTCue::setPosition(const V8UnionAutoKeywordOrDouble* position,
                          ExceptionState& exception_state) {
   // http://dev.w3.org/html5/webvtt/#dfn-vttcue-position
   // On setting, if the new value is negative or greater than 100, then an
   // IndexSizeError exception must be thrown. Otherwise, the WebVTT cue
   // position must be set to the new value; if the new value is the string
   // "auto", then it must be interpreted as the special value auto.
-  double text_position;
-  if (position.IsAutoKeyword()) {
-    if (TextPositionIsAuto())
-      return;
-    text_position = std::numeric_limits<double>::quiet_NaN();
-  } else {
-    DCHECK(position.IsDouble());
-    if (IsInvalidPercentage(position.GetAsDouble(), exception_state))
-      return;
-    text_position = position.GetAsDouble();
-    if (text_position_ == text_position)
-      return;
+  double text_position = 0;
+  switch (position->GetContentType()) {
+    case V8UnionAutoKeywordOrDouble::ContentType::kAutoKeyword: {
+      if (TextPositionIsAuto())
+        return;
+      text_position = std::numeric_limits<double>::quiet_NaN();
+      break;
+    }
+    case V8UnionAutoKeywordOrDouble::ContentType::kDouble: {
+      text_position = position->GetAsDouble();
+      if (IsInvalidPercentage(text_position, exception_state))
+        return;
+      if (text_position_ == text_position)
+        return;
+      break;
+    }
   }
 
   CueWillChange();
@@ -797,9 +803,9 @@ void VTTCue::UpdatePastAndFutureNodes(double movie_time) {
   }
 }
 
-base::Optional<double> VTTCue::GetNextIntraCueTime(double movie_time) const {
+absl::optional<double> VTTCue::GetNextIntraCueTime(double movie_time) const {
   if (!display_tree_) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Iterate through children once, since in a well-formed VTTCue
@@ -816,13 +822,13 @@ base::Optional<double> VTTCue::GetNextIntraCueTime(double movie_time) const {
           return timestamp;
         } else {
           // Timestamps should never be greater than the end time of the VTTCue.
-          return base::nullopt;
+          return absl::nullopt;
         }
       }
     }
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 VTTCueBox* VTTCue::GetDisplayTree() {
@@ -1118,8 +1124,10 @@ void VTTCue::ParseSettings(const VTTRegionMap* region_map,
         break;
       }
       case kRegionId:
-        if (region_map)
-          region_ = region_map->at(input.ExtractString(value_run));
+        if (region_map) {
+          auto it = region_map->find(input.ExtractString(value_run));
+          region_ = it != region_map->end() ? it->value : nullptr;
+        }
         break;
       case kNone:
         break;

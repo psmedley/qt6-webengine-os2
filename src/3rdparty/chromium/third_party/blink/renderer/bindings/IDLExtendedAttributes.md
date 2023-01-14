@@ -6,7 +6,7 @@
 
 The main interest in extended attributes are their _semantics_: Blink implements many more extended attributes than the Web IDL standard, to specify various behavior.
 
-The authoritative list of allowed extended attributes and values is [bindings/IDLExtendedAttributes.txt](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/bindings/IDLExtendedAttributes.txt). This is complete but not necessarily precise (there may be unused extended attributes or values), since validation is run on build, but coverage isn't checked.
+The authoritative list of allowed extended attributes and values is [bindings/IDLExtendedAttributes.txt](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/IDLExtendedAttributes.txt). This is complete but not necessarily precise (there may be unused extended attributes or values), since validation is run on build, but coverage isn't checked.
 
 Syntactically, Blink IDL extended attributes differ from standard Web IDL extended attributes in a few ways:
 
@@ -59,7 +59,7 @@ Extended attributes mostly work normally on overloaded methods, affecting only t
 While `[DeprecateAs]`, `[MeasureAs]` only affect callback for non-overloaded methods, the logging code is instead put in the method itself for overloaded methods, so these can be placed on the method to log in question.
 ***
 
-Extended attributes that affect the callback must be on the _last_ overloaded method, though it is safest to put them on all the overloaded methods, for consistency (and in case they are rearranged or deleted). The source is [bindings/templates/methods.cpp](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/bindings/templates/methods.cpp), and currently there are no extended attribute that affect the callback (even for overloaded methods).
+Extended attributes that affect the callback must be on the _last_ overloaded method, though it is safest to put them on all the overloaded methods, for consistency (and in case they are rearranged or deleted). The source is [bindings/templates/methods.cpp](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/templates/methods.cpp), and currently there are no extended attribute that affect the callback (even for overloaded methods).
 
 ### Special operations (methods)
 
@@ -126,7 +126,7 @@ Extended attributes on members of an interface mixin work as normal. However, on
 
 ### Inheritance
 
-Extended attributes are generally not inherited: only extended attributes on the interface itself are consulted. However, there are a handful of extended attributes that are inherited (applying them to an ancestor interface applies them to the descendants). These are extended attributes that affect memory management, and currently consists of `[ActiveScriptWrappable]`; the up-to-date list is [compute_dependencies.INHERITED_EXTENDED_ATTRIBUTES](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/bindings/scripts/compute_dependencies.py&q=INHERITED_EXTENDED_ATTRIBUTES).
+Extended attributes are generally not inherited: only extended attributes on the interface itself are consulted. However, there are a handful of extended attributes that are inherited (applying them to an ancestor interface applies them to the descendants). These are extended attributes that affect memory management, and currently consists of `[ActiveScriptWrappable]`; the up-to-date list is [compute_dependencies.INHERITED_EXTENDED_ATTRIBUTES](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/scripts/compute_interfaces_info_overall.py?q=INHERITED_EXTENDED_ATTRIBUTES&ss=chromium).
 
 ## Standard Web IDL Extended Attributes
 
@@ -216,6 +216,21 @@ Whether you should allow an interface to have constructor depends on the spec of
 *** note
 Currently `[Constructor(...)]` does not yet support optional arguments w/o defaults. It just supports optional `[DefaultValue=Undefined]`.
 ***
+
+### [CrossOriginIsolated] _(a, i, m)_
+
+Standard: [CrossOriginIsolated](https://heycam.github.io/webidl/#CrossOriginIsolated)
+
+Summary: Interfaces and interface members with a `CrossOriginIsolated` attribute are exposed only inside contexts whose [cross-origin isolated capability](https://html.spec.whatwg.org/multipage/webappapis.html#concept-settings-object-cross-origin-isolated-capability) is enabled.
+
+Usage: The `[CrossOriginIsolated]` attribute may be specified on interfaces, attributes, and members:
+
+```webidl
+[CrossOriginIsolated]
+interface HighResolutionTimer {
+  DOMHighResTimeStamp getHighResolutionTime();
+};
+```
 
 ### [EnforceRange] _(t)_
 
@@ -962,7 +977,7 @@ v8::Local<v8::Value> V8XXX::CallAsFunctionCallback(const v8::Arguments& args) {
 Summary: Denotes an API that exposes data that folks on the internet find useful for fingerprinting.
 
 Attributes and methods marked as `[HighEntropy]` are known to be practically useful for [identifying particular clients](https://dev.chromium.org/Home/chromium-security/client-identification-mechanisms) on the web today.
-Both methods and attribute/constant getters annotated with this attribute are wired up to [`Dactyloscoper::Record`](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/core/frame/dactyloscoper.cc&q=Dactyloscoper::Record) for additional processing.
+Both methods and attribute/constant getters annotated with this attribute are wired up to [`Dactyloscoper::Record`](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/frame/dactyloscoper.cc&q=Dactyloscoper::Record) for additional processing.
 
 This attribute must be accompanied by either `[Measure]` or `[MeasureAs]`.
 
@@ -982,9 +997,9 @@ For now, this label is only supported for attribute getters, although the `[High
 
 ### [DeprecateAs] _(m, a, c)_
 
-Summary: Measures usage of a deprecated feature via UseCounter, and notifies developers about deprecation via a console warning.
+Summary: Measures usage of a deprecated feature via `UseCounter`, and notifies developers about deprecation via a console warning.
 
-`[DeprecateAs]` can be considered an extended form of `[MeasureAs]`: it both measures the feature's usage via the same UseCounter mechanism, and also sends out a warning to the console (optionally with a message) in order to inform developers that the code they've written will stop working at some point in the relatively near future.
+`[DeprecateAs]` can be considered an extended form of `[MeasureAs]`: it both measures the feature's usage via the same `UseCounter` mechanism, and also sends out a warning to the console (optionally with a message) in order to inform developers that the code they've written will stop working at some point in the relatively near future.
 
 Usage: `[DeprecateAs]` can be specified on methods, attributes, and constants.
 
@@ -994,7 +1009,7 @@ Usage: `[DeprecateAs]` can be specified on methods, attributes, and constants.
     [DeprecateAs=DeprecatedPrefixedConstant] const short DEPRECATED_PREFIXED_CONSTANT = 1;
 ```
 
-The deprecation message show on the console can be specified via the [UseCounter::deprecationMessage](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/core/frame/use_counter.cc&q=UseCounter::deprecationMessage&l=615) method.
+The deprecation message shown on the console can be specified via the [Deprecation::GetDeprecationInfo](https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/renderer/core/frame/deprecation.cc;l=194) method.
 
 ### [DoNotTestNewObject] _(m)_
 
@@ -1004,7 +1019,7 @@ When specified, does not generate a test for `[NewObject]`. Some implementation 
 
 ### [Measure] _(i, m, a, c)_
 
-Summary: Measures usage of a specific feature via UseCounter.
+Summary: Measures usage of a specific feature via `UseCounter`.
 
 In order to measure usage of specific features, Chrome submits anonymous statistics through the Histogram recording system for users who opt-in to sharing usage statistics. This extended attribute hooks up a specific feature to this measurement system.
 
@@ -1012,7 +1027,7 @@ Usage: `[Measure]` can be specified on interfaces, methods, attributes, and cons
 
 (_deprecated_) When specified on an interface usage of the constructor will be measured. This behavior could be changed in the future. Specify `[Measure]` on constructor operations instead.
 
-The generated feature name must be added to [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/instrumentation/use_counter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [platform/instrumentation/use_counter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/instrumentation/use_counter.h)).
+The generated feature name must be added to `WebFeature` (in [blink/public/mojom/web_feature/web_feature.mojom](https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/public/mojom/web_feature/web_feature.mojom)).
 
 ```webidl
 [Measure] attribute Node interestingAttribute;
@@ -1029,7 +1044,7 @@ Usage: `[MeasureAs]` can be specified on interfaces, methods, attributes, and co
 
 (_deprecated_) Specifying `[MeasureAs]` on interfaces is deprecated. Specify `[MeasureAs]` on constructor operations instead.
 
-The value must match one of the enumeration values in [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/instrumentation/use_counter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [platform/instrumentation/use_counter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/instrumentation/use_counter.h)).
+The value must match one of the enumeration values in `WebFeature` (in [blink/public/mojom/web_feature/web_feature.mojom](https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/public/mojom/web_feature/web_feature.mojom)).
 
 ```webidl
 [MeasureAs=AttributeWeAreInterestedIn] attribute Node interestingAttribute;
@@ -1236,7 +1251,7 @@ Non-empty string values specified by `[ReflectOnly]` must be added to
 
 Summary: `[RuntimeEnabled]` wraps the generated code with `if (RuntimeEnabledFeatures::FeatureNameEnabled) { ...code... }`.
 
-Usage: `[RuntimeEnabled=FeatureName]`. FeatureName must be included in [runtime\_enabled\_features.json5](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/runtime_enabled_features.json5).
+Usage: `[RuntimeEnabled=FeatureName]`. FeatureName must be included in [runtime\_enabled\_features.json5](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/runtime_enabled_features.json5).
 
 ```webidl
 [
@@ -1252,7 +1267,7 @@ foo(long x);
 [RuntimeEnabled=FeatureName] foo(long x, long y);
 ```
 
-For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/blink/renderer/platform/runtime_enabled_features.json5).
+For more information, see [RuntimeEnabledFeatures](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/runtime_enabled_features.json5).
 
 ### [SaveSameObject] _(a)_
 
@@ -1570,23 +1585,23 @@ V8PrivateProperty::GetHTMLFooBarCachedAccessor().Set(context, object, new_value)
 
 ### [Affects] _(m, a)_
 
-Summary: `[Affects=Nothing]` indicates that a function must not produce JS-observable side effects. Functions without this attribute are never invoked by V8 with throwOnSideEffect.
+Summary: `[Affects=Nothing]` indicates that a function must not produce JS-observable side effects, while `[Affects=Everything]` indicates that a function may produce JS-observable side effects. Functions which are not considered free of JS-observable side effects will never be invoked by V8 with throwOnSideEffect.
 
-Marked functions are allowed to be nondeterministic, throw exceptions, force layout, and recalculate style, but must not set values, cache objects, or schedule execution that will be observable after the function completes. If a marked function calls into V8, it must properly handle cases when the V8 call returns an MaybeHandle.
-
-All DOM constructors are assumed to have side effects. However, an exception can be explicitly indicated when calling constructors using the V8 API method Function::NewInstanceWithSideEffectType().
-
-There is not yet support for marking SymbolKeyedMethodConfigurations as side-effect free. This requires additional support in V8 to allow Intrinsics.
-
-Usage for attributes and operations: `[Affects=Nothing]` can be specified on an operation, or on an attribute to indicate that its getter callback is side effect free:
+Usage for attributes and operations: `[Affects=Nothing]` and `[Affects=Everything]` can be specified on an operation, or on an attribute to indicate that its getter callback is side effect free or side effecting:
 
 ```webidl
 interface HTMLFoo {
-    [Affects=Nothing] attribute Bar bar;
+    [Affects=Everything] attribute Bar bar;
     [Affects=Nothing] Bar baz();
     void removeItems();
 };
 ```
+
+When neither `[Affects=Nothing]` nor `[Affects=Everything]` is specified, the default for operations is `[Affects=Everything]`, while for attributes it's `[Affects=Nothing]`. Functions marked as side effect free are allowed to be nondeterministic, throw exceptions, force layout, and recalculate style, but must not set values, cache objects, or schedule execution that will be observable after the function completes. If a marked function calls into V8, it must properly handle cases when the V8 call returns an MaybeHandle.
+
+All DOM constructors are assumed to side effects. However, an exception can be explicitly indicated when calling constructors using the V8 API method Function::NewInstanceWithSideEffectType().
+
+There is not yet support for marking SymbolKeyedMethodConfigurations as side-effect free. This requires additional support in V8 to allow Intrinsics.
 
 
 ### [DefaultValue] _(p)_
@@ -1611,6 +1626,22 @@ The difference between `optional` and `[DefaultValue=Undefined]` optional is whe
 In case of `func1(...)`, if JavaScript calls `func1(100, 200)`, then `HTMLFoo::func1(int a, int b)` is called in Blink. If JavaScript calls `func1(100, 200, 300)`, then `HTMLFoo::func1(int a, int b, int c)` is called in Blink. If JavaScript calls `func1(100, 200, 300, 400)`, then `HTMLFoo::func1(int a, int b, int c, int d)` is called in Blink. In other words, if the Blink implementation has overloaded methods, you can use `optional` without `[DefaultValue=Undefined]`.
 
 In case of `func2(...)` which adds `[DefaultValue=Undefined]`, if JavaScript calls `func2(100, 200)`, then it behaves as if JavaScript called `func2(100, 200, undefined)`. Consequently, `HTMLFoo::func2(int a, int b, int c)` is called in Blink. 100 is passed to `a`, 200 is passed to `b`, and 0 is passed to `c`. (A JavaScript `undefined` is converted to 0, following the value conversion rule in the Web IDL spec; if it were a DOMString parameter, it would end up as the string `"undefined"`.) In this way, Blink needs to just implement `func2(int a, int b, int c)` and needs not to implement both `func2(int a, int b)` and `func2(int a, int b, int c)`.
+
+
+### [DirectSocketEnabled] _(a, i, m)_
+
+Summary: Interfaces and interface members with a `DirectSocketEnabled` extended attribute are exposed only inside contexts whose [cross-origin isolated capability](https://html.spec.whatwg.org/multipage/webappapis.html#concept-settings-object-cross-origin-isolated-capability) is enabled, and when the [kDirectSocket](https://source.chromium.org/chromium/chromium/src/+/main:content/public/common/content_features.cc;drc=25b97f298830b78a443fd7cdfd0b3e190817d1dd;l=556) feature flag is enabled.
+
+Note that it's likely for these requirements to shift over time: <https://crbug.com/1206150>.
+
+Usage: The `[DirectSocketEnabled]` extended attribute may be specified on interfaces, attributes, and operations:
+
+```webidl
+[DirectSocketEnabled]
+interface TCPSocket {
+  ...
+};
+```
 
 
 ### [NoAllocDirectCall]

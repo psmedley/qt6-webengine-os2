@@ -9,10 +9,13 @@ import("//tools/grit/grit_rule.gni")
 
 group("all_tests") {
   testonly = true
-  deps = [
-    ":ios_web_inttests",
-    ":ios_web_unittests",
-  ]
+  deps = []
+  if (!use_qt) {
+    deps += [
+      ":ios_web_inttests",
+      ":ios_web_unittests",
+    ]
+  }
 }
 
 source_set("web") {
@@ -186,8 +189,9 @@ test("ios_web_unittests") {
     "//ios/web/test:packed_resources",
     "//ios/web/web_view:unittests",
   ]
-
-  assert_no_deps = ios_assert_no_deps
+  if (!use_qt) {
+    assert_no_deps = ios_assert_no_deps
+  }
   configs += [ "//build/config/compiler:enable_arc" ]
 }
 
@@ -271,7 +275,6 @@ source_set("ios_web_navigation_unittests") {
     "navigation/crw_navigation_item_holder_unittest.mm",
     "navigation/crw_session_storage_unittest.mm",
     "navigation/crw_wk_navigation_states_unittest.mm",
-    "navigation/error_retry_state_machine_unittest.mm",
     "navigation/navigation_context_impl_unittest.mm",
     "navigation/navigation_item_impl_unittest.mm",
     "navigation/navigation_item_storage_builder_unittest.mm",
@@ -348,6 +351,7 @@ source_set("ios_web_text_fragments_unittests") {
     "//components/shared_highlighting/core/common",
     "//components/ukm:test_support",
     "//ios/web/common:features",
+    "//ios/web/navigation:core",
     "//ios/web/public/navigation:referrer",
     "//ios/web/public/test",
     "//ios/web/public/test/fakes",
@@ -361,7 +365,7 @@ source_set("ios_web_text_fragments_unittests") {
     "//url",
   ]
 
-  sources = [ "text_fragments/crw_text_fragments_handler_unittest.mm" ]
+  sources = [ "text_fragments/text_fragments_manager_impl_unittest.mm" ]
 }
 
 source_set("ios_web_web_state_unittests") {
@@ -438,7 +442,6 @@ source_set("ios_web_web_state_js_unittests") {
     "//ios/net",
     "//ios/testing:ocmock_support",
     "//ios/web/common:web_view_creation_util",
-    "//ios/web/find_in_page",
     "//ios/web/js_features/context_menu",
     "//ios/web/js_messaging",
     "//ios/web/public",
@@ -459,7 +462,6 @@ source_set("ios_web_web_state_js_unittests") {
 
   sources = [
     "web_state/js/common_js_unittest.mm",
-    "web_state/js/find_in_page_js_unittest.mm",
     "web_state/js/message_js_unittest.mm",
   ]
 }
@@ -556,11 +558,14 @@ test("ios_web_inttests") {
     "//ios/testing:http_server_bundle_data",
     "//ios/web:resources_grit",
     "//ios/web/common",
+    "//ios/web/common:uikit",
     "//ios/web/common:web_view_creation_util",
     "//ios/web/download:download_inttests",
     "//ios/web/favicon:inttests",
+    "//ios/web/find_in_page",
     "//ios/web/js_features/context_menu",
     "//ios/web/js_messaging:inttests",
+    "//ios/web/js_messaging:java_script_feature",
     "//ios/web/js_messaging:java_script_feature_util",
     "//ios/web/navigation",
     "//ios/web/navigation:core",
@@ -583,6 +588,8 @@ test("ios_web_inttests") {
     "//mojo/core/embedder",
     "//net:test_support",
     "//services/network/public/cpp",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//testing/gtest",
     "//ui/base:test_support",
     "//ui/resources",
@@ -609,24 +616,18 @@ test("ios_web_inttests") {
     "webui/web_ui_inttest.mm",
     "webui/web_ui_mojo_inttest.mm",
   ]
-
-  assert_no_deps = ios_assert_no_deps
+  if (!use_qt) {
+      assert_no_deps = ios_assert_no_deps
+  }
 }
 
 js_compile_bundle("main_frame_web_bundle") {
   visibility = [ ":js_resources" ]
   closure_entry_point = "__crWeb.mainFrameWebBundle"
 
-  # Silence warning when compiling text-fragment-utils.js until the code
-  # has been rolled (see https://crbug.com/1129390).
-  suppressed_warnings = [ "uselessCode" ]
-
   sources = [
-    "//third_party/text-fragments-polyfill/src/src/text-fragment-utils.js",
     "web_state/js/resources/main_frame_web_bundle.js",
     "web_state/js/resources/navigation.js",
-    "web_state/js/resources/scroll_workaround.js",
-    "web_state/js/resources/text_fragments.js",
   ]
 }
 
@@ -637,7 +638,6 @@ js_compile_bundle("all_frames_web_bundle") {
   sources = [
     "web_state/js/resources/all_frames_web_bundle.js",
     "web_state/js/resources/cookie.js",
-    "web_state/js/resources/find_in_page.js",
     "web_state/js/resources/share_workaround.js",
   ]
 }
@@ -649,16 +649,6 @@ js_compile_bundle("all_frames_document_end_web_bundle") {
   sources = [
     "js_messaging/resources/setup_frame.js",
     "web_state/js/resources/all_frames_document_end_web_bundle.js",
-  ]
-}
-
-js_compile_bundle("main_frame_document_end_web_bundle") {
-  visibility = [ ":js_resources" ]
-  closure_entry_point = "__crWeb.mainFrameDocumentEndWebBundle"
-
-  sources = [
-    "favicon/resources/favicon.js",
-    "web_state/js/resources/main_frame_document_end_web_bundle.js",
   ]
 }
 
@@ -694,7 +684,6 @@ js_compile_checked("js_resources") {
   public_deps = [
     ":all_frames_document_end_web_bundle",
     ":all_frames_web_bundle",
-    ":main_frame_document_end_web_bundle",
     ":main_frame_web_bundle",
   ]
 

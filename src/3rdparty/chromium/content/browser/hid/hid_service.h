@@ -10,8 +10,7 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
-#include "content/public/browser/frame_service_base.h"
+#include "content/public/browser/document_service_base.h"
 #include "content/public/browser/hid_delegate.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -27,9 +26,10 @@ class RenderFrameHost;
 
 // HidService provides an implementation of the HidService mojom interface. This
 // interface is used by Blink to implement the WebHID API.
-class HidService : public content::FrameServiceBase<blink::mojom::HidService>,
-                   public device::mojom::HidConnectionWatcher,
-                   public HidDelegate::Observer {
+class HidService
+    : public content::DocumentServiceBase<blink::mojom::HidService>,
+      public device::mojom::HidConnectionWatcher,
+      public HidDelegate::Observer {
  public:
   HidService(HidService&) = delete;
   HidService& operator=(HidService&) = delete;
@@ -52,9 +52,10 @@ class HidService : public content::FrameServiceBase<blink::mojom::HidService>,
   void OnDeviceAdded(const device::mojom::HidDeviceInfo& device_info) override;
   void OnDeviceRemoved(
       const device::mojom::HidDeviceInfo& device_info) override;
+  void OnDeviceChanged(
+      const device::mojom::HidDeviceInfo& device_info) override;
   void OnHidManagerConnectionError() override;
-  void OnPermissionRevoked(const url::Origin& requesting_origin,
-                           const url::Origin& embedding_origin) override;
+  void OnPermissionRevoked(const url::Origin& origin) override;
 
  private:
   HidService(RenderFrameHost*, mojo::PendingReceiver<blink::mojom::HidService>);
@@ -74,8 +75,7 @@ class HidService : public content::FrameServiceBase<blink::mojom::HidService>,
 
   // The last shown HID chooser UI.
   std::unique_ptr<HidChooser> chooser_;
-  url::Origin requesting_origin_;
-  url::Origin embedding_origin_;
+  url::Origin origin_;
 
   // Used to bind with Blink.
   mojo::AssociatedRemoteSet<device::mojom::HidManagerClient> clients_;

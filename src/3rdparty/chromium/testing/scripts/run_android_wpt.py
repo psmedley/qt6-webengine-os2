@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright 2019 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -47,6 +47,7 @@ CATAPULT_DIR = os.path.join(SRC_DIR, 'third_party', 'catapult')
 DEFAULT_WPT = os.path.join(
     SRC_DIR, 'third_party', 'wpt_tools', 'wpt', 'wpt')
 PYUTILS = os.path.join(CATAPULT_DIR, 'common', 'py_utils')
+TOMBSTONE_PARSER = os.path.join(SRC_DIR, 'build', 'android', 'tombstones.py')
 
 if PYUTILS not in sys.path:
   sys.path.append(PYUTILS)
@@ -111,30 +112,51 @@ class WPTAndroidAdapter(wpt_common.BaseWptScriptAdapter):
     # Arguments from add_extra_argumentsparse were added so
     # its safe to parse the arguments and set self._options
     self.parse_args()
+    self.output_directory = os.path.join(SRC_DIR, 'out', self.options.target)
+    self.mojo_js_directory = os.path.join(self.output_directory, 'gen')
 
   @property
   def rest_args(self):
     rest_args = super(WPTAndroidAdapter, self).rest_args
 
+    # Update the output directory to the default if it's not set.
+    self.maybe_set_default_isolated_script_test_output()
+
     # Here we add all of the arguments required to run WPT tests on Android.
     rest_args.extend([self.options.wpt_path])
 
-    # TODO(crbug.com/1166741): We should be running WPT under Python 3.
-    rest_args.extend(["--py2"])
+    # By default, WPT will treat unexpected passes as errors, so we disable
+    # that to be consistent with Chromium CI.
+    rest_args.extend(['--no-fail-on-unexpected-pass'])
+    if self.options.default_exclude:
+      rest_args.extend(['--default-exclude'])
 
     # vpython has packages needed by wpt, so force it to skip the setup
-    rest_args.extend(["--venv=../../", "--skip-venv-setup"])
+    rest_args.extend(['--venv=' + SRC_DIR, '--skip-venv-setup'])
 
-    rest_args.extend(["run",
-      "--tests=" + wpt_common.EXTERNAL_WPT_TESTS_DIR,
-      "--test-type=" + self.options.test_type,
-      "--device-serial", self._device.serial,
-      "--webdriver-binary",
+    rest_args.extend(['run',
+      '--tests=' + wpt_common.EXTERNAL_WPT_TESTS_DIR,
+      '--test-type=' + self.options.test_type,
+      '--device-serial', self._device.serial,
+      '--webdriver-binary',
       self.options.webdriver_binary,
-      "--headless",
-      "--no-pause-after-test",
-      "--no-capture-stdio",
-      "--no-manifest-download",
+      '--symbols-path',
+      self.output_directory,
+      '--stackwalk-binary',
+      TOMBSTONE_PARSER,
+      '--headless',
+      '--no-pause-after-test',
+      '--no-capture-stdio',
+      '--no-manifest-download',
+      '--binary-arg=--enable-blink-features=MojoJS,MojoJSTest',
+      '--binary-arg=--enable-blink-test-features',
+      '--binary-arg=--disable-field-trial-config',
+      '--enable-mojojs',
+      '--mojojs-path=' + self.mojo_js_directory,
+      '--binary-arg=--enable-features=DownloadService<DownloadServiceStudy',
+      '--binary-arg=--force-fieldtrials=DownloadServiceStudy/Enabled',
+      '--binary-arg=--force-fieldtrial-params=DownloadServiceStudy.Enabled:'
+      'start_up_delay_ms/0',
     ])
     # if metadata was created then add the metadata directory
     # to the list of wpt arguments
@@ -142,40 +164,65 @@ class WPTAndroidAdapter(wpt_common.BaseWptScriptAdapter):
       rest_args.extend(['--metadata', self._metadata_dir])
 
     if self.options.verbose >= 3:
-      rest_args.extend(["--log-mach=-", "--log-mach-level=debug",
-                        "--log-mach-verbose"])
+      rest_args.extend(['--log-mach=-', '--log-mach-level=debug',
+                        '--log-mach-verbose'])
 
     if self.options.verbose >= 4:
       rest_args.extend(['--webdriver-arg=--verbose',
                         '--webdriver-arg="--log-path=-"'])
 
+    if self.options.log_wptreport:
+      wpt_output = self.options.isolated_script_test_output
+      self.wptreport = os.path.join(os.path.dirname(wpt_output),
+                                       'reports.json')
+      rest_args.extend(['--log-wptreport',
+                        self.wptreport])
+
     rest_args.extend(self.pass_through_wpt_args)
 
     return rest_args
 
-  def _extra_metadata_builder_args(self):
+  @property
+  def browser_specific_expectations_path(self):
     raise NotImplementedError
+
+  def _extra_metadata_builder_args(self):
+    args = ['--additional-expectations=%s' % path
+            for path in self.options.additional_expectations]
+    if not self.options.ignore_browser_specific_expectations:
+      args.extend(['--additional-expectations',
+                   self.browser_specific_expectations_path])
+
+    return args
 
   def _maybe_build_metadata(self):
     metadata_builder_cmd = [
-         sys.executable,
-         os.path.join(wpt_common.BLINK_TOOLS_DIR, 'build_wpt_metadata.py'),
-         '--android-product',
-         self.options.product,
-         '--ignore-default-expectations',
-         '--metadata-output-dir',
-         self._metadata_dir,
-         '--additional-expectations',
-         ANDROID_DISABLED_TESTS,
+      sys.executable,
+      os.path.join(wpt_common.BLINK_TOOLS_DIR, 'build_wpt_metadata.py'),
+      '--android-product',
+      self.options.product,
+      '--metadata-output-dir',
+      self._metadata_dir,
+      '--additional-expectations',
+      ANDROID_DISABLED_TESTS,
+      '--use-subtest-results',
     ]
+    if self.options.ignore_default_expectations:
+      metadata_builder_cmd += [ '--ignore-default-expectations' ]
     metadata_builder_cmd.extend(self._extra_metadata_builder_args())
     return common.run_command(metadata_builder_cmd)
 
   def run_test(self):
-    with NamedTemporaryDirectory() as self._metadata_dir, self._install_apks():
+    with NamedTemporaryDirectory() as tmp_dir, self._install_apks():
+      self._metadata_dir = os.path.join(tmp_dir, 'metadata_dir')
       metadata_command_ret = self._maybe_build_metadata()
       if metadata_command_ret != 0:
-          return metadata_command_ret
+        return metadata_command_ret
+
+      # If there is no metadata then we need to create an
+      # empty directory to pass to wptrunner
+      if not os.path.exists(self._metadata_dir):
+        os.makedirs(self._metadata_dir)
       return super(WPTAndroidAdapter, self).run_test()
 
   def _install_apks(self):
@@ -196,6 +243,9 @@ class WPTAndroidAdapter(wpt_common.BaseWptScriptAdapter):
 
     # Add this so that product argument does not go in self._rest_args
     # when self.parse_args() is called
+    parser.add_argument('--target', '-t', default='Release',
+                        help='Specify the target build subdirectory under'
+                        ' src/out/.')
     parser.add_argument('--product', help=argparse.SUPPRESS)
     parser.add_argument('--webdriver-binary', required=True,
                         help='Path of the webdriver binary.  It needs to have'
@@ -204,10 +254,19 @@ class WPTAndroidAdapter(wpt_common.BaseWptScriptAdapter):
                         help='Controls the path of the WPT runner to use'
                         ' (therefore tests).  Defaults the revision rolled into'
                         ' Chromium.')
+    parser.add_argument('--additional-expectations',
+                        action='append', default=[],
+                        help='Paths to additional test expectations files.')
+    parser.add_argument('--ignore-default-expectations', action='store_true',
+                        help='Do not use the default set of'
+                        ' TestExpectations files.')
+    parser.add_argument('--ignore-browser-specific-expectations',
+                        action='store_true', default=False,
+                        help='Ignore browser specific expectation files.')
     parser.add_argument('--test-type', default='testharness',
                         help='Specify to experiment with other test types.'
                         ' Currently only the default is expected to work.')
-    parser.add_argument('--verbose', '-v', action='count',
+    parser.add_argument('--verbose', '-v', action='count', default=0,
                         help='Verbosity level.')
     parser.add_argument('--repeat',
                         action=WPTPassThroughArgs, type=int,
@@ -218,14 +277,18 @@ class WPTAndroidAdapter(wpt_common.BaseWptScriptAdapter):
     parser.add_argument('--include-file',
                         action=WPTPassThroughArgs,
                         help='A file listing test(s) to run')
+    parser.add_argument('--default-exclude', action='store_true', default=False,
+                        help="Only run the tests explicitly given in arguments."
+                             "No tests will run if the list is empty, and the "
+                             "program will exit with status code 0.")
     parser.add_argument('--list-tests', action=WPTPassThroughArgs, nargs=0,
                         help="Don't run any tests, just print out a list of"
                         ' tests that would be run.')
     parser.add_argument('--webdriver-arg', action=WPTPassThroughArgs,
                         help='WebDriver args.')
-    parser.add_argument('--log-wptreport', metavar='WPT_REPORT_FILE',
-                        action=WPTPassThroughArgs,
-                        help="Log wptreport with subtest details.")
+    parser.add_argument('--log-wptreport',
+                        action='store_true', default=False,
+                        help="Generates a test report in JSON format.")
     parser.add_argument('--log-raw', metavar='RAW_REPORT_FILE',
                         action=WPTPassThroughArgs,
                         help="Log raw report.")
@@ -269,10 +332,9 @@ class WPTWeblayerAdapter(WPTAndroidAdapter):
          install_webview_provider_as_needed:
       yield
 
-  def _extra_metadata_builder_args(self):
-    return [
-      '--additional-expectations',
-      PRODUCTS_TO_EXPECTATION_FILE_PATHS[ANDROID_WEBLAYER]]
+  @property
+  def browser_specific_expectations_path(self):
+    return PRODUCTS_TO_EXPECTATION_FILE_PATHS[ANDROID_WEBLAYER]
 
   def add_extra_arguments(self, parser):
     super(WPTWeblayerAdapter, self).add_extra_arguments(parser)
@@ -310,10 +372,9 @@ class WPTWebviewAdapter(WPTAndroidAdapter):
     with install_shell_as_needed, install_webview_provider_as_needed:
       yield
 
-  def _extra_metadata_builder_args(self):
-    return [
-      '--additional-expectations',
-      PRODUCTS_TO_EXPECTATION_FILE_PATHS[ANDROID_WEBVIEW]]
+  @property
+  def browser_specific_expectations_path(self):
+    return PRODUCTS_TO_EXPECTATION_FILE_PATHS[ANDROID_WEBVIEW]
 
   def add_extra_arguments(self, parser):
     super(WPTWebviewAdapter, self).add_extra_arguments(parser)
@@ -331,6 +392,7 @@ class WPTWebviewAdapter(WPTAndroidAdapter):
     args.append(ANDROID_WEBVIEW)
     return args
 
+
 class WPTClankAdapter(WPTAndroidAdapter):
 
   @contextlib.contextmanager
@@ -340,10 +402,9 @@ class WPTClankAdapter(WPTAndroidAdapter):
     with install_clank_as_needed:
       yield
 
-  def _extra_metadata_builder_args(self):
-    return [
-      '--additional-expectations',
-      PRODUCTS_TO_EXPECTATION_FILE_PATHS[CHROME_ANDROID]]
+  @property
+  def browser_specific_expectations_path(self):
+    return PRODUCTS_TO_EXPECTATION_FILE_PATHS[CHROME_ANDROID]
 
   def add_extra_arguments(self, parser):
     super(WPTClankAdapter, self).add_extra_arguments(parser)
@@ -420,7 +481,8 @@ def no_op():
 # This is not really a "script test" so does not need to manually add
 # any additional compile targets.
 def main_compile_targets(args):
-    json.dump([], args.output)
+  json.dump([], args.output)
+
 
 @contextlib.contextmanager
 def get_device(args):
@@ -444,6 +506,7 @@ def get_device(args):
     if instance:
       instance.Stop()
 
+
 def add_emulator_args(parser):
   parser.add_argument(
       '--avd-config',
@@ -456,6 +519,7 @@ def add_emulator_args(parser):
       action='store_true',
       default=False,
       help='Enable graphical window display on the emulator.')
+
 
 def main():
   devil_chromium.Initialize()
@@ -484,19 +548,19 @@ def main():
     # WPT setup for chrome and webview requires that PATH contains adb.
     platform_tools_path = os.path.dirname(devil_env.config.FetchPath('adb'))
     os.environ['PATH'] = ':'.join([platform_tools_path] +
-                                os.environ['PATH'].split(':'))
+                                  os.environ['PATH'].split(':'))
 
     return adapter.run_test()
 
 
 if __name__ == '__main__':
-    # Conform minimally to the protocol defined by ScriptTest.
-    if 'compile_targets' in sys.argv:
-        funcs = {
-            'run': None,
-            'compile_targets': main_compile_targets,
-        }
-        sys.exit(common.run_script(sys.argv[1:], funcs))
-    logging.basicConfig(level=logging.WARNING)
-    logger = logging.getLogger()
-    sys.exit(main())
+  # Conform minimally to the protocol defined by ScriptTest.
+  if 'compile_targets' in sys.argv:
+    funcs = {
+      'run': None,
+      'compile_targets': main_compile_targets,
+    }
+    sys.exit(common.run_script(sys.argv[1:], funcs))
+  logging.basicConfig(level=logging.WARNING)
+  logger = logging.getLogger()
+  sys.exit(main())

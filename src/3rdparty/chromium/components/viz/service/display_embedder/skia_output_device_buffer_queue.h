@@ -6,6 +6,7 @@
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_DEVICE_BUFFER_QUEUE_H_
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -54,12 +55,14 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
                gfx::BufferFormat format,
                gfx::OverlayTransform transform) override;
   SkSurface* BeginPaint(
+      bool allocate_frame_buffer,
       std::vector<GrBackendSemaphore>* end_semaphores) override;
   void EndPaint() override;
+  void ReleaseOneFrameBuffer() override;
 
   bool IsPrimaryPlaneOverlay() const override;
   void SchedulePrimaryPlane(
-      const base::Optional<
+      const absl::optional<
           OverlayProcessorInterface::OutputSurfaceOverlayPlane>& plane)
       override;
   void ScheduleOverlays(SkiaOutputSurface::OverlayList overlays) override;
@@ -71,7 +74,8 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
       base::CancelableOnceCallback<void(gfx::SwapCompletionResult)>;
 
   OutputPresenter::Image* GetNextImage();
-  void PageFlipComplete(OutputPresenter::Image* image);
+  void PageFlipComplete(OutputPresenter::Image* image,
+                        gfx::GpuFenceHandle release_fence);
   void FreeAllSurfaces();
   // Used as callback for SwapBuffersAsync and PostSubBufferAsync to finish
   // operation
@@ -126,13 +130,25 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
   // key.
   base::flat_set<OverlayData, OverlayDataComparator> overlays_;
 
+#if defined(USE_OZONE)
+  const gpu::Mailbox GetImageMailboxForColor(const SkColor& color);
+
+  // All in-flight solid color images are held in this container until a swap
+  // buffer with the identifying mailbox releases them.
+  base::flat_map<gpu::Mailbox,
+                 std::pair<SkColor, std::unique_ptr<OutputPresenter::Image>>>
+      solid_color_images_;
+
+  std::unordered_multimap<SkColor, std::unique_ptr<OutputPresenter::Image>>
+      solid_color_cache_;
+#endif
   // Set to true if no image is to be used for the primary plane of this frame.
   bool current_frame_has_no_primary_plane_ = false;
   // Whether the platform needs an occluded background image. Wayland needs it
   // for opaque accelerated widgets and event wiring.
   bool needs_background_image_ = false;
   // A 4x4 small image that will be scaled to cover an opaque region.
-  std::unique_ptr<OutputPresenter::Image> background_image_ = nullptr;
+  std::unique_ptr<OutputPresenter::Image> background_image_;
   // Set to true if background has been scheduled in a frame.
   bool background_image_is_scheduled_ = false;
   // Whether |SchedulePrimaryPlane| needs to wait for a paint before scheduling

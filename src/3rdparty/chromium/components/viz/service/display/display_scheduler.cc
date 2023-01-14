@@ -4,6 +4,8 @@
 
 #include "components/viz/service/display/display_scheduler.h"
 
+#include <algorithm>
+
 #include "base/auto_reset.h"
 #include "base/trace_event/trace_event.h"
 
@@ -40,10 +42,13 @@ class DisplayScheduler::BeginFrameObserver : public BeginFrameObserverBase {
 DisplayScheduler::DisplayScheduler(BeginFrameSource* begin_frame_source,
                                    base::SingleThreadTaskRunner* task_runner,
                                    int max_pending_swaps,
-                                   bool wait_for_all_surfaces_before_draw)
+                                   absl::optional<int> max_pending_swaps_120hz,
+                                   bool wait_for_all_surfaces_before_draw,
+                                   gfx::RenderingPipeline* gpu_pipeline)
     : begin_frame_observer_(std::make_unique<BeginFrameObserver>(this)),
       begin_frame_source_(begin_frame_source),
       task_runner_(task_runner),
+      gpu_pipeline_(gpu_pipeline),
       inside_surface_damaged_(false),
       visible_(false),
       output_surface_lost_(false),
@@ -53,6 +58,7 @@ DisplayScheduler::DisplayScheduler(BeginFrameSource* begin_frame_source,
       next_swap_id_(1),
       pending_swaps_(0),
       max_pending_swaps_(max_pending_swaps),
+      max_pending_swaps_120hz_(max_pending_swaps_120hz),
       wait_for_all_surfaces_before_draw_(wait_for_all_surfaces_before_draw),
       observing_begin_frame_source_(false) {
   begin_frame_deadline_closure_ = base::BindRepeating(
@@ -126,9 +132,15 @@ void DisplayScheduler::OutputSurfaceLost() {
   ScheduleBeginFrameDeadline();
 }
 
+void DisplayScheduler::SetGpuLatency(base::TimeDelta gpu_latency) {
+  if (gpu_pipeline_)
+    gpu_pipeline_->SetGpuLatency(gpu_latency);
+}
+
 bool DisplayScheduler::DrawAndSwap() {
   TRACE_EVENT0("viz", "DisplayScheduler::DrawAndSwap");
-  DCHECK_LT(pending_swaps_, max_pending_swaps_);
+  DCHECK_LT(pending_swaps_,
+            std::max(max_pending_swaps_, max_pending_swaps_120hz_.value_or(0)));
   DCHECK(!output_surface_lost_);
 
   bool success = client_ && client_->DrawAndSwap(current_frame_display_time());
@@ -153,7 +165,7 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
     DCHECK(missed_begin_frame_task_.IsCancelled());
     missed_begin_frame_task_.Reset(
         base::BindOnce(base::IgnoreResult(&DisplayScheduler::OnBeginFrame),
-                       // The CancelableCallback will not run after it is
+                       // The CancelableOnceCallback will not run after it is
                        // destroyed, which happens when |this| is destroyed.
                        base::Unretained(this), args));
     task_runner_->PostTask(FROM_HERE, missed_begin_frame_task_.callback());
@@ -179,10 +191,25 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
   current_begin_frame_args_.deadline -=
       BeginFrameArgs::DefaultEstimatedDisplayDrawTime(save_args.interval);
   inside_begin_frame_deadline_interval_ = true;
+  if (gpu_pipeline_)
+    gpu_pipeline_->SetTargetDuration(save_args.interval);
+
   UpdateHasPendingSurfaces();
   ScheduleBeginFrameDeadline();
 
   return true;
+}
+
+int DisplayScheduler::MaxPendingSwaps() const {
+  // Interval for 120hz with some delta for margin of error.
+  constexpr base::TimeDelta k120HzInterval =
+      base::TimeDelta::FromMicroseconds(8500);
+  if (current_begin_frame_args_.interval > k120HzInterval ||
+      !max_pending_swaps_120hz_) {
+    return max_pending_swaps_;
+  } else {
+    return max_pending_swaps_120hz_.value();
+  }
 }
 
 void DisplayScheduler::SetNeedsOneBeginFrame(bool needs_draw) {
@@ -202,6 +229,8 @@ void DisplayScheduler::StartObservingBeginFrames() {
   if (!observing_begin_frame_source_) {
     begin_frame_source_->AddObserver(begin_frame_observer_.get());
     observing_begin_frame_source_ = true;
+    if (gpu_pipeline_)
+      gpu_pipeline_active_.emplace(gpu_pipeline_);
   }
 }
 
@@ -209,6 +238,7 @@ void DisplayScheduler::StopObservingBeginFrames() {
   if (observing_begin_frame_source_) {
     begin_frame_source_->RemoveObserver(begin_frame_observer_.get());
     observing_begin_frame_source_ = false;
+    gpu_pipeline_active_.reset();
 
     // A missed BeginFrame may be queued, so drop that too if we're going to
     // stop listening.
@@ -263,7 +293,7 @@ DisplayScheduler::DesiredBeginFrameDeadlineMode() const {
     return BeginFrameDeadlineMode::kImmediate;
   }
 
-  if (pending_swaps_ >= max_pending_swaps_) {
+  if (pending_swaps_ >= MaxPendingSwaps()) {
     TRACE_EVENT_INSTANT0("viz", "Swap throttled", TRACE_EVENT_SCOPE_THREAD);
     return BeginFrameDeadlineMode::kLate;
   }
@@ -354,7 +384,7 @@ bool DisplayScheduler::AttemptDrawAndSwap() {
   begin_frame_deadline_task_time_ = base::TimeTicks();
 
   if (ShouldDraw()) {
-    if (pending_swaps_ < max_pending_swaps_)
+    if (pending_swaps_ < MaxPendingSwaps())
       return DrawAndSwap();
   } else {
     // We are going idle, so reset expectations.
@@ -373,6 +403,8 @@ void DisplayScheduler::OnBeginFrameDeadline() {
 
   bool did_draw = AttemptDrawAndSwap();
   DidFinishFrame(did_draw);
+  if (gpu_pipeline_)
+    gpu_pipeline_->NotifyFrameFinished();
 }
 
 void DisplayScheduler::DidFinishFrame(bool did_draw) {
@@ -385,7 +417,7 @@ void DisplayScheduler::DidFinishFrame(bool did_draw) {
 
 void DisplayScheduler::DidSwapBuffers() {
   pending_swaps_++;
-  if (pending_swaps_ == max_pending_swaps_)
+  if (pending_swaps_ >= MaxPendingSwaps())
     begin_frame_source_->SetIsGpuBusy(true);
 
   uint32_t swap_id = next_swap_id_++;

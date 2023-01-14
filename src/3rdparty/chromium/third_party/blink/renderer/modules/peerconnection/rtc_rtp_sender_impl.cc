@@ -287,6 +287,9 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
       new_parameters.encodings[i].rid = encoding.rid;
       new_parameters.encodings[i].scale_resolution_down_by =
           encoding.scale_resolution_down_by;
+      new_parameters.encodings[i].num_temporal_layers =
+          encoding.num_temporal_layers;
+      new_parameters.encodings[i].scalability_mode = encoding.scalability_mode;
       new_parameters.encodings[i].adaptive_ptime = encoding.adaptive_ptime;
     }
 
@@ -617,13 +620,13 @@ webrtc::RTCError RTCRtpSenderOnlyTransceiver::SetDirection(
   return webrtc::RTCError::OK();
 }
 
-base::Optional<webrtc::RtpTransceiverDirection>
+absl::optional<webrtc::RtpTransceiverDirection>
 RTCRtpSenderOnlyTransceiver::CurrentDirection() const {
   NOTIMPLEMENTED();
   return webrtc::RtpTransceiverDirection::kSendOnly;
 }
 
-base::Optional<webrtc::RtpTransceiverDirection>
+absl::optional<webrtc::RtpTransceiverDirection>
 RTCRtpSenderOnlyTransceiver::FiredDirection() const {
   NOTIMPLEMENTED();
   return webrtc::RtpTransceiverDirection::kSendOnly;

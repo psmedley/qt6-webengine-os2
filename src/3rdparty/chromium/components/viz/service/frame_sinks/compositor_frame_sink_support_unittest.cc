@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -145,7 +145,7 @@ class CompositorFrameSinkSupportTest : public testing::Test {
       std::unique_ptr<CopyOutputRequest> request) {
     frame.render_pass_list.back()->copy_requests.push_back(std::move(request));
     const auto result = support_->MaybeSubmitCompositorFrame(
-        local_surface_id_, std::move(frame), base::nullopt, 0,
+        local_surface_id_, std::move(frame), absl::nullopt, 0,
         mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
     switch (result) {
       case SubmitResult::ACCEPTED:
@@ -170,9 +170,9 @@ class CompositorFrameSinkSupportTest : public testing::Test {
       resource.sync_token = consumer_sync_token_;
       resource.id = ids_to_unref[i];
       resource.count = counts_to_unref[i];
-      unref_array.push_back(resource);
+      unref_array.push_back(std::move(resource));
     }
-    support_->UnrefResources(unref_array);
+    support_->UnrefResources(std::move(unref_array));
   }
 
   void CheckReturnedResourcesMatchExpected(ResourceId* expected_returned_ids,
@@ -181,8 +181,7 @@ class CompositorFrameSinkSupportTest : public testing::Test {
         fake_support_client_.returned_resources();
     ASSERT_EQ(expected_resources, actual_resources.size());
     for (size_t i = 0; i < expected_resources; ++i) {
-      ReturnedResource resource = actual_resources[i];
-      EXPECT_EQ(expected_returned_ids[i], resource.id);
+      EXPECT_EQ(expected_returned_ids[i], actual_resources[i].id);
     }
     fake_support_client_.clear_returned_resources();
   }
@@ -195,7 +194,7 @@ class CompositorFrameSinkSupportTest : public testing::Test {
         fake_support_client_.returned_resources();
     ASSERT_EQ(expected_resources, actual_resources.size());
     for (size_t i = 0; i < expected_resources; ++i) {
-      ReturnedResource resource = actual_resources[i];
+      const auto& resource = actual_resources[i];
       EXPECT_EQ(expected_sync_token, resource.sync_token);
       EXPECT_EQ(expected_returned_ids[i], resource.id);
       EXPECT_EQ(expected_returned_counts[i], resource.count);
@@ -611,37 +610,37 @@ TEST_F(CompositorFrameSinkSupportTest, MonotonicallyIncreasingLocalSurfaceIds) {
 
   // LocalSurfaceId1(6, 1)
   auto result = support->MaybeSubmitCompositorFrame(
-      local_surface_id1, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id1, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
   // LocalSurfaceId(6, 2): Child-initiated synchronization.
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id2, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id2, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
   // LocalSurfaceId(7, 2): Parent-initiated synchronization.
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id3, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id3, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
   // LocalSurfaceId(5, 3): Submit rejected because not monotonically increasing.
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id4, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id4, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::SURFACE_ID_DECREASED, result);
 
   // LocalSurfaceId(8, 1): Submit rejected because not monotonically increasing.
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id5, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id5, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::SURFACE_ID_DECREASED, result);
 
   // LocalSurfaceId(9, 3): Parent AND child-initiated synchronization.
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id6, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id6, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
@@ -661,7 +660,8 @@ TEST_F(CompositorFrameSinkSupportTest, ProhibitsUnprivilegedCopyRequests) {
   bool did_receive_aborted_copy_result = false;
   base::RunLoop aborted_copy_run_loop;
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(
           [](bool* got_nothing, base::OnceClosure finished,
              std::unique_ptr<CopyOutputResult> result) {
@@ -711,11 +711,13 @@ TEST_F(CompositorFrameSinkSupportTest, EvictLastActivatedSurface) {
             local_surface_id);
   local_surface_id_ = LocalSurfaceId();
 
-  std::vector<ReturnedResource> returned_resources = {
-      resource.ToReturnedResource()};
+  ResourceId returned_id = resource.ToReturnedResource().id;
   EXPECT_TRUE(GetSurfaceForId(id));
-  EXPECT_CALL(mock_client, DidReceiveCompositorFrameAck(returned_resources))
-      .Times(1);
+  EXPECT_CALL(mock_client, DidReceiveCompositorFrameAck(_))
+      .WillOnce([=](std::vector<ReturnedResource> got) {
+        EXPECT_EQ(1u, got.size());
+        EXPECT_EQ(returned_id, got[0].id);
+      });
   support->EvictSurface(local_surface_id);
   ExpireAllTemporaryReferences();
   manager_.surface_manager()->GarbageCollectSurfaces();
@@ -827,7 +829,8 @@ TEST_F(CompositorFrameSinkSupportTest, CopyRequestOnSubtree) {
   bool called1 = false;
   base::RunLoop called1_run_loop;
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&CopyRequestTestCallback, &called1,
                      called1_run_loop.QuitClosure()));
   support_->RequestCopyOfOutput(
@@ -840,7 +843,8 @@ TEST_F(CompositorFrameSinkSupportTest, CopyRequestOnSubtree) {
   bool called2 = false;
   base::RunLoop called2_run_loop;
   request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&CopyRequestTestCallback, &called2,
                      called2_run_loop.QuitClosure()));
   support_->RequestCopyOfOutput(
@@ -874,7 +878,8 @@ TEST_F(CompositorFrameSinkSupportTest, DuplicateCopyRequest) {
   bool called1 = false;
   base::RunLoop called1_run_loop;
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&CopyRequestTestCallback, &called1,
                      called1_run_loop.QuitClosure()));
   request->set_source(kArbitrarySourceId1);
@@ -887,7 +892,8 @@ TEST_F(CompositorFrameSinkSupportTest, DuplicateCopyRequest) {
   bool called2 = false;
   base::RunLoop called2_run_loop;
   request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&CopyRequestTestCallback, &called2,
                      called2_run_loop.QuitClosure()));
   request->set_source(kArbitrarySourceId2);
@@ -902,7 +908,8 @@ TEST_F(CompositorFrameSinkSupportTest, DuplicateCopyRequest) {
   bool called3 = false;
   base::RunLoop called3_run_loop;
   request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&CopyRequestTestCallback, &called3,
                      called3_run_loop.QuitClosure()));
   request->set_source(kArbitrarySourceId1);
@@ -954,7 +961,7 @@ TEST_F(CompositorFrameSinkSupportTest, FrameSizeMismatch) {
                    .AddRenderPass(gfx::Rect(5, 5), gfx::Rect())
                    .Build();
   auto result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id_, std::move(frame), base::nullopt, 0,
+      local_surface_id_, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
   EXPECT_TRUE(GetSurfaceForId(id));
@@ -970,7 +977,7 @@ TEST_F(CompositorFrameSinkSupportTest, FrameSizeMismatch) {
                       base::size(frame_resource_ids));
 
   result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id_, std::move(frame), base::nullopt, 0,
+      local_surface_id_, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
 
   EXPECT_EQ(SubmitResult::SIZE_MISMATCH, result);
@@ -992,7 +999,7 @@ TEST_F(CompositorFrameSinkSupportTest, DeviceScaleFactorMismatch) {
                    .SetDeviceScaleFactor(0.5f)
                    .Build();
   auto result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id_, std::move(frame), base::nullopt, 0,
+      local_surface_id_, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
   EXPECT_TRUE(GetSurfaceForId(id));
@@ -1004,7 +1011,7 @@ TEST_F(CompositorFrameSinkSupportTest, DeviceScaleFactorMismatch) {
               .SetDeviceScaleFactor(0.4f)
               .Build();
   result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id_, std::move(frame), base::nullopt, 0,
+      local_surface_id_, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::SIZE_MISMATCH, result);
 }
@@ -1041,11 +1048,19 @@ TEST_F(CompositorFrameSinkSupportTest, PassesOnBeginFrameAcks) {
   support_->SetNeedsBeginFrame(false);
 }
 
+#if defined(OS_MAC) && defined(ARCH_CPU_ARM64)
+// https://crbug.com/1223023
+#define MAYBE_NeedsBeginFrameResetAfterPresentationFeedback \
+  DISABLED_NeedsBeginFrameResetAfterPresentationFeedback
+#else
+#define MAYBE_NeedsBeginFrameResetAfterPresentationFeedback \
+  NeedsBeginFrameResetAfterPresentationFeedback
+#endif
 // Validates that if a client asked to stop receiving begin-frames, then it
 // stops receiving begin-frames after receiving the presentation-feedback from
 // the last submitted frame.
 TEST_F(CompositorFrameSinkSupportTest,
-       NeedsBeginFrameResetAfterPresentationFeedback) {
+       MAYBE_NeedsBeginFrameResetAfterPresentationFeedback) {
   // Request BeginFrames.
   support_->SetNeedsBeginFrame(true);
 
@@ -1132,7 +1147,8 @@ TEST_F(CompositorFrameSinkSupportTest,
 
   // Send a CopyOutputRequest.
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(StubResultCallback));
   support_->RequestCopyOfOutput(
       {local_surface_id1, SubtreeCaptureId(), std::move(request)});
@@ -1175,7 +1191,8 @@ TEST_F(CompositorFrameSinkSupportTest,
 
   // Send a CopyOutputRequest.
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(StubResultCallback));
   support_->RequestCopyOfOutput(
       {local_surface_id2, SubtreeCaptureId(), std::move(request)});
@@ -1217,7 +1234,8 @@ TEST_F(CompositorFrameSinkSupportTest,
   // Send a CopyOutputRequest. Note that the second surface doesn't even exist
   // yet.
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(StubResultCallback));
   support_->RequestCopyOfOutput(
       {local_surface_id1, SubtreeCaptureId(), std::move(request)});
@@ -1303,7 +1321,7 @@ TEST_F(CompositorFrameSinkSupportTest, OnFrameTokenUpdate) {
 TEST_F(CompositorFrameSinkSupportTest,
        DisallowEmbedTokenReuseAcrossFrameSinks) {
   auto result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id_, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id_, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
@@ -1315,7 +1333,7 @@ TEST_F(CompositorFrameSinkSupportTest,
       false /* not root frame sink */);
   LocalSurfaceId local_surface_id(31232, local_surface_id_.embed_token());
   result = support->MaybeSubmitCompositorFrame(
-      local_surface_id, MakeDefaultCompositorFrame(), base::nullopt, 0,
+      local_surface_id, MakeDefaultCompositorFrame(), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::SURFACE_OWNED_BY_ANOTHER_CLIENT, result);
 }
@@ -1331,13 +1349,13 @@ TEST_F(CompositorFrameSinkSupportTest, SubmitAfterReparenting) {
   CompositorFrame frame =
       CompositorFrameBuilder().AddDefaultRenderPass().Build();
   SubmitResult result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id1, std::move(frame), base::nullopt, 0,
+      local_surface_id1, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
   EXPECT_EQ(SubmitResult::ACCEPTED, result);
 
   frame = CompositorFrameBuilder().AddDefaultRenderPass().Build();
   result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id2, std::move(frame), base::nullopt, 0,
+      local_surface_id2, std::move(frame), absl::nullopt, 0,
       mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback());
 
   // Even though |local_surface_id2| has a smaller parent sequence number than
@@ -1555,7 +1573,7 @@ TEST_F(CompositorFrameSinkSupportTest, BeginFrameInterval) {
   uint64_t sequence_number = 1;
   int sent_frames = 0;
   BeginFrameArgs args;
-
+  uint64_t frames_throttled_since_last = 0;
   const base::TimeTicks end_time = frame_time + base::TimeDelta::FromSeconds(2);
 
   base::TimeTicks next_expected_begin_frame = frame_time;
@@ -1563,8 +1581,11 @@ TEST_F(CompositorFrameSinkSupportTest, BeginFrameInterval) {
     args = CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE, 0,
                                           sequence_number++, frame_time);
     if (frame_time < next_expected_begin_frame) {
-      EXPECT_CALL(mock_client, OnBeginFrame(args, _)).Times(0);
+      EXPECT_CALL(mock_client, OnBeginFrame(_, _)).Times(0);
+      ++frames_throttled_since_last;
     } else {
+      args.frames_throttled_since_last = frames_throttled_since_last;
+      frames_throttled_since_last = 0;
       EXPECT_CALL(mock_client, OnBeginFrame(args, _)).WillOnce([&]() {
         support->SubmitCompositorFrame(local_surface_id_,
                                        MakeDefaultCompositorFrame());
@@ -1608,6 +1629,58 @@ TEST_F(CompositorFrameSinkSupportTest, ForceFullFrameToActivateSurface) {
                                           testing::IsFalse()),
                            _));
   begin_frame_source.TestOnBeginFrame(args_animate_only);
+}
+
+TEST_F(CompositorFrameSinkSupportTest, GetCopyOutputRequestSize) {
+  // No surface with active frame.
+  EXPECT_EQ((gfx::Size{}),
+            support_->GetCopyOutputRequestSize(SubtreeCaptureId{}));
+
+  // Surface with active frame but no capture identifier.
+  ResourceId first_frame_ids[] = {ResourceId(1), ResourceId(2), ResourceId(3)};
+  SubmitCompositorFrameWithResources(first_frame_ids,
+                                     base::size(first_frame_ids));
+  EXPECT_EQ((gfx::Size{20, 20}),
+            support_->GetCopyOutputRequestSize(SubtreeCaptureId{}));
+
+  // Render pass with subtree size.
+  const SurfaceId surface_id(support_->frame_sink_id(), local_surface_id_);
+  constexpr SubtreeCaptureId kSubtreeId1(22);
+
+  auto frame = CompositorFrameBuilder()
+                   .AddDefaultRenderPass()
+                   .AddDefaultRenderPass()
+                   .SetReferencedSurfaces({SurfaceRange(surface_id)})
+                   .Build();
+  frame.render_pass_list.front()->subtree_capture_id = kSubtreeId1;
+  frame.render_pass_list.front()->subtree_size = gfx::Size{13, 37};
+  support_->SubmitCompositorFrame(local_surface_id_, std::move(frame));
+  EXPECT_EQ(surface_observer_.last_created_surface_id().local_surface_id(),
+            local_surface_id_);
+
+  EXPECT_EQ((gfx::Size{13, 37}),
+            support_->GetCopyOutputRequestSize(kSubtreeId1));
+
+  // Render pass but no subtree size.
+  constexpr SubtreeCaptureId kSubtreeId2(7);
+
+  auto frame_with_output_size =
+      CompositorFrameBuilder()
+          .AddDefaultRenderPass()
+          .AddDefaultRenderPass()
+          .SetReferencedSurfaces({SurfaceRange(surface_id)})
+          .Build();
+  frame_with_output_size.render_pass_list.front()->subtree_capture_id =
+      kSubtreeId2;
+  frame_with_output_size.render_pass_list.front()->output_rect =
+      gfx::Rect{0, 0, 640, 480};
+  support_->SubmitCompositorFrame(local_surface_id_,
+                                  std::move(frame_with_output_size));
+  EXPECT_EQ(surface_observer_.last_created_surface_id().local_surface_id(),
+            local_surface_id_);
+
+  EXPECT_EQ((gfx::Size{640, 480}),
+            support_->GetCopyOutputRequestSize(kSubtreeId2));
 }
 
 }  // namespace viz

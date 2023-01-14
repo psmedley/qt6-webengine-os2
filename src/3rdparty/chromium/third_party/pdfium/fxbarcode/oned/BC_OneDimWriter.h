@@ -7,10 +7,12 @@
 #ifndef FXBARCODE_ONED_BC_ONEDIMWRITER_H_
 #define FXBARCODE_ONED_BC_ONEDIMWRITER_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <vector>
 
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_textrenderoptions.h"
 #include "fxbarcode/BC_Library.h"
@@ -18,7 +20,8 @@
 #include "fxbarcode/utils.h"
 
 class CFX_Font;
-class CFX_PathData;
+class CFX_Matrix;
+class CFX_Path;
 class CFX_RenderDevice;
 class TextCharPos;
 
@@ -49,7 +52,7 @@ class CBC_OneDimWriter : public CBC_Writer {
                   int32_t& outWidth,
                   int32_t& outHeight);
   bool RenderDeviceResult(CFX_RenderDevice* device,
-                          const CFX_Matrix* matrix,
+                          const CFX_Matrix& matrix,
                           WideStringView contents);
   bool SetFont(CFX_Font* cFont);
 
@@ -63,11 +66,11 @@ class CBC_OneDimWriter : public CBC_Writer {
                               int32_t& outLength) = 0;
   virtual bool ShowChars(WideStringView contents,
                          CFX_RenderDevice* device,
-                         const CFX_Matrix* matrix,
+                         const CFX_Matrix& matrix,
                          int32_t barWidth,
                          int32_t multiple);
   void ShowDeviceChars(CFX_RenderDevice* device,
-                       const CFX_Matrix* matrix,
+                       const CFX_Matrix& matrix,
                        const ByteString str,
                        float geWidth,
                        TextCharPos* pCharPos,
@@ -102,7 +105,7 @@ class CBC_OneDimWriter : public CBC_Writer {
   int32_t m_iDataLenth = 0;
   size_t m_iContentLen = 0;
 
-  std::vector<CFX_PathData> m_output;
+  std::vector<CFX_Path> m_output;
   int32_t m_barWidth;
   int32_t m_multiple;
   float m_outputHScale;

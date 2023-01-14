@@ -79,6 +79,7 @@ jumbo_component("clipboard") {
     "clipboard_monitor.h",
     "clipboard_observer.cc",
     "clipboard_observer.h",
+    "clipboard_sequence_number_token.h",
     "custom_data_helper.cc",
     "custom_data_helper.h",
     "scoped_clipboard_writer.cc",
@@ -130,33 +131,7 @@ jumbo_component("clipboard") {
   ]
 
   if (use_aura && !use_qt) {
-    # Linux clipboard implementations.
-    if ((is_linux || is_chromeos_lacros) && !is_chromecast) {
-      sources += [ "clipboard_linux.cc" ]
-      if (use_ozone) {
-        sources += [
-          "clipboard_ozone.cc",
-          "clipboard_ozone.h",
-        ]
-        deps += [ "//ui/base" ]
-      }
-      if (use_x11) {
-        sources += [
-          "clipboard_x11.cc",
-          "clipboard_x11.h",
-        ]
-        deps += [
-          "//ui/base",
-          "//ui/base/x",
-          "//ui/events/platform",
-          "//ui/events/platform/x11",
-          "//ui/events/x",
-          "//ui/gfx/x",
-        ]
-      }
-    } else if (is_chromeos_ash && ozone_platform_x11) {
-      # linux-chromeos uses non-backed clipboard by default, but supports ozone
-      # x11 with flag --use-system-clipbboard.
+    if (use_ozone) {
       sources += [
         "clipboard_data.cc",
         "clipboard_data.h",
@@ -165,15 +140,36 @@ jumbo_component("clipboard") {
         "clipboard_ozone.cc",
         "clipboard_ozone.h",
       ]
-      deps += [ "//ui/base" ]
-    } else if (!is_win) {
-      # This file is used for all builds not backed by an underlying platform.
+      deps += [ "//ui/ozone" ]
+    }
+
+    if (use_x11) {
       sources += [
-        "clipboard_data.cc",
-        "clipboard_data.h",
-        "clipboard_non_backed.cc",
-        "clipboard_non_backed.h",
+        "clipboard_x11.cc",
+        "clipboard_x11.h",
       ]
+      deps += [
+        "//ui/base",
+        "//ui/base/x",
+        "//ui/events/platform",
+        "//ui/events/platform/x11",
+        "//ui/events/x",
+        "//ui/gfx/x",
+      ]
+    }
+
+    # TODO(crbug.com/1096425): Cleanup when non-Ozone path gets dropped.
+    if (use_ozone || use_x11) {
+      sources += [ "clipboard_factory_ozone.cc" ]
+      if (!use_ozone) {
+        sources += [
+          "clipboard_data.cc",
+          "clipboard_data.h",
+          "clipboard_non_backed.cc",
+          "clipboard_non_backed.h",
+        ]
+      }
+      deps += [ "//ui/base" ]
     }
   }
 
@@ -188,14 +184,9 @@ jumbo_component("clipboard") {
       "CoreFoundation.framework",
     ]
   }
-
-  if (use_ozone) {
-    deps += [ "//ui/ozone" ]
-  }
   if (use_qt && is_mac) {
     sources -= [ "clipboard_mac.h", "clipboard_mac.mm" ]
   }
-
 }
 
 jumbo_source_set("clipboard_test_support") {
@@ -220,7 +211,13 @@ jumbo_source_set("clipboard_test_support") {
     "//skia",
   ]
 
-  deps = [ "//base/test:test_support" ]
+  deps = [
+    "//base/test:test_support",
+    "//build:chromecast_buildflags",
+    "//build:chromeos_buildflags",
+    "//ui/base:features",
+    "//ui/gfx",
+  ]
 
   if (is_android) {
     deps += [ "//ui/android:ui_javatest_jni_headers" ]

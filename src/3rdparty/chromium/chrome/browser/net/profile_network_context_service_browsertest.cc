@@ -13,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -40,7 +39,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/policy/core/common/policy_map.h"
@@ -69,6 +67,7 @@
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/constants/ash_features.h"
@@ -83,8 +82,9 @@ class ProfileNetworkContextServiceBrowsertest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    loader_factory_ = content::BrowserContext::GetDefaultStoragePartition(
-                          browser()->profile())
+    loader_factory_ = browser()
+                          ->profile()
+                          ->GetDefaultStoragePartition()
                           ->GetURLLoaderFactoryForBrowserProcess()
                           .get();
   }
@@ -252,9 +252,8 @@ class ProfileNetworkContextServiceCacheSameBrowsertest
   ~ProfileNetworkContextServiceCacheSameBrowsertest() override = default;
 
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        {}, {net::features::kSplitCacheByNetworkIsolationKey,
-             net::features::kAppendFrameOriginToNetworkIsolationKey});
+    scoped_feature_list_.InitAndDisableFeature(
+        net::features::kSplitCacheByNetworkIsolationKey);
     ProfileNetworkContextServiceBrowsertest::SetUp();
   }
 
@@ -296,9 +295,8 @@ class ProfileNetworkContextServiceCacheChangeBrowsertest
     : public ProfileNetworkContextServiceBrowsertest {
  public:
   ProfileNetworkContextServiceCacheChangeBrowsertest() {
-    scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{net::features::kAppendFrameOriginToNetworkIsolationKey, {}}},
-        {net::features::kSplitCacheByNetworkIsolationKey});
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        net::features::kSplitCacheByNetworkIsolationKey, {});
   }
   ~ProfileNetworkContextServiceCacheChangeBrowsertest() override = default;
 
@@ -308,7 +306,6 @@ class ProfileNetworkContextServiceCacheChangeBrowsertest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-// Flaky on Linux and Mac: https://crbug.com/1041810
 // The first time we load, even if we're in an experiment there's no reset
 // from the unknown state.
 IN_PROC_BROWSER_TEST_F(ProfileNetworkContextServiceCacheChangeBrowsertest,
@@ -322,7 +319,7 @@ IN_PROC_BROWSER_TEST_F(ProfileNetworkContextServiceCacheChangeBrowsertest,
   DCHECK_EQ(
       local_state->GetString(
           "profile_network_context_service.http_cache_finch_experiment_groups"),
-      "None scoped_feature_list_trial_group None");
+      "scoped_feature_list_trial_group None None");
   // Set the local state for the next test.
   local_state->SetString(
       "profile_network_context_service.http_cache_finch_experiment_groups",
@@ -342,16 +339,12 @@ IN_PROC_BROWSER_TEST_F(ProfileNetworkContextServiceCacheChangeBrowsertest,
   DCHECK_EQ(
       local_state->GetString(
           "profile_network_context_service.http_cache_finch_experiment_groups"),
-      "None scoped_feature_list_trial_group None");
+      "scoped_feature_list_trial_group None None");
 }
 
-class AmbientAuthenticationTestWithPolicy
-    : public policy::PolicyTest,
-      public ::testing::WithParamInterface<bool> {
+class AmbientAuthenticationTestWithPolicy : public policy::PolicyTest {
  public:
   AmbientAuthenticationTestWithPolicy() {
-    TestingProfile::SetScopedFeatureListForEphemeralGuestProfiles(
-        scoped_feature_list_, GetParam());
     policy::PolicyTest::SetUpInProcessBrowserTestFixture();
   }
 
@@ -361,9 +354,11 @@ class AmbientAuthenticationTestWithPolicy
         service->GetInteger(prefs::kAmbientAuthenticationInPrivateModesEnabled);
 
     Profile* regular_profile = browser()->profile();
-    Profile* incognito_profile = regular_profile->GetPrimaryOTRProfile();
+    Profile* incognito_profile =
+        regular_profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
     Profile* non_primary_otr_profile = regular_profile->GetOffTheRecordProfile(
-        Profile::OTRProfileID("Test::AmbientAuthentication"));
+        Profile::OTRProfileID::CreateUniqueForTesting(),
+        /*create_if_needed=*/true);
 
     EXPECT_TRUE(AmbientAuthenticationTestHelper::IsAmbientAuthAllowedForProfile(
         regular_profile));
@@ -392,34 +387,29 @@ class AmbientAuthenticationTestWithPolicy
 
  private:
   policy::PolicyMap policies_;
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_P(AmbientAuthenticationTestWithPolicy, RegularOnly) {
+IN_PROC_BROWSER_TEST_F(AmbientAuthenticationTestWithPolicy, RegularOnly) {
   EnablePolicyWithValue(net::AmbientAuthAllowedProfileTypes::REGULAR_ONLY);
   IsAmbientAuthAllowedForProfilesTest();
 }
 
-IN_PROC_BROWSER_TEST_P(AmbientAuthenticationTestWithPolicy,
+IN_PROC_BROWSER_TEST_F(AmbientAuthenticationTestWithPolicy,
                        IncognitoAndRegular) {
   EnablePolicyWithValue(
       net::AmbientAuthAllowedProfileTypes::INCOGNITO_AND_REGULAR);
   IsAmbientAuthAllowedForProfilesTest();
 }
 
-IN_PROC_BROWSER_TEST_P(AmbientAuthenticationTestWithPolicy, GuestAndRegular) {
+IN_PROC_BROWSER_TEST_F(AmbientAuthenticationTestWithPolicy, GuestAndRegular) {
   EnablePolicyWithValue(net::AmbientAuthAllowedProfileTypes::GUEST_AND_REGULAR);
   IsAmbientAuthAllowedForProfilesTest();
 }
 
-IN_PROC_BROWSER_TEST_P(AmbientAuthenticationTestWithPolicy, All) {
+IN_PROC_BROWSER_TEST_F(AmbientAuthenticationTestWithPolicy, All) {
   EnablePolicyWithValue(net::AmbientAuthAllowedProfileTypes::ALL);
   IsAmbientAuthAllowedForProfilesTest();
 }
-
-INSTANTIATE_TEST_SUITE_P(All,
-                         AmbientAuthenticationTestWithPolicy,
-                         /*ephemeral_guest_profile_enabled=*/testing::Bool());
 
 // Test subclass that adds switches::kDiskCacheDir and switches::kDiskCacheSize
 // to the command line, to make sure they're respected.
@@ -472,7 +462,7 @@ IN_PROC_BROWSER_TEST_F(ProfileNetworkContextServiceDiskCacheBrowsertest,
   // Cache directory should now exist.
   base::FilePath expected_cache_path =
       TempPath()
-          .Append(browser()->profile()->GetPath().BaseName())
+          .Append(browser()->profile()->GetBaseName())
           .Append(chrome::kCacheDirname);
   base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(expected_cache_path));
@@ -510,7 +500,7 @@ void UnblockOnProfileCreation(base::RunLoop* run_loop,
 }
 }  // namespace
 
-class ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest
+class ProfileNetworkContextServiceCertVerifierBuiltinPermissionsPolicyTest
     : public policy::PolicyTest,
       public testing::WithParamInterface<bool> {
  public:
@@ -552,8 +542,7 @@ class ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest
         profile_manager->GenerateNextProfileDirectoryPath();
     base::RunLoop run_loop;
     profile_manager->CreateProfileAsync(
-        new_path, base::BindRepeating(&UnblockOnProfileCreation, &run_loop),
-        base::string16(), std::string());
+        new_path, base::BindRepeating(&UnblockOnProfileCreation, &run_loop));
     run_loop.Run();
     return profile_manager->GetProfileByPath(new_path);
   }
@@ -568,11 +557,10 @@ class ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest
 };
 
 IN_PROC_BROWSER_TEST_P(
-    ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest,
+    ProfileNetworkContextServiceCertVerifierBuiltinPermissionsPolicyTest,
     Test) {
   {
-    content::BrowserContext::GetDefaultStoragePartition(CreateNewProfile())
-        ->GetNetworkContext();
+    CreateNewProfile()->GetDefaultStoragePartition()->GetNetworkContext();
 
     ExpectUseBuiltinCertVerifierCorrect(
         use_builtin_cert_verifier()
@@ -591,8 +579,7 @@ IN_PROC_BROWSER_TEST_P(
   UpdateProviderPolicy(policies);
 
   {
-    content::BrowserContext::GetDefaultStoragePartition(CreateNewProfile())
-        ->GetNetworkContext();
+    CreateNewProfile()->GetDefaultStoragePartition()->GetNetworkContext();
 
     ExpectUseBuiltinCertVerifierCorrect(
         cert_verifier::mojom::CertVerifierCreationParams::CertVerifierImpl::
@@ -604,8 +591,7 @@ IN_PROC_BROWSER_TEST_P(
   UpdateProviderPolicy(policies);
 
   {
-    content::BrowserContext::GetDefaultStoragePartition(CreateNewProfile())
-        ->GetNetworkContext();
+    CreateNewProfile()->GetDefaultStoragePartition()->GetNetworkContext();
 
     ExpectUseBuiltinCertVerifierCorrect(
         cert_verifier::mojom::CertVerifierCreationParams::CertVerifierImpl::
@@ -616,14 +602,14 @@ IN_PROC_BROWSER_TEST_P(
 
 INSTANTIATE_TEST_SUITE_P(
     All,
-    ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest,
+    ProfileNetworkContextServiceCertVerifierBuiltinPermissionsPolicyTest,
     ::testing::Bool());
 #endif  // BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 class ProfileNetworkContextServiceMemoryPressureFeatureBrowsertest
     : public ProfileNetworkContextServiceBrowsertest,
-      public ::testing::WithParamInterface<base::Optional<bool>> {
+      public ::testing::WithParamInterface<absl::optional<bool>> {
  public:
   ProfileNetworkContextServiceMemoryPressureFeatureBrowsertest() = default;
   ~ProfileNetworkContextServiceMemoryPressureFeatureBrowsertest() override =
@@ -673,5 +659,5 @@ INSTANTIATE_TEST_SUITE_P(
     All,
     ProfileNetworkContextServiceMemoryPressureFeatureBrowsertest,
     /*disable_idle_sockets_close_on_memory_pressure=*/
-    ::testing::Values(base::nullopt, true, false));
+    ::testing::Values(absl::nullopt, true, false));
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)

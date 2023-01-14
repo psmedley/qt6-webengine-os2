@@ -6,18 +6,22 @@
 
 #include <errno.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
+#include "base/memory/page_size.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/process/process_metrics.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_infra_background_allowlist.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "base/trace_event/traced_value.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/perfetto/protos/perfetto/trace/memory_graph.pbzero.h"
 #include "third_party/perfetto/protos/perfetto/trace/trace_packet.pbzero.h"
 
@@ -81,7 +85,7 @@ size_t ProcessMemoryDump::GetSystemPageSize() {
 }
 
 // static
-base::Optional<size_t> ProcessMemoryDump::CountResidentBytes(
+absl::optional<size_t> ProcessMemoryDump::CountResidentBytes(
     void* start_address,
     size_t mapped_size) {
   const size_t page_size = GetSystemPageSize();
@@ -166,13 +170,13 @@ base::Optional<size_t> ProcessMemoryDump::CountResidentBytes(
   DCHECK(!failure);
   if (failure) {
     LOG(ERROR) << "CountResidentBytes failed. The resident size is invalid";
-    return base::nullopt;
+    return absl::nullopt;
   }
   return total_resident_pages;
 }
 
 // static
-base::Optional<size_t> ProcessMemoryDump::CountResidentBytesInSharedMemory(
+absl::optional<size_t> ProcessMemoryDump::CountResidentBytesInSharedMemory(
     void* start_address,
     size_t mapped_size) {
 #if defined(OS_MAC)
@@ -187,7 +191,7 @@ base::Optional<size_t> ProcessMemoryDump::CountResidentBytesInSharedMemory(
   if (result == MachVMRegionResult::Error) {
     LOG(ERROR) << "CountResidentBytesInSharedMemory failed. The resident size "
                   "is invalid";
-    return base::Optional<size_t>();
+    return absl::optional<size_t>();
   }
 
   size_t resident_pages =
@@ -268,7 +272,7 @@ MemoryAllocatorDump* ProcessMemoryDump::AddAllocatorDumpInternal(
   // given.
   if (dump_args_.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND &&
       !IsMemoryAllocatorDumpNameInAllowlist(mad->absolute_name())) {
-    return GetBlackHoleMad();
+    return GetBlackHoleMad(mad->absolute_name());
   }
 
   auto insertion_result = allocator_dumps_.insert(
@@ -516,12 +520,15 @@ void ProcessMemoryDump::AddSuballocation(const MemoryAllocatorDumpGuid& source,
   AddOwnershipEdge(source, target_child_mad->guid());
 }
 
-MemoryAllocatorDump* ProcessMemoryDump::GetBlackHoleMad() {
-  DCHECK(is_black_hole_non_fatal_for_testing_);
+MemoryAllocatorDump* ProcessMemoryDump::GetBlackHoleMad(
+    const std::string& absolute_name) {
+  DCHECK(is_black_hole_non_fatal_for_testing_)
+      << " unknown dump name " << absolute_name
+      << " this likely means kAllocatorDumpNameAllowlist needs to be updated";
   if (!black_hole_mad_) {
     std::string name = "discarded";
-    black_hole_mad_.reset(new MemoryAllocatorDump(
-        name, dump_args_.level_of_detail, GetDumpId(name)));
+    black_hole_mad_ = std::make_unique<MemoryAllocatorDump>(
+        name, dump_args_.level_of_detail, GetDumpId(name));
   }
   return black_hole_mad_.get();
 }

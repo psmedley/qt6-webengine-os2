@@ -4,13 +4,16 @@
 
 #include "components/autofill/core/browser/payments/credit_card_fido_authenticator.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
 #include "base/base64.h"
 #include "base/containers/flat_set.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_client.h"
@@ -84,7 +87,8 @@ void CreditCardFIDOAuthenticator::Authenticate(
     current_flow_ = AUTHENTICATION_FLOW;
     GetAssertion(ParseRequestOptions(std::move(request_options)));
   } else {
-    requester_->OnFIDOAuthenticationComplete(/*did_succeed=*/false);
+    FidoAuthenticationResponse response{.did_succeed = false};
+    requester_->OnFIDOAuthenticationComplete(response);
   }
 }
 
@@ -144,7 +148,15 @@ void CreditCardFIDOAuthenticator::IsUserVerifiable(
     std::move(callback).Run(false);
     return;
   }
-
+#if defined(OS_ANDROID)
+  // Because Payments servers only accept WebAuthn credentials for Android P
+  // and above, this returns false if the build version is O or below.
+  if (base::android::BuildInfo::GetInstance()->sdk_int() <
+      base::android::SDK_VERSION_P) {
+    std::move(callback).Run(false);
+    return;
+  }
+#endif  // defined(OS_ANDROID)
   authenticator()->IsUserVerifyingPlatformAuthenticatorAvailable(
       std::move(callback));
 }
@@ -387,8 +399,10 @@ void CreditCardFIDOAuthenticator::OnDidGetAssertion(
   // End the flow if there was an authentication error.
   if (status != AuthenticatorStatus::SUCCESS) {
     // Report failure to |requester_| if card unmasking was requested.
-    if (current_flow_ == AUTHENTICATION_FLOW)
-      requester_->OnFIDOAuthenticationComplete(/*did_succeed=*/false);
+    if (current_flow_ == AUTHENTICATION_FLOW) {
+      FidoAuthenticationResponse response{.did_succeed = false};
+      requester_->OnFIDOAuthenticationComplete(response);
+    }
     if (current_flow_ == FOLLOWUP_AFTER_CVC_AUTH_FLOW)
       requester_->OnFidoAuthorizationComplete(/*did_succeed=*/false);
 
@@ -414,12 +428,21 @@ void CreditCardFIDOAuthenticator::OnDidGetAssertion(
   if (current_flow_ == AUTHENTICATION_FLOW) {
     base::Value response =
         ParseAssertionResponse(std::move(assertion_response));
-    full_card_request_.reset(new payments::FullCardRequest(
+    full_card_request_ = std::make_unique<payments::FullCardRequest>(
         autofill_client_, autofill_client_->GetPaymentsClient(),
-        autofill_client_->GetPersonalDataManager(), form_parsed_timestamp_));
+        autofill_client_->GetPersonalDataManager(), form_parsed_timestamp_);
+
+    absl::optional<GURL> last_committed_url_origin;
+    if (card_->record_type() == CreditCard::VIRTUAL_CARD &&
+        autofill_client_->GetLastCommittedURL().is_valid()) {
+      last_committed_url_origin =
+          autofill_client_->GetLastCommittedURL().GetOrigin();
+    }
+
     full_card_request_->GetFullCardViaFIDO(
         *card_, AutofillClient::UNMASK_FOR_AUTOFILL,
-        weak_ptr_factory_.GetWeakPtr(), std::move(response));
+        weak_ptr_factory_.GetWeakPtr(), std::move(response),
+        last_committed_url_origin);
   } else {
     DCHECK(current_flow_ == FOLLOWUP_AFTER_CVC_AUTH_FLOW ||
            current_flow_ == OPT_IN_WITH_CHALLENGE_FLOW);
@@ -514,17 +537,21 @@ void CreditCardFIDOAuthenticator::OnDidGetOptChangeResult(
 void CreditCardFIDOAuthenticator::OnFullCardRequestSucceeded(
     const payments::FullCardRequest& full_card_request,
     const CreditCard& card,
-    const base::string16& cvc) {
+    const std::u16string& cvc) {
   DCHECK_EQ(AUTHENTICATION_FLOW, current_flow_);
   current_flow_ = NONE_FLOW;
-  requester_->OnFIDOAuthenticationComplete(/*did_succeed=*/true, &card, cvc);
+  FidoAuthenticationResponse response{
+      .did_succeed = true, .card = &card, .cvc = cvc};
+  requester_->OnFIDOAuthenticationComplete(response);
 }
 
 void CreditCardFIDOAuthenticator::OnFullCardRequestFailed(
     payments::FullCardRequest::FailureType failure_type) {
   DCHECK_EQ(AUTHENTICATION_FLOW, current_flow_);
   current_flow_ = NONE_FLOW;
-  requester_->OnFIDOAuthenticationComplete(/*did_succeed=*/false);
+  FidoAuthenticationResponse response{.did_succeed = false,
+                                      .failure_type = failure_type};
+  requester_->OnFIDOAuthenticationComplete(response);
 }
 
 PublicKeyCredentialRequestOptionsPtr
@@ -582,16 +609,13 @@ CreditCardFIDOAuthenticator::ParseCreationOptions(
                            ->GetPrimaryAccountInfo(signin::ConsentLevel::kSync)
                            .email;
 
-  base::Optional<AccountInfo> account_info =
-      autofill_client_->GetIdentityManager()
-          ->FindExtendedAccountInfoForAccountWithRefreshToken(
-              autofill_client_->GetPersonalDataManager()
-                  ->GetAccountInfoForPaymentsServer());
-  if (account_info.has_value()) {
-    options->user.display_name = account_info.value().given_name;
-    options->user.icon_url = GURL(account_info.value().picture_url);
-  } else {
-    options->user.display_name = "";
+  AccountInfo account_info =
+      autofill_client_->GetIdentityManager()->FindExtendedAccountInfo(
+          autofill_client_->GetPersonalDataManager()
+              ->GetAccountInfoForPaymentsServer());
+  options->user.display_name = account_info.given_name;
+  if (!account_info.IsEmpty()) {
+    options->user.icon_url = GURL(account_info.picture_url);
   }
 
   const auto* challenge = creation_options.FindStringKey("challenge");
@@ -659,7 +683,7 @@ CreditCardFIDOAuthenticator::ParseCredentialDescriptor(
       "authenticator_transport_support", base::Value::Type::LIST);
   if (transports && !transports->GetList().empty()) {
     for (const base::Value& transport_type : transports->GetList()) {
-      base::Optional<FidoTransportProtocol> protocol =
+      absl::optional<FidoTransportProtocol> protocol =
           device::ConvertToFidoTransportProtocol(
               base::ToLowerASCII(transport_type.GetString()));
       if (protocol.has_value())

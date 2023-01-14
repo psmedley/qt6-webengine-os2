@@ -87,6 +87,7 @@ const base::FilePath::CharType kFrameworkName[] =
     FPL(PRODUCT_STRING " Framework.framework");
 const base::FilePath::CharType kFrameworkExecutableName[] =
     FPL(PRODUCT_STRING " Framework");
+const char kMacHelperSuffixAlerts[] = " (Alerts)";
 #endif  // OS_MAC
 
 #if defined(OS_WIN)
@@ -98,7 +99,6 @@ const base::FilePath::CharType kStatusTrayWindowClass[] =
 
 const char kInitialProfile[] = "Default";
 const char kMultiProfileDirPrefix[] = "Profile ";
-const char kEphemeralGuestProfileDirPrefix[] = "Guest ";
 const base::FilePath::CharType kGuestProfileDir[] = FPL("Guest Profile");
 const base::FilePath::CharType kSystemProfileDir[] = FPL("System Profile");
 
@@ -119,8 +119,6 @@ const base::FilePath::CharType kFeatureEngagementTrackerStorageDirname[] =
     FPL("Feature Engagement Tracker");
 const base::FilePath::CharType kFirstRunSentinel[] = FPL("First Run");
 const base::FilePath::CharType kGCMStoreDirname[] = FPL("GCM Store");
-const base::FilePath::CharType kHeavyAdInterventionOptOutDBFilename[] =
-    FPL("heavy_ad_intervention_opt_out.db");
 const base::FilePath::CharType kLocalStateFilename[] = FPL("Local State");
 const base::FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const base::FilePath::CharType kNetworkPersistentStateFilename[] =
@@ -139,12 +137,12 @@ const base::FilePath::CharType kPreferencesFilename[] = FPL("Preferences");
 const base::FilePath::CharType kPreviewsOptOutDBFilename[] =
     FPL("previews_opt_out.db");
 const base::FilePath::CharType kQueryTileStorageDirname[] = FPL("Query Tiles");
-const base::FilePath::CharType kVideoTutorialsStorageDirname[] =
-    FPL("Video Tutorials");
 const base::FilePath::CharType kReadmeFilename[] = FPL("README");
 const base::FilePath::CharType kSecurePreferencesFilename[] =
     FPL("Secure Preferences");
 const base::FilePath::CharType kServiceStateFileName[] = FPL("Service State");
+const base::FilePath::CharType kSegmentationPlatformStorageDirName[] =
+    FPL("Segmentation Platform");
 const base::FilePath::CharType kSingletonCookieFilename[] =
     FPL("SingletonCookie");
 const base::FilePath::CharType kSingletonLockFilename[] = FPL("SingletonLock");
@@ -153,7 +151,11 @@ const base::FilePath::CharType kSingletonSocketFilename[] =
 const base::FilePath::CharType kSupervisedUserSettingsFilename[] =
     FPL("Managed Mode Settings");
 const base::FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
+const base::FilePath::CharType kTransportSecurityPersisterFilename[] =
+    FPL("TransportSecurity");
 const base::FilePath::CharType kTrustTokenFilename[] = FPL("Trust Tokens");
+const base::FilePath::CharType kVideoTutorialsStorageDirname[] =
+    FPL("Video Tutorials");
 const base::FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
 // Only use if the ENABLE_REPORTING build flag is true
 const base::FilePath::CharType kReportingAndNelStoreFilename[] =

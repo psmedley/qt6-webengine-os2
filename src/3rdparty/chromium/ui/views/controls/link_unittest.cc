@@ -37,14 +37,12 @@ class LinkTest : public test::BaseControlTestWidget {
 
     event_generator_ = std::make_unique<ui::test::EventGenerator>(
         GetContext(), widget()->GetNativeWindow());
-    event_generator_->set_assume_window_at_origin(false);
   }
 
  protected:
   void CreateWidgetContent(View* container) override {
     // Create a widget containing a link which does not take the full size.
-    link_ = container->AddChildView(
-        std::make_unique<Link>(base::ASCIIToUTF16("TestLink")));
+    link_ = container->AddChildView(std::make_unique<Link>(u"TestLink"));
     link_->SetBoundsRect(
         gfx::ScaleToEnclosedRect(container->GetLocalBounds(), 0.5f));
   }
@@ -89,8 +87,6 @@ TEST_F(LinkTest, TestLinkTap) {
   EXPECT_TRUE(link_clicked);
 }
 
-// This test doesn't work on Mac due to crbug.com/1071633.
-#if !defined(OS_MAC)
 // Tests that hovering and unhovering a link adds and removes an underline.
 TEST_F(LinkTest, TestUnderlineOnHover) {
   // A non-hovered link should not be underlined.
@@ -113,6 +109,5 @@ TEST_F(LinkTest, TestUnderlineOnHover) {
   EXPECT_FALSE(link()->IsMouseHovered());
   EXPECT_FALSE(link_underlined());
 }
-#endif  // !defined(OS_MAC)
 
 }  // namespace views

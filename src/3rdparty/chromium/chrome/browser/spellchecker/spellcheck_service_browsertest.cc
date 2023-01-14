@@ -5,15 +5,16 @@
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -76,7 +77,7 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
 #endif  // defined(OS_WIN)
 
   void SetUpOnMainThread() override {
-    renderer_.reset(new content::MockRenderProcessHost(GetContext()));
+    renderer_ = std::make_unique<content::MockRenderProcessHost>(GetContext());
     renderer_->Init();
     prefs_ = user_prefs::UserPrefs::Get(GetContext());
   }
@@ -115,9 +116,12 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
     prefs_->SetString(spellcheck::prefs::kSpellCheckDictionary,
                       single_dictionary);
     base::ListValue dictionaries_value;
-    dictionaries_value.AppendStrings(
+    const std::vector<std::string> str_list =
         base::SplitString(multiple_dictionaries, ",", base::TRIM_WHITESPACE,
-                          base::SPLIT_WANT_NONEMPTY));
+                          base::SPLIT_WANT_NONEMPTY);
+    for (const std::string& str : str_list) {
+      dictionaries_value.Append(str);
+    }
     prefs_->Set(spellcheck::prefs::kSpellCheckDictionaries, dictionaries_value);
 
     SpellcheckService* spellcheck =
@@ -152,9 +156,12 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
 
   void SetMultiLingualDictionaries(const std::string& multiple_dictionaries) {
     base::ListValue dictionaries_value;
-    dictionaries_value.AppendStrings(
+    const std::vector<std::string> str_list =
         base::SplitString(multiple_dictionaries, ",", base::TRIM_WHITESPACE,
-                          base::SPLIT_WANT_NONEMPTY));
+                          base::SPLIT_WANT_NONEMPTY);
+    for (const std::string& str : str_list) {
+      dictionaries_value.Append(str);
+    }
     prefs_->Set(spellcheck::prefs::kSpellCheckDictionaries, dictionaries_value);
   }
 
@@ -162,10 +169,9 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
     const base::ListValue* list_value =
         prefs_->GetList(spellcheck::prefs::kSpellCheckDictionaries);
     std::vector<base::StringPiece> dictionaries;
-    for (const auto& item_value : *list_value) {
-      base::StringPiece dictionary;
-      EXPECT_TRUE(item_value.GetAsString(&dictionary));
-      dictionaries.push_back(dictionary);
+    for (const auto& item_value : list_value->GetList()) {
+      EXPECT_TRUE(item_value.is_string());
+      dictionaries.push_back(item_value.GetString());
     }
     return base::JoinString(dictionaries, ",");
   }
@@ -314,7 +320,7 @@ class SpellcheckServiceHostBrowserTest : public SpellcheckServiceBrowserTest {
   }
 
   bool spelling_service_done_called_ = false;
-  base::string16 word_;
+  std::u16string word_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellcheckServiceHostBrowserTest);
 };
@@ -768,7 +774,7 @@ const std::vector<std::string> kSpellcheckDictionariesAfter = {
 // spellcheck language preferences for the test profile.
 IN_PROC_BROWSER_TEST_F(SpellcheckServiceWindowsHybridBrowserTestDelayInit,
                        PRE_WindowsHybridSpellcheckDelayInit) {
-  GetPrefs()->SetString(language::prefs::kAcceptLanguages, kAcceptLanguages);
+  GetPrefs()->SetString(language::prefs::kSelectedLanguages, kAcceptLanguages);
   base::Value spellcheck_dictionaries_list(base::Value::Type::LIST);
   for (const auto& dictionary : kSpellcheckDictionariesBefore) {
     spellcheck_dictionaries_list.Append(std::move(dictionary));

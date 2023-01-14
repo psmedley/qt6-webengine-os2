@@ -13,10 +13,10 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
-#include "base/values.h"
 #include "components/viz/common/viz_common_export.h"
 
 namespace perfetto {
+class EventContext;
 namespace protos {
 namespace pbzero {
 class BeginFrameArgs;
@@ -150,7 +150,8 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // these base::trace_event json dictionary functions.
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
   void AsValueInto(base::trace_event::TracedValue* dict) const;
-  void AsProtozeroInto(perfetto::protos::pbzero::BeginFrameArgs* args) const;
+  void AsProtozeroInto(perfetto::EventContext& ctx,
+                       perfetto::protos::pbzero::BeginFrameArgs* args) const;
 
   std::string ToString() const;
 
@@ -169,8 +170,8 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // the client and service as the id for trace-events.
   int64_t trace_id = -1;
 
-  BeginFrameArgsType type;
-  bool on_critical_path;
+  BeginFrameArgsType type = INVALID;
+  bool on_critical_path = true;
 
   // If true, observers of this BeginFrame should not produce a new
   // CompositorFrame, but instead only run the (web-visible) side effects of the
@@ -184,7 +185,11 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // Designed for use in headless, in conjunction with
   // --disable-threaded-animation, --disable-threaded-scrolling, and
   // --disable-checker-imaging, see bit.ly/headless-rendering.
-  bool animate_only;
+  bool animate_only = false;
+
+  // Number of frames being skipped during throttling since last BeginFrame
+  // sent.
+  uint64_t frames_throttled_since_last = 0;
 
  private:
   BeginFrameArgs(uint64_t source_id,
@@ -197,7 +202,7 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
 
 // Sent by a BeginFrameObserver as acknowledgment of completing a BeginFrame.
 struct VIZ_COMMON_EXPORT BeginFrameAck {
-  BeginFrameAck();
+  BeginFrameAck() = default;
 
   // Constructs an instance as a response to the specified BeginFrameArgs.
   BeginFrameAck(const BeginFrameArgs& args, bool has_damage);
@@ -223,7 +228,7 @@ struct VIZ_COMMON_EXPORT BeginFrameAck {
 
   // |true| if the observer has produced damage (e.g. sent a CompositorFrame or
   // damaged a surface) as part of responding to the BeginFrame.
-  bool has_damage;
+  bool has_damage = false;
 };
 
 }  // namespace viz

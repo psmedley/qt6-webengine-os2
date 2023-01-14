@@ -23,7 +23,7 @@ namespace {
 void OnRecognitionResult(
     ScriptPromiseResolver* resolver,
     ScriptState* script_state,
-    base::Optional<Vector<handwriting::mojom::blink::HandwritingPredictionPtr>>
+    absl::optional<Vector<handwriting::mojom::blink::HandwritingPredictionPtr>>
         predictions) {
   // If `predictions` does not have value, it means the some error happened in
   // recognition. Otherwise, if it has value but the vector is empty, it means
@@ -45,8 +45,7 @@ void OnRecognitionResult(
 HandwritingDrawing::HandwritingDrawing(ExecutionContext* context,
                                        HandwritingRecognizer* recognizer,
                                        const HandwritingHints* hints)
-    : hints_(MakeGarbageCollected<HandwritingHints>(*hints)),
-      recognizer_(recognizer) {}
+    : hints_(hints), recognizer_(recognizer) {}
 
 HandwritingDrawing::~HandwritingDrawing() = default;
 

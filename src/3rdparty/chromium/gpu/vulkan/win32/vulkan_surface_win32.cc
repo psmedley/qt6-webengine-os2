@@ -148,7 +148,7 @@ class VulkanSurfaceWin32::WindowThread : public base::Thread,
     DCHECK(!g_thread);
     g_thread = this;
     base::Thread::Options options(base::MessagePumpType::UI, 0);
-    StartWithOptions(options);
+    StartWithOptions(std::move(options));
   }
 
   WindowThread(const WindowThread&) = delete;
@@ -194,7 +194,7 @@ std::unique_ptr<VulkanSurfaceWin32> VulkanSurfaceWin32::Create(
   event.Wait();
 
   VkSurfaceKHR surface;
-  VkWin32SurfaceCreateInfoKHR surface_create_info;
+  VkWin32SurfaceCreateInfoKHR surface_create_info{};
   surface_create_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
   surface_create_info.hinstance = reinterpret_cast<HINSTANCE>(
           GetWindowLongPtr(window->hwnd(), GWLP_HINSTANCE));
@@ -217,10 +217,7 @@ VulkanSurfaceWin32::VulkanSurfaceWin32(
     VkSurfaceKHR vk_surface,
     scoped_refptr<WindowThread> thread,
     std::unique_ptr<gfx::WindowImpl> window)
-    : VulkanSurface(vk_instance,
-                    window->hwnd(),
-                    vk_surface,
-                    false /* use_protected_memory */),
+    : VulkanSurface(vk_instance, window->hwnd(), vk_surface),
       thread_(std::move(thread)),
       window_(std::move(window)) {}
 

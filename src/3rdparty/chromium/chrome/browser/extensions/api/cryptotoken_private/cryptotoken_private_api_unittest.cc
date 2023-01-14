@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/common/chrome_features.h"
@@ -23,6 +24,10 @@
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
 
 namespace extensions {
 
@@ -248,7 +253,9 @@ class CryptoTokenPermissionTest : public ExtensionApiUnittest {
       bool* out_result) {
     if (bubble_action != permissions::PermissionRequestManager::NONE) {
       prompt_factory_->set_response_type(bubble_action);
-      prompt_factory_->DocumentOnLoadCompletedInMainFrame();
+      auto* web_contents = browser()->tab_strip_model()->GetWebContentsAt(0);
+      prompt_factory_->DocumentOnLoadCompletedInMainFrame(
+          web_contents->GetMainFrame());
     }
 
     auto function = base::MakeRefCounted<
@@ -278,6 +285,13 @@ class CryptoTokenPermissionTest : public ExtensionApiUnittest {
 };
 
 TEST_F(CryptoTokenPermissionTest, Prompt) {
+#if defined(OS_WIN)
+  // TODO(crbug.com/1225335) This test is failing on WIN10_20H2.
+  if (base::win::OSInfo::GetInstance()->version() >=
+      base::win::Version::WIN10_20H2)
+    return;
+#endif
+
   const std::vector<permissions::PermissionRequestManager::AutoResponseType>
       actions = {
           permissions::PermissionRequestManager::ACCEPT_ALL,

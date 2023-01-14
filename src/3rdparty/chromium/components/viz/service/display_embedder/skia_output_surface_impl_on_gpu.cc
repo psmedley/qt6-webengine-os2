@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "components/viz/service/display_embedder/skia_output_surface_impl_on_gpu.h"
+#include <memory>
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
+#include "base/bind_post_task.h"
 #include "base/callback_helpers.h"
-#include "base/optional.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
@@ -31,7 +32,6 @@
 #include "components/viz/service/display_embedder/skia_output_surface_dependency.h"
 #include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "gpu/command_buffer/service/gr_shader_cache.h"
-#include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/scheduler.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
@@ -42,10 +42,14 @@
 #include "gpu/ipc/common/gpu_surface_lookup.h"
 #include "gpu/vulkan/buildflags.h"
 #include "skia/buildflags.h"
+#include "skia/ext/legacy_display_globals.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
 #include "third_party/skia/include/core/SkDeferredDisplayList.h"
+#include "third_party/skia/include/core/SkPixelRef.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gl/gl_surface.h"
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -169,32 +173,28 @@ class SkiaOutputSurfaceImplOnGpu::AsyncReadResultLock
 class SkiaOutputSurfaceImplOnGpu::AsyncReadResultHelper {
  public:
   explicit AsyncReadResultHelper(
-      SkiaOutputSurfaceImplOnGpu* impl,
+      SkiaOutputSurfaceImplOnGpu* impl_on_gpu,
       std::unique_ptr<const SkSurface::AsyncReadResult> result)
-      : lock_(impl ? impl->async_read_result_lock_ : nullptr),
-        impl_(impl),
+      : lock_(impl_on_gpu->async_read_result_lock_),
+        impl_on_gpu_(impl_on_gpu),
         result_(std::move(result)) {
-    if (lock_) {
-      base::AutoLock auto_lock(lock());
-      impl_->async_read_result_helpers_.insert(this);
-    }
+    base::AutoLock auto_lock(lock());
+    impl_on_gpu_->async_read_result_helpers_.insert(this);
   }
 
   ~AsyncReadResultHelper() {
-    if (lock_) {
       base::AutoLock auto_lock(lock());
-      if (impl_) {
-        DCHECK(impl_->async_read_result_helpers_.count(this));
-        impl_->async_read_result_helpers_.erase(this);
+      if (impl_on_gpu_) {
+        DCHECK(impl_on_gpu_->async_read_result_helpers_.count(this));
+        impl_on_gpu_->async_read_result_helpers_.erase(this);
       }
-    }
   }
 
   base::Lock& lock() const { return lock_->lock(); }
 
   void reset() {
     AssertLockAcquired();
-    impl_ = nullptr;
+    impl_on_gpu_ = nullptr;
     result_.reset();
   }
 
@@ -215,7 +215,7 @@ class SkiaOutputSurfaceImplOnGpu::AsyncReadResultHelper {
   }
 
   const scoped_refptr<AsyncReadResultLock> lock_;
-  SkiaOutputSurfaceImplOnGpu* impl_;
+  SkiaOutputSurfaceImplOnGpu* impl_on_gpu_;
   std::unique_ptr<const SkSurface::AsyncReadResult> result_;
 };
 
@@ -225,7 +225,10 @@ class SkiaOutputSurfaceImplOnGpu::CopyOutputResultYUV
   CopyOutputResultYUV(SkiaOutputSurfaceImplOnGpu* impl,
                       const gfx::Rect& rect,
                       std::unique_ptr<const SkSurface::AsyncReadResult> result)
-      : CopyOutputResult(Format::I420_PLANES, rect),
+      : CopyOutputResult(Format::I420_PLANES,
+                         Destination::kSystemMemory,
+                         rect,
+                         /*needs_lock_for_bitmap=*/false),
         result_(impl, std::move(result)) {
 #if DCHECK_IS_ON()
     base::AutoLock auto_lock(result_.lock());
@@ -241,20 +244,22 @@ class SkiaOutputSurfaceImplOnGpu::CopyOutputResultYUV
       void* c,
       std::unique_ptr<const SkSurface::AsyncReadResult> async_result) {
     auto context = base::WrapUnique(static_cast<ReadPixelsContext*>(c));
+    auto* impl_on_gpu = context->impl_on_gpu.get();
 
     // This will automatically send an empty result.
-    if (!context->impl_on_gpu)
+    if (!impl_on_gpu)
       return;
 
-    context->impl_on_gpu->ReadbackDone();
+    DCHECK_CALLED_ON_VALID_THREAD(impl_on_gpu->thread_checker_);
+
+    impl_on_gpu->ReadbackDone();
 
     // This will automatically send an empty result.
     if (!async_result)
       return;
 
     auto result = std::make_unique<CopyOutputResultYUV>(
-        context->impl_on_gpu.get(), context->result_rect,
-        std::move(async_result));
+        impl_on_gpu, context->result_rect, std::move(async_result));
     context->request->SendResult(std::move(result));
   }
 
@@ -297,11 +302,25 @@ class SkiaOutputSurfaceImplOnGpu::CopyOutputResultYUV
   AsyncReadResultHelper result_;
 };
 
-class SkiaOutputSurfaceImplOnGpu::CopyOutputResultRGBA {
+class SkiaOutputSurfaceImplOnGpu::CopyOutputResultRGBA
+    : public CopyOutputResult {
  public:
-  static void DestroyAsyncReadResultHelper(void* addr, void* context) {
-    auto helper =
-        base::WrapUnique(static_cast<AsyncReadResultHelper*>(context));
+  CopyOutputResultRGBA(SkiaOutputSurfaceImplOnGpu* impl,
+                       const gfx::Rect& rect,
+                       std::unique_ptr<const SkSurface::AsyncReadResult> result,
+                       const gfx::ColorSpace& color_space)
+      : CopyOutputResult(Format::RGBA,
+                         Destination::kSystemMemory,
+                         rect,
+                         /*needs_lock_for_bitmap=*/true),
+        result_(impl, std::move(result)),
+        color_space_(color_space.ToSkColorSpace()) {}
+
+  ~CopyOutputResultRGBA() override {
+    // cached_bitmap()->pixelRef() should not be used after CopyOutputResultRGBA
+    // is released.
+    DCHECK(!cached_bitmap()->pixelRef() ||
+           cached_bitmap()->pixelRef()->unique());
   }
 
   static void OnReadbackDone(
@@ -310,36 +329,60 @@ class SkiaOutputSurfaceImplOnGpu::CopyOutputResultRGBA {
     auto context = base::WrapUnique(static_cast<ReadPixelsContext*>(c));
 
     // This will automatically send an empty result.
-    if (!context->impl_on_gpu)
+    auto* impl_on_gpu = context->impl_on_gpu.get();
+    if (!impl_on_gpu)
       return;
 
-    context->impl_on_gpu->ReadbackDone();
+    DCHECK_CALLED_ON_VALID_THREAD(impl_on_gpu->thread_checker_);
+    impl_on_gpu->ReadbackDone();
 
     // This will automatically send an empty result.
     if (!async_result)
       return;
 
-    // CopyOutputSkBitmapResult uses SkBitmap which keeps a pointer for the
-    // pixel data in SkSurface::AsyncReadResult. We don't know when and where
-    // SkBitmap will be read, so we cannot track and reset
-    // AsyncReadResultHelper when GrDirectContext is abondended.
-    // TODO(crbug.com/1153592): track AyncReadResult.
-    auto helper = std::make_unique<AsyncReadResultHelper>(
-        /*impl=*/nullptr, std::move(async_result));
-    auto info = SkImageInfo::MakeN32Premul(
-        context->result_rect.width(), context->result_rect.height(),
-        context->color_space.ToSkColorSpace());
-
-    SkBitmap bitmap;
-    const auto* data = (*helper)->data(0);
-    auto row_bytes = (*helper)->rowBytes(0);
-    bitmap.installPixels(info, const_cast<void*>(data), row_bytes,
-                         &DestroyAsyncReadResultHelper, helper.release());
-
-    auto result = std::make_unique<CopyOutputSkBitmapResult>(
-        context->result_rect, bitmap);
+    auto result = std::make_unique<CopyOutputResultRGBA>(
+        impl_on_gpu, context->result_rect, std::move(async_result),
+        context->color_space);
     context->request->SendResult(std::move(result));
   }
+
+  const SkBitmap& AsSkBitmap() const override {
+    if (!result_) {
+      // The |result_| has been reset, the cached_bitmap() should be reset too.
+      *cached_bitmap() = SkBitmap();
+    } else if (!bitmap_created_) {
+      const auto* data = result_->data(0);
+      auto row_bytes = result_->rowBytes(0);
+      auto info = SkImageInfo::MakeN32Premul(size().width(), size().height(),
+                                             color_space_);
+      SkBitmap bitmap;
+      bitmap.installPixels(info, const_cast<void*>(data), row_bytes);
+
+      *cached_bitmap() = std::move(bitmap);
+      bitmap_created_ = true;
+    }
+
+    return CopyOutputResult::AsSkBitmap();
+  }
+
+  bool LockSkBitmap() const override NO_THREAD_SAFETY_ANALYSIS {
+    result_.lock().Acquire();
+    if (!result_) {
+      result_.lock().Release();
+      return false;
+    }
+    return true;
+  }
+
+  void UnlockSkBitmap() const override NO_THREAD_SAFETY_ANALYSIS {
+    result_.lock().AssertAcquired();
+    result_.lock().Release();
+  }
+
+ private:
+  AsyncReadResultHelper result_;
+  const sk_sp<SkColorSpace> color_space_;
+  mutable bool bitmap_created_ = false;
 };
 
 SkiaOutputSurfaceImplOnGpu::PromiseImageAccessHelper::PromiseImageAccessHelper(
@@ -393,7 +436,8 @@ std::unique_ptr<gpu::SharedImageFactory> CreateSharedImageFactory(
       deps->GetGpuFeatureInfo(), deps->GetSharedContextState().get(),
       deps->GetMailboxManager(), deps->GetSharedImageManager(),
       deps->GetGpuImageFactory(), memory_tracker,
-      true /* enable_wrapped_sk_image */);
+      /*enable_wrapped_sk_image=*/true,
+      /*is_for_display_compositor=*/true);
 }
 
 std::unique_ptr<gpu::SharedImageRepresentationFactory>
@@ -404,44 +448,6 @@ CreateSharedImageRepresentationFactory(SkiaOutputSurfaceDependency* deps,
 }
 
 }  // namespace
-
-// Offscreen surfaces for render passes. It can only be accessed on GPU
-// thread.
-class SkiaOutputSurfaceImplOnGpu::OffscreenSurface {
- public:
-  OffscreenSurface() = default;
-  OffscreenSurface(const OffscreenSurface& offscreen_surface) = delete;
-  OffscreenSurface(OffscreenSurface&& offscreen_surface) = default;
-  OffscreenSurface& operator=(const OffscreenSurface& offscreen_surface) =
-      delete;
-  OffscreenSurface& operator=(OffscreenSurface&& offscreen_surface) = default;
-  ~OffscreenSurface() = default;
-
-  SkSurface* surface() { return surface_.get(); }
-  void set_surface(sk_sp<SkSurface> surface) {
-    surface_ = std::move(surface);
-    promise_texture_ = {};
-  }
-
-  SkPromiseImageTexture* fulfill() {
-    DCHECK(surface_);
-    if (!promise_texture_) {
-      promise_texture_ =
-          SkPromiseImageTexture::Make(surface_->getBackendTexture(
-              SkSurface::kFlushRead_BackendHandleAccess));
-    }
-    return promise_texture_.get();
-  }
-
-  sk_sp<SkSurface> TakeSurface() {
-    promise_texture_ = {};
-    return std::move(surface_);
-  }
-
- private:
-  sk_sp<SkSurface> surface_;
-  sk_sp<SkPromiseImageTexture> promise_texture_;
-};
 
 SkiaOutputSurfaceImplOnGpu::ReleaseCurrent::ReleaseCurrent(
     scoped_refptr<gl::GLSurface> gl_surface,
@@ -555,6 +561,13 @@ SkiaOutputSurfaceImplOnGpu::SkiaOutputSurfaceImplOnGpu(
       weak_ptr_, std::move(buffer_presented_callback));
 }
 
+void SkiaOutputSurfaceImplOnGpu::ReleaseAsyncReadResultHelpers() {
+  base::AutoLock auto_lock(async_read_result_lock_->lock());
+  for (auto* helper : async_read_result_helpers_)
+    helper->reset();
+  async_read_result_helpers_.clear();
+}
+
 SkiaOutputSurfaceImplOnGpu::~SkiaOutputSurfaceImplOnGpu() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -565,14 +578,11 @@ SkiaOutputSurfaceImplOnGpu::~SkiaOutputSurfaceImplOnGpu() {
     has_context = MakeCurrent(/*need_framebuffer=*/false);
     if (has_context) {
       release_current_last_.emplace(gl_surface_, context_state_);
-
-      // Release all ongoing AsyncReadResults.
-      base::AutoLock auto_lock(async_read_result_lock_->lock());
-      for (auto* helper : async_read_result_helpers_)
-        helper->reset();
-      async_read_result_helpers_.clear();
     }
   }
+
+  for (auto& callback : release_on_gpu_callbacks_)
+    std::move(*callback).Run(gpu::SyncToken(), /*is_lost=*/true);
 
   // |output_device_| may still need |shared_image_factory_|, so release it
   // first.
@@ -590,11 +600,8 @@ SkiaOutputSurfaceImplOnGpu::~SkiaOutputSurfaceImplOnGpu() {
 
   sync_point_client_state_->Destroy();
 
-#if DCHECK_IS_ON()
-  // All ongoing AsyncReadResults should be released already.
-  base::AutoLock auto_lock(async_read_result_lock_->lock());
-  DCHECK(async_read_result_helpers_.empty());
-#endif
+  // Release all ongoing AsyncReadResults.
+  ReleaseAsyncReadResultHelpers();
 }
 
 void SkiaOutputSurfaceImplOnGpu::Reshape(const gfx::Size& size,
@@ -624,7 +631,8 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintCurrentFrame(
     std::vector<ImageContextImpl*> image_contexts,
     std::vector<gpu::SyncToken> sync_tokens,
     base::OnceClosure on_finished,
-    base::Optional<gfx::Rect> draw_rectangle) {
+    absl::optional<gfx::Rect> draw_rectangle,
+    bool allocate_frame_buffer) {
   TRACE_EVENT0("viz", "SkiaOutputSurfaceImplOnGpu::FinishPaintCurrentFrame");
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!scoped_output_device_paint_);
@@ -648,7 +656,8 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintCurrentFrame(
   // We do not reset scoped_output_device_paint_ after drawing the ddl until
   // SwapBuffers() is called, because we may need access to output_sk_surface()
   // for CopyOutput().
-  scoped_output_device_paint_ = output_device_->BeginScopedPaint();
+  scoped_output_device_paint_ =
+      output_device_->BeginScopedPaint(allocate_frame_buffer);
   if (!scoped_output_device_paint_) {
     MarkContextLost(ContextLostReason::CONTEXT_LOST_BEGIN_PAINT_FAILED);
     return;
@@ -656,10 +665,8 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintCurrentFrame(
 
   dependency_->ScheduleGrContextCleanup();
 
-  PullTextureUpdates(std::move(sync_tokens));
-
   {
-    base::Optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
+    absl::optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
     if (dependency_->GetGrShaderCache()) {
       cache_use.emplace(dependency_->GetGrShaderCache(),
                         gpu::kDisplayCompositorClientId);
@@ -672,7 +679,7 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintCurrentFrame(
     if (!begin_semaphores.empty()) {
       auto result = scoped_output_device_paint_->Wait(
           begin_semaphores.size(), begin_semaphores.data(),
-          /*deleteSemaphoresAfterWait=*/false);
+          /*delete_semaphores_after_wait=*/false);
       DCHECK(result);
     }
 
@@ -724,27 +731,35 @@ void SkiaOutputSurfaceImplOnGpu::ScheduleOutputSurfaceAsOverlay(
   output_surface_plane_ = output_surface_plane;
 }
 
-void SkiaOutputSurfaceImplOnGpu::SwapBuffers(
-    base::TimeTicks post_task_timestamp,
-    OutputSurfaceFrame frame) {
+void SkiaOutputSurfaceImplOnGpu::SwapBuffers(OutputSurfaceFrame frame,
+                                             bool release_frame_buffer) {
   TRACE_EVENT0("viz", "SkiaOutputSurfaceImplOnGpu::SwapBuffers");
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (!post_task_timestamp.is_null()) {
-    output_device_->SetDrawTimings(post_task_timestamp, base::TimeTicks::Now());
-  }
+  if (release_frame_buffer)
+    output_device_->ReleaseOneFrameBuffer();
 
   SwapBuffersInternal(std::move(frame));
 }
 
+void SkiaOutputSurfaceImplOnGpu::SetDependenciesResolvedTimings(
+    base::TimeTicks task_ready) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  output_device_->SetDependencyTimings(task_ready);
+}
+
+void SkiaOutputSurfaceImplOnGpu::SetDrawTimings(base::TimeTicks task_posted) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  output_device_->SetDrawTimings(task_posted, base::TimeTicks::Now());
+}
+
 void SkiaOutputSurfaceImplOnGpu::SwapBuffersSkipped() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  SwapBuffersInternal(base::nullopt);
+  SwapBuffersInternal(absl::nullopt);
 }
 
 void SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass(
-    base::TimeTicks post_task_timestamp,
-    AggregatedRenderPassId id,
+    const gpu::Mailbox& mailbox,
     sk_sp<SkDeferredDisplayList> ddl,
     std::vector<ImageContextImpl*> image_contexts,
     std::vector<gpu::SyncToken> sync_tokens,
@@ -752,10 +767,6 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass(
   TRACE_EVENT0("viz", "SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass");
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(ddl);
-
-  if (!post_task_timestamp.is_null()) {
-    output_device_->SetDrawTimings(post_task_timestamp, base::TimeTicks::Now());
-  }
 
   if (context_is_lost_)
     return;
@@ -765,32 +776,41 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass(
     return;
   }
 
-  PullTextureUpdates(std::move(sync_tokens));
+  auto backing_representation =
+      shared_image_representation_factory_->ProduceSkia(mailbox,
+                                                        context_state_.get());
+  DCHECK(backing_representation);
 
-  auto& offscreen = offscreen_surfaces_[id];
-  if (!offscreen.surface()) {
-    offscreen.set_surface(SkSurface::MakeRenderTarget(
-        gr_context(), ddl->characterization(), SkBudgeted::kNo));
-    DCHECK(offscreen.surface());
+  std::vector<GrBackendSemaphore> begin_semaphores;
+  std::vector<GrBackendSemaphore> end_semaphores;
+  auto scoped_access = backing_representation->BeginScopedWriteAccess(
+      /*final_msaa_count=*/0, ddl->characterization().surfaceProps(),
+      &begin_semaphores, &end_semaphores,
+      gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
+  if (!scoped_access) {
+    MarkContextLost(CONTEXT_LOST_UNKNOWN);
+    return;
   }
 
+  SkSurface* surface = scoped_access->surface();
+  DCHECK(surface);
+
   {
-    base::Optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
+    absl::optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
     if (dependency_->GetGrShaderCache()) {
       cache_use.emplace(dependency_->GetGrShaderCache(),
                         gpu::kDisplayCompositorClientId);
     }
-    std::vector<GrBackendSemaphore> begin_semaphores;
-    std::vector<GrBackendSemaphore> end_semaphores;
     promise_image_access_helper_.BeginAccess(
         std::move(image_contexts), &begin_semaphores, &end_semaphores);
     if (!begin_semaphores.empty()) {
-      auto result = offscreen.surface()->wait(
-          begin_semaphores.size(), begin_semaphores.data(),
-          /*deleteSemaphoresAfterWait=*/false);
+      auto result =
+          surface->wait(begin_semaphores.size(), begin_semaphores.data(),
+                        /*deleteSemaphoresAfterWait=*/false);
       DCHECK(result);
     }
-    offscreen.surface()->draw(ddl);
+    surface->draw(ddl);
+    backing_representation->SetCleared();
     destroy_after_swap_.emplace_back(std::move(ddl));
 
     GrFlushInfo flush_info = {
@@ -802,7 +822,7 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass(
                                           &flush_info);
     if (on_finished)
       gpu::AddCleanupTaskForSkiaFlush(std::move(on_finished), &flush_info);
-    auto result = offscreen.surface()->flush(flush_info);
+    auto result = surface->flush(flush_info);
     if (result != GrSemaphoresSubmitted::kYes &&
         !(begin_semaphores.empty() && end_semaphores.empty())) {
       // TODO(penghuang): handle vulkan device lost.
@@ -817,42 +837,15 @@ void SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass(
   }
 }
 
-void SkiaOutputSurfaceImplOnGpu::RemoveRenderPassResource(
-    std::vector<AggregatedRenderPassId> ids,
-    std::vector<std::unique_ptr<ImageContextImpl>> image_contexts) {
-  TRACE_EVENT0("viz", "SkiaOutputSurfaceImplOnGpu::RemoveRenderPassResource");
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(!ids.empty());
-
-  for (AggregatedRenderPassId id : ids) {
-    // It's possible that |offscreen_surfaces_| won't contain an entry for the
-    // render pass if draw failed early.
-    auto it = offscreen_surfaces_.find(id);
-    if (it != offscreen_surfaces_.end()) {
-      DeleteSkSurface(context_state_.get(), it->second.TakeSurface());
-      offscreen_surfaces_.erase(it);
-    }
-  }
-
-  // |image_contexts| will go out of scope and be destroyed now.
-}
-
-static void PostTaskFromMainToImplThread(
-    scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
-    ReleaseCallback callback,
-    const gpu::SyncToken& sync_token,
-    bool is_lost) {
-  impl_task_runner->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), sync_token, is_lost));
-}
-
 void SkiaOutputSurfaceImplOnGpu::CopyOutput(
     AggregatedRenderPassId id,
     copy_output::RenderPassGeometry geometry,
     const gfx::ColorSpace& color_space,
-    std::unique_ptr<CopyOutputRequest> request) {
+    std::unique_ptr<CopyOutputRequest> request,
+    const gpu::Mailbox& mailbox) {
   TRACE_EVENT0("viz", "SkiaOutputSurfaceImplOnGpu::CopyOutput");
-  // TODO(crbug.com/898595): Do this on the GPU instead of CPU with Vulkan.
+  // TODO(https://crbug.com/898595): Do this on the GPU instead of CPU with
+  // Vulkan.
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (context_is_lost_)
@@ -861,11 +854,33 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
   bool from_framebuffer = !id;
   DCHECK(scoped_output_device_paint_ || !from_framebuffer);
 
-  DCHECK(from_framebuffer ||
-         offscreen_surfaces_.find(id) != offscreen_surfaces_.end());
-  SkSurface* surface = from_framebuffer
-                           ? scoped_output_device_paint_->sk_surface()
-                           : offscreen_surfaces_[id].surface();
+  SkSurface* surface;
+  std::unique_ptr<gpu::SharedImageRepresentationSkia> backing_representation;
+  std::unique_ptr<gpu::SharedImageRepresentationSkia::ScopedWriteAccess>
+      scoped_access;
+  std::vector<GrBackendSemaphore> begin_semaphores;
+  std::vector<GrBackendSemaphore> end_semaphores;
+  if (from_framebuffer) {
+    surface = scoped_output_device_paint_->sk_surface();
+  } else {
+    backing_representation = shared_image_representation_factory_->ProduceSkia(
+        mailbox, context_state_.get());
+    DCHECK(backing_representation);
+
+    // TODO(crbug.com/1226672): Use BeginScopedReadAccess instead
+    scoped_access = backing_representation->BeginScopedWriteAccess(
+        /*final_msaa_count=*/0, skia::LegacyDisplayGlobals::GetSkSurfaceProps(),
+        &begin_semaphores, &end_semaphores,
+        gpu::SharedImageRepresentation::AllowUnclearedAccess::kNo);
+    surface = scoped_access->surface();
+    if (!begin_semaphores.empty()) {
+      auto result =
+          surface->wait(begin_semaphores.size(), begin_semaphores.data(),
+                        /*deleteSemaphoresAfterWait=*/false);
+      DCHECK(result);
+    }
+  }
+
   // Do not support reading back from vulkan secondary command buffer.
   if (!surface)
     return;
@@ -876,7 +891,7 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
   bool need_discard_alpha =
       from_framebuffer && (output_device_->is_emulated_rgbx());
   if (need_discard_alpha) {
-    base::Optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
+    absl::optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
     if (dependency_->GetGrShaderCache()) {
       cache_use.emplace(dependency_->GetGrShaderCache(),
                         gpu::kDisplayCompositorClientId);
@@ -888,7 +903,7 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
     surface->flush();
   }
 
-  base::Optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
+  absl::optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
   if (dependency_->GetGrShaderCache()) {
     cache_use.emplace(dependency_->GetGrShaderCache(),
                       gpu::kDisplayCompositorClientId);
@@ -942,7 +957,9 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
         SkSurface::RescaleGamma::kSrc, rescale_mode,
         &CopyOutputResultYUV::OnReadbackDone, context.release());
   } else if (request->result_format() ==
-             CopyOutputRequest::ResultFormat::RGBA_BITMAP) {
+                 CopyOutputRequest::ResultFormat::RGBA &&
+             request->result_destination() ==
+                 CopyOutputRequest::ResultDestination::kSystemMemory) {
     // Perform swizzle during readback.
     const bool skbitmap_is_bgra = (kN32_SkColorType == kBGRA_8888_SkColorType);
     // If we can't convert |color_space| to a SkColorSpace
@@ -968,7 +985,9 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
         dst_info, src_rect, SkSurface::RescaleGamma::kSrc, rescale_mode,
         &CopyOutputResultRGBA::OnReadbackDone, context.release());
   } else if (request->result_format() ==
-             CopyOutputRequest::ResultFormat::RGBA_TEXTURE) {
+                 CopyOutputRequest::ResultFormat::RGBA &&
+             request->result_destination() ==
+                 CopyOutputRequest::ResultDestination::kNativeTextures) {
     gpu::Mailbox mailbox = gpu::Mailbox::GenerateForSharedImage();
     constexpr auto kUsage = gpu::SHARED_IMAGE_USAGE_GLES2 |
                             gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
@@ -1010,6 +1029,13 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
 
     dest_canvas->clipRect(
         SkRect::MakeXYWH(0, 0, src_rect.width(), src_rect.height()));
+    // TODO(b/197353769): Ideally, we should simply use a kSrc blending mode,
+    // but for some reason, this triggers some antialiasing code that causes
+    // various Vulkan tests to fail. We should investigate this and replace
+    // this clear with blend mode.
+    if (surface->imageInfo().alphaType() != kOpaque_SkAlphaType) {
+      dest_canvas->clear(SK_ColorTRANSPARENT);
+    }
     auto sampling =
         is_downscale_or_identity_in_both_dimensions
             ? SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear)
@@ -1029,23 +1055,64 @@ void SkiaOutputSurfaceImplOnGpu::CopyOutput(
       DLOG(ERROR) << "dest_surface->flush() failed.";
       return;
     }
-    auto release_callback = base::BindOnce(
-        &SkiaOutputSurfaceImplOnGpu::DestroySharedImageOnImplThread,
+
+    auto gpu_callback = std::make_unique<ReleaseCallback>(base::BindOnce(
+        &SkiaOutputSurfaceImplOnGpu::DestroyCopyOutputResourcesOnGpuThread,
         weak_ptr_factory_.GetWeakPtr(), std::move(representation),
-        context_state_);
-    auto main_callback = SingleReleaseCallback::Create(base::BindOnce(
-        &PostTaskFromMainToImplThread, base::ThreadTaskRunnerHandle::Get(),
-        std::move(release_callback)));
+        context_state_));
+    release_on_gpu_callbacks_.push_back(std::move(gpu_callback));
+    auto run_gpu_callback = base::BindOnce(
+        &SkiaOutputSurfaceImplOnGpu::RunDestroyCopyOutputResourcesOnGpuThread,
+        weak_ptr_factory_.GetWeakPtr(), release_on_gpu_callbacks_.back().get());
+    auto viz_callback = base::BindPostTask(base::ThreadTaskRunnerHandle::Get(),
+                                           std::move(run_gpu_callback));
+
+    CopyOutputResult::ReleaseCallbacks release_callbacks;
+    release_callbacks.push_back(std::move(viz_callback));
+
     request->SendResult(std::make_unique<CopyOutputTextureResult>(
-        geometry.result_bounds, mailbox, gpu::SyncToken(), color_space,
-        std::move(main_callback)));
+        geometry.result_bounds,
+        CopyOutputResult::TextureResult(mailbox, gpu::SyncToken(), color_space),
+        std::move(release_callbacks)));
   } else {
     NOTREACHED();
   }
+
+  if (!end_semaphores.empty()) {
+    GrFlushInfo flush_info;
+    flush_info.fNumSemaphores = end_semaphores.size();
+    flush_info.fSignalSemaphores = end_semaphores.data();
+    gpu::AddVulkanCleanupTaskForSkiaFlush(vulkan_context_provider_,
+                                          &flush_info);
+    auto flush_result =
+        surface->flush(SkSurface::BackendSurfaceAccess::kNoAccess, flush_info);
+    if (flush_result != GrSemaphoresSubmitted::kYes &&
+        !(begin_semaphores.empty() && end_semaphores.empty())) {
+      // TODO(penghuang): handle vulkan device lost.
+      DLOG(ERROR) << "surface->flush() failed.";
+      return;
+    }
+  }
+
   ScheduleCheckReadbackCompletion();
 }
 
-void SkiaOutputSurfaceImplOnGpu::DestroySharedImageOnImplThread(
+void SkiaOutputSurfaceImplOnGpu::RunDestroyCopyOutputResourcesOnGpuThread(
+    ReleaseCallback* callback,
+    const gpu::SyncToken& sync_token,
+    bool is_lost) {
+  for (size_t i = 0; i < release_on_gpu_callbacks_.size(); ++i) {
+    if (release_on_gpu_callbacks_[i].get() == callback) {
+      std::move(*release_on_gpu_callbacks_[i]).Run(sync_token, is_lost);
+      release_on_gpu_callbacks_.erase(release_on_gpu_callbacks_.begin() + i);
+      return;
+    }
+  }
+  NOTREACHED() << "The Callback returned by GetDeleteCallback() was called "
+               << "more than once.";
+}
+
+void SkiaOutputSurfaceImplOnGpu::DestroyCopyOutputResourcesOnGpuThread(
     std::unique_ptr<gpu::SharedImageRepresentationSkia> representation,
     scoped_refptr<gpu::SharedContextState> context_state,
     const gpu::SyncToken& sync_token,
@@ -1065,32 +1132,19 @@ void SkiaOutputSurfaceImplOnGpu::BeginAccessImages(
 
   for (auto* context : image_contexts) {
     // Prepare for accessing render pass.
-    if (context->render_pass_id()) {
-      // We don't cache promise image for render pass, so the it should always
-      // be nullptr.
-      auto it = offscreen_surfaces_.find(context->render_pass_id());
-      DCHECK(it != offscreen_surfaces_.end());
-      context->set_promise_image_texture(sk_ref_sp(it->second.fulfill()));
-      if (!context->promise_image_texture()) {
-        DLOG(ERROR) << "Failed to fulfill the promise texture created from "
-                       "CompositorRenderPassId:"
-                    << context->render_pass_id();
-      }
-    } else {
-      context->BeginAccessIfNecessary(
-          context_state_.get(), shared_image_representation_factory_.get(),
-          dependency_->GetMailboxManager(), begin_semaphores, end_semaphores);
-      if (context->end_access_state())
-        image_contexts_with_end_access_state_.emplace(context);
+    context->BeginAccessIfNecessary(
+        context_state_.get(), shared_image_representation_factory_.get(),
+        dependency_->GetMailboxManager(), begin_semaphores, end_semaphores);
+    if (context->end_access_state())
+      image_contexts_with_end_access_state_.emplace(context);
 
-      // Texture parameters can be modified by concurrent reads so reset them
-      // before compositing from the texture. See https://crbug.com/1092080.
-      if (is_gl && context->maybe_concurrent_reads()) {
-        auto* promise_texture = context->promise_image_texture();
-        if (promise_texture) {
-          GrBackendTexture backend_texture = promise_texture->backendTexture();
-          backend_texture.glTextureParametersModified();
-        }
+    // Texture parameters can be modified by concurrent reads so reset them
+    // before compositing from the texture. See https://crbug.com/1092080.
+    if (is_gl && context->maybe_concurrent_reads()) {
+      auto* promise_texture = context->promise_image_texture();
+      if (promise_texture) {
+        GrBackendTexture backend_texture = promise_texture->backendTexture();
+        backend_texture.glTextureParametersModified();
       }
     }
   }
@@ -1140,53 +1194,58 @@ void SkiaOutputSurfaceImplOnGpu::ScheduleOverlays(
     SkiaOutputSurface::OverlayList overlays,
     std::vector<ImageContextImpl*> image_contexts,
     base::OnceClosure on_finished) {
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(USE_OZONE)
   if (context_is_lost_)
     return;
 
-  // GL is used on MacOS and GL doesn't need semaphores.
-  promise_image_access_helper_.BeginAccess(std::move(image_contexts),
-                                           /*begin_semaphores=*/nullptr,
-                                           /*end_semaphores=*/nullptr);
-  using ScopedWriteAccess =
-      std::unique_ptr<gpu::SharedImageRepresentationSkia::ScopedWriteAccess>;
-  std::vector<ScopedWriteAccess> scoped_write_accesses;
-  for (auto& overlay : overlays) {
-    if (!overlay.ddl)
-      continue;
-    const auto& characterization = overlay.ddl->characterization();
-    auto backing = GetOrCreateRenderPassOverlayBacking(characterization);
-    if (!backing)
-      break;
-    DCHECK(overlay.mailbox.IsZero());
-    overlay.mailbox = backing->mailbox();
-    auto scoped_access = backing->BeginScopedWriteAccess(
-        /*final_msaa_count=*/0, characterization.surfaceProps(),
-        /*begin_semaphores=*/nullptr,
-        /*end_semaphores=*/nullptr,
-        gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
-    bool result = scoped_access->surface()->draw(overlay.ddl);
-    DCHECK(result);
-    scoped_write_accesses.push_back(std::move(scoped_access));
-    backing->SetCleared();
-    in_flight_render_pass_overlay_backings_.insert(std::move(backing));
-  }
+  if (!image_contexts.empty()) {
+    DCHECK(context_state_->GrContextIsGL());
 
-  if (!scoped_write_accesses.empty()) {
-    base::Optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
-    if (dependency_->GetGrShaderCache()) {
-      cache_use.emplace(dependency_->GetGrShaderCache(),
-                        gpu::kDisplayCompositorClientId);
+    // GL doesn't use semaphores.
+    promise_image_access_helper_.BeginAccess(std::move(image_contexts),
+                                             /*begin_semaphores=*/nullptr,
+                                             /*end_semaphores=*/nullptr);
+    using ScopedWriteAccess =
+        std::unique_ptr<gpu::SharedImageRepresentationSkia::ScopedWriteAccess>;
+    std::vector<ScopedWriteAccess> scoped_write_accesses;
+    for (auto& overlay : overlays) {
+      if (!overlay.ddl)
+        continue;
+      const auto& characterization = overlay.ddl->characterization();
+      auto backing = GetOrCreateRenderPassOverlayBacking(characterization);
+      if (!backing)
+        break;
+      DCHECK(overlay.mailbox.IsZero());
+      overlay.mailbox = backing->mailbox();
+      auto scoped_access = backing->BeginScopedWriteAccess(
+          /*final_msaa_count=*/0, characterization.surfaceProps(),
+          /*begin_semaphores=*/nullptr,
+          /*end_semaphores=*/nullptr,
+          gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
+      bool result = scoped_access->surface()->draw(overlay.ddl);
+      DCHECK(result);
+      scoped_write_accesses.push_back(std::move(scoped_access));
+      backing->SetCleared();
+      in_flight_render_pass_overlay_backings_.insert(std::move(backing));
     }
 
-    GrFlushInfo flush_info = {};
-    if (on_finished)
-      gpu::AddCleanupTaskForSkiaFlush(std::move(on_finished), &flush_info);
-    context_state_->gr_context()->flush(flush_info);
-    context_state_->gr_context()->submit();
-    scoped_write_accesses.clear();
+    if (!scoped_write_accesses.empty()) {
+      absl::optional<gpu::raster::GrShaderCache::ScopedCacheUse> cache_use;
+      if (dependency_->GetGrShaderCache()) {
+        cache_use.emplace(dependency_->GetGrShaderCache(),
+                          gpu::kDisplayCompositorClientId);
+      }
+
+      GrFlushInfo flush_info = {};
+      if (on_finished)
+        gpu::AddCleanupTaskForSkiaFlush(std::move(on_finished), &flush_info);
+      context_state_->gr_context()->flush(flush_info);
+      context_state_->gr_context()->submit();
+      scoped_write_accesses.clear();
+    }
+    promise_image_access_helper_.EndAccess();
   }
-  promise_image_access_helper_.EndAccess();
+
   output_device_->ScheduleOverlays(std::move(overlays));
 #else
   DCHECK(image_contexts.empty());
@@ -1350,6 +1409,23 @@ bool SkiaOutputSurfaceImplOnGpu::InitializeForVulkan() {
     return true;
   }
 
+#if defined(OS_ANDROID)
+  if (vulkan_context_provider_->GetGrSecondaryCBDrawContext()) {
+    if (base::FeatureList::IsEnabled(
+            features::kWebViewVulkanIntermediateBuffer)) {
+      output_device_ =
+          std::make_unique<SkiaOutputDeviceVulkanSecondaryCBOffscreen>(
+              context_state_, shared_gpu_deps_->memory_tracker(),
+              GetDidSwapBuffersCompleteCallback());
+    } else {
+      output_device_ = std::make_unique<SkiaOutputDeviceVulkanSecondaryCB>(
+          vulkan_context_provider_, shared_gpu_deps_->memory_tracker(),
+          GetDidSwapBuffersCompleteCallback());
+    }
+    return true;
+  }
+#endif
+
 #if defined(USE_OZONE)
   bool needs_background_image =
       features::IsUsingOzonePlatform() && ui::OzonePlatform::GetInstance()
@@ -1392,23 +1468,6 @@ bool SkiaOutputSurfaceImplOnGpu::InitializeForVulkan() {
   }
 #endif  // !defined(OS_WIN)
   (void)needs_background_image;
-
-#if defined(OS_ANDROID)
-  if (vulkan_context_provider_->GetGrSecondaryCBDrawContext()) {
-    if (base::FeatureList::IsEnabled(
-            features::kWebViewVulkanIntermediateBuffer)) {
-      output_device_ =
-          std::make_unique<SkiaOutputDeviceVulkanSecondaryCBOffscreen>(
-              context_state_, shared_gpu_deps_->memory_tracker(),
-              GetDidSwapBuffersCompleteCallback());
-    } else {
-      output_device_ = std::make_unique<SkiaOutputDeviceVulkanSecondaryCB>(
-          vulkan_context_provider_, shared_gpu_deps_->memory_tracker(),
-          GetDidSwapBuffersCompleteCallback());
-    }
-    return true;
-  }
-#endif
 
   std::unique_ptr<SkiaOutputDeviceVulkan> output_device;
   if (!gpu_preferences_.disable_vulkan_surface) {
@@ -1460,7 +1519,7 @@ bool SkiaOutputSurfaceImplOnGpu::InitializeForDawn() {
         GetDidSwapBuffersCompleteCallback());
   } else {
 #if defined(USE_X11) || defined(USE_OZONE_PLATFORM_X11)
-    // TODO(sgilhuly): Set up a Vulkan swapchain so that Linux can also use
+    // TODO(rivr): Set up a Vulkan swapchain so that Linux can also use
     // SkiaOutputDeviceDawn.
     if (MayFallBackToSkiaOutputDeviceX11()) {
       output_device_ = SkiaOutputDeviceX11::Create(
@@ -1520,45 +1579,16 @@ bool SkiaOutputSurfaceImplOnGpu::MakeCurrent(bool need_framebuffer) {
   return true;
 }
 
-void SkiaOutputSurfaceImplOnGpu::PullTextureUpdates(
-    std::vector<gpu::SyncToken> sync_tokens) {
-  // TODO(https://crbug.com/900973): Remove it when MailboxManager is replaced
-  // with SharedImage API.
-  if (dependency_->GetMailboxManager()->UsesSync()) {
-    for (auto& sync_token : sync_tokens)
-      dependency_->GetMailboxManager()->PullTextureUpdates(sync_token);
-  }
-}
-
-void SkiaOutputSurfaceImplOnGpu::ReleaseFenceSyncAndPushTextureUpdates(
-    uint64_t sync_fence_release) {
-  // TODO(https://crbug.com/900973): Remove it when MailboxManager is replaced
-  // with SharedImage API.
-  if (dependency_->GetMailboxManager()->UsesSync()) {
-    // If MailboxManagerSync is used, we are sharing textures between threads.
-    // In this case, sync point can only guarantee GL commands are issued in
-    // correct order across threads and GL contexts. However GPU driver may
-    // execute GL commands out of the issuing order across GL contexts. So we
-    // have to use PushTextureUpdates() and PullTextureUpdates() to ensure the
-    // correct GL commands executing order.
-    // PushTextureUpdates(token) will insert a GL fence into the current GL
-    // context, PullTextureUpdates(token) will wait the GL fence associated with
-    // the give token on the current GL context.
-    // Reconstruct sync_token from sync_fence_release.
-    gpu::SyncToken sync_token(
-        gpu::CommandBufferNamespace::VIZ_SKIA_OUTPUT_SURFACE,
-        command_buffer_id(), sync_fence_release);
-    dependency_->GetMailboxManager()->PushTextureUpdates(sync_token);
-  }
+void SkiaOutputSurfaceImplOnGpu::ReleaseFenceSync(uint64_t sync_fence_release) {
   sync_point_client_state_->ReleaseFenceSync(sync_fence_release);
 }
 
 void SkiaOutputSurfaceImplOnGpu::SwapBuffersInternal(
-    base::Optional<OutputSurfaceFrame> frame) {
+    absl::optional<OutputSurfaceFrame> frame) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(output_device_);
 
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(USE_OZONE)
   // Release any backings which are not reused by the current frame, probably
   // because the properties of render passes are changed or render passes are
   // removed
@@ -1572,6 +1602,11 @@ void SkiaOutputSurfaceImplOnGpu::SwapBuffersInternal(
   if (context_is_lost_)
     return;
 
+  if (gl_surface_ && frame && frame->delegated_ink_metadata) {
+    gl_surface_->SetDelegatedInkTrailStartPoint(
+        std::move(frame->delegated_ink_metadata));
+  }
+
   bool sync_cpu =
       gpu::ShouldVulkanSyncCpuForSkiaSubmit(vulkan_context_provider_);
 
@@ -1582,7 +1617,7 @@ void SkiaOutputSurfaceImplOnGpu::SwapBuffersInternal(
 }
 
 void SkiaOutputSurfaceImplOnGpu::PostSubmit(
-    base::Optional<OutputSurfaceFrame> frame) {
+    absl::optional<OutputSurfaceFrame> frame) {
   promise_image_access_helper_.EndAccess();
   scoped_output_device_paint_.reset();
 
@@ -1594,6 +1629,8 @@ void SkiaOutputSurfaceImplOnGpu::PostSubmit(
       if (frame->sub_buffer_rect &&
           capabilities().supports_post_sub_buffer &&
           frame->sub_buffer_rect->size() != size_) {
+        output_device_->SwapBuffersSkipped(buffer_presented_callback_,
+                                           std::move(*frame));
         output_surface_plane_.reset();
         destroy_after_swap_.clear();
         return;
@@ -1634,10 +1671,6 @@ void SkiaOutputSurfaceImplOnGpu::PostSubmit(
 
   destroy_after_swap_.clear();
   context_state_->UpdateSkiaOwnedMemorySize();
-#if BUILDFLAG(ENABLE_VULKAN)
-  if (is_using_vulkan())
-    gpu::ReportUMAPerSwapBuffers();
-#endif
 }
 
 bool SkiaOutputSurfaceImplOnGpu::IsDisplayedAsOverlay() {
@@ -1672,7 +1705,8 @@ base::TimeDelta SkiaOutputSurfaceImplOnGpu::GetGpuBlockedTimeSinceLastSwap() {
 }
 
 void SkiaOutputSurfaceImplOnGpu::DidSwapBuffersComplete(
-    gpu::SwapBuffersCompleteParams params) {
+    gpu::SwapBuffersCompleteParams params,
+    gfx::GpuFenceHandle release_fence) {
   // Handled by SkiaOutputDevice already.
 }
 
@@ -1683,7 +1717,8 @@ void SkiaOutputSurfaceImplOnGpu::BufferPresented(
 
 void SkiaOutputSurfaceImplOnGpu::DidSwapBuffersCompleteInternal(
     gpu::SwapBuffersCompleteParams params,
-    const gfx::Size& pixel_size) {
+    const gfx::Size& pixel_size,
+    gfx::GpuFenceHandle release_fence) {
   if (params.swap_response.result == gfx::SwapResult::SWAP_FAILED) {
     DLOG(ERROR) << "Context lost on SWAP_FAILED";
     if (!context_state_->IsCurrent(nullptr) ||
@@ -1703,7 +1738,7 @@ void SkiaOutputSurfaceImplOnGpu::DidSwapBuffersCompleteInternal(
     waiting_for_full_damage_ = true;
   }
 
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(USE_OZONE)
   // |available_render_pass_overlay_backings_| are used or released in
   // SwapBuffers() for every frames.
   DCHECK(available_render_pass_overlay_backings_.empty());
@@ -1723,8 +1758,9 @@ void SkiaOutputSurfaceImplOnGpu::DidSwapBuffersCompleteInternal(
 
 #endif
 
-  PostTaskToClientThread(
-      base::BindOnce(did_swap_buffer_complete_callback_, params, pixel_size));
+  PostTaskToClientThread(base::BindOnce(did_swap_buffer_complete_callback_,
+                                        params, pixel_size,
+                                        std::move(release_fence)));
 }
 
 SkiaOutputSurfaceImplOnGpu::DidSwapBufferCompleteCallback
@@ -1746,13 +1782,8 @@ void SkiaOutputSurfaceImplOnGpu::MarkContextLost(ContextLostReason reason) {
 
   UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.DisplayCompositor", reason);
 
-  {
-    // Release all ongoing AsyncReadResults.
-    base::AutoLock auto_lock(async_read_result_lock_->lock());
-    for (auto* helper : async_read_result_helpers_)
-      helper->reset();
-    async_read_result_helpers_.clear();
-  }
+  // Release all ongoing AsyncReadResults.
+  ReleaseAsyncReadResultHelpers();
 
   context_state_->MarkContextLost();
   if (context_lost_callback_) {
@@ -1786,7 +1817,7 @@ void SkiaOutputSurfaceImplOnGpu::PreserveChildSurfaceControls() {
     gl_surface_->PreserveChildSurfaceControls();
 }
 
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) || defined(USE_OZONE)
 std::unique_ptr<gpu::SharedImageRepresentationSkia>
 SkiaOutputSurfaceImplOnGpu::GetOrCreateRenderPassOverlayBacking(
     const SkSurfaceCharacterization& characterization) {
@@ -1853,7 +1884,7 @@ SkiaOutputSurfaceImplOnGpu::GetOrCreateRenderPassOverlayBacking(
 
   return backing;
 }
-#endif
+#endif  // defined(OS_APPLE)  || defined(USE_OZONE)
 
 #ifdef TOOLKIT_QT
 void SkiaOutputSurfaceImplOnGpu::SetFrameSinkId(const FrameSinkId& frame_sink_id) {
@@ -1861,5 +1892,14 @@ void SkiaOutputSurfaceImplOnGpu::SetFrameSinkId(const FrameSinkId& frame_sink_id
     output_device_->SetFrameSinkId(frame_sink_id);
 }
 #endif
+
+void SkiaOutputSurfaceImplOnGpu::InitDelegatedInkPointRendererReceiver(
+    mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
+        pending_receiver) {
+  if (gl_surface_) {
+    gl_surface_->InitDelegatedInkPointRendererReceiver(
+        std::move(pending_receiver));
+  }
+}
 
 }  // namespace viz

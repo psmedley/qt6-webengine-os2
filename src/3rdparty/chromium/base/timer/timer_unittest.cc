@@ -11,12 +11,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
 #include "base/test/bind.h"
@@ -694,6 +694,20 @@ TEST(TimerTest, ContinuationReset) {
     RunLoop().Run();
     EXPECT_TRUE(g_callback_happened1);
   }
+}
+
+TEST(TimerTest, AbandonedTaskIsCancelled) {
+  test::TaskEnvironment task_environment(
+      test::TaskEnvironment::TimeSource::MOCK_TIME);
+  OneShotTimer timer;
+
+  // Start a timer. There will be a pending task on the current sequence.
+  timer.Start(FROM_HERE, TimeDelta::FromSeconds(5), base::DoNothing());
+  EXPECT_EQ(1u, task_environment.GetPendingMainThreadTaskCount());
+
+  // After AbandonAndStop(), the task is correctly treated as cancelled.
+  timer.AbandonAndStop();
+  EXPECT_EQ(0u, task_environment.GetPendingMainThreadTaskCount());
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

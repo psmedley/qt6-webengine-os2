@@ -77,6 +77,14 @@ class BaseTestCase(unittest.TestCase):
                 'port_name': 'test-win-win7',
                 'specifiers': ['Win7', 'Release']
             },
+            'MOCK wpt(1)': {
+                'port_name': 'test-linux-trusty',
+                'specifiers': ['Trusty', 'Release']
+            },
+            'MOCK wpt(2)': {
+                'port_name': 'test-linux-trusty',
+                'specifiers': ['Trusty', 'Release']
+            },
         })
         self.mac_port = self.tool.port_factory.get_from_builder_name(
             'MOCK Mac10.11')
@@ -121,7 +129,7 @@ class BaseTestCase(unittest.TestCase):
     def _zero_out_test_expectations(self):
         for port_name in self.tool.port_factory.all_port_names():
             port = self.tool.port_factory.get(port_name)
-            for path in port.expectations_files():
+            for path in port.default_expectations_files():
                 self._write(path, '')
         self.tool.filesystem.written_files = {}
 
@@ -175,7 +183,7 @@ class TestAbstractRebaselineCommand(BaseTestCase):
         add_manifest_to_mock_filesystem(self.tool.port_factory.get())
         self.assertEqual(
             self.command._file_name_for_expected_result(
-                'console/console-is-a-namespace.any.worker.html',
+                'external/wpt/console/console-is-a-namespace.any.worker.html',
                 'txt',
                 is_wpt=True),
             'external/wpt/console/console-is-a-namespace.any.js.ini')
@@ -197,6 +205,11 @@ class TestAbstractParallelRebaselineCommand(BaseTestCase):
             'MOCK Win7'
         ])
         self.assertEqual(builders_to_fetch, {'MOCK Win7', 'MOCK Win10'})
+
+        builders_to_fetch = self.command._builders_to_fetch_from([
+            'MOCK Trusty', 'MOCK wpt(1)', 'MOCK wpt(2)'
+        ])
+        self.assertEqual(builders_to_fetch, {'MOCK Trusty', 'MOCK wpt(1)', 'MOCK wpt(2)'})
 
     def test_generic_baseline_paths(self):
         test_baseline_set = TestBaselineSet(self.tool)
@@ -285,11 +298,13 @@ class TestRebaseline(BaseTestCase):
     @staticmethod
     def options(**kwargs):
         return optparse.Values(
-            dict({
-                'optimize': True,
-                'verbose': True,
-                'results_directory': None
-            }, **kwargs))
+            dict(
+                {
+                    'optimize': True,
+                    'verbose': True,
+                    'results_directory': None,
+                    'flag_specific': None
+                }, **kwargs))
 
     def test_rebaseline_test_passes_on_all_builders(self):
         self.tool.results_fetcher.set_results(
@@ -550,7 +565,8 @@ class TestRebaselineUpdatesExpectationsFiles(BaseTestCase):
         return optparse.Values({
             'optimize': False,
             'verbose': True,
-            'results_directory': None
+            'results_directory': None,
+            'flag_specific': None
         })
 
     # In the following test cases, we use a mock rebaseline-test-internal to
@@ -906,7 +922,8 @@ class TestRebaselineExecute(BaseTestCase):
             'optimize': False,
             'builders': None,
             'suffixes': 'txt,png',
-            'verbose': True
+            'verbose': True,
+            'flag_specific': None
         })
 
     def test_rebaseline(self):
@@ -1069,8 +1086,8 @@ class TestBaselineSetTest(unittest.TestCase):
         test_baseline_set.add('a/x.html', Build('MOCK Win10'))
         self.assertEqual(str(test_baseline_set), (
             '<TestBaselineSet with:\n'
-            '  a/x.html: Build(builder_name=\'MOCK Mac10.12\', build_number=None), test-mac-mac10.12\n'
-            '  a/x.html: Build(builder_name=\'MOCK Win10\', build_number=None), test-win-win10>'
+            '  a/x.html: Build(builder_name=\'MOCK Mac10.12\', build_number=None, build_id=None), test-mac-mac10.12\n'
+            '  a/x.html: Build(builder_name=\'MOCK Win10\', build_number=None, build_id=None), test-win-win10>'
         ))
 
     def test_getters(self):

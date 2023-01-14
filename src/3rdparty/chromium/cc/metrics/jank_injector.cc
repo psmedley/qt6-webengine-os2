@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/debug/alias.h"
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_split.h"
 #include "base/trace_event/trace_event.h"
@@ -45,10 +46,12 @@ struct JankInjectionParams {
   bool busy_loop = true;
 };
 
+bool g_jank_enabled_for_test = false;
+
 bool IsJankInjectionEnabled() {
   static bool enabled =
       base::FeatureList::IsEnabled(features::kJankInjectionAblationFeature);
-  return enabled;
+  return enabled || g_jank_enabled_for_test;
 }
 
 using AllowedURLsMap = std::map<std::string, std::vector<std::string>>;
@@ -104,6 +107,16 @@ void RunJank(JankInjectionParams params) {
 }
 
 }  // namespace
+
+ScopedJankInjectionEnabler::ScopedJankInjectionEnabler() {
+  DCHECK(!g_jank_enabled_for_test);
+  g_jank_enabled_for_test = true;
+}
+
+ScopedJankInjectionEnabler::~ScopedJankInjectionEnabler() {
+  DCHECK(g_jank_enabled_for_test);
+  g_jank_enabled_for_test = false;
+}
 
 JankInjector::JankInjector() {
   if (IsJankInjectionEnabled()) {

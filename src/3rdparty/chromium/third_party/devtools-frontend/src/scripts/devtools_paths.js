@@ -44,7 +44,6 @@ function pathIsMostTopLevelPath(filePath) {
   return filePath === path.sep || path.dirname(filePath) === filePath;
 }
 
-
 const _lookUpCaches = new Map(
     [['chromium', null]],
 );
@@ -59,15 +58,9 @@ function isInChromiumDirectory() {
     return cached;
   }
 
-  let potentialChromiumDir = PATH_TO_EXECUTED_FILE;
-  let isInChromium = false;
-  while (!pathIsMostTopLevelPath(potentialChromiumDir)) {
-    potentialChromiumDir = path.dirname(potentialChromiumDir);
-    if (path.basename(potentialChromiumDir) === 'chromium') {
-      isInChromium = true;
-      break;
-    }
-  }
+  const normalizedPath = PATH_TO_EXECUTED_FILE.split(path.sep).join('/');
+  const isInChromium = normalizedPath.includes('chromium/src/third_party/devtools-frontend');
+  const potentialChromiumDir = PATH_TO_EXECUTED_FILE.substring(0, PATH_TO_EXECUTED_FILE.indexOf('chromium') + 8);
   const result = {isInChromium, chromiumDirectory: potentialChromiumDir};
   _lookUpCaches.set('chromium', result);
   return result;
@@ -145,6 +138,10 @@ function stylelintExecutablePath() {
   return path.join(nodeModulesPath(), 'stylelint', 'bin', 'stylelint.js');
 }
 
+function mochaExecutablePath() {
+  return path.join(nodeModulesPath(), 'mocha', 'bin', 'mocha');
+}
+
 function downloadedChromeBinaryPath() {
   const paths = {
     'linux': path.join('chrome-linux', 'chrome'),
@@ -159,6 +156,7 @@ module.exports = {
   nodePath,
   devtoolsRootPath,
   nodeModulesPath,
+  mochaExecutablePath,
   stylelintExecutablePath,
   downloadedChromeBinaryPath
 };

@@ -11,17 +11,16 @@
 
 #include "core/fpdfapi/render/cpdf_imageloader.h"
 #include "core/fxcrt/fx_coordinates.h"
+#include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/cfx_imagerenderer.h"
 #include "core/fxge/dib/fx_dib.h"
 #include "third_party/base/optional.h"
 
-class CFX_DIBitmap;
 class CFX_DIBBase;
 class CFX_DefaultRenderDevice;
 class CFX_ImageTransformer;
 class CPDF_ImageObject;
-class CPDF_PageObject;
 class CPDF_Pattern;
 class CPDF_RenderOptions;
 class CPDF_RenderStatus;

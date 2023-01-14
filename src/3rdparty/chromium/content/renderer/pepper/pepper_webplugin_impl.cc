@@ -29,7 +29,6 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_element.h"
@@ -47,7 +46,6 @@ using blink::WebPlugin;
 using blink::WebPluginContainer;
 using blink::WebPluginParams;
 using blink::WebPrintParams;
-using blink::WebSize;
 using blink::WebString;
 using blink::WebURL;
 using blink::WebVector;
@@ -86,9 +84,8 @@ PepperWebPluginImpl::PepperWebPluginImpl(PluginModule* plugin_module,
   init_data_->url = params.url;
 
   // Set subresource URL for crash reporting.
-  static base::debug::CrashKeyString* subresource_url =
-      base::debug::AllocateCrashKeyString("subresource_url",
-                                          base::debug::CrashKeySize::Size256);
+  static auto* const subresource_url = base::debug::AllocateCrashKeyString(
+      "subresource_url", base::debug::CrashKeySize::Size256);
   base::debug::SetCrashKeyString(subresource_url, init_data_->url.spec());
 }
 
@@ -337,12 +334,6 @@ bool PepperWebPluginImpl::CanRedo() const {
   return instance_ && instance_->CanRedo();
 }
 
-bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name) {
-  DCHECK(name != "Paste");
-  DCHECK(name != "PasteAndMatchStyle");
-  return ExecuteEditCommand(name, WebString());
-}
-
 bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
                                              const blink::WebString& value) {
   if (!instance_)
@@ -462,14 +453,6 @@ bool PepperWebPluginImpl::GetPrintPresetOptionsFromDocument(
   return instance_->GetPrintPresetOptionsFromDocument(preset_options);
 }
 
-bool PepperWebPluginImpl::IsPdfPlugin() {
-  // Re-entrancy may cause JS to try to execute script on the plugin before it
-  // is fully initialized. See: crbug.com/715747.
-  if (!instance_)
-    return false;
-  return instance_->IsPdfPlugin();
-}
-
 bool PepperWebPluginImpl::CanRotateView() {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
@@ -478,7 +461,7 @@ bool PepperWebPluginImpl::CanRotateView() {
   return instance_->CanRotateView();
 }
 
-void PepperWebPluginImpl::RotateView(RotationType type) {
+void PepperWebPluginImpl::RotateView(blink::WebPlugin::RotationType type) {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
   if (instance_)

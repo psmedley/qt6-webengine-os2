@@ -15,7 +15,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/notreached.h"
-#include "base/optional.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
@@ -25,6 +24,7 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "net/url_request/url_request.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/url_util_qt.h"
 
 using content::BrowserThread;
@@ -455,66 +455,37 @@ bool ProtocolHandlerRegistry::IsHandledProtocol(
 }
 
 void ProtocolHandlerRegistry::RemoveHandler(const ProtocolHandler& handler) {
-  RemoveHandlers({handler});
-}
+  if (IsIgnored(handler)) {
+    RemoveIgnoredHandler(handler);
+    return;
+  }
 
-void ProtocolHandlerRegistry::RemoveHandlers(
-    const std::vector<ProtocolHandler>& handlers) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  std::vector<ProtocolHandler> erased_handlers;
-
-  for (const auto& handler : handlers) {
-    if (IsIgnored(handler)) {
-      RemoveIgnoredHandler(handler);
-      continue;
-    }
-
-    ProtocolHandlerList& existing_handlers =
-        protocol_handlers_[handler.protocol()];
-    bool erase_success = false;
-    if (HandlerExists(handler, existing_handlers) &&
-        HandlerExists(handler, &user_protocol_handlers_)) {
-      EraseHandler(handler, &user_protocol_handlers_);
-      erase_success = true;
-      if (!HandlerExists(handler, &policy_protocol_handlers_))
-        EraseHandler(handler, &protocol_handlers_);
-    }
-
-    if (!erase_success)
-      continue;
-    else
-      erased_handlers.push_back(handler);
+  ProtocolHandlerList& handlers = protocol_handlers_[handler.protocol()];
+  bool erase_success = false;
+  if (HandlerExists(handler, handlers) &&
+      HandlerExists(handler, &user_protocol_handlers_)) {
+    EraseHandler(handler, &user_protocol_handlers_);
+    erase_success = true;
+    if (!HandlerExists(handler, &policy_protocol_handlers_))
+      EraseHandler(handler, &protocol_handlers_);
   }
-
-  std::vector<ProtocolHandler> updated_default_handlers;
-
-  // Choose new defaults for erased handlers that were default handlers.
-  for (const auto& erased_handler : erased_handlers) {
-    ProtocolHandlerList& existing_handlers =
-        protocol_handlers_[erased_handler.protocol()];
-    ProtocolHandler default_handler = GetHandlerFor(erased_handler.protocol());
-    if (default_handler == erased_handler) {
-      // Removing the default handler for a protocol requires updating the
-      // default registration. If the default handler is a web app handler, the
-      // removal of any handler for the protocol may require updating the
-      // the default registration as the protocol may no longer require
-      // disambiguation.
-      if (!existing_handlers.empty()) {
-        updated_default_handlers.push_back(existing_handlers[0]);
-      } else {
-        default_handlers_.erase(erased_handler.protocol());
-      }
-    }
-
-    if (!IsHandledProtocol(erased_handler.protocol())) {
-      delegate_->DeregisterExternalHandler(erased_handler.protocol());
+  auto q = default_handlers_.find(handler.protocol());
+  if (erase_success && q != default_handlers_.end() && q->second == handler) {
+    // Make the new top handler in the list the default.
+    if (!handlers.empty()) {
+      // NOTE We pass a copy because SetDefault() modifies handlers.
+      SetDefault(ProtocolHandler(handlers[0]));
+    } else {
+      default_handlers_.erase(q);
     }
   }
 
-  SetDefaults(updated_default_handlers);
+  if (erase_success && !IsHandledProtocol(handler.protocol())) {
+    delegate_->DeregisterExternalHandler(handler.protocol());
+  }
   Save();
-  if (!erased_handlers.empty())
+  if (erase_success)
     NotifyChanged();
 }
 
@@ -637,34 +608,20 @@ ProtocolHandlerRegistry::GetHandlerList(
 }
 
 void ProtocolHandlerRegistry::SetDefault(const ProtocolHandler& handler) {
-  SetDefaults({handler});
-}
-
-void ProtocolHandlerRegistry::SetDefaults(
-    const std::vector<ProtocolHandler>& handlers) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  for (const auto& handler : handlers) {
-    SetDefaultImpl(handler);
-  }
-
-#if !defined(TOOLKIT_QT)
-  if (is_loading_)
-    return;
-
-  // If we're not loading register with the OS.
-  for (const auto& handler : handlers) {
-    delegate_->RegisterWithOSAsDefaultClient(
-        handler.protocol(), GetDefaultWebClientCallback(handler.protocol()));
-  }
-#endif
-}
-
-void ProtocolHandlerRegistry::SetDefaultImpl(const ProtocolHandler& handler) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const std::string& protocol = handler.protocol();
+  ProtocolHandlerMap::const_iterator p = default_handlers_.find(protocol);
+  // If we're not loading, and we are setting a default for a new protocol,
+  // register with the OS.
+#if !defined(TOOLKIT_QT)
+  if (!is_loading_ && p == default_handlers_.end())
+    delegate_->RegisterWithOSAsDefaultClient(
+        protocol, GetDefaultWebClientCallback(protocol));
+#endif
   default_handlers_.erase(protocol);
   default_handlers_.insert(std::make_pair(protocol, handler));
+
   PromoteHandler(handler);
 }
 

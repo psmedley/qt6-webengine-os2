@@ -22,12 +22,15 @@ namespace {
 // Helper class that tracks the parser state.
 class State {
  public:
-  State(std::vector<Token> token_list, Options options)
+  State(std::vector<Token> token_list,
+        EncodeCallback encode_callback,
+        Options options)
       : token_list_(std::move(token_list)),
+        encode_callback_(std::move(encode_callback)),
         options_(std::move(options)),
         segment_wildcard_regex_(
-            absl::StrFormat("[^%s]+?", EscapeString(options_.delimiter_list))) {
-  }
+            absl::StrFormat("[^%s]+?",
+                            EscapeRegexpString(options_.delimiter_list))) {}
 
   // Return true if there are more tokens to process.
   bool HasMoreTokens() const { return index_ < token_list_.size(); }
@@ -53,10 +56,10 @@ class State {
     ABSL_ASSERT(index_ < token_list_.size());
     if (const Token* token = TryConsume(type))
       return token;
-    return absl::InvalidArgumentError(
-        absl::StrFormat("Unexpected %s at %d, expected %s",
-                        TokenTypeToString(token_list_[index_].type), index_,
-                        TokenTypeToString(type)));
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "Unexpected %s '%s' at index %d, expected %s.",
+        TokenTypeToString(token_list_[index_].type), token_list_[index_].value,
+        token_list_[index_].index, TokenTypeToString(type)));
   }
 
   const Token* TryConsumeModifier() {
@@ -93,20 +96,26 @@ class State {
 
   // Convert the pending fixed value, if any, to a kFixed Part.  Has no effect
   // if there is no pending value.
-  void MaybeAddPartFromPendingFixedValue() {
+  absl::Status MaybeAddPartFromPendingFixedValue() {
     if (pending_fixed_value_.empty())
-      return;
-    part_list_.emplace_back(PartType::kFixed, std::move(pending_fixed_value_),
+      return absl::OkStatus();
+
+    auto encoded_result = encode_callback_(std::move(pending_fixed_value_));
+    if (!encoded_result.ok())
+      return encoded_result.status();
+
+    part_list_.emplace_back(PartType::kFixed, std::move(encoded_result.value()),
                             Modifier::kNone);
     pending_fixed_value_ = "";
+    return absl::OkStatus();
   }
 
   // Add a Part for the given set of tokens.
-  void AddPart(std::string prefix,
-               const Token* name_token,
-               const Token* regex_or_wildcard_token,
-               std::string suffix,
-               const Token* modifier_token) {
+  absl::Status AddPart(std::string prefix,
+                       const Token* name_token,
+                       const Token* regex_or_wildcard_token,
+                       std::string suffix,
+                       const Token* modifier_token) {
     // Convert the modifier Token into a Modifier enum value.
     Modifier modifier = Modifier::kNone;
     if (modifier_token) {
@@ -127,6 +136,23 @@ class State {
       }
     }
 
+    // If this is a `{ ... }` grouping containing only fixed text, then
+    // just add it to our pending value for now.  We want to collect as
+    // much fixed text as possible in the buffer before commiting it to
+    // a kFixed Part.
+    if (!name_token && !regex_or_wildcard_token &&
+        modifier == Modifier::kNone) {
+      AppendToPendingFixedValue(prefix);
+      return absl::OkStatus();
+    }
+
+    // We are about to add some kind of matching group Part to the list.
+    // Before doing that make sure to flush any pending fixed test to a
+    // kFixed Part.
+    absl::Status status = MaybeAddPartFromPendingFixedValue();
+    if (!status.ok())
+      return status;
+
     // If there is no name, regex, or wildcard tokens then this is just a fixed
     // string grouping; e.g. "{foo}?".  The fixed string ends up in the prefix
     // value since it consumed the entire text of the grouping.  If the prefix
@@ -134,9 +160,13 @@ class State {
     // any Part.
     if (!name_token && !regex_or_wildcard_token) {
       ABSL_ASSERT(suffix.empty());
-      if (!prefix.empty())
-        part_list_.emplace_back(PartType::kFixed, std::move(prefix), modifier);
-      return;
+      if (prefix.empty())
+        return absl::OkStatus();
+      auto result = encode_callback_(std::move(prefix));
+      if (!result.ok())
+        return result.status();
+      part_list_.emplace_back(PartType::kFixed, *result, modifier);
+      return absl::OkStatus();
     }
 
     // Determine the regex value.  If there is a |kRegex| Token, then this is
@@ -175,10 +205,20 @@ class State {
     else if (regex_or_wildcard_token)
       name = GenerateKey();
 
-    // Finally add the part to the list.
-    part_list_.emplace_back(type, std::move(name), std::move(prefix),
-                            std::move(regex_value), std::move(suffix),
-                            modifier);
+    auto prefix_result = encode_callback_(std::move(prefix));
+    if (!prefix_result.ok())
+      return prefix_result.status();
+
+    auto suffix_result = encode_callback_(std::move(suffix));
+    if (!suffix_result.ok())
+      return suffix_result.status();
+
+    // Finally add the part to the list.  We encode the prefix and suffix, but
+    // must be careful not to encode the regex value since it can change the
+    // meaning of the regular expression.
+    part_list_.emplace_back(type, std::move(name), *prefix_result,
+                            std::move(regex_value), *suffix_result, modifier);
+    return absl::OkStatus();
   }
 
   Pattern TakeAsPattern() {
@@ -193,6 +233,8 @@ class State {
 
   // The input list of Token objects to process.
   const std::vector<Token> token_list_;
+
+  EncodeCallback encode_callback_;
 
   // The set of options used to parse and construct this Pattern.  This
   // controls the behavior of things like kSegmentWildcard parts, etc.
@@ -221,12 +263,13 @@ class State {
 }  // namespace
 
 absl::StatusOr<Pattern> Parse(absl::string_view pattern,
+                              EncodeCallback encode_callback,
                               const Options& options) {
   auto result = Tokenize(pattern);
   if (!result.ok())
     return result.status();
 
-  State state(std::move(result.value()), options);
+  State state(std::move(result.value()), std::move(encode_callback), options);
 
   while (state.HasMoreTokens()) {
     // Look for the sequence: <prefix char><name><regex><modifier>
@@ -269,14 +312,19 @@ absl::StatusOr<Pattern> Parse(absl::string_view pattern,
 
       // If we have any buffered characters in a pending fixed value, then
       // convert them into a kFixed Part now.
-      state.MaybeAddPartFromPendingFixedValue();
+      absl::Status status = state.MaybeAddPartFromPendingFixedValue();
+      if (!status.ok())
+        return status;
 
       // kName and kRegex tokens can optionally be followed by a modifier.
       const Token* modifier_token = state.TryConsumeModifier();
 
       // Add the Part for the name and regex/wildcard tokens.
-      state.AddPart(std::string(prefix), name_token, regex_or_wildcard_token,
-                    /*suffix=*/"", modifier_token);
+      status = state.AddPart(std::string(prefix), name_token,
+                             regex_or_wildcard_token,
+                             /*suffix=*/"", modifier_token);
+      if (!status.ok())
+        return status;
       continue;
     }
 
@@ -293,9 +341,9 @@ absl::StatusOr<Pattern> Parse(absl::string_view pattern,
     }
 
     // There was not a kChar or kEscapedChar token, so we no we are at the end
-    // of any fixed string.  Therefore convert the pending fixed value into a
-    // kFixed Part now.
-    state.MaybeAddPartFromPendingFixedValue();
+    // of any fixed string.  Do not yet convert the pending fixed value into
+    // a kFixedPart, though.  Its possible there will be further fixed text in
+    // a `{ ... }` group, etc.
 
     // Look for the sequence:
     //
@@ -329,10 +377,19 @@ absl::StatusOr<Pattern> Parse(absl::string_view pattern,
 
       const Token* modifier_token = state.TryConsumeModifier();
 
-      state.AddPart(std::move(prefix), name_token, regex_or_wildcard_token,
-                    std::move(suffix), modifier_token);
+      absl::Status status =
+          state.AddPart(std::move(prefix), name_token, regex_or_wildcard_token,
+                        std::move(suffix), modifier_token);
+      if (!status.ok())
+        return status;
       continue;
     }
+
+    // We are about to end the pattern string, so flush any pending text to
+    // a kFixed Part.
+    absl::Status status = state.MaybeAddPartFromPendingFixedValue();
+    if (!status.ok())
+      return status;
 
     // We didn't find any tokens allowed by the syntax, so we should be
     // at the end of the token list.  If there is a syntax error, this

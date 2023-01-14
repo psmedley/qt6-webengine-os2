@@ -16,7 +16,6 @@
 #include "base/metrics/sample_vector.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -108,6 +107,7 @@ class MetricsLogTest : public testing::Test {
     EXPECT_TRUE(system_profile.has_build_timestamp());
     EXPECT_TRUE(system_profile.has_app_version());
     EXPECT_TRUE(system_profile.has_channel());
+    EXPECT_FALSE(system_profile.has_is_extended_stable_channel());
     EXPECT_TRUE(system_profile.has_application_locale());
 
     const SystemProfileProto::OS& os = system_profile.os();
@@ -149,6 +149,14 @@ TEST_F(MetricsLogTest, BasicRecord) {
   client.set_version_string("bogus version");
   const std::string kClientId = "totally bogus client ID";
   TestingPrefServiceSimple prefs;
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  // Clears existing command line flags and sets mock flags:
+  // "--mock-flag-1 --mock-flag-2=unused_value"
+  // Hashes of these flags should be populated on the system_profile field.
+  command_line->InitFromArgv(0, nullptr);
+  command_line->AppendSwitch("mock-flag-1");
+  command_line->AppendSwitchASCII("mock-flag-2", "unused_value");
+
   MetricsLog log(kClientId, 137, MetricsLog::ONGOING_LOG, &client);
   log.CloseLog();
 
@@ -172,15 +180,16 @@ TEST_F(MetricsLogTest, BasicRecord) {
   system_profile->set_channel(client.GetChannel());
   system_profile->set_application_locale(client.GetApplicationLocale());
   system_profile->set_brand_code(TestMetricsServiceClient::kBrandForTesting);
+  // Hashes of "mock-flag-1" and "mock-flag-2" from SetUpCommandLine.
+  system_profile->add_command_line_key_hash(2578836236);
+  system_profile->add_command_line_key_hash(2867288449);
 
 #if defined(ADDRESS_SANITIZER) || DCHECK_IS_ON()
   system_profile->set_is_instrumented_build(true);
 #endif
   metrics::SystemProfileProto::Hardware* hardware =
       system_profile->mutable_hardware();
-#if !defined(OS_IOS)
   hardware->set_cpu_architecture(base::SysInfo::OperatingSystemArchitecture());
-#endif
   auto app_os_arch = base::SysInfo::ProcessCPUArchitecture();
   if (!app_os_arch.empty())
     hardware->set_app_cpu_architecture(app_os_arch);
@@ -284,6 +293,29 @@ TEST_F(MetricsLogTest, HistogramBucketFields) {
   EXPECT_EQ(12, histogram_proto.bucket(4).max());
 }
 
+TEST_F(MetricsLogTest, HistogramSamplesCount) {
+  const std::string histogram_name = "test";
+  TestMetricsServiceClient client;
+  TestingPrefServiceSimple prefs;
+  TestMetricsLog log(kClientId, kSessionId, MetricsLog::ONGOING_LOG, &client);
+
+  // Create buckets: 1-5.
+  base::BucketRanges ranges(2);
+  ranges.set_range(0, 1);
+  ranges.set_range(1, 5);
+
+  // Add two samples.
+  base::SampleVector samples(1, &ranges);
+  samples.Accumulate(3, 2);
+  log.RecordHistogramDelta(histogram_name, samples);
+
+  EXPECT_EQ(2, log.log_metadata().samples_count.value());
+
+  // Add two more samples.
+  log.RecordHistogramDelta(histogram_name, samples);
+  EXPECT_EQ(4, log.log_metadata().samples_count.value());
+}
+
 TEST_F(MetricsLogTest, RecordEnvironment) {
   TestMetricsServiceClient client;
   TestMetricsLog log(kClientId, kSessionId, MetricsLog::ONGOING_LOG, &client);
@@ -307,6 +339,20 @@ TEST_F(MetricsLogTest, RecordEnvironment) {
   EXPECT_EQ(kSessionId, log.uma_proto().session_id());
   // Check that the system profile on the log has the correct values set.
   CheckSystemProfile(log.system_profile());
+}
+
+TEST_F(MetricsLogTest, RecordEnvironmentExtendedStable) {
+  TestMetricsServiceClient client;
+  client.set_is_extended_stable_channel(true);
+  TestMetricsLog log(kClientId, kSessionId, MetricsLog::ONGOING_LOG, &client);
+
+  DelegatingProvider delegating_provider;
+  auto cpu_provider = std::make_unique<metrics::CPUMetricsProvider>();
+  delegating_provider.RegisterMetricsProvider(std::move(cpu_provider));
+  log.RecordEnvironment(&delegating_provider);
+
+  EXPECT_TRUE(log.system_profile().has_is_extended_stable_channel());
+  EXPECT_TRUE(log.system_profile().is_extended_stable_channel());
 }
 
 TEST_F(MetricsLogTest, RecordEnvironmentEnableDefault) {

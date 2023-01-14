@@ -11,11 +11,11 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "components/metrics/structured/persistent_proto.h"
 #include "components/metrics/structured/storage.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace metrics {
 namespace structured {
@@ -87,6 +87,15 @@ class KeyData {
   // StructuredMetricsProvider for more details.
   uint64_t Id(uint64_t project_name_hash);
 
+  // Returns when the key for |project_name_hash| was last rotated, in days
+  // since epoch. Returns nullopt if the key doesn't exist.
+  absl::optional<int> LastKeyRotation(uint64_t project_name_hash);
+
+  // Clears all key data from memory and from disk. If this is called before the
+  // underlying proto has been read from disk, the purge will be performed once
+  // the read is complete.
+  void Purge();
+
   // Returns whether this KeyData instance has finished reading from disk and is
   // ready to be used. If false, both Id and HmacMetric will return 0u.
   bool is_initialized() { return is_initialized_; }
@@ -101,8 +110,8 @@ class KeyData {
   void OnWrite(WriteStatus status);
 
   // Ensure that a valid key exists for |project|, and return it. Either returns
-  // a string of size |kKeySize| or base::nullopt, which indicates an error.
-  base::Optional<std::string> ValidateAndGetKey(uint64_t project_name_hash);
+  // a string of size |kKeySize| or absl::nullopt, which indicates an error.
+  absl::optional<std::string> ValidateAndGetKey(uint64_t project_name_hash);
 
   // Regenerate |key|, also updating the |last_rotation| and |rotation_period|.
   // This triggers a save.

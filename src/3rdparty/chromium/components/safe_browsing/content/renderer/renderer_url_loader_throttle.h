@@ -48,6 +48,7 @@ class RendererURLLoaderThrottle : public blink::URLLoaderThrottle,
   void WillProcessResponse(const GURL& response_url,
                            network::mojom::URLResponseHead* response_head,
                            bool* defer) override;
+  const char* NameForLoggingWillProcessResponse() override;
 
   // mojom::UrlCheckNotifier implementation.
   void OnCompleteCheck(bool proceed, bool showed_interstitial) override;
@@ -86,9 +87,6 @@ class RendererURLLoaderThrottle : public blink::URLLoaderThrottle,
 
   // The total delay caused by SafeBrowsing deferring the resource load.
   base::TimeDelta total_delay_;
-  // Whether the interstitial page has been shown and therefore user action has
-  // been involved.
-  bool user_action_involved_ = false;
 
   std::unique_ptr<mojo::ReceiverSet<mojom::UrlCheckNotifier>>
       notifier_receivers_;

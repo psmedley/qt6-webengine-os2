@@ -15,7 +15,7 @@
 #include "quic/core/quic_types.h"
 #include "quic/platform/api/quic_flag_utils.h"
 #include "quic/platform/api/quic_flags.h"
-#include "common/platform/api/quiche_text_utils.h"
+#include "common/quiche_text_utils.h"
 
 namespace quic {
 
@@ -63,15 +63,6 @@ void QuicReceiveControlStream::OnDataAvailable() {
 
 void QuicReceiveControlStream::OnError(HttpDecoder* decoder) {
   stream_delegate()->OnStreamError(decoder->error(), decoder->error_detail());
-}
-
-bool QuicReceiveControlStream::OnCancelPushFrame(const CancelPushFrame& frame) {
-  if (spdy_session()->debug_visitor()) {
-    spdy_session()->debug_visitor()->OnCancelPushFrameReceived(frame);
-  }
-
-  // TODO(b/151841240): Handle CANCEL_PUSH frames instead of ignoring them.
-  return ValidateFrameType(HttpFrameType::CANCEL_PUSH);
 }
 
 bool QuicReceiveControlStream::OnMaxPushIdFrame(const MaxPushIdFrame& frame) {
@@ -145,33 +136,9 @@ bool QuicReceiveControlStream::OnHeadersFrameEnd() {
   return false;
 }
 
-bool QuicReceiveControlStream::OnPushPromiseFrameStart(
-    QuicByteCount /*header_length*/) {
-  return ValidateFrameType(HttpFrameType::PUSH_PROMISE);
-}
-
-bool QuicReceiveControlStream::OnPushPromiseFramePushId(
-    PushId /*push_id*/,
-    QuicByteCount /*push_id_length*/,
-    QuicByteCount /*header_block_length*/) {
-  QUICHE_NOTREACHED();
-  return false;
-}
-
-bool QuicReceiveControlStream::OnPushPromiseFramePayload(
-    absl::string_view /*payload*/) {
-  QUICHE_NOTREACHED();
-  return false;
-}
-
-bool QuicReceiveControlStream::OnPushPromiseFrameEnd() {
-  QUICHE_NOTREACHED();
-  return false;
-}
-
 bool QuicReceiveControlStream::OnPriorityUpdateFrameStart(
     QuicByteCount /*header_length*/) {
-  return ValidateFrameType(HttpFrameType::PRIORITY_UPDATE);
+  return ValidateFrameType(HttpFrameType::PRIORITY_UPDATE_REQUEST_STREAM);
 }
 
 bool QuicReceiveControlStream::OnPriorityUpdateFrame(
@@ -233,6 +200,13 @@ bool QuicReceiveControlStream::OnAcceptChFrame(const AcceptChFrame& frame) {
   return true;
 }
 
+void QuicReceiveControlStream::OnWebTransportStreamFrameType(
+    QuicByteCount /*header_length*/,
+    WebTransportSessionId /*session_id*/) {
+  QUIC_BUG(WEBTRANSPORT_STREAM on Control Stream)
+      << "Parsed WEBTRANSPORT_STREAM on a control stream.";
+}
+
 bool QuicReceiveControlStream::OnUnknownFrameStart(
     uint64_t frame_type,
     QuicByteCount /*header_length*/,
@@ -258,13 +232,11 @@ bool QuicReceiveControlStream::OnUnknownFrameEnd() {
 
 bool QuicReceiveControlStream::ValidateFrameType(HttpFrameType frame_type) {
   // Certain frame types are forbidden.
-  if ((frame_type == HttpFrameType::DATA ||
-       frame_type == HttpFrameType::HEADERS ||
-       frame_type == HttpFrameType::PUSH_PROMISE) ||
+  if (frame_type == HttpFrameType::DATA ||
+      frame_type == HttpFrameType::HEADERS ||
       (spdy_session()->perspective() == Perspective::IS_CLIENT &&
        frame_type == HttpFrameType::MAX_PUSH_ID) ||
-      (GetQuicReloadableFlag(quic_parse_accept_ch_frame) &&
-       spdy_session()->perspective() == Perspective::IS_SERVER &&
+      (spdy_session()->perspective() == Perspective::IS_SERVER &&
        frame_type == HttpFrameType::ACCEPT_CH)) {
     stream_delegate()->OnStreamError(
         QUIC_HTTP_FRAME_UNEXPECTED_ON_CONTROL_STREAM,

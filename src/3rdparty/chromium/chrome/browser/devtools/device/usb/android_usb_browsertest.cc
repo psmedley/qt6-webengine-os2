@@ -10,7 +10,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/containers/queue.h"
+#include "base/containers/span.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
@@ -220,7 +222,9 @@ class FakeAndroidUsbDevice : public FakeUsbDevice {
   FakeAndroidUsbDevice(
       scoped_refptr<FakeUsbDeviceInfo> device,
       mojo::PendingRemote<device::mojom::UsbDeviceClient> client)
-      : FakeUsbDevice(device, std::move(client)) {
+      : FakeUsbDevice(device,
+                      /*blocked_interface_classes=*/{},
+                      std::move(client)) {
     broken_traits_ =
         static_cast<FakeAndroidUsbDeviceInfo*>(device.get())->broken_traits();
   }
@@ -235,7 +239,7 @@ class FakeAndroidUsbDevice : public FakeUsbDevice {
   }
 
   void GenericTransferOut(uint8_t endpoint_number,
-                          const std::vector<uint8_t>& buffer,
+                          base::span<const uint8_t> buffer,
                           uint32_t timeout,
                           GenericTransferOutCallback callback) override {
     if (remaining_body_length_ == 0) {
@@ -424,6 +428,7 @@ class FakeAndroidUsbManager : public FakeUsbDeviceManager {
 
   void GetDevice(
       const std::string& guid,
+      const std::vector<uint8_t>& blocked_interface_classes,
       mojo::PendingReceiver<device::mojom::UsbDevice> device_receiver,
       mojo::PendingRemote<device::mojom::UsbDeviceClient> device_client)
       override {

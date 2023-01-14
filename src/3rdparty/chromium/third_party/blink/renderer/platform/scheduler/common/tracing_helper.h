@@ -9,7 +9,6 @@
 #include <unordered_set>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
@@ -99,6 +98,8 @@ class StateTracer {
   explicit StateTracer(const char* name) : name_(name), slice_is_open_(false) {
     internal::ValidateTracingCategory(category);
   }
+  StateTracer(const StateTracer&) = delete;
+  StateTracer& operator=(const StateTracer&) = delete;
 
   ~StateTracer() {
     if (slice_is_open_)
@@ -145,8 +146,6 @@ class StateTracer {
   // We have to track whether slice is open to avoid confusion since assignment,
   // "absent" state and OnTraceLogEnabled can happen anytime.
   bool slice_is_open_;
-
-  DISALLOW_COPY_AND_ASSIGN(StateTracer);
 };
 
 // TODO(kraynov): Rename to something less generic and reflecting
@@ -169,6 +168,8 @@ class TraceableState : public TraceableVariable, private StateTracer<category> {
     Trace();
   }
 
+  TraceableState(const TraceableState&) = delete;
+
   ~TraceableState() override = default;
 
   TraceableState& operator=(const T& value) {
@@ -187,7 +188,7 @@ class TraceableState : public TraceableVariable, private StateTracer<category> {
 
   // TraceableState<T> is serialisable into trace iff T is serialisable.
   template <typename V = T>
-  typename perfetto::check_traced_value_support<V>::type WriteIntoTracedValue(
+  typename perfetto::check_traced_value_support<V>::type WriteIntoTrace(
       perfetto::TracedValue context) const {
     perfetto::WriteIntoTracedValue(std::move(context), get());
   }
@@ -222,8 +223,6 @@ class TraceableState : public TraceableVariable, private StateTracer<category> {
 
   const ConverterFuncPtr converter_;
   T state_;
-
-  DISALLOW_COPY(TraceableState);
 };
 
 template <const char* category, typename TypedValue>
@@ -370,6 +369,8 @@ class TraceableCounter : public TraceableVariable {
           return static_cast<double>(value);
         }) {}
 
+  TraceableCounter(const TraceableCounter&) = delete;
+
   TraceableCounter& operator=(const T& value) {
     value_ = value;
     Trace();
@@ -407,7 +408,6 @@ class TraceableCounter : public TraceableVariable {
   const ConverterFuncPtr converter_;
 
   T value_;
-  DISALLOW_COPY(TraceableCounter);
 };
 
 // Add operators when it's needed.

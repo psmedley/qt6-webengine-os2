@@ -28,9 +28,13 @@ jumbo_source_set("internal") {
     "async_policy_provider.h",
     "chrome_schema.cc",
     "chrome_schema.h",
+    "cloud/affiliation.cc",
+    "cloud/affiliation.h",
     "cloud/chrome_browser_cloud_management_metrics.h",
     "cloud/cloud_external_data_manager.cc",
     "cloud/cloud_external_data_manager.h",
+    "cloud/cloud_external_data_store.cc",
+    "cloud/cloud_external_data_store.h",
     "cloud/cloud_policy_client.cc",
     "cloud/cloud_policy_client.h",
     "cloud/cloud_policy_client_registration_helper.cc",
@@ -111,8 +115,6 @@ jumbo_source_set("internal") {
     "management/management_service.h",
     "management/platform_management_service.cc",
     "management/platform_management_service.h",
-    "plist_writer.cc",
-    "plist_writer.h",
     "policy_bundle.cc",
     "policy_bundle.h",
     "policy_details.h",
@@ -138,6 +140,8 @@ jumbo_source_set("internal") {
     "policy_service_impl.h",
     "policy_statistics_collector.cc",
     "policy_statistics_collector.h",
+    "proxy_policy_provider.cc",
+    "proxy_policy_provider.h",
     "remote_commands/remote_command_job.cc",
     "remote_commands/remote_command_job.h",
     "remote_commands/remote_commands_factory.cc",
@@ -236,6 +240,8 @@ jumbo_source_set("internal") {
   if (is_android || is_ios) {
     sources += [ "cloud/component_cloud_policy_service_stub.cc" ]
     sources -= [
+      "cloud/cloud_external_data_store.cc",
+      "cloud/cloud_external_data_store.h",
       "cloud/component_cloud_policy_service.cc",
       "cloud/component_cloud_policy_store.cc",
       "cloud/component_cloud_policy_store.h",
@@ -271,8 +277,6 @@ jumbo_source_set("internal") {
     sources += [
       "policy_scheduler.cc",
       "policy_scheduler.h",
-      "proxy_policy_provider.cc",
-      "proxy_policy_provider.h",
     ]
     sources -= [
       "cloud/chrome_browser_cloud_management_metrics.h",
@@ -333,8 +337,8 @@ jumbo_static_library("test_support") {
     "cloud/mock_signing_service.h",
     "cloud/mock_user_cloud_policy_store.cc",
     "cloud/mock_user_cloud_policy_store.h",
-    "cloud/policy_builder.cc",
-    "cloud/policy_builder.h",
+    "cloud/test/policy_builder.cc",
+    "cloud/test/policy_builder.h",
     "configuration_policy_provider_test.cc",
     "configuration_policy_provider_test.h",
     "fake_async_policy_loader.cc",
@@ -406,6 +410,8 @@ source_set("common_constants") {
     "policy_switches.cc",
     "policy_switches.h",
     "policy_types.h",
+    "proxy_settings_constants.cc",
+    "proxy_settings_constants.h",
   ]
 
   if (is_ios) {
@@ -421,6 +427,7 @@ source_set("common_constants") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "cloud/affiliation_unittest.cc",
     "cloud/cloud_policy_client_unittest.cc",
     "cloud/cloud_policy_core_unittest.cc",
     "cloud/cloud_policy_manager_unittest.cc",
@@ -433,7 +440,6 @@ source_set("unit_tests") {
     "generate_policy_source_unittest.cc",
     "legacy_chrome_policy_migrator_unittest.cc",
     "management/management_service_unittest.cc",
-    "plist_writer_unittest.cc",
     "policy_bundle_unittest.cc",
     "policy_loader_command_line_unittest.cc",
     "policy_map_unittest.cc",
@@ -488,6 +494,7 @@ source_set("unit_tests") {
   }
   if (!is_android && !is_ios) {
     sources += [
+      "cloud/cloud_external_data_store_unittest.cc",
       "cloud/component_cloud_policy_service_unittest.cc",
       "cloud/component_cloud_policy_store_unittest.cc",
       "cloud/component_cloud_policy_updater_unittest.cc",
@@ -518,6 +525,9 @@ source_set("unit_tests") {
   if (is_win) {
     sources += [ "policy_loader_win_unittest.cc" ]
   }
+  if (is_chromeos_lacros) {
+    sources += [ "policy_loader_lacros_unittest.cc" ]
+  }
 
   deps = [
     ":common_constants",
@@ -543,6 +553,15 @@ source_set("unit_tests") {
   }
   if (is_android) {
     deps += [ "//components/policy/android:test_jni_headers" ]
+  }
+  if (is_chromeos_lacros) {
+    deps += [
+      "//chrome/browser",
+      "//chromeos/crosapi/mojom",
+      "//chromeos/lacros",
+      "//chromeos/lacros:test_support",
+      "//chromeos/startup:startup",
+    ]
   }
 }
 

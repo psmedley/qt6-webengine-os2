@@ -5,6 +5,9 @@
 #ifndef COMPONENTS_NTP_SNIPPETS_REMOTE_REMOTE_SUGGESTIONS_STATUS_SERVICE_IMPL_H_
 #define COMPONENTS_NTP_SNIPPETS_REMOTE_REMOTE_SUGGESTIONS_STATUS_SERVICE_IMPL_H_
 
+#include <string>
+#include <vector>
+
 #include "base/callback.h"
 #include "base/scoped_observation.h"
 #include "components/ntp_snippets/remote/remote_suggestions_status_service.h"
@@ -17,9 +20,10 @@ namespace ntp_snippets {
 class RemoteSuggestionsStatusServiceImpl
     : public RemoteSuggestionsStatusService {
  public:
-  RemoteSuggestionsStatusServiceImpl(bool is_signed_in,
-                                     PrefService* pref_service,
-                                     const std::string& additional_toggle_pref);
+  RemoteSuggestionsStatusServiceImpl(
+      bool is_signed_in,
+      PrefService* pref_service,
+      const std::vector<std::string>& additional_toggle_prefs);
 
   ~RemoteSuggestionsStatusServiceImpl() override;
 
@@ -45,9 +49,9 @@ class RemoteSuggestionsStatusServiceImpl
   RemoteSuggestionsStatus status_;
   StatusChangeCallback status_change_callback_;
 
-  // Name of a preference to be used as an additional toggle to guard the
-  // remote suggestions provider.
-  std::string additional_toggle_pref_;
+  // Name of preferences to be used as additional toggles to guard the remote
+  // suggestions provider.
+  std::vector<std::string> additional_toggle_prefs_;
   bool is_signed_in_;
   // Whether the list of remote suggestions was ever visible during the session.
   // In case it was visible and then gets hidden, the service will only be

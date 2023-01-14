@@ -5,13 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_V8_WRAPPER_HEAP_ALLOCATOR_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_V8_WRAPPER_HEAP_ALLOCATOR_IMPL_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_table_backing.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector_backing.h"
 #include "third_party/blink/renderer/platform/heap/v8_wrapper/heap.h"
 #include "third_party/blink/renderer/platform/heap/v8_wrapper/thread_state.h"
 #include "third_party/blink/renderer/platform/heap/v8_wrapper/visitor.h"
+#include "third_party/blink/renderer/platform/heap/v8_wrapper/write_barrier.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "v8/include/cppgc/explicit-management.h"
 #include "v8/include/cppgc/heap-consistency.h"
 
 namespace blink {
@@ -44,29 +47,42 @@ class PLATFORM_EXPORT HeapAllocator {
 
   template <typename T>
   static T* AllocateVectorBacking(size_t size) {
-    return reinterpret_cast<T*>(
+    return HeapVectorBacking<T>::ToArray(
         MakeGarbageCollected<HeapVectorBacking<T>>(size / sizeof(T)));
   }
 
-  static void FreeVectorBacking(void*) {
-    // TODO(1056170): Implement.
+  template <typename T>
+  static void Free(T* array) {
+    NOTREACHED();
   }
 
-  static bool ExpandVectorBacking(void*, size_t) {
-    // TODO(1056170): Implement.
-    return false;
+  template <typename T>
+  static void FreeVectorBacking(T* array) {
+    if (!array)
+      return;
+
+    HeapVectorBacking<T>::FromArray(array)->Free(
+        ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState()
+            ->heap_handle());
   }
 
-  static bool ShrinkVectorBacking(void*, size_t, size_t) {
-    // TODO(1056170): Implement.
-    return false;
+  template <typename T>
+  static bool ExpandVectorBacking(T* array, size_t new_size) {
+    DCHECK(array);
+    return HeapVectorBacking<T>::FromArray(array)->Resize(new_size);
+  }
+
+  template <typename T>
+  static bool ShrinkVectorBacking(T* array, size_t, size_t new_size) {
+    DCHECK(array);
+    return HeapVectorBacking<T>::FromArray(array)->Resize(new_size);
   }
 
   template <typename T, typename HashTable>
   static T* AllocateHashTableBacking(size_t size) {
     static_assert(sizeof(T) == sizeof(typename HashTable::ValueType),
                   "T must match ValueType.");
-    return reinterpret_cast<T*>(
+    return HeapHashTableBacking<HashTable>::ToArray(
         MakeGarbageCollected<HeapHashTableBacking<HashTable>>(size /
                                                               sizeof(T)));
   }
@@ -76,13 +92,21 @@ class PLATFORM_EXPORT HeapAllocator {
     return AllocateHashTableBacking<T, HashTable>(size);
   }
 
-  static void FreeHashTableBacking(void*) {
-    // TODO(1056170): Implement.
+  template <typename T, typename HashTable>
+  static void FreeHashTableBacking(T* array) {
+    if (!array)
+      return;
+
+    HeapHashTableBacking<HashTable>::FromArray(array)->Free(
+        ThreadStateFor<ThreadingTrait<
+            HeapHashTableBacking<HashTable>>::kAffinity>::GetState()
+            ->heap_handle());
   }
 
-  static bool ExpandHashTableBacking(void*, size_t) {
-    // TODO(1056170): Implement.
-    return false;
+  template <typename T, typename HashTable>
+  static bool ExpandHashTableBacking(T* array, size_t new_size) {
+    DCHECK(array);
+    return HeapHashTableBacking<HashTable>::FromArray(array)->Resize(new_size);
   }
 
   static bool IsAllocationAllowed() {
@@ -115,27 +139,15 @@ class PLATFORM_EXPORT HeapAllocator {
 
   template <typename T>
   static void BackingWriteBarrier(T** slot) {
-    HeapConsistency::WriteBarrierParams params;
-    switch (HeapConsistency::GetWriteBarrierType(slot, *slot, params)) {
-      case HeapConsistency::WriteBarrierType::kMarking:
-        HeapConsistency::DijkstraWriteBarrier(params, *slot);
-        break;
-      case HeapConsistency::WriteBarrierType::kGenerational:
-        HeapConsistency::GenerationalBarrier(params, slot);
-        break;
-      case HeapConsistency::WriteBarrierType::kNone:
-        break;
-      default:
-        break;  // TODO(1056170): Remove default case when API is stable.
-    }
+    WriteBarrier::DispatchForObject(slot);
   }
 
   template <typename T>
-  static void TraceBackingStoreIfMarked(T** slot) {
+  static void TraceBackingStoreIfMarked(T* object) {
     HeapConsistency::WriteBarrierParams params;
-    if (HeapConsistency::GetWriteBarrierType(slot, *slot, params) ==
+    if (HeapConsistency::GetWriteBarrierType(object, params) ==
         HeapConsistency::WriteBarrierType::kMarking) {
-      HeapConsistency::SteeleWriteBarrier(params, *slot);
+      HeapConsistency::SteeleWriteBarrier(params, object);
     }
   }
 

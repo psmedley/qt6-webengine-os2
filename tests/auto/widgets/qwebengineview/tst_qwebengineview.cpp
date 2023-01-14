@@ -34,10 +34,12 @@
 #include <qtemporarydir.h>
 #include <QClipboard>
 #include <QCompleter>
+#include <QDropEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QHBoxLayout>
 #include <QMenu>
+#include <QMimeData>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QtWebEngineCore/qwebenginehttprequest.h>
@@ -173,6 +175,9 @@ private Q_SLOTS:
     void setViewPreservesExplicitPage();
     void closeDiscardsPage();
     void loadAfterRendererCrashed();
+    void inspectElement();
+    void navigateOnDrop_data();
+    void navigateOnDrop();
 };
 
 // This will be called before the first test function is executed.
@@ -3128,7 +3133,7 @@ void tst_QWebEngineView::webUIURLs_data()
     QTest::newRow("conversion-internals") << QUrl("chrome://conversion-internals") << true;
     QTest::newRow("crashes") << QUrl("chrome://crashes") << false;
     QTest::newRow("credits") << QUrl("chrome://credits") << false;
-    QTest::newRow("device-log") << QUrl("chrome://device-log") << false;
+    QTest::newRow("device-log") << QUrl("chrome://device-log") << true;
     QTest::newRow("devices") << QUrl("chrome://devices") << false;
     QTest::newRow("dino") << QUrl("chrome://dino") << false; // It works but this is an error page
     QTest::newRow("discards") << QUrl("chrome://discards") << false;
@@ -3479,6 +3484,71 @@ void tst_QWebEngineView::loadAfterRendererCrashed()
     view.load(QUrl("qrc:///resources/dummy.html"));
     QTRY_COMPARE(loadSpy.count(), 1);
     QVERIFY(loadSpy.first().first().toBool());
+}
+
+void tst_QWebEngineView::inspectElement()
+{
+    QWebEngineView view;
+    view.resize(640, 480);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    auto page = view.page();
+    // shouldn't do anything until page is set
+    page->triggerAction(QWebEnginePage::InspectElement);
+    QTest::qWait(100);
+
+    QSignalSpy spy(&view, &QWebEngineView::loadFinished);
+    view.load(QUrl("data:text/plain,foobarbaz"));
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 12000);
+
+    // shouldn't do anything since inspector is not attached
+    page->triggerAction(QWebEnginePage::InspectElement);
+    QTest::qWait(100);
+
+    QWebEngineView inspectorView;
+    inspectorView.resize(640, 480);
+    inspectorView.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&inspectorView));
+    inspectorView.page()->setInspectedPage(page);
+
+    page->triggerAction(QWebEnginePage::InspectElement);
+    // TODO verify somehow
+    QTest::qWait(100);
+}
+
+void tst_QWebEngineView::navigateOnDrop_data()
+{
+    QTest::addColumn<QUrl>("url");
+    QTest::newRow("file") << QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).absoluteFilePath("resources/dummy.html"));
+    QTest::newRow("qrc") << QUrl("qrc:///resources/dummy.html");
+}
+
+void tst_QWebEngineView::navigateOnDrop()
+{
+    QFETCH(QUrl, url);
+    struct WebEngineView : QWebEngineView {
+        QWebEngineView* createWindow(QWebEnginePage::WebWindowType /* type */) override { return this; }
+    } view;
+    view.resize(640, 480);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    QSignalSpy loadSpy(&view, &QWebEngineView::loadFinished);
+    QMimeData mimeData;
+    mimeData.setUrls({ url });
+
+    auto sendEvents = [&] () {
+        QDragEnterEvent dee(view.rect().center(), Qt::CopyAction, &mimeData, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(&view, &dee);
+        QDropEvent de(view.rect().center(), Qt::CopyAction, &mimeData, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(&view, &de);
+    };
+
+    sendEvents();
+    QTRY_COMPARE(loadSpy.count(), 1);
+    QVERIFY(loadSpy.first().first().toBool());
+    QCOMPARE(view.url(), url);
 }
 
 QTEST_MAIN(tst_QWebEngineView)

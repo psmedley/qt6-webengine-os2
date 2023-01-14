@@ -5,7 +5,8 @@
 #ifndef COMPONENTS_BOOKMARKS_BROWSER_TITLED_URL_NODE_H_
 #define COMPONENTS_BOOKMARKS_BROWSER_TITLED_URL_NODE_H_
 
-#include "base/containers/span.h"
+#include <vector>
+
 #include "base/strings/string_piece.h"
 #include "url/gurl.h"
 
@@ -17,7 +18,7 @@ namespace bookmarks {
 class TitledUrlNode {
  public:
   // Returns the title for the node.
-  virtual const base::string16& GetTitledUrlNodeTitle() const = 0;
+  virtual const std::u16string& GetTitledUrlNodeTitle() const = 0;
 
   // Returns the URL for the node.
   virtual const GURL& GetTitledUrlNodeUrl() const = 0;

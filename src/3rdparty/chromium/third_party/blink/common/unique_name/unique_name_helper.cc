@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -148,7 +148,7 @@ std::string AppendUniqueSuffix(const FrameAdapter* frame,
 std::string CalculateNameInternal(const FrameAdapter* frame,
                                   base::StringPiece name) {
   if (!name.empty() && frame->IsCandidateUnique(name) && name != "_blank")
-    return name.as_string();
+    return std::string(name);
 
   std::string candidate = GenerateCandidate(frame);
   if (frame->IsCandidateUnique(candidate))
@@ -316,8 +316,8 @@ std::string UniqueNameHelper::ExtractStableNameForTesting(
     base::StringPiece unique_name) {
   size_t i = unique_name.rfind(kDynamicFrameMarker);
   if (i == std::string::npos)
-    return unique_name.as_string();
-  return unique_name.substr(0, i).as_string();
+    return std::string(unique_name);
+  return std::string(unique_name.substr(0, i));
 }
 
 }  // namespace blink

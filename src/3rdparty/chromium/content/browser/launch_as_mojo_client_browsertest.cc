@@ -86,7 +86,8 @@ class LaunchAsMojoClientBrowserTest : public ContentBrowserTest {
                                   base::size(kSwitchesToCopy));
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-    command_line.AppendSwitchASCII(switches::kUseGL, "swiftshader");
+    command_line.AppendSwitchASCII(switches::kUseGL,
+                                   gl::kGLImplementationSwiftShaderName);
 #endif
     return command_line;
   }
@@ -154,7 +155,7 @@ IN_PROC_BROWSER_TEST_F(LaunchAsMojoClientBrowserTest, LaunchAndBindInterface) {
   base::RunLoop loop;
   shell_controller->GetSwitchValue(
       kExtraSwitchName,
-      base::BindLambdaForTesting([&](const base::Optional<std::string>& value) {
+      base::BindLambdaForTesting([&](const absl::optional<std::string>& value) {
         ASSERT_TRUE(value);
         EXPECT_EQ(kExtraSwitchValue, *value);
         loop.Quit();

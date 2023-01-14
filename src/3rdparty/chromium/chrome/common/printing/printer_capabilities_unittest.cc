@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
@@ -17,6 +16,7 @@
 #include "build/chromeos_buildflags.h"
 #include "content/public/test/browser_task_environment.h"
 #include "printing/backend/test_print_backend.h"
+#include "printing/print_job_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -46,10 +46,10 @@ void VerifyPaper(const Value& paper_dict,
   const std::string* vendor = paper_dict.FindStringKey("vendor_id");
   ASSERT_TRUE(vendor);
   EXPECT_EQ(expected_vendor, *vendor);
-  base::Optional<int> width = paper_dict.FindIntKey("width_microns");
+  absl::optional<int> width = paper_dict.FindIntKey("width_microns");
   ASSERT_TRUE(width.has_value());
   EXPECT_EQ(expected_size.width(), width.value());
-  base::Optional<int> height = paper_dict.FindIntKey("height_microns");
+  absl::optional<int> height = paper_dict.FindIntKey("height_microns");
   ASSERT_TRUE(height.has_value());
   EXPECT_EQ(expected_size.height(), height.value());
 }
@@ -148,7 +148,7 @@ TEST_F(PrinterCapabilitiesTest, ProvidedCapabilitiesUsed) {
   EXPECT_TRUE(caps_dict->FindKey(kDpi));
 }
 
-// Ensure that the capabilities dictionary is present but empty if the backend
+// Ensure that the capabilities dictionary is not present if the backend
 // doesn't return capabilities.
 TEST_F(PrinterCapabilitiesTest, NullCapabilitiesExcluded) {
   std::string printer_name = "test_printer";
@@ -166,11 +166,8 @@ TEST_F(PrinterCapabilitiesTest, NullCapabilitiesExcluded) {
   // Verify settings were created.
   ASSERT_FALSE(settings_dictionary.DictEmpty());
 
-  // Verify that capabilities is an empty dictionary.
-  base::Value* caps_dict = settings_dictionary.FindKeyOfType(
-      kSettingCapabilities, base::Value::Type::DICTIONARY);
-  ASSERT_TRUE(caps_dict);
-  EXPECT_TRUE(caps_dict->DictEmpty());
+  // Verify that capabilities is not present.
+  ASSERT_FALSE(settings_dictionary.FindKey(kSettingCapabilities));
 }
 
 TEST_F(PrinterCapabilitiesTest, UserDefinedPapers) {
@@ -251,7 +248,7 @@ TEST_F(PrinterCapabilitiesTest, HasNotSecureProtocol) {
   // Verify that pin is not supported.
   const Value* pin = printer->FindKeyOfType("pin", Value::Type::DICTIONARY);
   ASSERT_TRUE(pin);
-  base::Optional<bool> pin_supported = pin->FindBoolKey("supported");
+  absl::optional<bool> pin_supported = pin->FindBoolKey("supported");
   ASSERT_TRUE(pin_supported.has_value());
   ASSERT_FALSE(pin_supported.value());
 }

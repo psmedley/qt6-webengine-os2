@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -117,7 +118,7 @@ class ComboboxModelExampleList : public ui::ComboboxModel {
 
   // ui::ComboboxModel:
   int GetItemCount() const override { return example_list_.size(); }
-  base::string16 GetItemAt(int index) const override {
+  std::u16string GetItemAt(int index) const override {
     return base::UTF8ToUTF16(example_list_[index]->example_title());
   }
 
@@ -185,9 +186,7 @@ class ExamplesWindowContents : public WidgetDelegateView {
 
  private:
   // WidgetDelegateView:
-  base::string16 GetWindowTitle() const override {
-    return base::ASCIIToUTF16("Views Examples");
-  }
+  std::u16string GetWindowTitle() const override { return u"Views Examples"; }
   void WindowClosing() override {
     instance_ = nullptr;
     if (on_close_)
@@ -202,11 +201,12 @@ class ExamplesWindowContents : public WidgetDelegateView {
     }
     return size;
   }
+  gfx::Size GetMinimumSize() const override { return gfx::Size(50, 50); }
 
   void ComboboxChanged() {
     int index = combobox_->GetSelectedIndex();
     DCHECK_LT(index, combobox_model_->GetItemCount());
-    example_shown_->RemoveAllChildViews(false);
+    example_shown_->RemoveAllChildViewsWithoutDeleting();
     example_shown_->AddChildView(combobox_model_->GetItemViewAt(index));
     example_shown_->RequestFocus();
     SetStatus(std::string());

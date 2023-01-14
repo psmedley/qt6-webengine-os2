@@ -10,6 +10,7 @@
 #include <string>
 
 #include "base/build_time.h"
+#include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_base.h"
@@ -20,7 +21,6 @@
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -33,6 +33,7 @@
 #include "components/metrics/metrics_service_client.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/variations/hashing.h"
 #include "third_party/metrics_proto/histogram_event.pb.h"
 #include "third_party/metrics_proto/system_profile.pb.h"
 #include "third_party/metrics_proto/user_action_event.pb.h"
@@ -49,6 +50,23 @@
 using base::SampleCountIterator;
 
 namespace metrics {
+
+LogMetadata::LogMetadata()
+    : samples_count(absl::nullopt), user_id(absl::nullopt) {}
+LogMetadata::LogMetadata(
+    const absl::optional<base::HistogramBase::Count> samples_count,
+    const absl::optional<uint64_t> user_id)
+    : samples_count(samples_count), user_id(user_id) {}
+LogMetadata::LogMetadata(const LogMetadata& other) = default;
+LogMetadata::~LogMetadata() = default;
+
+void LogMetadata::AddSampleCount(base::HistogramBase::Count sample_count) {
+  if (samples_count.has_value()) {
+    samples_count = samples_count.value() + sample_count;
+  } else {
+    samples_count = sample_count;
+  }
+}
 
 namespace {
 
@@ -133,8 +151,7 @@ MetricsLog::MetricsLog(const std::string& client_id,
   RecordCoreSystemProfile(client_, system_profile);
 }
 
-MetricsLog::~MetricsLog() {
-}
+MetricsLog::~MetricsLog() = default;
 
 // static
 void MetricsLog::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -182,25 +199,37 @@ void MetricsLog::RecordUserAction(const std::string& key,
 // static
 void MetricsLog::RecordCoreSystemProfile(MetricsServiceClient* client,
                                          SystemProfileProto* system_profile) {
-  RecordCoreSystemProfile(client->GetVersionString(), client->GetChannel(),
-                          client->GetApplicationLocale(),
-                          client->GetAppPackageName(), system_profile);
+  RecordCoreSystemProfile(
+      client->GetVersionString(), client->GetChannel(),
+      client->IsExtendedStableChannel(), client->GetApplicationLocale(),
+      client->GetAppPackageNameIfLoggable(), system_profile);
 
   std::string brand_code;
   if (client->GetBrand(&brand_code))
     system_profile->set_brand_code(brand_code);
+
+  // Records 32-bit hashes of the command line keys.
+  const auto command_line_switches =
+      base::CommandLine::ForCurrentProcess()->GetSwitches();
+  for (const auto& command_line_switch : command_line_switches) {
+    system_profile->add_command_line_key_hash(
+        variations::HashName(command_line_switch.first));
+  }
 }
 
 // static
 void MetricsLog::RecordCoreSystemProfile(
     const std::string& version,
     metrics::SystemProfileProto::Channel channel,
+    bool is_extended_stable_channel,
     const std::string& application_locale,
     const std::string& package_name,
     SystemProfileProto* system_profile) {
   system_profile->set_build_timestamp(metrics::MetricsLog::GetBuildTime());
   system_profile->set_app_version(version);
   system_profile->set_channel(channel);
+  if (is_extended_stable_channel)
+    system_profile->set_is_extended_stable_channel(true);
   system_profile->set_application_locale(application_locale);
 
 #if defined(ADDRESS_SANITIZER) || DCHECK_IS_ON()
@@ -210,12 +239,7 @@ void MetricsLog::RecordCoreSystemProfile(
 
   metrics::SystemProfileProto::Hardware* hardware =
       system_profile->mutable_hardware();
-#if !defined(OS_IOS)
-  // On iOS, OperatingSystemArchitecture() returns values like iPad4,4 which is
-  // not the actual CPU architecture. Don't set it until the API is fixed. See
-  // crbug.com/370104 for details.
   hardware->set_cpu_architecture(base::SysInfo::OperatingSystemArchitecture());
-#endif
   auto app_os_arch = base::SysInfo::ProcessCPUArchitecture();
   if (!app_os_arch.empty())
     hardware->set_app_cpu_architecture(app_os_arch);
@@ -262,7 +286,7 @@ void MetricsLog::RecordCoreSystemProfile(
 void MetricsLog::RecordHistogramDelta(const std::string& histogram_name,
                                       const base::HistogramSamples& snapshot) {
   DCHECK(!closed_);
-  samples_count_ += snapshot.TotalCount();
+  log_metadata_.AddSampleCount(snapshot.TotalCount());
   EncodeHistogramDelta(histogram_name, snapshot, &uma_proto_);
 }
 

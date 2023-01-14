@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
+#include "gpu/command_buffer/service/ref_counted_lock.h"
 #include "gpu/command_buffer/service/stream_texture_shared_image_interface.h"
 #include "media/gpu/android/codec_output_buffer_renderer.h"
 #include "media/gpu/android/promotion_hint_aggregator.h"
@@ -27,9 +28,14 @@ class ScopedHardwareBufferFenceSync;
 namespace media {
 
 // A GLImage that renders MediaCodec buffers to a TextureOwner or overlay
-// as needed in order to draw them.
+// as needed in order to draw them. Note that when DrDc is enabled(kEnableDrDc),
+// a per codec dr-dc lock is expected to be held while calling methods of this
+// class. This is ensured by adding AssertAcquiredDrDcLock() to those methods.
+// We are not adding a Locked suffix on those methods since many of those
+// methods are either overrides or virtual.
 class MEDIA_GPU_EXPORT CodecImage
-    : public gpu::StreamTextureSharedImageInterface {
+    : public gpu::StreamTextureSharedImageInterface,
+      gpu::RefCountedLockHelperDrDc {
  public:
   // Callback to notify that a codec image is now unused in the sense of not
   // being out for display.  This lets us signal interested folks once a video
@@ -42,7 +48,8 @@ class MEDIA_GPU_EXPORT CodecImage
   // destroying it.
   using UnusedCB = base::OnceCallback<void(CodecImage*)>;
 
-  CodecImage(const gfx::Size& coded_size);
+  CodecImage(const gfx::Size& coded_size,
+             scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
   // (Re-)Initialize this CodecImage to use |output_buffer| et. al.
   //
@@ -99,13 +106,14 @@ class MEDIA_GPU_EXPORT CodecImage
   // gpu::StreamTextureSharedImageInterface implementation.
   void ReleaseResources() override;
   bool IsUsingGpuMemory() const override;
-  void UpdateAndBindTexImage() override;
+  void UpdateAndBindTexImage(GLuint service_id) override;
   bool HasTextureOwner() const override;
   gpu::TextureBase* GetTextureBase() const override;
   void NotifyOverlayPromotion(bool promotion, const gfx::Rect& bounds) override;
   // Renders this image to the overlay. Returns true if the buffer is in the
   // overlay front buffer. Returns false if the buffer was invalidated.
   bool RenderToOverlay() override;
+  bool TextureOwnerBindsTextureOnUpdate() override;
 
   // Whether the codec buffer has been rendered to the front buffer.
   bool was_rendered_to_front_buffer() const {
@@ -156,7 +164,12 @@ class MEDIA_GPU_EXPORT CodecImage
   // Renders this image to the texture owner front buffer by first rendering
   // it to the back buffer if it's not already there, and then waiting for the
   // frame available event before calling UpdateTexImage().
-  bool RenderToTextureOwnerFrontBuffer(BindingsMode bindings_mode);
+  // Also bind the latest image
+  // to the provided |service_id| if TextureOwner does not binds texture on
+  // update. If |bindings_mode| is other than kEnsureTexImageBound, then
+  // |service_id| is not required.
+  bool RenderToTextureOwnerFrontBuffer(BindingsMode bindings_mode,
+                                       GLuint service_id);
 
   // Whether this image is texture_owner or overlay backed.
   bool is_texture_owner_backed_ = false;
@@ -171,6 +184,10 @@ class MEDIA_GPU_EXPORT CodecImage
   PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb_;
 
   std::vector<UnusedCB> unused_cbs_;
+
+  // Bound to the gpu main thread on which this CodecImage is created. Some
+  // methods can only be called on this thread.
+  THREAD_CHECKER(gpu_main_thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(CodecImage);
 };

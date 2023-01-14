@@ -15,7 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "build/buildflag.h"
 #include "chrome/browser/ash/assistant/assistant_util.h"
-#include "chrome/browser/chromeos/login/ui/oobe_dialog_size_utils.h"
+#include "chrome/browser/ash/login/ui/oobe_dialog_size_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -50,19 +50,18 @@ namespace {
 AssistantOptInDialog* g_dialog = nullptr;
 
 constexpr int kCaptionBarHeight = 32;
-constexpr int kDialogMargin = 48;
-constexpr gfx::Size kDialogMaxSize = gfx::Size(768, 768);
-constexpr gfx::Size kDialogMinSize = gfx::Size(544, 464);
-constexpr gfx::Insets kDialogInsets =
-    gfx::Insets(kDialogMargin + kCaptionBarHeight,
-                kDialogMargin,
-                kDialogMargin,
-                kDialogMargin);
 
 constexpr char kFlowTypeParamKey[] = "flow-type";
 constexpr char kCaptionBarHeightParamKey[] = "caption-bar-height";
-constexpr char kOobeDialogHeightParamKey[] = "oobe-dialog-height";
-constexpr char kOobeDialogWidthParamKey[] = "oobe-dialog-width";
+
+GURL CreateAssistantOptInURL(ash::FlowType type) {
+  GURL gurl(chrome::kChromeUIAssistantOptInURL);
+  gurl = net::AppendQueryParameter(
+      gurl, kFlowTypeParamKey, base::NumberToString(static_cast<int>(type)));
+  gurl = net::AppendQueryParameter(gurl, kCaptionBarHeightParamKey,
+                                   base::NumberToString(kCaptionBarHeight));
+  return gurl;
+}
 
 }  // namespace
 
@@ -94,8 +93,8 @@ AssistantOptInUI::AssistantOptInUI(content::WebUI* web_ui)
                           IDR_ASSISTANT_VOICE_MATCH_ANIMATION);
   source->AddResourcePath("voice_match_already_setup_animation.json",
                           IDR_ASSISTANT_VOICE_MATCH_ALREADY_SETUP_ANIMATION);
-  source->AddBoolean("newLayoutEnabled",
-                     chromeos::features::IsNewOobeLayoutEnabled());
+  // TODO(crbug.com/1202135): Remove along with JS part.
+  source->AddBoolean("newLayoutEnabled", true);
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::WorkerSrc, "worker-src blob: 'self';");
   source->DisableTrustedTypesCSP();
@@ -169,7 +168,7 @@ bool AssistantOptInDialog::BounceIfActive() {
 AssistantOptInDialog::AssistantOptInDialog(
     ash::FlowType type,
     ash::AssistantSetup::StartAssistantOptInFlowCallback callback)
-    : SystemWebDialogDelegate(CreateAssistantOptInURL(type), base::string16()),
+    : SystemWebDialogDelegate(CreateAssistantOptInURL(type), std::u16string()),
       callback_(std::move(callback)) {}
 
 AssistantOptInDialog::~AssistantOptInDialog() {
@@ -182,35 +181,13 @@ void AssistantOptInDialog::AdjustWidgetInitParams(
   params->z_order = ui::ZOrderLevel::kNormal;
 }
 
-GURL AssistantOptInDialog::CreateAssistantOptInURL(ash::FlowType type) {
-  GURL gurl(chrome::kChromeUIAssistantOptInURL);
-  gurl = net::AppendQueryParameter(
-      gurl, kFlowTypeParamKey, base::NumberToString(static_cast<int>(type)));
-  gurl = net::AppendQueryParameter(gurl, kCaptionBarHeightParamKey,
-                                   base::NumberToString(kCaptionBarHeight));
-  gfx::Size size;
-  GetDialogSize(&size);
-  gurl = net::AppendQueryParameter(gurl, kOobeDialogHeightParamKey,
-                                   base::NumberToString(size.height()));
-  gurl = net::AppendQueryParameter(gurl, kOobeDialogWidthParamKey,
-                                   base::NumberToString(size.width()));
-  return gurl;
-}
-
 void AssistantOptInDialog::GetDialogSize(gfx::Size* size) const {
   auto bounds = display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   gfx::Size dialog_size;
-  if (features::IsNewOobeLayoutEnabled()) {
-    const bool is_horizontal = bounds.width() > bounds.height();
-    dialog_size = CalculateOobeDialogSize(
-        display::Screen::GetScreen()->GetPrimaryDisplay().size(),
-        ash::ShelfConfig::Get()->shelf_size(), is_horizontal);
-  } else {
-    bounds.Inset(kDialogInsets);
-    dialog_size = bounds.size();
-    dialog_size.SetToMin(kDialogMaxSize);
-    dialog_size.SetToMax(kDialogMinSize);
-  }
+  const bool is_horizontal = bounds.width() > bounds.height();
+  dialog_size = CalculateOobeDialogSize(
+      display::Screen::GetScreen()->GetPrimaryDisplay().size(),
+      ash::ShelfConfig::Get()->shelf_size(), is_horizontal);
   size->SetSize(dialog_size.width(), dialog_size.height());
 }
 

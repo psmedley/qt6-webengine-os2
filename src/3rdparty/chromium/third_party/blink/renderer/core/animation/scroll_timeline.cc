@@ -6,8 +6,11 @@
 
 #include <tuple>
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_scroll_timeline_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_csskeywordvalue_cssnumericvalue_scrolltimelineelementbasedoffset_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_scrolltimelineautokeyword.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_offset.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_util.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
@@ -27,12 +30,6 @@
 namespace blink {
 
 namespace {
-
-constexpr double kScrollTimelineDuration = 100.0;
-// Animation times are tracked as TimeDeltas which are stored internally as an
-// integer number of microseconds. Multiplying by 1000 converts this into a
-// value equivalent to Milliseconds.
-constexpr double kScrollTimelineDurationMs = kScrollTimelineDuration * 1000.0;
 
 using ScrollTimelineSet =
     HeapHashMap<WeakMember<Node>,
@@ -87,25 +84,23 @@ ScrollOrientation ToPhysicalScrollOrientation(
   }
 }
 
-// Note that the resolution process may trigger document lifecycle to clean
-// style and layout.
 Node* ResolveScrollSource(Element* scroll_source) {
-  // When in quirks mode we need the style to be clean, so we don't use
-  // |ScrollingElementNoLayout|.
   if (scroll_source &&
-      scroll_source == scroll_source->GetDocument().scrollingElement()) {
+      scroll_source ==
+          scroll_source->GetDocument().ScrollingElementNoLayout()) {
     return &scroll_source->GetDocument();
   }
   return scroll_source;
 }
+
 }  // namespace
 
 ScrollTimeline* ScrollTimeline::Create(Document& document,
                                        ScrollTimelineOptions* options,
                                        ExceptionState& exception_state) {
-  Element* scroll_source = options->hasScrollSource()
-                               ? options->scrollSource()
-                               : document.scrollingElement();
+  absl::optional<Element*> scroll_source =
+      options->hasScrollSource() ? absl::make_optional(options->scrollSource())
+                                 : absl::nullopt;
 
   ScrollDirection orientation;
   if (!StringToScrollDirection(options->orientation(), orientation)) {
@@ -114,64 +109,37 @@ ScrollTimeline* ScrollTimeline::Create(Document& document,
     return nullptr;
   }
 
-  ScrollTimelineOffset* start_scroll_offset =
-      ScrollTimelineOffset::Create(options->startScrollOffset());
-  if (!start_scroll_offset) {
-    exception_state.ThrowTypeError("Invalid start offset.");
-    return nullptr;
-  }
-
-  ScrollTimelineOffset* end_scroll_offset =
-      ScrollTimelineOffset::Create(options->endScrollOffset());
-  if (!end_scroll_offset) {
-    exception_state.ThrowTypeError("Invalid end offset");
-    return nullptr;
-  }
-
-  // TODO(crbug.com/1094014): Either scroll offsets or start/end offsets can
-  // be specified.
-  if (!options->scrollOffsets().IsEmpty() &&
-      (!start_scroll_offset->IsDefaultValue() ||
-       !end_scroll_offset->IsDefaultValue())) {
-    exception_state.ThrowTypeError(
-        "Either scrollOffsets or start/end offsets can be specified.");
-    return nullptr;
-  }
-
   HeapVector<Member<ScrollTimelineOffset>> scroll_offsets;
-  if (options->scrollOffsets().IsEmpty()) {
-    // TODO(crbug.com/1094014): scroll_offsets will replace start and end
-    // offsets once spec decision on multiple scroll offsets is finalized.
-    // https://github.com/w3c/csswg-drafts/issues/4912
-    if (!start_scroll_offset->IsDefaultValue())
-      scroll_offsets.push_back(start_scroll_offset);
-    if (!end_scroll_offset->IsDefaultValue() ||
-        !start_scroll_offset->IsDefaultValue())
-      scroll_offsets.push_back(end_scroll_offset);
-  } else {
-    for (auto& offset : options->scrollOffsets()) {
-      ScrollTimelineOffset* scroll_offset =
-          ScrollTimelineOffset::Create(offset);
-      if (!scroll_offset) {
-        exception_state.ThrowTypeError("Invalid scroll offset");
-        return nullptr;
-      }
-      if (scroll_offset->IsDefaultValue() &&
-          (options->scrollOffsets().size() == 1 ||
-           (scroll_offsets.size() + 1) < options->scrollOffsets().size())) {
-        exception_state.ThrowTypeError(
-            "Invalid scrollOffsets: 'auto' can only be set as an end "
-            "offset when start offset presents.");
-        return nullptr;
-      }
-      scroll_offsets.push_back(scroll_offset);
+  // https://drafts.csswg.org/scroll-animations-1/#set-the-offset-value
+  for (auto& offset : options->scrollOffsets()) {
+    ScrollTimelineOffset* scroll_offset = ScrollTimelineOffset::Create(offset);
+    if (!scroll_offset) {
+      exception_state.ThrowTypeError("Invalid scroll offset");
+      return nullptr;
     }
+    // 2.1 If val is a CSSKeywordValue and matches the grammar auto and pos
+    // equals to 0 or size - 1: Return val.
+    unsigned int pos = scroll_offsets.size();
+    if (scroll_offset->IsDefaultValue() &&
+        !(pos == 0 || pos == (options->scrollOffsets().size() - 1))) {
+      exception_state.ThrowTypeError(
+          "Invalid scrollOffsets: 'auto' can only be set as start or end "
+          "offset");
+      return nullptr;
+    }
+    scroll_offsets.push_back(scroll_offset);
   }
 
-  base::Optional<double> time_range;
-  if (options->timeRange().IsDouble()) {
-    time_range = base::make_optional(options->timeRange().GetAsDouble());
+  absl::optional<double> time_range;
+  if (options->timeRange()->IsDouble()) {
+    time_range = absl::make_optional(options->timeRange()->GetAsDouble());
   }
+
+  // The scrollingElement depends on style/layout-tree in quirks mode. Update
+  // such that subsequent calls to ScrollingElementNoLayout returns up-to-date
+  // information.
+  if (document.InQuirksMode())
+    document.UpdateStyleAndLayoutTree();
 
   return MakeGarbageCollected<ScrollTimeline>(
       &document, scroll_source, orientation, scroll_offsets, time_range);
@@ -179,12 +147,13 @@ ScrollTimeline* ScrollTimeline::Create(Document& document,
 
 ScrollTimeline::ScrollTimeline(
     Document* document,
-    Element* scroll_source,
+    absl::optional<Element*> scroll_source,
     ScrollDirection orientation,
     HeapVector<Member<ScrollTimelineOffset>> scroll_offsets,
-    base::Optional<double> time_range)
+    absl::optional<double> time_range)
     : AnimationTimeline(document),
-      scroll_source_(scroll_source),
+      scroll_source_(
+          scroll_source.value_or(document->ScrollingElementNoLayout())),
       resolved_scroll_source_(ResolveScrollSource(scroll_source_)),
       orientation_(orientation),
       scroll_offsets_(std::move(scroll_offsets)),
@@ -238,8 +207,11 @@ const std::vector<double> ScrollTimeline::GetResolvedScrollOffsets() const {
 
 // Resolves scroll offsets and stores them into resolved_offsets argument.
 // Returns true if the offsets are resolved.
+// https://drafts.csswg.org/scroll-animations-1/#effective-scroll-offsets-algorithm
 bool ScrollTimeline::ResolveScrollOffsets(
     WTF::Vector<double>& resolved_offsets) const {
+  // 1. Let effective scroll offsets be an empty list of effective scroll
+  // offsets.
   DCHECK(resolved_offsets.IsEmpty());
   DCHECK(ComputeIsActive());
   LayoutBox* layout_box = resolved_scroll_source_->GetLayoutBox();
@@ -251,26 +223,59 @@ bool ScrollTimeline::ResolveScrollOffsets(
 
   auto orientation = ToPhysicalScrollOrientation(orientation_, *layout_box);
 
+  // 2. Let first offset be true.
+  // first_offset signifies weather min or max scroll offset is pushed to
+  // effective scroll offsets.
+  bool first_offset = true;
+
+  // 3. If scrollOffsets is empty
   if (scroll_offsets_.size() == 0) {
     // Start and end offsets resolve to 'auto'.
+    // 3.1 Run the procedure to resolve a scroll timeline offset for auto with
+    // the is first flag set to first offset and add the resulted value into
+    // effective scroll offsets.
     resolved_offsets.push_back(0);
+    // 3.2 Set first offset to false.
+    // 3.3 Run the procedure to resolve a scroll timeline offset for auto with
+    // the is first flag set to first offset and add the resulted value into
+    // effective scroll offsets.
     resolved_offsets.push_back(max_offset);
     return true;
   }
   // Single entry offset in scrollOffsets is considered as 'end'.
-  if (scroll_offsets_.size() == 1)
+  // 4. If scrollOffsets has exactly one element
+  if (scroll_offsets_.size() == 1) {
+    // 4.1 Run the procedure to resolve a scroll timeline offset for auto with
+    // the is first flag set to first offset and add the resulted value into
+    // effective scroll offsets.
     resolved_offsets.push_back(0);
+    // 4.2 Set first offset to false.
+    first_offset = false;
+  }
+
+  // 5. For each scroll offset in the list of scrollOffsets, perform the
+  // following steps:
   for (auto& offset : scroll_offsets_) {
-    auto resolved_offset = offset->ResolveOffset(
-        resolved_scroll_source_, orientation, max_offset, max_offset);
+    // 5.1 Let effective offset be the result of applying the procedure to
+    // resolve a scroll timeline offset for scroll offset with the is first flag
+    // set to first offset.
+    auto resolved_offset =
+        offset->ResolveOffset(resolved_scroll_source_, orientation, max_offset,
+                              first_offset ? 0 : max_offset);
     if (!resolved_offset) {
-      // Empty resolved offset if any of the offsets cannot be resolved.
+      // 5.2 If effective offset is null, the effective scroll offsets is empty
+      // and abort the remaining steps.
       resolved_offsets.clear();
       return false;
     }
+    // 5.3 Add effective offset into effective scroll offsets.
     resolved_offsets.push_back(resolved_offset.value());
+
+    // 5.4 Set first offset to false.
+    first_offset = false;
   }
   DCHECK_GE(resolved_offsets.size(), 2u);
+  // 6. Return effective scroll offsets.
   return true;
 }
 
@@ -283,15 +288,21 @@ bool ScrollTimeline::ScrollOffsetsEqual(
     const HeapVector<Member<ScrollTimelineOffset>>& other) const {
   if (scroll_offsets_.size() != other.size())
     return false;
-  size_t size = scroll_offsets_.size();
-  for (size_t i = 0; i < size; ++i) {
+  wtf_size_t size = scroll_offsets_.size();
+  for (wtf_size_t i = 0; i < size; ++i) {
     if (!DataEquivalent(scroll_offsets_.at(i), other.at(i)))
       return false;
   }
   return true;
 }
 
-void ScrollTimeline::currentTime(CSSNumberish& currentTime) {
+V8CSSNumberish* ScrollTimeline::ConvertTimeToProgress(
+    AnimationTimeDelta time) const {
+  return MakeGarbageCollected<V8CSSNumberish>(
+      CSSUnitValues::percent((time / GetDuration().value()) * 100));
+}
+
+V8CSSNumberish* ScrollTimeline::currentTime() {
   // time returns either in milliseconds or a 0 to 100 value representing the
   // progress of the timeline
   auto current_time = timeline_state_snapshotted_.current_time;
@@ -300,36 +311,40 @@ void ScrollTimeline::currentTime(CSSNumberish& currentTime) {
   // We are currently abusing the intended use of the "auto" keyword. We are
   // using it here as a signal to use progress based timeline instead of having
   // a range based current time.
-  // We are doing this maintain backwards compatibility with existing tests.
+  // We are doing this to maintain backwards compatibility with existing tests.
   if (time_range_) {
     // not using progress based, return time as double
-    currentTime =
-        current_time ? CSSNumberish::FromDouble(current_time->InMillisecondsF())
-                     : CSSNumberish();
+    if (current_time) {
+      return MakeGarbageCollected<V8CSSNumberish>(
+          current_time->InMillisecondsF());
+    }
+    return nullptr;
   } else {
-    currentTime = current_time
-                      ? CSSNumberish::FromCSSNumericValue(
-                            CSSUnitValues::percent(current_time->InSecondsF()))
-                      : CSSNumberish();
+    if (current_time) {
+      return ConvertTimeToProgress(AnimationTimeDelta(current_time.value()));
+    }
+    return nullptr;
   }
 }
 
-void ScrollTimeline::duration(CSSNumberish& duration) {
+V8CSSNumberish* ScrollTimeline::duration() {
+  // TODO (crbug.com/1216655): Time range should be removed from ScrollTimeline.
+  // Currently still left in for the sake of backwards compatibility with
+  // existing tests.
   if (time_range_) {
-    duration = CSSNumberish::FromDouble(time_range_.value());
-  } else {
-    duration = CSSNumberish::FromCSSNumericValue(
-        CSSUnitValues::percent(kScrollTimelineDuration));
+    return MakeGarbageCollected<V8CSSNumberish>(time_range_.value());
   }
+  return MakeGarbageCollected<V8CSSNumberish>(CSSUnitValues::percent(100));
 }
 
+// https://drafts.csswg.org/scroll-animations-1/#current-time-algorithm
 ScrollTimeline::TimelineState ScrollTimeline::ComputeTimelineState() const {
   // 1. If scroll timeline is inactive, return an unresolved time value.
   // https://github.com/WICG/scroll-animations/issues/31
   // https://wicg.github.io/scroll-animations/#current-time-algorithm
   WTF::Vector<double> resolved_offsets;
   if (!ComputeIsActive()) {
-    return {TimelinePhase::kInactive, /*current_time*/ base::nullopt,
+    return {TimelinePhase::kInactive, /*current_time*/ absl::nullopt,
             resolved_offsets};
   }
   LayoutBox* layout_box = resolved_scroll_source_->GetLayoutBox();
@@ -344,7 +359,7 @@ ScrollTimeline::TimelineState ScrollTimeline::ComputeTimelineState() const {
 
   if (!resolved) {
     DCHECK(resolved_offsets.IsEmpty());
-    return {TimelinePhase::kInactive, /*current_time*/ base::nullopt,
+    return {TimelinePhase::kInactive, /*current_time*/ absl::nullopt,
             resolved_offsets};
   }
 
@@ -356,39 +371,68 @@ ScrollTimeline::TimelineState ScrollTimeline::ComputeTimelineState() const {
   // to add a special case here. See
   // https://github.com/WICG/scroll-animations/issues/20
 
-  // 3. If current scroll offset is less than startScrollOffset:
+  // 3. The current time is the result corresponding to the first matching
+  // condition from below:
+  // 3.1 If current scroll offset is less than effective start offset:
+  //     The current time is 0.
   if (current_offset < start_offset) {
     return {TimelinePhase::kBefore, base::TimeDelta(), resolved_offsets};
   }
 
-  double duration =
-      time_range_ ? time_range_.value() : kScrollTimelineDurationMs;
+  // TODO (crbug.com/1216655): Time range should be removed from ScrollTimeline.
+  // Currently still left in for the sake of backwards compatibility with
+  // existing tests.
+  base::TimeDelta duration =
+      time_range_ ? base::TimeDelta::FromMillisecondsD(time_range_.value())
+                  : base::TimeDelta::FromSecondsD(GetDuration()->InSecondsF());
 
-  // 4. If current scroll offset is greater than or equal to endScrollOffset:
+  // 3.2 If current scroll offset is greater than or equal to effective end
+  // offset:
+  //    The current time is the effective time range.
   if (current_offset >= end_offset) {
     // If end_offset is greater than or equal to the maximum scroll offset of
     // scrollSource in orientation then return active phase, otherwise return
     // after phase.
     TimelinePhase phase = end_offset >= max_offset ? TimelinePhase::kActive
                                                    : TimelinePhase::kAfter;
-    return {phase, base::TimeDelta::FromMillisecondsD(duration),
-            resolved_offsets};
+    return {phase, duration, resolved_offsets};
   }
 
-  // 5. Return the result of evaluating the following expression:
-  //   ((current scroll offset - startScrollOffset) /
-  //      (endScrollOffset - startScrollOffset)) * effective time range
-  base::Optional<base::TimeDelta> calculated_current_time =
+  // 3.3 Otherwise,
+  // 3.3.1 Let progress be a result of applying calculate scroll timeline
+  // progress procedure for current scroll offset.
+  // 3.3.2 The current time is the result of evaluating the following
+  // expression:
+  //     progress × effective time range
+  absl::optional<base::TimeDelta> calculated_current_time =
       base::TimeDelta::FromMillisecondsD(scroll_timeline_util::ComputeProgress(
                                              current_offset, resolved_offsets) *
-                                         duration);
+                                         duration.InMillisecondsF());
   return {TimelinePhase::kActive, calculated_current_time, resolved_offsets};
 }
 
 // Scroll-linked animations are initialized with the start time of zero.
-base::Optional<base::TimeDelta>
+absl::optional<base::TimeDelta>
 ScrollTimeline::InitialStartTimeForAnimations() {
   return base::TimeDelta();
+}
+
+AnimationTimeDelta ScrollTimeline::CalculateIntrinsicIterationDuration(
+    const Timing& timing) {
+  absl::optional<AnimationTimeDelta> duration = GetDuration();
+
+  // Only run calculation for progress based scroll timelines
+  if (duration) {
+    // if iteration_duration == "auto" and iterations > 0
+    if (!timing.iteration_duration && timing.iteration_count > 0) {
+      // duration represents 100% so we divide it by iteration count to
+      // calculate the iteration duration. TODO: (crbug.com/1216527) Once
+      // delays can be percentages we will include them in the calculation:
+      // ((100% - start_delay% - end_delay%) / iterations) * duration
+      return duration.value() / timing.iteration_count;
+    }
+  }
+  return AnimationTimeDelta();
 }
 
 void ScrollTimeline::ServiceAnimations(TimingUpdateReason reason) {
@@ -447,49 +491,29 @@ String ScrollTimeline::orientation() {
   }
 }
 
-// TODO(crbug.com/1094014): scrollOffsets will replace start and end
-// offsets once spec decision on multiple scroll offsets is finalized.
-// https://github.com/w3c/csswg-drafts/issues/4912
-void ScrollTimeline::startScrollOffset(ScrollTimelineOffsetValue& out) const {
-  if (StartScrollOffset()) {
-    out = StartScrollOffset()->ToScrollTimelineOffsetValue();
-  } else {
-    ScrollTimelineOffset scrollOffset;
-    out = scrollOffset.ToScrollTimelineOffsetValue();
-  }
-}
-
-void ScrollTimeline::endScrollOffset(ScrollTimelineOffsetValue& out) const {
-  if (EndScrollOffset()) {
-    out = EndScrollOffset()->ToScrollTimelineOffsetValue();
-  } else {
-    ScrollTimelineOffset scrollOffset;
-    out = scrollOffset.ToScrollTimelineOffsetValue();
-  }
-}
-
-const HeapVector<ScrollTimelineOffsetValue> ScrollTimeline::scrollOffsets()
+const HeapVector<Member<V8ScrollTimelineOffset>> ScrollTimeline::scrollOffsets()
     const {
-  HeapVector<ScrollTimelineOffsetValue> scroll_offsets;
+  HeapVector<Member<V8ScrollTimelineOffset>> scroll_offsets;
   for (auto& offset : scroll_offsets_) {
-    scroll_offsets.push_back(offset->ToScrollTimelineOffsetValue());
+    scroll_offsets.push_back(offset->ToV8ScrollTimelineOffset());
     // 'auto' can only be the end offset.
     DCHECK(!offset->IsDefaultValue() || scroll_offsets.size() == 2);
   }
   return scroll_offsets;
 }
 
-void ScrollTimeline::timeRange(DoubleOrScrollTimelineAutoKeyword& result) {
+V8UnionDoubleOrScrollTimelineAutoKeyword* ScrollTimeline::timeRange() const {
   // TODO(crbug.com/1140602): Support progress based animations
   // We are currently abusing the intended use of the "auto" keyword. We are
   // using it here as a signal to use progress based timeline instead of having
   // a range based current time.
   // We are doing this maintain backwards compatibility with existing tests.
   if (time_range_) {
-    result.SetDouble(time_range_.value());
-  } else {
-    result.SetScrollTimelineAutoKeyword("auto");
+    return MakeGarbageCollected<V8UnionDoubleOrScrollTimelineAutoKeyword>(
+        time_range_.value());
   }
+  return MakeGarbageCollected<V8UnionDoubleOrScrollTimelineAutoKeyword>(
+      V8ScrollTimelineAutoKeyword(V8ScrollTimelineAutoKeyword::Enum::kAuto));
 }
 
 void ScrollTimeline::GetCurrentAndMaxOffset(const LayoutBox* layout_box,
@@ -533,17 +557,16 @@ void ScrollTimeline::GetCurrentAndMaxOffset(const LayoutBox* layout_box,
 }
 
 void ScrollTimeline::AnimationAttached(Animation* animation) {
-  AnimationTimeline::AnimationAttached(animation);
-  if (resolved_scroll_source_ && scroll_animations_.IsEmpty())
+  if (resolved_scroll_source_ && !HasAnimations())
     resolved_scroll_source_->RegisterScrollTimeline(this);
 
-  scroll_animations_.insert(animation);
+  AnimationTimeline::AnimationAttached(animation);
 }
 
 void ScrollTimeline::AnimationDetached(Animation* animation) {
   AnimationTimeline::AnimationDetached(animation);
-  scroll_animations_.erase(animation);
-  if (resolved_scroll_source_ && scroll_animations_.IsEmpty())
+
+  if (resolved_scroll_source_ && !HasAnimations())
     resolved_scroll_source_->UnregisterScrollTimeline(this);
 }
 
@@ -560,7 +583,6 @@ void ScrollTimeline::WorkletAnimationDetached() {
 }
 
 void ScrollTimeline::Trace(Visitor* visitor) const {
-  visitor->Trace(scroll_animations_);
   visitor->Trace(scroll_source_);
   visitor->Trace(resolved_scroll_source_);
   visitor->Trace(scroll_offsets_);
@@ -600,7 +622,7 @@ void ScrollTimeline::Invalidate(Node* node) {
 }
 
 void ScrollTimeline::InvalidateEffectTargetStyle() {
-  for (Animation* animation : scroll_animations_)
+  for (Animation* animation : GetAnimations())
     animation->InvalidateEffectTargetStyle();
 }
 

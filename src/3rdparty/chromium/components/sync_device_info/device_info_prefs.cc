@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <utility>
-#include <vector>
 
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
@@ -113,7 +112,7 @@ void DeviceInfoPrefs::GarbageCollectExpiredCacheGuids() {
       return true;
     }
 
-    base::Optional<int> days_since_epoch = dict.FindIntKey(kTimestampKey);
+    absl::optional<int> days_since_epoch = dict.FindIntKey(kTimestampKey);
 
     // Avoid crashes if the dictionary contains no timestamp and meanwhile clean
     // up these corrupt entries.

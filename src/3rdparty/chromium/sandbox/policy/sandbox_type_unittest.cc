@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "printing/buildflags/buildflags.h"
 #include "sandbox/policy/switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -53,7 +54,6 @@ TEST(SandboxTypeTest, Utility) {
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kProcessType,
                                  switches::kUtilityProcess);
-  EXPECT_EQ(SandboxType::kUtility, SandboxTypeFromCommandLine(command_line));
 
   base::CommandLine command_line2(command_line);
   SetCommandLineFlagsForSandboxType(&command_line2, SandboxType::kNetwork);
@@ -72,8 +72,8 @@ TEST(SandboxTypeTest, Utility) {
   EXPECT_EQ(SandboxType::kPpapi, SandboxTypeFromCommandLine(command_line5));
 
   base::CommandLine command_line6(command_line);
-  command_line6.AppendSwitchASCII(switches::kServiceSandboxType, "bogus");
-  EXPECT_EQ(SandboxType::kUtility, SandboxTypeFromCommandLine(command_line6));
+  SetCommandLineFlagsForSandboxType(&command_line6, SandboxType::kService);
+  EXPECT_EQ(SandboxType::kService, SandboxTypeFromCommandLine(command_line6));
 
   base::CommandLine command_line7(command_line);
   SetCommandLineFlagsForSandboxType(&command_line7,
@@ -111,14 +111,39 @@ TEST(SandboxTypeTest, Utility) {
             SandboxTypeFromCommandLine(command_line12));
 #endif
 
+#if BUILDFLAG(ENABLE_PRINTING)
   base::CommandLine command_line13(command_line);
-  command_line13.AppendSwitchASCII(switches::kServiceSandboxType,
+  SetCommandLineFlagsForSandboxType(&command_line13,
+                                    SandboxType::kPrintBackend);
+  EXPECT_EQ(SandboxType::kPrintBackend,
+            SandboxTypeFromCommandLine(command_line13));
+#endif
+
+  base::CommandLine command_line14(command_line);
+  command_line14.AppendSwitchASCII(switches::kServiceSandboxType,
                                    switches::kNoneSandbox);
   EXPECT_EQ(SandboxType::kNoSandbox,
-            SandboxTypeFromCommandLine(command_line13));
+            SandboxTypeFromCommandLine(command_line14));
 
   command_line.AppendSwitch(switches::kNoSandbox);
   EXPECT_EQ(SandboxType::kNoSandbox, SandboxTypeFromCommandLine(command_line));
+}
+
+TEST(SandboxTypeTest, UtilityDeath) {
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+  command_line.AppendSwitchASCII(switches::kProcessType,
+                                 switches::kUtilityProcess);
+
+  EXPECT_DEATH_IF_SUPPORTED(SandboxTypeFromCommandLine(command_line), "");
+
+  // kGPU not valid for utility processes.
+  base::CommandLine command_line1(command_line);
+  command_line1.AppendSwitchASCII(switches::kServiceSandboxType, "gpu");
+  EXPECT_DEATH_IF_SUPPORTED(SandboxTypeFromCommandLine(command_line1), "");
+
+  base::CommandLine command_line2(command_line);
+  command_line2.AppendSwitchASCII(switches::kServiceSandboxType, "bogus");
+  EXPECT_DEATH_IF_SUPPORTED(SandboxTypeFromCommandLine(command_line2), "");
 }
 
 TEST(SandboxTypeTest, GPU) {

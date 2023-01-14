@@ -232,14 +232,14 @@ void URLRequestJob::ContinueDespiteLastError() {
 }
 
 void URLRequestJob::FollowDeferredRedirect(
-    const base::Optional<std::vector<std::string>>& removed_headers,
-    const base::Optional<net::HttpRequestHeaders>& modified_headers) {
+    const absl::optional<std::vector<std::string>>& removed_headers,
+    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
   // OnReceivedRedirect must have been called.
   DCHECK(deferred_redirect_info_);
 
   // It is possible that FollowRedirect will delete |this|, so it is not safe to
   // pass along a reference to |deferred_redirect_info_|.
-  base::Optional<RedirectInfo> redirect_info =
+  absl::optional<RedirectInfo> redirect_info =
       std::move(deferred_redirect_info_);
   FollowRedirect(*redirect_info, removed_headers, modified_headers);
 }
@@ -385,8 +385,9 @@ GURL URLRequestJob::ComputeReferrerForPolicy(
   return GURL();
 }
 
-int URLRequestJob::NotifyConnected(const TransportInfo& info) {
-  return request_->NotifyConnected(info);
+int URLRequestJob::NotifyConnected(const TransportInfo& info,
+                                   CompletionOnceCallback callback) {
+  return request_->NotifyConnected(info, std::move(callback));
 }
 
 void URLRequestJob::NotifyCertificateRequested(
@@ -400,8 +401,11 @@ void URLRequestJob::NotifySSLCertificateError(int net_error,
   request_->NotifySSLCertificateError(net_error, ssl_info, fatal);
 }
 
-bool URLRequestJob::CanGetCookies() const {
-  return request_->CanGetCookies();
+void URLRequestJob::AnnotateAndMoveUserBlockedCookies(
+    CookieAccessResultList& maybe_included_cookies,
+    CookieAccessResultList& excluded_cookies) const {
+  request_->AnnotateAndMoveUserBlockedCookies(maybe_included_cookies,
+                                              excluded_cookies);
 }
 
 bool URLRequestJob::CanSetCookie(const net::CanonicalCookie& cookie,
@@ -474,8 +478,8 @@ void URLRequestJob::NotifyHeadersComplete() {
     if (defer_redirect) {
       deferred_redirect_info_ = std::move(redirect_info);
     } else {
-      FollowRedirect(redirect_info, base::nullopt, /*  removed_headers */
-                     base::nullopt /* modified_headers */);
+      FollowRedirect(redirect_info, absl::nullopt, /*  removed_headers */
+                     absl::nullopt /* modified_headers */);
     }
     return;
   }
@@ -733,8 +737,8 @@ int URLRequestJob::CanFollowRedirect(const GURL& new_url) {
 
 void URLRequestJob::FollowRedirect(
     const RedirectInfo& redirect_info,
-    const base::Optional<std::vector<std::string>>& removed_headers,
-    const base::Optional<net::HttpRequestHeaders>& modified_headers) {
+    const absl::optional<std::vector<std::string>>& removed_headers,
+    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
   request_->Redirect(redirect_info, removed_headers, modified_headers);
 }
 

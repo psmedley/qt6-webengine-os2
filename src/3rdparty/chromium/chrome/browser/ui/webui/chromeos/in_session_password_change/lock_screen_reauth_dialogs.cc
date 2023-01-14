@@ -5,19 +5,27 @@
 #include "chrome/browser/ui/webui/chromeos/in_session_password_change/lock_screen_reauth_dialogs.h"
 
 #include <memory>
+#include <string>
 
+#include "ash/constants/ash_features.h"
 #include "base/bind.h"
 #include "base/json/json_writer.h"
+#include "chrome/browser/ash/login/helper.h"
 #include "chrome/browser/ash/login/saml/in_session_password_sync_manager.h"
 #include "chrome/browser/ash/login/saml/in_session_password_sync_manager_factory.h"
+#include "chrome/browser/ash/login/ui/oobe_dialog_size_utils.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/chromeos/in_session_password_change/base_lock_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/in_session_password_change/confirm_password_change_handler.h"
+#include "chrome/browser/ui/webui/chromeos/in_session_password_change/lock_screen_network_dialog.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/display/display.h"
@@ -27,44 +35,35 @@
 namespace chromeos {
 
 namespace {
-
 LockScreenStartReauthDialog* g_dialog = nullptr;
 
-constexpr gfx::Size kLockScreenReauthSize(768, 640);
-
-gfx::Size FitSizeToDisplay(const gfx::Size& desired) {
-  const display::Display display =
-      display::Screen::GetScreen()->GetPrimaryDisplay();
-
-  gfx::Size display_size = display.size();
-
-  if (display.rotation() == display::Display::ROTATE_90 ||
-      display.rotation() == display::Display::ROTATE_270) {
-    display_size = gfx::Size(display_size.height(), display_size.width());
-  }
-
-  display_size.SetToMin(desired);
-  return display_size;
-}
+// Dialog width ratio compared to the screen.
+const double kDialogRatio = 0.86;
 
 }  // namespace
 
-BaseLockDialog::BaseLockDialog(GURL url, gfx::Size desired_size)
-    : SystemWebDialogDelegate(url, /*title=*/base::string16()),
-      desired_size_(desired_size) {}
+// static
+gfx::Size LockScreenStartReauthDialog::CalculateLockScreenReauthDialogSize(
+    const gfx::Size& display_size,
+    bool is_new_layout_enabled) {
+  if (!is_new_layout_enabled) {
+    return kBaseLockDialogSize;
+  }
 
-BaseLockDialog::~BaseLockDialog() {}
+  gfx::Size result = display_size;
+  result.set_height(result.height() * kDialogRatio);
+  result.set_width(result.width() * kDialogRatio);
 
-void BaseLockDialog::GetDialogSize(gfx::Size* size) const {
-  *size = FitSizeToDisplay(desired_size_);
-}
+  bool is_horizontal = display_size.width() >= display_size.height();
+  if (is_horizontal) {
+    result.SetToMax(kMinLandscapeDialogSize);
+    result.SetToMin(kMaxLandscapeDialogSize);
+  } else {
+    result.SetToMax(kMinPortraitDialogSize);
+    result.SetToMin(kMaxPortraitDialogSize);
+  }
 
-void BaseLockDialog::AdjustWidgetInitParams(views::Widget::InitParams* params) {
-  params->type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
-}
-
-ui::ModalType BaseLockDialog::GetDialogModalType() const {
-  return ui::ModalType::MODAL_TYPE_SYSTEM;
+  return result;
 }
 
 void LockScreenStartReauthDialog::Show() {
@@ -77,16 +76,20 @@ void LockScreenStartReauthDialog::Show() {
   g_browser_process->profile_manager()->CreateProfileAsync(
       ProfileHelper::GetLockScreenProfileDir(),
       base::BindRepeating(&LockScreenStartReauthDialog::OnProfileCreated,
-                          weak_factory_.GetWeakPtr()),
-      base::string16(), std::string());
+                          weak_factory_.GetWeakPtr()));
 }
 
 void LockScreenStartReauthDialog::OnProfileCreated(
     Profile* profile,
     Profile::CreateStatus status) {
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
+    profile_ = profile;
     g_dialog->ShowSystemDialogForBrowserContext(
-        profile->GetPrimaryOTRProfile());
+        profile->GetPrimaryOTRProfile(/*create_if_needed=*/true));
+    // Show network screen if needed.
+    if (!network_state_helper_->IsConnected()) {
+      ShowLockScreenNetworkDialog();
+    }
   } else if (status != Profile::CREATE_STATUS_CREATED) {
     // TODO(mohammedabdon): Create some generic way to show an error on the lock
     // screen.
@@ -105,8 +108,8 @@ void LockScreenStartReauthDialog::OnDialogClosed(
   const user_manager::User* user =
       user_manager::UserManager::Get()->GetActiveUser();
   Profile* profile = ProfileHelper::Get()->GetProfileByUser(user);
-  InSessionPasswordSyncManager* password_sync_manager =
-      chromeos::InSessionPasswordSyncManagerFactory::GetForProfile(profile);
+  auto* password_sync_manager =
+      InSessionPasswordSyncManagerFactory::GetForProfile(profile);
   password_sync_manager->ResetDialog();
 }
 
@@ -114,13 +117,61 @@ bool LockScreenStartReauthDialog::IsRunning() {
   return g_dialog;
 }
 
+int LockScreenStartReauthDialog::GetDialogWidth() {
+  gfx::Size ret;
+  GetDialogSize(&ret);
+  return ret.width();
+}
+
+void LockScreenStartReauthDialog::CloseLockScreenNetworkDialog() {
+  if (!lock_screen_network_dialog_)
+    return;
+  lock_screen_network_dialog_.reset();
+}
+
+void LockScreenStartReauthDialog::ShowLockScreenNetworkDialog() {
+  if (lock_screen_network_dialog_)
+    return;
+  DCHECK(profile_);
+  lock_screen_network_dialog_ =
+      std::make_unique<chromeos::LockScreenNetworkDialog>(base::BindOnce(
+          &LockScreenStartReauthDialog::CloseLockScreenNetworkDialog,
+          base::Unretained(this)));
+  lock_screen_network_dialog_->Show(profile_);
+}
+
 LockScreenStartReauthDialog::LockScreenStartReauthDialog()
-    : BaseLockDialog(GURL(chrome::kChromeUILockScreenStartReauthURL),
-                           kLockScreenReauthSize) {}
+    : BaseLockDialog(
+          GURL(chrome::kChromeUILockScreenStartReauthURL),
+          CalculateLockScreenReauthDialogSize(
+              display::Screen::GetScreen()->GetPrimaryDisplay().size(),
+              features::IsNewLockScreenReauthLayoutEnabled())),
+      network_state_helper_(std::make_unique<login::NetworkStateHelper>()) {
+  NetworkHandler::Get()->network_state_handler()->AddObserver(this, FROM_HERE);
+}
 
 LockScreenStartReauthDialog::~LockScreenStartReauthDialog() {
   DCHECK_EQ(this, g_dialog);
+  NetworkHandler::Get()->network_state_handler()->RemoveObserver(this,
+                                                                 FROM_HERE);
+  CloseLockScreenNetworkDialog();
   g_dialog = nullptr;
+}
+
+void LockScreenStartReauthDialog::NetworkConnectionStateChanged(
+    const NetworkState* network) {
+  if (network_state_helper_->IsConnected()) {
+    if (lock_screen_network_dialog_) {
+      lock_screen_network_dialog_->Close();
+    }
+    return;
+  }
+  ShowLockScreenNetworkDialog();
+}
+
+void LockScreenStartReauthDialog::DefaultNetworkChanged(
+    const NetworkState* network) {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace chromeos

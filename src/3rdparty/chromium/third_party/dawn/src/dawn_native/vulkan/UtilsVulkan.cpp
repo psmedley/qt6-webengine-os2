@@ -83,11 +83,13 @@ namespace dawn_native { namespace vulkan {
         Extent3D validTextureCopyExtent = copySize;
         const TextureBase* texture = textureCopy.texture.Get();
         Extent3D virtualSizeAtLevel = texture->GetMipLevelVirtualSize(textureCopy.mipLevel);
-        if (textureCopy.origin.x + copySize.width > virtualSizeAtLevel.width) {
+        ASSERT(textureCopy.origin.x <= virtualSizeAtLevel.width);
+        ASSERT(textureCopy.origin.y <= virtualSizeAtLevel.height);
+        if (copySize.width > virtualSizeAtLevel.width - textureCopy.origin.x) {
             ASSERT(texture->GetFormat().isCompressed);
             validTextureCopyExtent.width = virtualSizeAtLevel.width - textureCopy.origin.x;
         }
-        if (textureCopy.origin.y + copySize.height > virtualSizeAtLevel.height) {
+        if (copySize.height > virtualSizeAtLevel.height - textureCopy.origin.y) {
             ASSERT(texture->GetFormat().isCompressed);
             validTextureCopyExtent.height = virtualSizeAtLevel.height - textureCopy.origin.y;
         }
@@ -130,7 +132,7 @@ namespace dawn_native { namespace vulkan {
                 region.imageOffset.z = 0;
 
                 region.imageSubresource.baseArrayLayer = textureCopy.origin.z;
-                region.imageSubresource.layerCount = copySize.depth;
+                region.imageSubresource.layerCount = copySize.depthOrArrayLayers;
 
                 Extent3D imageExtent = ComputeTextureCopyExtent(textureCopy, copySize);
                 region.imageExtent.width = imageExtent.width;
@@ -139,8 +141,22 @@ namespace dawn_native { namespace vulkan {
                 break;
             }
 
+            case wgpu::TextureDimension::e3D: {
+                region.imageOffset.x = textureCopy.origin.x;
+                region.imageOffset.y = textureCopy.origin.y;
+                region.imageOffset.z = textureCopy.origin.z;
+
+                region.imageSubresource.baseArrayLayer = 0;
+                region.imageSubresource.layerCount = 1;
+
+                Extent3D imageExtent = ComputeTextureCopyExtent(textureCopy, copySize);
+                region.imageExtent.width = imageExtent.width;
+                region.imageExtent.height = imageExtent.height;
+                region.imageExtent.depth = imageExtent.depthOrArrayLayers;
+                break;
+            }
+
             case wgpu::TextureDimension::e1D:
-            case wgpu::TextureDimension::e3D:
                 UNREACHABLE();
         }
 
