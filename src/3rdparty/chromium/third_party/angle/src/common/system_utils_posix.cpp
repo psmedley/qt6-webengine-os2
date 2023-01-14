@@ -90,8 +90,8 @@ std::string GetHelperExecutableDir()
         std::string moduleName = dlInfo.dli_fname;
         directory              = moduleName.substr(0, moduleName.find_last_of('/') + 1);
     }
-    return directory;
 #endif
+    return directory;
 }
 
 class PosixLibrary : public Library
