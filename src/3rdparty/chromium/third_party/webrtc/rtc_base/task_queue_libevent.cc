@@ -23,6 +23,11 @@
 #include <type_traits>
 #include <utility>
 
+#if defined(OS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/string_view.h"
 #include "api/task_queue/queued_task.h"
