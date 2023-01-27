@@ -286,7 +286,9 @@ static void logContext(const char *glType, base::CommandLine *cmd)
                usingDefaultSGBackend() ? "yes" : "no", usingSoftwareDynamicGL() ? "yes" : "no",
                usingANGLE() ? "yes" : "no", qPrintable(params.join(" ")));
 #else
+#ifndef Q_OS_OS2 // We dont' have opengl on OS/2, so suppress the warning
         qCInfo(webEngineContextLog) << "WebEngine compiled with no opengl enabled.";
+#endif
 #endif //QT_CONFIG(opengl)
     }
 }
