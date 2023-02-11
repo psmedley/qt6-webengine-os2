@@ -2544,7 +2544,7 @@ jumbo_static_library("browser") {
       sources += [
         "child_process_launcher_helper_os2.cc",
         "memory/swap_metrics_driver_impl_os2.cc",
-        "speech/tts_fuchsia.cc",
+        "speech/tts_os2.cc",
       ]
     }
 
