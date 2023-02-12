@@ -5,6 +5,7 @@
 #include "content/renderer/render_view_impl.h"
 
 #include "third_party/blink/public/platform/web_font_render_style.h"
+#include "base/notreached.h"
 
 namespace content {
 

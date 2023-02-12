@@ -8,6 +8,7 @@
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
 #include "base/logging.h"
+#include "base/notreached.h"
 
 namespace base {
 

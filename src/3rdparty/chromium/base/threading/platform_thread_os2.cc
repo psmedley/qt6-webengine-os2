@@ -6,6 +6,7 @@
 
 #include "base/threading/platform_thread_internal_posix.h"
 #include "base/threading/thread_id_name_manager.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "base/os2/os2_toolkit.h"
 
@@ -32,8 +33,8 @@ bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
   return DosSetPriority(PRTYS_THREAD, cls, 0, _gettid()) == NO_ERROR;
 }
 
-Optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
-  Optional<ThreadPriority> prio = base::nullopt;
+absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
+  absl::optional<ThreadPriority> prio = absl::nullopt;
   PTIB ptib;
   APIRET arc = DosGetInfoBlocks(&ptib, NULL);
   if (arc == NO_ERROR) {
@@ -41,16 +42,16 @@ Optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
     ULONG cls = (ptib->tib_ptib2->tib2_ulpri >> 8) & 0xFF;
     switch (cls) {
       case PRTYC_IDLETIME:
-        prio = base::make_optional(ThreadPriority::BACKGROUND);
+        prio = absl::make_optional(ThreadPriority::BACKGROUND);
         break;
       case PRTYC_REGULAR:
-        prio = base::make_optional(ThreadPriority::NORMAL);
+        prio = absl::make_optional(ThreadPriority::NORMAL);
         break;
       case PRTYC_FOREGROUNDSERVER:
-        prio = base::make_optional(ThreadPriority::DISPLAY);
+        prio = absl::make_optional(ThreadPriority::DISPLAY);
         break;
       case PRTYC_TIMECRITICAL:
-        prio = base::make_optional(ThreadPriority::REALTIME_AUDIO);
+        prio = absl::make_optional(ThreadPriority::REALTIME_AUDIO);
         break;
     }
   }

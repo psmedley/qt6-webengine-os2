@@ -15,7 +15,7 @@
 // The following assumes cdecl calling convention.
 // Source: https://en.wikipedia.org/wiki/X86_calling_conventions#cdecl
 asm(
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
     ".globl _PAPushAllRegistersAndIterateStack            \n"
     "_PAPushAllRegistersAndIterateStack:                  \n"
 #else   // !_WIN32

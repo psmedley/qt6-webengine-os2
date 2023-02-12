@@ -50,6 +50,12 @@ void* GetStackTop() {
   return pthread_get_stackaddr_np(pthread_self());
 }
 
+#elif defined(OS_OS2)
+void* GetStackTop() {
+  /* FIXME! Stub Only */
+  return nullptr;
+}
+
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 
 void* GetStackTop() {

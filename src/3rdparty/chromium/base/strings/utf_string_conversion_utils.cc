@@ -124,9 +124,9 @@ void PrepareForUTF8Output(const CHAR* src,
 // Instantiate versions we know callers will need.
 #if !defined(OS_DOSLIKE)
 // wchar_t and char16_t are the same thing on Windows and OS/2.
-template void PrepareForUTF8Output(const char16_t*, size_t, std::string*);
+template void PrepareForUTF8Output(const wchar_t*, size_t, std::string*);
 #endif
-template void PrepareForUTF8Output(const char16*, size_t, std::string*);
+template void PrepareForUTF8Output(const char16_t*, size_t, std::string*);
 
 template<typename STRING>
 void PrepareForUTF16Or32Output(const char* src,

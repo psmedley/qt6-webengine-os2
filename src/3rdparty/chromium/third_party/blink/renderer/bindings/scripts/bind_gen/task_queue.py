@@ -26,7 +26,7 @@ class TaskQueue(object):
         self._single_process = True
         self._pool_size = 1
         self._pool = None
-        if single_process:
+        if (single_process or sys.platform == 'os2knix'):
             self._single_process = True
             self._pool_size = 1
             self._pool = None

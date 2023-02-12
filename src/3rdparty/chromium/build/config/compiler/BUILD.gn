@@ -357,6 +357,7 @@ config("compiler") {
         # On OS/2, stack protection helpers are in a separate library.
         # See https://github.com/bitwiseworks/gcc-os2/issues/13
         ldflags += [ "-fstack-protector" ]
+        cflags += [ "-fpermissive" ]
       }
     }
 

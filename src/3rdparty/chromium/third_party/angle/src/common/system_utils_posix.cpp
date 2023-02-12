@@ -32,6 +32,8 @@ namespace
 std::string GetModulePath(void *moduleOrSymbol)
 {
 #if defined(ANGLE_PLATFORM_OS2)
+    std::string directory;
+    static int placeholderSymbol = 0;
     // TODO implement dladdr in LIBCn, see https://github.com/bitwiseworks/libc/issues/104
     HMODULE hmod;
     if (!DosQueryModFromEIP(&hmod, NULL, 0, NULL, NULL, (ULONG)&placeholderSymbol))
@@ -177,11 +179,12 @@ Library *OpenSharedLibraryWithExtension(const char *libraryName, SearchType sear
     }
 
     int extraFlags = 0;
+#ifndef ANGLE_PLATFORM_OS2
     if (searchType == SearchType::AlreadyLoaded)
     {
         extraFlags = RTLD_NOLOAD;
     }
-
+#endif
     std::string fullPath = directory + libraryName;
 #if ANGLE_PLATFORM_IOS
     // On iOS, dlopen needs a suffix on the framework name to work.

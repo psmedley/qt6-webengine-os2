@@ -2076,6 +2076,8 @@ jumbo_component("base") {
       "threading/platform_thread_internal_posix.cc",
     ]
 
+    cflags = [ "-fpermissive" ]
+
     defines += [ "_EMX_SOURCE" ] # Use EMX extensions.
 
     deps += [
