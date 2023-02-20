@@ -89,7 +89,7 @@ void RspTargetWriter::Run() {
   std::string prefix(
       settings->build_settings()->build_dir().SourceWithNoTrailingSlash());
   prefix.append("/");
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
   prefix.erase(prefix.begin());
 #endif
   switch (type_) {
