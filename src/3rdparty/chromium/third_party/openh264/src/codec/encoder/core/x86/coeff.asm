@@ -44,6 +44,10 @@
 
 %ifdef X86_32_PICASM
 SECTION .text align=16
+%elifidn __OUTPUT_FORMAT__,obj
+        ; OMF needs special handling to ensure everything is in the same segment
+        ; and that the segment is 32 bit.
+        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=16
 %endif
