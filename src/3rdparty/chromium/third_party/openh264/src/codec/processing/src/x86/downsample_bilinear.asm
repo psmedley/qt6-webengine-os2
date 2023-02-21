@@ -62,7 +62,7 @@ SECTION .text align=32
 %elifidn __OUTPUT_FORMAT__,obj
         ; OMF needs special handling to ensure everything is in the same segment
         ; and that the segment is 32 bit.
-        SECTION TEXT32 align=32 public use32 class=CODE
+        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=32
 %endif
