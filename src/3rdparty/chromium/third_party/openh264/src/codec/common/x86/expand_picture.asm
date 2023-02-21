@@ -54,7 +54,7 @@
 
 
 
-SECTION .text
+SECTION_TEXT
 
 
 ;;;;;;;expanding result;;;;;;;
