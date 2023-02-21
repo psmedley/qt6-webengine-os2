@@ -741,3 +741,12 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits ; Mark the stack as non-
   %endif
 %endif
 %endmacro
+
+; Needed on OS/2 where it is 16-bit by default.
+%macro SECTION_TEXT 0
+    %ifidn __OUTPUT_FORMAT__,obj
+        SEGMENT TEXT32 CLASS=CODE USE32
+    %else
+        SECTION .text
+    %endif
+%endmacro

@@ -165,7 +165,7 @@ low_mask_table:
     db 16,20,17,20,20,24
 
 
-SECTION .text
+SECTION_TEXT
 
 ;***********************************************************************
 ;void WelsScan4x4DcAc_sse2( int16_t level[16], int16_t *pDct )

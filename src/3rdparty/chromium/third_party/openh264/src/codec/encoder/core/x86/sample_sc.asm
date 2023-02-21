@@ -45,7 +45,7 @@ mv_x_inc_x4     dw  0x10, 0x10, 0x10, 0x10
 mv_y_inc_x4     dw  0x04, 0x04, 0x04, 0x04
 mx_x_offset_x4  dw  0x00, 0x04, 0x08, 0x0C
 
-SECTION .text
+SECTION_TEXT
 %ifdef X86_32
 ;**********************************************************************************************************************
 ;void SumOf8x8BlockOfFrame_sse2(uint8_t* pRefPicture, const int32_t kiWidth, const int32_t kiHeight, const int32_t kiRefStride,
