@@ -103,6 +103,11 @@ config("libvpx_config") {
       "-Wno-sign-compare",
     ]
   }
+  if (is_os2) {
+    cflags += [
+      "-mstackrealign",
+    ]
+  }
 }
 
 # This config is applied to targets that depend on libvpx.

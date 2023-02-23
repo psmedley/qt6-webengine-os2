@@ -64,7 +64,7 @@ pd_0xf00801c7: dd 0xf00801c7
 
 cextern sgr_x_by_x_avx2
 
-SECTION .text
+SECTION_TEXT
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

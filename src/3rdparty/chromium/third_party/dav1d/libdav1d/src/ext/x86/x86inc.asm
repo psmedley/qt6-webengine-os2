@@ -85,9 +85,7 @@
     %elif WIN64
         SECTION .rdata align=%1
     %elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=%1 public use32 class=CODE
+        SEGMENT TEXT32 CLASS=CODE USE32 ALIGN=%1
     %else
         SECTION .rodata align=%1
     %endif
