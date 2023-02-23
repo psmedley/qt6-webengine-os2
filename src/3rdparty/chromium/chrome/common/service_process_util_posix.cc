@@ -23,6 +23,11 @@
 #error "Should not be built on android"
 #endif
 
+#if defined(OS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 namespace {
 int g_signal_socket = -1;
 
