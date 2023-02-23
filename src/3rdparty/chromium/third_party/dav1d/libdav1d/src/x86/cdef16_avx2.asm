@@ -28,7 +28,7 @@
 
 %if ARCH_X86_64
 
-SECTION .text
+SECTION_TEXT
 
 cextern cdef_dir_8bpc_avx2
 

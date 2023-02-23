@@ -27,7 +27,6 @@
 
 #ifndef DAV1D_SRC_X86_MSAC_H
 #define DAV1D_SRC_X86_MSAC_H
-
 unsigned dav1d_msac_decode_symbol_adapt4_sse2(MsacContext *s, uint16_t *cdf,
                                               size_t n_symbols);
 unsigned dav1d_msac_decode_symbol_adapt8_sse2(MsacContext *s, uint16_t *cdf,

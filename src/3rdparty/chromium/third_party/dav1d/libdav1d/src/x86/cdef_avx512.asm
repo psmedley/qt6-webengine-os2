@@ -90,7 +90,7 @@ pri_tap:       db 64, 64, 32, 32, 48, 48, 48, 48         ; left-shifted by 4
 sec_tap:       db 32, 32, 16, 16
 pd_268435568:  dd 268435568
 
-SECTION .text
+SECTION_TEXT
 
 %if WIN64
 DECLARE_REG_TMP 5, 6

@@ -32,7 +32,7 @@ SECTION_RODATA 16
 pq_dir_shr:      dq  2,  4
 %endif
 
-SECTION .text
+SECTION_TEXT
 
 cextern cdef_dir_8bpc_ssse3
 

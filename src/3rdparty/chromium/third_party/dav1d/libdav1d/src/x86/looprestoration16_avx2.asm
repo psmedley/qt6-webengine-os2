@@ -62,7 +62,7 @@ pb_wiener7_l: times 2 db  4,  5
 pb_wiener7_m: times 2 db -4, -3
 pb_wiener7_r: times 2 db -8, -7
 
-SECTION .text
+SECTION_TEXT
 
 INIT_YMM avx2
 cglobal wiener_filter5_h_16bpc, 6, 9, 14, dst, left, src, ss, f, w, h, edge, bdmax
