@@ -310,13 +310,7 @@ SCALED_JMP_TABLE prep_8tap_scaled_ssse3,   4, 8, 16, 32, 64, 128
 
 %define table_offset(type, fn) type %+ fn %+ SUFFIX %+ _table - type %+ SUFFIX
 
-<<<<<<< HEAD
-SECTION .text
-=======
-cextern mc_warp_filter
-
 SECTION_TEXT
->>>>>>> 21cb76cdff (Further changes to asm to try and fix hangs)
 
 INIT_XMM ssse3
 
